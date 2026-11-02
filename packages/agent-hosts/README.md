@@ -156,13 +156,13 @@ No documented public extension point drives either harness's visible TUI
 session, so these stay. Floors: OpenCode 1.18.18 (V1 plugin) and 2.2.5 (V2 plugin), Grok 1.0.46; verified on
 OpenCode 2.2.5 by `apps/clankie/test/opencode2-worker.integration.test.ts`,
 OpenCode 1.19.3 and Grok 1.0.50 in the
-[latest-release evidence](../../docs/testing/2026-10-17-opencode-grok-latest/README.md).
+[latest-release evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-opencode-grok-latest/README.md).
 
 Transcript discovery and an available native CLI
 do not imply a local hire adapter exists. Unsupported automated briefs fail
 without creating a worker or typing into a terminal. Upstream source links and
 the distinction between automated checks and live evidence are recorded in the
-[delivery verification notes](../../docs/testing/2026-10-01-native-agent-delivery/README.md).
+[delivery verification notes](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-01-native-agent-delivery/README.md).
 
 Pi uses the original process-bound extension and causal native custom-message
 receipts. The service registers this local adapter only with
@@ -184,8 +184,8 @@ naming the release and the failed surface, in the hire and in `worker_accounts`,
 so an upgrade stays visible ([ADR 0250](../../docs/adr/0250-pi-workers-use-the-same-usability-view.md)).
 A live Mac hire on Pi 1.3.0 delivered its brief, reported through
 `message_clankie` and completed
-([evidence](../../docs/testing/2026-10-17-vuh-2417-pi-latest/README.md)).
-See the [Pi acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md).
+([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-vuh-2417-pi-latest/README.md)).
+See the [Pi acceptance boundary](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-pi-workers/README.md).
 
 Work records stay in the repo's [tracker or files](../work-items/README.md).
 Remote agents use the per-fleet link and native adapters.
@@ -243,7 +243,7 @@ async answers use the TUI's attributed user-input envelope and verify its exact
 client ID and content in the native thread. Async questions remain nonblocking
 and survive normal completion. Matching interrupted/failed turns release stale
 questions and active dispatch; idle alone requires a read-only terminal-turn
-proof. See [question protocol evidence](../../docs/testing/2026-10-05-codex-worker-questions/README.md).
+proof. See [question protocol evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-codex-worker-questions/README.md).
 See [ADR 0207](../../docs/adr/0207-work-records-and-native-agent-delivery.md)
 for the boundary between task records, native terminals and harness delivery.
 
@@ -278,7 +278,7 @@ through their original TUI's `app.exit` command; success requires the original
 terminal to disappear. Cold, replaced or switched sessions cannot use this
 control, and there is no unconditional physical pane-close fallback. Worker
 history comes only from its registered profile, not an owner-wide store. See
-the [subagent verification](../../docs/testing/2026-10-04-opencode-subagents/README.md)
+the [subagent verification](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-opencode-subagents/README.md)
 and the
 [operator seat guide](../../integrations/opencode-plugin/README.md) for current
 capabilities and verification limits.
@@ -366,7 +366,7 @@ guarantee. No owner-wide database, migration or parallel transcript store is use
 controller after fresh process, session and cwd checks. Saved metadata grants no
 control. General profile discovery, restart reattachment and
 new-process continuation remain unavailable. The
-[worker checkpoint](../../docs/testing/2026-10-04-opencode-workers/README.md)
+[worker checkpoint](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-opencode-workers/README.md)
 separates the original deterministic proof from later native persona/exit
 verification and the remaining live acceptance checks.
 
@@ -396,4 +396,4 @@ When the proxy cannot reach that active thread, queue acceptance reports
 `state: queued` with an explicit until-turn-end detail. It does not mean the agent
 has seen the message; a goal may hold it until the goal ends. Shared-daemon
 Herdr identity and MCP membership are separate limitations; see the
-[external Codex verification notes](../../docs/testing/2026-10-03-external-codex-control/README.md).
+[external Codex verification notes](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-03-external-codex-control/README.md).

@@ -144,7 +144,7 @@ The repository prefix audit covers these remaining references:
 | Shipped skills and `docs/cli.md`                                                                                    | Seat reference and CLI explain the new scope, prefix and binding. Other shipped skills have no old-prefix reference.                             |
 | `command/mcp.ts`, `mcp-bridge.test.ts`, `fixtures/seat-pump-stdio.ts`                                               | Retain old channel aliases/fixture; bridge integration now covers `server:clankie` too.                                                          |
 | `eval-runner.test.ts`, `native-room-handoff.integration.test.ts`, `room-handoff-native-captain.integration.test.ts` | Old tool-name fixtures exercise supported legacy native journals; retained. No eval was run.                                                     |
-| `docs/verification/vuh-1887`, `docs/testing/VUH-1859-idle-claude-delivery.md`                                       | Historical observations retain their measured names. This README and VUH-2815 evidence describe the migration.                                   |
+| `docs/verification/vuh-1887`, `archive/clankie-docs-testing/VUH-1859-idle-claude-delivery.md`                       | Historical observations retain their measured names. This README and VUH-2815 evidence describe the migration.                                   |
 
 A read-only audit also found one owner rule, `~/.claude/settings.json` →
 `permissions.allow[5] = "mcp__plugin_clankie_clankie"`. It belongs to the owner
@@ -475,7 +475,7 @@ managed settings allow it. That is the owner's action, never the dispatcher's:
 a hire needs `"channelsEnabled": true` and
 `{ "marketplace": "inline", "plugin": "clankie-worker" }` in
 `allowedChannelPlugins`, with `disableSideloadFlags` unset (background in
-[managed consent](../../docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md)).
+[managed consent](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/managed-consent.md)).
 `clankie herdr prepare` writes it on a fleet machine; on the Mac it is the
 owner's administrator step. Nothing is installed in a Claude profile: `clankie
 harness install` and its update refresh remove an older `clankie-worker@clankie`

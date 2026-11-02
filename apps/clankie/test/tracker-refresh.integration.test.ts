@@ -32,11 +32,7 @@ async function runProof(flow: URL) {
 }
 
 it("retains a newer local commit when an external refresh finishes late in a fresh process", async () => {
-  expect(
-    await runProof(
-      new URL("../../../docs/testing/2026-10-27-local-vuh-51-refresh/flows/race.ts", import.meta.url),
-    ),
-  ).toEqual({
+  expect(await runProof(new URL("./fixtures/tracker-proof/refresh-race.ts", import.meta.url))).toEqual({
     externalValidated: true,
     localSnapshotRetained: true,
     spuriousRefusal: null,
@@ -46,9 +42,7 @@ it("retains a newer local commit when an external refresh finishes late in a fre
 
 it("rechecks disk when an older metadata reader publishes during a locked refresh, preserving both external and local commits", async () => {
   expect(
-    await runProof(
-      new URL("../../../docs/testing/2026-10-27-local-vuh-51-refresh/flows/stale-base.ts", import.meta.url),
-    ),
+    await runProof(new URL("./fixtures/tracker-proof/refresh-stale-base.ts", import.meta.url)),
   ).toMatchObject({
     writeError: null,
     externalXSurvived: true,

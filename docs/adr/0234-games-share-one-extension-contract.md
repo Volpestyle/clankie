@@ -110,10 +110,10 @@ audit remain core authority projections, not extension-authored grants.
 
 ## Verification
 
-[Registration evidence](../testing/2026-10-08-game-extension-registration/README.md)
+[Registration evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-game-extension-registration/README.md)
 records the isolated native IPC, real Mineflayer packet/MCP/worker boundary,
 owner-authenticated HTTP/CLI and settings projection checks. Earlier
-[Pokémon adoption evidence](../testing/2026-10-06-game-extension/README.md)
+[Pokémon adoption evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-game-extension/README.md)
 remains valid for unchanged execution behavior. These fixtures do not prove a
 live game body, paid model, Discord stream or deployment.
 

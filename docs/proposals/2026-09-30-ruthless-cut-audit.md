@@ -16,7 +16,7 @@ owner something the Claude Code and Codex ecosystems don't, and still be needed 
 Claude and Codex were twice as good tomorrow. This audit applies that test to every
 app, package, service, captain tool, CLI and TUI command and bundled skill. It reuses
 the [Discord surface review](2026-09-30-discord-surface-review.md) (VUH-1460) and
-the [2026-09-30 eval baseline](../testing/2026-09-30-eval-baseline/README.md).
+the [2026-09-30 eval baseline](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-eval-baseline/README.md).
 
 ## Headline
 

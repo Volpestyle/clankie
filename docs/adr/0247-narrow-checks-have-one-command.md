@@ -63,7 +63,7 @@ HEAD with different source fingerprints is not unchanged-input proof. No
 additional exclusions or subject-only integration cap follow from that gap.
 The real roster shutdown persistence regression required a product lifecycle
 fix, so its broader fleet/lifecycle coverage stays. Measurements and limitations
-are retained in [the policy evidence](../testing/2026-10-18-vuh-2460-landing-policy/README.md).
+are retained in [the policy evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-18-vuh-2460-landing-policy/README.md).
 
 Core includes `pnpm deadcode` (knip) in this landing command. Full-gate
 measurements on 2026-10-07 put it at 1.8–3.1 seconds. That small cost catches

@@ -18,7 +18,7 @@ rest of the system. It asks for one change at a time, measured against an
 end-to-end eval.
 
 [VUH-2796](https://linear.app/vuhlp/issue/VUH-2796) measured where Clankie runs
-separate loops ([record](../testing/2026-10-24-vuh-2796-lane-folding/README.md)):
+separate loops ([record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-24-vuh-2796-lane-folding/README.md)):
 
 - **Pi text rooms** (the busiest separate lane, 250 handoffs in 18 days). Since
   ADR 0229, every admitted message starts a fresh Pi session. It starts at zero

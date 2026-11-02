@@ -206,7 +206,7 @@ broker entry, and perform the read-only MCP call there. Verify that no provider
 token appears in gateway/account-service handling or client responses. Check
 the app auth-sheet flow on both iPhone and iPad.
 
-The [development probe and evidence](../testing/2026-09-28-hosted-essentials/README.md)
+The [development probe and evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-28-hosted-essentials/README.md)
 use the real credential broker and MCP host with a private Gmail configuration.
 They do not enable a production connector or prove remote E2E OAuth completion.
 Missing consent stops the live proof.

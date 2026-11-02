@@ -660,7 +660,7 @@ The daily check counts only attributable tracker ownership. Unscoped operator-he
 and native-child claims are excluded rather than assigned to the default connector.
 A historical pause ledger without scope cannot establish restoration authority.
 Source-checkout disposable-store proof is retained under
-[`docs/testing/2026-10-12-local-vuh-8`](testing/2026-10-12-local-vuh-8/README.md).
+[`docs/testing/2026-10-12-local-vuh-8`](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-12-local-vuh-8/README.md).
 Actual installed-pane behavior requires a separate check after deployment.
 
 ### Retiring and approving machine-specific workspaces

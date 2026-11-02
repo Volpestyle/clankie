@@ -17,14 +17,14 @@ The adapter prepares the endpoint and token only for that launch. Original
 process/socket and session admission lives in Clankie's controller and the shared
 prepared-native host. A token or reported native path alone cannot attach control.
 
-Read the [implementation and live acceptance boundary](../../docs/testing/2026-10-04-pi-workers/README.md)
+Read the [implementation and live acceptance boundary](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-pi-workers/README.md)
 before interpreting receipts or trying to resume an uncertain worker. The control modules have fake-native API and real transport fixtures.
 The fleet consumer additionally has installed Pi SDK / real MCP subprocess
 integration coverage, without provider turns; see the
-[fleet boundary evidence](../../docs/testing/2026-10-08-pi-worker-fleet-mcp/README.md).
+[fleet boundary evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-pi-worker-fleet-mcp/README.md).
 Neither fixture proves a live hire; `pnpm --filter @clankie/clankie verify-pi-seat`
 runs one against the installed release
-([evidence](../../docs/testing/2026-10-17-vuh-2417-pi-latest/README.md)).
+([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-vuh-2417-pi-latest/README.md)).
 
 ## Release probe
 

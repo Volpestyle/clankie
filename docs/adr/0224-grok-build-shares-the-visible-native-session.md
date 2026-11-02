@@ -98,4 +98,4 @@ Otherwise the hire refuses with the found version and what it lacks. The floor
 stands for what no probe observes: queue acknowledgments, prompt-ID echoes, the
 system-prompt override and leader mode ignoring permission flags. The leader
 IPC is still the observed internal protocol. Grok 1.0.50 passed the probe and a
-live hire ([evidence](../testing/2026-10-17-opencode-grok-latest/README.md)).
+live hire ([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-opencode-grok-latest/README.md)).

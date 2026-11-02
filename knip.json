@@ -1,12 +1,5 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignore": [
-    "docs/testing/2026-08-18-pokeagents-trial-run/flows/collect-run-evidence.mjs",
-    "docs/testing/2026-09-26-hosted-connections/flows/serve.mts",
-    "docs/testing/2026-09-26-work-items/flows/serve.mts",
-    "docs/testing/2026-10-10-views/flows/serve.mts",
-    "docs/testing/2026-10-12-vuh-2163/flows/prove.mjs"
-  ],
   "workspaces": {
     ".": {
       "entry": [
@@ -23,8 +16,8 @@
         "scripts/scratch-stack.mjs",
         "scripts/manual/work-inbox-proof.mjs",
         "scripts/manual/tracker-peak-day.ts",
-        "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/run.mjs",
-        "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts",
+        "scripts/manual/tracker-peak-day/run.mjs",
+        "scripts/manual/tracker-peak-day/browser.ts",
         "scripts/dependency-types.mjs",
         "scripts/proof-linux-pi-process.mjs",
         ".agents/skills/shared-checkout/scripts/land.mjs",
@@ -38,32 +31,7 @@
         "scripts/codex-review.mjs",
         "scripts/testing/landing-graph-reporter.mjs",
         "scripts/testing/release-test-reporter.mjs",
-        "docs/testing/2026-10-12-vuh-2163/flows/prove.mjs",
-        "docs/testing/2026-09-27-remote-fleet/connect/enroll-clankie.mjs",
-        "docs/testing/2026-09-29-browser-bursts/flows/smoke.mjs",
-        "docs/testing/2026-09-04-astra-terra-comparison/flows/assert-suite.mjs",
-        "docs/testing/2026-09-04-linux-service-spike/flows/pairing-and-seat-dm.ts",
-        "docs/testing/2026-09-04-linux-service-spike/flows/synthetic-provider.mjs",
-        "docs/testing/2026-09-04-linux-service-spike/flows/guard-proof.mjs",
-        "docs/testing/2026-09-04-case-b-execution-metrics/flows/check-arm.mjs",
-        "docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.mjs",
-        "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs",
-        "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs",
-        "docs/testing/2026-09-20-delivered-files-live/flows/run-isolated-proof.mjs",
-        "docs/testing/2026-09-30-claude-worker-seat/live-hire.mts",
-        "docs/testing/2026-10-19-native-proof-startup/latency.mjs",
-        "docs/testing/2026-10-19-native-proof-startup/probe.mts",
-        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/generate-store.ts",
-        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/bench-writes.ts",
-        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/migrate-store.ts",
-        "docs/testing/2026-10-27-local-vuh-42-tracker-journal/flows/journal-format.ts",
-        "docs/testing/2026-10-27-local-vuh-47-tracker-write-cost/flows/profile-summary.mjs",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/baseline.mjs",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/after.mjs",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/open.ts",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/refresh.ts",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/rollback.mjs",
-        "docs/testing/2026-10-28-local-vuh-49-streamed-open/flows/template.ts",
+        "scripts/manual/tracker-peak-day/generate-store.ts",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/clankie-cli.mjs",
@@ -108,10 +76,7 @@
         "integrations/pi-plugin/worker-connection.d.mts",
         "integrations/claude-plugin/hooks/mods/tool-catalog.mjs",
         "integrations/claude-plugin/worker/hooks/mods/tool-catalog.mjs",
-        "integrations/claude-plugin/worker/bin/mcp-result.mjs",
-        "docs/testing/2026-10-31-participant-sessions/participant-view.mjs",
-        "docs/testing/2026-10-31-participant-sessions/view.mjs",
-        "docs/testing/2026-10-31-participant-sessions/render.mjs"
+        "integrations/claude-plugin/worker/bin/mcp-result.mjs"
       ],
       "paths": {
         "/clankie/*": ["./*"]
@@ -157,7 +122,10 @@
         "test/helpers/project-native-proof/harness.mjs",
         "test/helpers/project-native-proof/process-churn.mjs",
         "test/helpers/local-fleet-cancellation/fixture.mjs",
-        "test/helpers/codex-catalog-native-bridge.mjs"
+        "test/helpers/codex-catalog-native-bridge.mjs",
+        "test/fixtures/tracker-proof/refresh-race.ts",
+        "test/fixtures/tracker-proof/refresh-stale-base.ts",
+        "test/fixtures/tracker-proof/bundle-routing-worker.ts"
       ]
     },
     "packages/protocol": {
@@ -194,14 +162,12 @@
     }
   },
   "ignoreIssues": {
-    "docs/testing/2026-09-20-delivered-files-live/flows/build-presentation.mjs": ["unlisted"],
-    "docs/testing/2026-09-20-delivered-files-live/flows/build-workbook.mjs": ["unlisted"],
     "scripts/evals/lead-coding-tools.mjs": ["unlisted"],
     "scripts/evals/lead-controller.mjs": ["unlisted"],
     "scripts/evals/lead-model-runtime.mjs": ["unlisted"],
     "integrations/opencode-plugin/worker-tui.mjs": ["unlisted"],
     "integrations/opencode-plugin/v2/worker-tui/tui.mjs": ["unlisted"],
     "scripts/manual/tracker-peak-day.ts": ["unlisted"],
-    "docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts": ["unlisted"]
+    "scripts/manual/tracker-peak-day/browser.ts": ["unlisted"]
   }
 }

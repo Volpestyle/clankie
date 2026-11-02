@@ -18,7 +18,7 @@ import { ControlPlaneDeviceAuthorizer } from "../../apps/relay/src/device-auth.t
 import { createDeviceConversationDispatch } from "../../apps/relay/src/conversation-upstream.ts";
 import { createOperatorConversationRelayHandler } from "../../apps/relay/src/operator-conversations.ts";
 import { DurableReceiptStore } from "../../apps/clankie/src/durable-receipt-store.ts";
-import { fixture } from "../../docs/testing/2026-10-27-local-vuh-46-peak-day/flows/fixture.ts";
+import { fixture } from "../../apps/clankie/test/fixtures/tracker-proof/peak-day-fixture.ts";
 
 const [appCheckout, source, output, root, mode] = process.argv.slice(2);
 if (!root || !process.env.HOME?.startsWith(root) || process.env.NODE_ENV !== "test")
@@ -324,7 +324,7 @@ async function run() {
     ).json();
     if (!device.deviceToken) throw new Error(`Scratch pairing refused: ${JSON.stringify(device)}`);
     const bundle = await build({
-      entryPoints: [resolve("docs/testing/2026-10-27-local-vuh-46-peak-day/flows/browser.ts")],
+      entryPoints: [resolve("scripts/manual/tracker-peak-day/browser.ts")],
       bundle: true,
       write: false,
       platform: "browser",

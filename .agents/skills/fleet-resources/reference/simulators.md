@@ -80,7 +80,7 @@ usually binds. Load and available-memory guards gate both heavy and simulator
 leases, which have independent budgets. A cold boot burns about ten cores for two
 minutes, ahead of the one-minute load average, so the governor admits no new
 simulator within three minutes of the last one and answers `waiting` with reason
-`pressure` ([measurements](../../../../docs/testing/2026-10-09-lean-simulators/README.md)).
+`pressure` ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-09-lean-simulators/README.md)).
 
 Read `usage` beside `holderId` in `clankie fleet resources` or
 `clankie simulator status`. Kernel footprint includes private compressed memory;
@@ -180,7 +180,7 @@ cores for two minutes while the machine is refused for load or memory is shut
 down early as a `runaway`. Each lease end is recorded with its reason
 (`released`, `idle`, `runaway`, `owner_exited`, ...) in `simulator-settled.jsonl`,
 and your next touch, verify or release names an `idle`, `runaway` or
-`owner_exited` end ([measurements](../../../../docs/testing/2026-10-19-simulator-runaway/README.md)).
+`owner_exited` end ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)).
 
 Clankie never shuts down a device it did not lease; it names such devices in
 status and doctor and tells the lead of the seat using one. A missing or

@@ -81,7 +81,7 @@ uses separate brokered OpenAI transcription and ElevenLabs speech credentials.
 The shared voice composition receives attributed transcripts, streams Claude's
 reply into the existing ElevenLabs mouth, and retains the same floor and tools.
 It requires a configured ElevenLabs voice ID and a body restart. Call quality
-and latency remain [James's manual trial](../../docs/testing/2026-10-06-sonnet-voice/manual-trial.md);
+and latency remain [James's manual trial](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-sonnet-voice/manual-trial.md);
 this setting does not change hosted fleet provider selection.
 
 Whenever this active body has a voice session, it hosts the fixed

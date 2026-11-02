@@ -1,9 +1,0 @@
-{
-  "id": "pc",
-  "kind": "herdr",
-  "session": "default",
-  "ssh": { "host": "volpe@supedupsilly", "shell": "powershell" },
-  "capabilities": ["code", "review", "research"],
-  "enabled": true,
-  "restart": "clankie restart captain"
-}

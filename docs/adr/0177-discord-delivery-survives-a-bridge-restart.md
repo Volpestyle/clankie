@@ -91,7 +91,7 @@ message, and 12 of 14 reconnects between 15:00Z and 19:00Z occurred within
 four seconds of a DarkWake; the other two followed wakes by 33–36 seconds.
 Vox runs in a separate process; nearby audio tick slippage does not establish
 a Node event-loop bug. This is not evidence of benign Discord-side churn.
-See the [content-free investigation and checks](../testing/2026-09-29-discord-reconnect-recovery.md).
+See the [content-free investigation and checks](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-29-discord-reconnect-recovery.md).
 
 The bridge does not override system/lid sleep. Persistent catch-up handles its
 message-delivery consequences when the host resumes. Gateway diagnostics now

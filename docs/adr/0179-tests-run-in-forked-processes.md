@@ -57,20 +57,20 @@ suite spends over 20 minutes serializing file imports and test waits. Vitest
 then ran at most two isolated forks inside the fleet heavy permit. Each file still
 gets its own temporary HOME and stores. The fork pool, suite selection and
 disabled retries remain the same; Node's worker-isolate teardown is still avoided.
-The [gate evidence](../testing/2026-10-06-gate-stability/README.md) records the
+The [gate evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-gate-stability/README.md) records the
 historical failures, cause repairs and before/after measurements.
 
 ## 2026-10-07: four forks
 
 Four forks replaced two (VUH-1762): the same four representative suites took
 46.0s instead of 79.6s, 42% less
-([gate evidence](../testing/2026-10-07-gate-stability/README.md)).
+([gate evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-07-gate-stability/README.md)).
 
 ## 2026-10-11 and 2026-10-12: three forks in CI, serial queue proofs
 
 CI defaults to three forks, keeping four locally: the three-core macOS runner
 needs CPU for Vite transforms, the coordinator and real fixture children too
-([VUH-2101 measurements](../testing/2026-10-11-release-ci-concurrency/README.md)).
+([VUH-2101 measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-release-ci-concurrency/README.md)).
 The remote queue proof moved to a later one-worker project (VUH-2119), and the
 local one joined it the next day (VUH-2164), so competing fixtures cannot expire
 their deliberately short deadlines.

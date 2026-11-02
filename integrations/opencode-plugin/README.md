@@ -121,9 +121,9 @@ failure and identity mismatch without extra turns.
 or newer; last run on 1.19.3) server with this plugin, the real seat bridge and an in-process Clankie service;
 only the model provider is a fixture. It covers a stalled context read, a turn
 ending in a provider error followed by a delivered app turn, and a preserved
-first stop cause ([evidence](../../docs/testing/2026-10-17-opencode-seat-resilience/README.md)). Scoped native evidence and remaining
+first stop cause ([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-opencode-seat-resilience/README.md)). Scoped native evidence and remaining
 acceptance gaps are recorded in
-[the verification notes](../../docs/testing/2026-10-03-opencode-seat/README.md).
+[the verification notes](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-03-opencode-seat/README.md).
 Native draft preservation and pending approval behavior were checked in an
 owned scratch TUI. The complete production outbox/projection cycle remains
 unverified; unit tests do not substitute for that acceptance.
@@ -191,7 +191,7 @@ An owned live worker can exit through its original TUI's `app.exit` command;
 success requires its original terminal to disappear. Cold, replaced or switched
 sessions refuse this control. There is no unconditional physical pane-close
 fallback. See the
-[worker evidence and limits](../../docs/testing/2026-10-04-opencode-workers/README.md)
+[worker evidence and limits](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-opencode-workers/README.md)
 for the original deterministic checkpoint, later native persona/exit evidence
 and the live checks still open; those stages are separate.
 

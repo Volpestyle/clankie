@@ -156,5 +156,5 @@ Discord or restart the service. The written persona itself is hashed, not copied
 into the report. Inspect generated answers before publishing, since a model may
 repeat facts from the owner's character card.
 
-See the [retained evaluation](testing/2026-09-28-persona-images/README.md) and
+See the [retained evaluation](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-28-persona-images/README.md) and
 [ADR 0202](adr/0202-owner-authored-persona-images.md).

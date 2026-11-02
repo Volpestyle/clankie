@@ -17,15 +17,7 @@ it("routes opaque bundle/run ids through hired worker MCP in a fresh isolated pr
   try {
     const { stdout } = await promisify(execFile)(
       fileURLToPath(new URL("../node_modules/.bin/tsx", import.meta.url)),
-      [
-        fileURLToPath(
-          new URL(
-            "../../../docs/testing/2026-10-27-local-vuh-52-bundle-routing/flows/worker.ts",
-            import.meta.url,
-          ),
-        ),
-        root,
-      ],
+      [fileURLToPath(new URL("./fixtures/tracker-proof/bundle-routing-worker.ts", import.meta.url)), root],
       { env, timeout: 25_000, maxBuffer: 1024 * 1024 },
     );
     const result = JSON.parse(stdout.trim().split("\n").at(-1)!);

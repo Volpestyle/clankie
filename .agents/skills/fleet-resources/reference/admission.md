@@ -9,7 +9,7 @@ The daily rules are in [the skill](../SKILL.md).
 example nine on an 18-core, 128 GiB machine). One job per four cores runs on the
 load and memory guards, each job admitted in the last minute counting four cores
 of load, as the
-[alternating benchmark](../../../../docs/testing/2026-10-08-heavy-parallelism/README.md)
+[alternating benchmark](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-heavy-parallelism/README.md)
 supports. Each job above that starts only while the measured machine (the busier
 of load and kernel CPU, plus a full four-core share for every job admitted in
 the last minute) stays under 70% of the cores, with memory to spare.

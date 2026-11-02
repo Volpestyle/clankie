@@ -103,5 +103,5 @@ be inspected before retrying, rather than allocating a replacement pane.
 
 VUH-1869 extends the real-socket journey with five allocations, exact 2x2
 geometry, numbered overflow, prepared initial-command joining and preserved
-foreign lanes. Its [live evidence](../testing/2026-10-08-worker-layout/README.md)
+foreign lanes. Its [live evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-worker-layout/README.md)
 uses only newly created throwaway panes in the owner's running session.

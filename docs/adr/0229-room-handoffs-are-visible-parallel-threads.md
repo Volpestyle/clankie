@@ -105,7 +105,7 @@ Focused integration covers actual service receipts, persisted child records,
 bounded concurrency, exact native ancestry and scoped MCP calls. It separates
 completed computation from confirmed room delivery. The real multi-person voice
 call and native operator session checks belong to James; exact steps and tested
-limits live in the [VUH-1672 evidence record](../testing/2026-10-05-room-handoffs/README.md).
+limits live in the [VUH-1672 evidence record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-room-handoffs/README.md).
 
 ## Amendment: a sender's burst steers their own handoff (2026-10-06)
 

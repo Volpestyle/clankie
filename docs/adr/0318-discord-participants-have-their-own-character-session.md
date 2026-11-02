@@ -44,4 +44,4 @@ This amends participant behavior from ADR 0229 and ADR 0291. Admin-server
 machine grants and explicitly linked private owner channels keep their existing
 routes; a Participant server cannot link its character to the main conversation.
 
-See [Discord rooms](../discord-rooms.md) and the [statecharts and boundary evidence](../testing/2026-10-31-participant-sessions/README.md).
+See [Discord rooms](../discord-rooms.md) and the [statecharts and boundary evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-31-participant-sessions/README.md).

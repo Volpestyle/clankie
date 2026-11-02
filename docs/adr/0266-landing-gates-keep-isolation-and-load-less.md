@@ -43,7 +43,7 @@ service arbiter and clients. Direct landing remains the default under
 
 ## Evidence and limits
 
-[Import evidence](../testing/2026-10-11-vuh-2148-imports/README.md) records the
+[Import evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-vuh-2148-imports/README.md) records the
 same 363-module collection at every stage. Baseline was 321.17 seconds wall /
 1184.45 seconds summed imports; final was 253.76 / 924.12. These observed
 reductions of 21% / 22% include changing host load and import instrumentation.
@@ -55,13 +55,13 @@ Focused real catalog, image, provider and voice contracts passed 98 tests;
 settings and protocol route contracts passed 61. Six package typechecks passed.
 Real esbuild checks cover the bundled lazy catalog and browser protocol index.
 
-The separate [gate-priority evidence](../testing/2026-10-11-vuh-2148-gate-priority/README.md)
+The separate [gate-priority evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-vuh-2148-gate-priority/README.md)
 records its native process/lock contracts and successful exact-tree landing.
 Its native process/lock proof uses controlled admission inputs. A repeat passed
 on the loaded Mac (2.48 load/core against the 1.5 policy) in 8.79 seconds; that
 does not substitute for live before/after landing-gate timing. The priority exact-tree gate passed 6,468 tests and pushed at `bd64bfb86`.
 
-The [live priority capture](../testing/2026-10-12-vuh-2148-live/README.md) after
+The [live priority capture](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-12-vuh-2148-live/README.md) after
 the 09:50:38Z deployment records the next real batch: install 11.870s and
 gate 446.746s, exit 0 and confirmed push. Full and light CLI probes waited
 with spare slots and healthy memory, then ran after the gate released its

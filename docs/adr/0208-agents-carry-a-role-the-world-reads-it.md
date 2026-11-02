@@ -82,7 +82,7 @@ that window and v2-only history remain unsupported. The inspected installed
 1.18.34 store contained historical 1.17.13 task records, not fresh 1.18.34
 subagents; the sanitized shapes and source-pinned background semantics are
 documented in the
-[inspection record](../testing/2026-10-04-opencode-subagents/README.md).
+[inspection record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-opencode-subagents/README.md).
 
 To respect ADR 0188, discovery alone never reads a transcript. The host reads
 only seats it already has an address for: one it hired or whose chat the owner

@@ -33,7 +33,7 @@ This slice refuses detected WSL. Windows interop containment, native/WSL
 dispatch through one canonical Windows budget, setup and PC proofs remain
 open. Linux `flock` on `/mnt/c` must never be used to acquire the Windows
 `LockFileEx` budget lock. Existing Mac lanes and KH2's build lock are unchanged.
-See the [local proof](../../docs/testing/2026-10-11-linux-containment/README.md)
+See the [local proof](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-linux-containment/README.md)
 for the container prerequisites and exact tested boundary.
 
 Every heavy command inherits `VITEST_MAX_WORKERS=4` and `TURBO_CONCURRENCY=4`,
@@ -58,7 +58,7 @@ Ordinary admission counts a full four-core
 share charged against the load guard for every job admitted in the last minute,
 which load1 cannot see yet (at load 1.48, four waiters once started within a
 second); the
-[alternating benchmark](../../docs/testing/2026-10-08-heavy-parallelism/README.md)
+[alternating benchmark](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-heavy-parallelism/README.md)
 supports four capped jobs for throughput on the 18-core, 128 GiB Mac. Above the
 base, the next queued job starts only while the measured machine stays under 70%
 of its cores, with 8 GiB per unsettled job above the memory floor. "Measured" is
@@ -113,7 +113,7 @@ unmanaged active devices count only against `simulatorSlots`. Status reports
 reservations; simulator status separately counts external active devices. Automatic simulator capacity is
 `max(1, min(floor(cores/2/2), floor(RAM_GiB/2/34)))`: half the machine at the
 measured cost of one simulator under test (see
-[the simulator run](../../docs/testing/2026-10-09-lean-simulators/README.md)).
+[the simulator run](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-09-lean-simulators/README.md)).
 Owner settings may say `auto`; the service resolves it to that count before
 configuring the shared registry, which always holds an exact integer every
 installed CLI can read. A new simulator is refused with `pressure` for three minutes after the previous
@@ -322,7 +322,7 @@ for two minutes: its census showed at least four cores, nobody touched it, and
 the host was refused for load or memory. Any break restarts the window. Both
 measured iOS 27 boot bursts, including the second poster render about 150
 seconds in, stay inside the boot window
-([measurements](../../docs/testing/2026-10-19-simulator-runaway/README.md)). Every device is kept for later reuse, including
+([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)). Every device is kept for later reuse, including
 ones created by Clankie; deletion requires an explicit owner tidy by exact
 stopped UDID. A historical `Clankie-<uuid>` name grants no ownership. Active
 journal claims (including a name with an uncertain create receipt) exclude

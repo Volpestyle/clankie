@@ -91,12 +91,13 @@ any uncovered screen pixel, fast face frames, or duplicate static first faces.
 
 The sheet stores the transparent overlays. Their GIFs and contact-sheet rows
 show each face composited on the unchanged `idle`-0 body for visual review.
-The offline [frame strip](../../docs/testing/2026-10-05-pet-faces/frame-strip.png)
+The offline [frame strip](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-pet-faces/frame-strip.png)
 also checks moving body anchors and the static Reduce Motion expression.
-Reproduce the art boundary evidence after rebuilding:
+Reproduce the art boundary evidence after rebuilding, with the verifier copied
+from clankie-ops `archive/clankie-docs-testing/2026-10-05-pet-faces/`:
 
 ```sh
-uv run --with pillow python3 docs/testing/2026-10-05-pet-faces/verify-art.py --baseline 05ccea2e
+uv run --with pillow python3 verify-art.py --baseline 05ccea2e
 ```
 
 That comparison is scoped to this face addition's approved original-art

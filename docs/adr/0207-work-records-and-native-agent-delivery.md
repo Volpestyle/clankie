@@ -52,7 +52,7 @@ arbitration against a simultaneous owner reply. An uncertain answer never
 authorizes a replacement send. Native idle releases dispatch only after the
 exact active turn is observed terminal, preserving newer turns and pending
 async questions from normally completed turns. See the
-[VUH-1688 protocol evidence](../testing/2026-10-05-codex-worker-questions/README.md).
+[VUH-1688 protocol evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-codex-worker-questions/README.md).
 
 ```mermaid
 flowchart LR

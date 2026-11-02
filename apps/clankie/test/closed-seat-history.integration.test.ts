@@ -14,7 +14,7 @@ import { PaneTidy, tidySessionKey } from "../src/captain/pane-tidy.ts";
 
 // VUH-2806: the real conversation store, inbound receipts and keep journal against a Herdr
 // inventory boundary. The same code ran on a copy of the live store with live Herdr
-// (docs/testing/2026-10-25-vuh-2806).
+// (archived in clankie-ops archive/clankie-docs-testing/2026-10-25-vuh-2806).
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));

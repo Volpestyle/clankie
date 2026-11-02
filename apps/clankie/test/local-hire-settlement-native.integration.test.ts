@@ -22,7 +22,7 @@ const nativeIt = it.skipIf(
 nativeIt(
   "settles a never-launched local hire from host inventory and frees its directory",
   async () => {
-    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-14-local-hire-settlement/abandon");
+    const logs = join(import.meta.dirname, "../../../.local/native-proof/local-hire-settlement/abandon");
     const herdr = await isolatedHerdr(logs);
     const evidence: unknown[] = [];
     let store: HerdrWatchStore | undefined;
@@ -183,7 +183,7 @@ nativeIt(
 nativeIt(
   "adopts launched but unconfirmed local hires for the conversation that hired their pane",
   async () => {
-    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-14-local-hire-settlement/adopt");
+    const logs = join(import.meta.dirname, "../../../.local/native-proof/local-hire-settlement/adopt");
     const herdr = await isolatedHerdr(logs);
     const evidence: unknown[] = [];
     let store: HerdrWatchStore | undefined;

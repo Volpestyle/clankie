@@ -32,7 +32,9 @@ nativeIt.each([
   async ({ qualified, restored }) => {
     const logs = join(
       import.meta.dirname,
-      restored ? "../../../docs/testing/2026-10-18-vuh-2477" : "../../../docs/testing/2026-10-12-orphan-hire",
+      restored
+        ? "../../../.local/native-proof/orphan-hire-restored"
+        : "../../../.local/native-proof/orphan-hire",
       restored ? "native" : qualified ? "qualified" : "local",
     );
     const herdr = await isolatedHerdr(logs);

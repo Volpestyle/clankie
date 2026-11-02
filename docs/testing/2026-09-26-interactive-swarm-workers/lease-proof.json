@@ -1,8 +1,0 @@
-{
-  "messageIdStable": true,
-  "leaseTokenChanged": true,
-  "attempts": [1, 2],
-  "effectCommits": 1,
-  "staleAckRejected": true,
-  "finalState": "acknowledged"
-}

@@ -58,7 +58,7 @@ Snapshots make restart semantics explicit rather than promising filesystem
 watching. Hosted owners name a directory on the hosted body; client-side uploads
 remain a separate product gap. Cache entries persist after clearing the setting.
 
-The [canonical-art A/B](../testing/2026-09-28-persona-images/README.md) found a
+The [canonical-art A/B](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-28-persona-images/README.md) found a
 large difference in self-description and art direction while the written wizard
 voice remained recognizable. Twelve single samples are not a statistical claim
 about personality, nor evidence of audio, image-generation quality or cache hits.
