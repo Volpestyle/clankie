@@ -340,6 +340,7 @@ describe("fleet routing", () => {
       personas: { ready: async () => {} },
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [],
       herdrRunner: routeHerdrFleets(
         localRunner(),
         new Map([
@@ -424,6 +425,7 @@ describe("fleet routing", () => {
       personas: { ready: async () => {} },
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [],
       herdrRunner: routeHerdrFleets(
         localRunner(),
         // No shared poll: each read sees the pane as Herdr answers now.
@@ -679,6 +681,7 @@ describe("fleet routing", () => {
       personas: { ready: async () => {} },
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [],
       herdrRunner: routeHerdrFleets(
         localRunner(),
         new Map([

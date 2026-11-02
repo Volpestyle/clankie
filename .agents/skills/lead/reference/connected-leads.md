@@ -57,7 +57,10 @@ it; none takes precedence over another.
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
-  don't watch another lead's worker.
+  don't watch another lead's worker. `read_agent` shows a hired worker's whole
+  screen even when it has gone quiet (waiting on CI, say), so read it to tell
+  waiting from stuck or done; only an agent the owner started by hand comes back
+  empty with a note until it prints again.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).

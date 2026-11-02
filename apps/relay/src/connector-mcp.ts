@@ -245,7 +245,7 @@ function connectorServer(
         name: "read_agent",
         title: "Read an agent's screen",
         description:
-          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out. When the start of the agent can't be found on its screen, its first screen is held back and a note says so; read again once it has printed more.",
+          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out. An agent Clankie or a connected app hired is read whole, so a quiet one (waiting on CI, say) still shows its last screen. For an agent the owner started by hand, what its pane showed before it was first read is held back and a note says so; read again once it has printed more.",
         inputSchema: {
           type: "object" as const,
           properties: {

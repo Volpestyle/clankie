@@ -44,6 +44,7 @@ import {
   type ObservedFleet,
   type ObservedHeadSeat,
 } from "./herdr-census.ts";
+import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
 import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
@@ -886,9 +887,20 @@ export function createOperatorService(
           return unavailable("The agent in that pane changed while it was read; read it again.");
         }
         // A desktop-app hire's terminal has run nothing but the harness Clankie started in it
-        // (ADR 0319): all of its history is that agent's own, so none of it is held back.
+        // (ADR 0319), and a Herdr pane Clankie hired into is a tab he opened for that hire, on
+        // this Mac or a linked PC: all of its history is that agent's own, so a quiet hire still
+        // shows its last screen. Only a hire claim on this exact live occupant counts; an
+        // adopted or hand-started agent, or a different one in the same pane, keeps the cut.
+        const hired =
+          pane.session !== undefined &&
+          ctx.liveSeats.some(
+            (seat) =>
+              seat.seatId === request.terminalId &&
+              seat.owner?.hired === true &&
+              seat.occupantId === occupantIdForHerdrSession(pane.session!),
+          );
         const { text, detail } =
-          splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET
+          splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET || hired
             ? { text: history, detail: undefined }
             : scope.bound(request.terminalId, occupant, history, screen);
         return {
