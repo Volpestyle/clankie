@@ -82,7 +82,7 @@ import {
   type WorkerReportPage,
 } from "./worker-reports.ts";
 import { ClosedWorkerPaneSchema, OperatorFleetReadWarningsSchema } from "./operator-conversations.ts";
-import { WorktreeReconciliationSchema } from "./checkouts.ts";
+import { ClosedWorktreeSchema, type ClosedWorktree, WorktreeReconciliationSchema } from "./checkouts.ts";
 import { HireReceiptIdSchema, HireReceiptSettlementSchema } from "./hire-receipts.ts";
 import { SeatDeliverySettlementSchema, UnresolvedSeatDeliverySchema } from "./seat-deliveries.ts";
 import { OperatorSeatBridgeStatusSchema } from "./fleet-messages.ts";
@@ -1715,6 +1715,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       closed: z.boolean(),
       /** Why the seat stayed open. */
       refusal: CloseSeatRefusalSchema.optional(),
+      worktree: ClosedWorktreeSchema.optional(),
     })
     .strict(),
   z
@@ -1849,6 +1850,7 @@ export type OperatorConversationTailItem =
  * captain-runtime internals — so every surface calls one identical contract.
  */
 interface CloseSeatOutcome {
+  readonly worktree?: ClosedWorktree;
   readonly closed: boolean;
   readonly refusal?: z.infer<typeof CloseSeatRefusalSchema>;
 }
@@ -2103,7 +2105,11 @@ export function createOperatorConversationServiceClient(
       ...(unlandedReason === undefined ? {} : { unlandedReason }),
     });
     if (result.op !== "close_seat") throw new Error(`Unexpected ${result.op} result for close_seat`);
-    return { closed: result.closed, ...(result.refusal ? { refusal: result.refusal } : {}) };
+    return {
+      closed: result.closed,
+      ...(result.refusal ? { refusal: result.refusal } : {}),
+      ...(result.worktree ? { worktree: result.worktree } : {}),
+    };
   };
   const rosterRead = async () => {
     const result = await dispatch({

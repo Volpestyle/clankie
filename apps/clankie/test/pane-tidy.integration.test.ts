@@ -1904,3 +1904,91 @@ it("retires an exact finished occupant through the owner API and reopens it thro
     f.watch.close();
   }
 });
+
+// #265: real Git, process census, evidence store and guarded prune after native close.
+it.each(["removed", "safe_to_drop", "shared", "leave_unlanded", "prune_failed"])(
+  "a confirmed close reports its exact worktree cleanup (%s)",
+  async (mode) => {
+    const w = await workerWorktree();
+    await fixtureOrigin(w);
+    await writeFile(join(w.repo, ".gitignore"), ".local/\n");
+    await git(w.repo, "add", ".gitignore");
+    await git(w.repo, "commit", "--quiet", "-m", "ignore evidence");
+    await git(w.repo, "push", "--quiet", "origin", "main");
+    await git(w.repo, "fetch", "--quiet", "origin");
+    await git(w.tree, "merge", "--ff-only", "origin/main");
+    const f = await fixture({ cwd: w.tree, socket: true, ordinaryHire: true });
+    if (mode === "safe_to_drop") {
+      await writeFile(join(w.tree, "spike.txt"), "explicitly discarded spike\n");
+      await git(w.tree, "add", "spike.txt");
+      await git(w.tree, "commit", "--quiet", "-m", "spike to discard");
+      expect((await f.tidy.seatWorktreeHold("term_111")).length).toBeGreaterThan(0);
+      await f.tidy.decideWorktree(
+        { repository: w.repo, path: w.tree, decision: "safe_to_drop", reason: "spike superseded" },
+        "lead",
+      );
+      expect(await f.tidy.seatWorktreeHold("term_111")).toEqual([]);
+      await writeFile(join(w.tree, "dirty.txt"), "decision never covers dirt\n");
+      expect((await f.tidy.seatWorktreeHold("term_111")).length).toBeGreaterThan(0);
+      await rm(join(w.tree, "dirty.txt"));
+      await writeFile(join(w.tree, "later.txt"), "a later commit is not covered\n");
+      await git(w.tree, "add", "later.txt");
+      await git(w.tree, "commit", "--quiet", "-m", "later work");
+      expect((await f.tidy.seatWorktreeHold("term_111")).length).toBeGreaterThan(0);
+      await f.tidy.decideWorktree(
+        { repository: w.repo, path: w.tree, decision: "safe_to_drop", reason: "both spikes superseded" },
+        "lead",
+      );
+      expect(await f.tidy.seatWorktreeHold("term_111")).toEqual([]);
+    }
+    const { pruneTidyWorktree, sweepEvidenceTrash } = await import("../src/captain/prune-worktree.ts");
+    const archive = join(w.base, "archive");
+    await mkdir(join(w.tree, ".local", "node_modules"), { recursive: true });
+    await writeFile(join(w.tree, ".local", "proof.md"), "kept evidence\n");
+    await writeFile(join(w.tree, ".local", "node_modules", "regenerable"), "x".repeat(65536));
+    const originalList = f.ports.runner.list!.bind(f.ports.runner);
+    const before = await f.ports.runner.get("w1:p1");
+    if (mode === "shared")
+      f.ports.runner.list = async () => [
+        ...(await originalList()),
+        { ...before, paneId: "w1:shared", terminalId: "term_shared" },
+      ];
+    f.ports.prune = async (repository, path, guard) => {
+      if (mode === "prune_failed") throw Error("injected admission failure");
+      return pruneTidyWorktree(repository, path, archive, f.ports.runner, guard, {
+        dropDecided: (path, head) => f.tidy.decisions.latest(path, head)?.decision === "safe_to_drop",
+      });
+    };
+    const result = await f.tidy.close(
+      {
+        pane: "w1:p1",
+        reason: "landed",
+        reportPath: f.reportPath,
+        ...(mode === "leave_unlanded" ? { unlandedReason: "retain exact checkout" } : {}),
+      },
+      authority,
+    );
+    expect(result.outcome).toBe("closed");
+    if (result.outcome !== "closed") return;
+    if (mode === "removed" || mode === "safe_to_drop") {
+      expect(result.entry.worktree).toMatchObject({ outcome: "removed", branchDeleted: mode === "removed" });
+      if (mode === "safe_to_drop")
+        expect(await git(w.repo, "rev-parse", result.entry.worktree!.keptRef!)).toMatch(/^[a-f0-9]{40}$/u);
+      expect(result.entry.worktree!.freedBytes).toBeGreaterThan(65536);
+      expect(await stat(w.tree).catch(() => undefined)).toBeUndefined();
+      expect(await readFile(join(result.entry.worktree!.evidencePath!, "proof.md"), "utf8")).toBe(
+        "kept evidence\n",
+      );
+      await sweepEvidenceTrash(archive);
+      expect(await git(w.repo, "worktree", "list", "--porcelain")).not.toContain(w.tree);
+      expect(new PaneTidy(f.path, f.ports).history()[0]?.worktree).toEqual(result.entry.worktree);
+    } else {
+      expect(result.entry.worktree).toMatchObject({
+        outcome: mode === "prune_failed" ? "unavailable" : "kept",
+      });
+      expect((await stat(w.tree)).isDirectory()).toBe(true);
+      expect(await readFile(join(w.tree, ".local", "proof.md"), "utf8")).toBe("kept evidence\n");
+    }
+  },
+  30_000,
+);

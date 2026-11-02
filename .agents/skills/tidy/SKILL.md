@@ -48,7 +48,14 @@ its old pane id.
 Use `close_worker_pane` for each pane you judge finished, with a short one-line
 reason and its saved report path when available. The service preserves its last
 output and report in `worker_pane_history`, and returns an undo ID with a short
-deadline. `undo_worker_pane` reopens and resumes that session. Abandoned fresh
+deadline. A successful close immediately tries the existing guarded prune for the
+hire's exact local worktree. Only clean landed trees qualify (ancestry, content,
+or `safe_to_drop`); shared panes/processes, main and managed runtimes stay.
+The returned `entry.worktree` says `removed`, `kept`, or `unavailable`, with its
+reason, evidence path and estimated `freedBytes`. Cleanup failure never fails
+the close. An explicit unlanded reason leaves the tree even if it is landed.
+`undo_worker_pane` reopens and resumes the session only while its directory still
+exists; removal keeps the harvested session/output and evidence but prevents Undo. Abandoned fresh
 hires, restored remote hires and the owner's roster routes have their own
 guarded paths in [mechanics](reference/mechanics.md).
 

@@ -18,7 +18,7 @@ import { tidyWorktreeInventory } from "./tidy-worktrees.ts";
 export const AUTO_TIDY_PANE_CHECK_MS = 5 * 60_000;
 /** How often landed worktrees in enrolled roots are considered for removal. */
 export const AUTO_TIDY_WORKTREE_CHECK_MS = 60 * 60_000;
-/** A landed, clean worktree must go this long without checkout activity before removal. */
+/** Orphan sweep only: a successful PaneTidy.close prunes its landed tree immediately. */
 const AUTO_TIDY_WORKTREE_IDLE_MS = 24 * 60 * 60_000;
 /** Bounds one sweep: removing a tree with its dependencies installed takes seconds to minutes. */
 const WORKTREES_PER_SWEEP = 16;

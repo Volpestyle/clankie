@@ -20,7 +20,7 @@ import {
   type UnreconciledWorktree,
   type WorktreeReconciliation,
 } from "@clankie/protocol";
-import { checkoutGit, projectPathContains, reconcileWorktree } from "@clankie/settings";
+import { checkoutGit, ownerCheckout, projectPathContains, reconcileWorktree } from "@clankie/settings";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   ConversationOwnerSchema,
@@ -225,6 +225,8 @@ export class PaneTidy {
     nativeExitAvailable?(agent: HerdrAgentSnapshot): Promise<boolean>;
     changed(): void;
     runtimeRoot?: string;
+    /** Named local Herdr sessions; qualified remote paths must never be inspected on this machine. */
+    localFleet?(fleet: string): Promise<boolean>;
     now?: () => number;
   };
   constructor(path: string, ports: PaneTidy["ports"]) {
@@ -444,6 +446,41 @@ export class PaneTidy {
     await this.authority(authority);
     if (!this.ports.pruneMany) throw Error("Worktree pruning unavailable");
     return this.ports.pruneMany(repository, paths, () => this.authority(authority));
+  }
+  /** Capture only this hire's checkout before its native process disappears. Never inspect remote paths locally. */
+  async worktreeForClose(
+    agent: HerdrAgentSnapshot,
+  ): Promise<{ path: string; repository?: string; reason?: string } | undefined> {
+    if (!agent.workingDirectory) return undefined;
+    const cwd = agent.workingDirectory;
+    try {
+      const owner = this.ports.provenance(agent);
+      if (owner === "unknown" || owner === "owner_interactive") return undefined;
+      const fleet = splitFleetQualified(agent.paneId)?.fleet;
+      if (fleet && fleet !== DESKTOP_SEAT_FLEET && !(await this.ports.localFleet?.(fleet)))
+        return { path: cwd, reason: "remote_worktree" };
+      const path = realpathSync((await checkoutGit(cwd, ["rev-parse", "--show-toplevel"])).trim());
+      return { path, repository: await ownerCheckout(path) };
+    } catch (error) {
+      return { path: cwd, reason: errorText(error) };
+    }
+  }
+  /** Post-close cleanup has its own authority guard: the pane being gone is now expected. */
+  async pruneClosedWorktree(
+    target: { path: string; repository?: string; reason?: string },
+    guard: () => Promise<void>,
+    leaveUnlanded = false,
+  ): Promise<import("./prune-worktree.ts").PruneWorktreeResult> {
+    if (leaveUnlanded) return { outcome: "kept", path: target.path, reason: "leave_unlanded" };
+    if (!target.repository)
+      return { outcome: "unavailable", path: target.path, reason: target.reason ?? "repository_unknown" };
+    try {
+      await guard();
+      if (!this.ports.prune) throw Error("Worktree pruning unavailable");
+      return await this.ports.prune(target.repository, target.path, guard);
+    } catch (error) {
+      return { outcome: "unavailable", path: target.path, reason: errorText(error) };
+    }
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now();
@@ -883,6 +920,7 @@ export class PaneTidy {
           return refuse("pane_kept");
       };
       await guard();
+      const closeWorktree = input.nativeOnly ? undefined : await this.worktreeForClose(agent);
       const closedAt = this.now();
       entry = EntrySchema.parse({
         id: randomUUID(),
@@ -957,6 +995,18 @@ export class PaneTidy {
       }
       if (!closed) return fail("close_unconfirmed");
       this.ports.untrack(agent.terminalId);
+      if (closeWorktree) {
+        entry.worktree = await this.pruneClosedWorktree(
+          closeWorktree,
+          () => this.authority(authority),
+          unlandedReason !== undefined,
+        );
+        try {
+          this.save();
+        } catch {
+          /* The pane is closed; cleanup history persistence cannot reverse it. */
+        }
+      }
       return { outcome: "closed", entry: leadEntry(entry) };
     } catch (error) {
       if (entry?.state === "closing") {
@@ -1008,7 +1058,19 @@ export class PaneTidy {
   /** What closing this seat would leave behind; the operator close path (TUI, app) holds on it too. */
   async seatWorktreeHold(seatId: string): Promise<WorktreeReconciliation[]> {
     const agent = await this.ports.runner.resolveTerminal(seatId).catch(() => undefined);
-    return agent ? workerWorktreeHold(agent) : [];
+    if (!agent) return [];
+    const held = await workerWorktreeHold(agent);
+    // The same exact-HEAD decided drop that admits the guarded prune. Dirt and unknown
+    // state still hold the close; a decision never covers a later commit or edited file.
+    return held.filter(
+      (work) =>
+        !(
+          work.state !== "unknown" &&
+          work.dirtyFiles === 0 &&
+          work.head &&
+          this.decisions.latest(work.path, work.head)?.decision === "safe_to_drop"
+        ),
+    );
   }
   /** The close record keeps the reason; the decision ledger lets doctor and tidy see it per worktree. */
   recordLeftBehind(unlanded: { reason: string; worktrees: WorktreeReconciliation[] }, by: string): void {
