@@ -63,6 +63,8 @@ export function createCodexSeatAdapter(
     /** A local hire's MCP profile overrides (`codexWorkerMcpOverrides`). */
     workerMcpOverrides?: typeof codexWorkerMcpOverrides;
     server?: CodexServerLauncher;
+    /** Where a host checkout is mounted in the server's native namespace (an eval container). */
+    nativeCwd?: (cwd: string) => string;
     serverForView?: (view: SeatView) => CodexServerLauncher;
     listenTimeoutMs?: number;
     /** Trusted controller policy, instantiated separately for every native seat. */
@@ -387,6 +389,7 @@ export function createCodexSeatAdapter(
           await view.guard?.();
           seat = await (options.start ?? startCodexAppServerSeat)({
             cwd: launch.cwd,
+            ...(options.nativeCwd ? { nativeCwd: options.nativeCwd(launch.cwd) } : {}),
             ...(view.name ? { threadName: view.name } : {}),
             ...(options.localProcess &&
             launch.env?.CLANKIE_CODEX_ISOLATED_HOME === launch.env?.CODEX_HOME &&
