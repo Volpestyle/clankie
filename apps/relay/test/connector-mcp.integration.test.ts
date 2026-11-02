@@ -956,7 +956,7 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\Windows" },
     });
     expect(elsewhere.isError).toBe(true);
-    expect(textOf(elsewhere)).toContain("isn't one of the places");
+    expect(textOf(elsewhere)).toBe("That isn't one of the places an agent can start.");
     const other = await client.callTool({
       name: "start_agent",
       arguments: {
@@ -971,6 +971,8 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\slow" },
     });
     expect(lost.isError).toBe(true);
+    expect(textOf(lost)).toContain("HTTP 502");
+    expect(textOf(lost)).toContain("conversation_upstream_unavailable");
     expect(textOf(lost)).toContain(
       "Call list_agents and look for a new agent in that place before you try again",
     );

@@ -108,17 +108,15 @@ export interface ConnectorMcpOptions {
  */
 function startNeverRan(error: unknown): boolean {
   return (
-    error instanceof ConnectorRefusal &&
-    (error.status === 400 || error.code === "connector_operation_not_allowed")
+    error instanceof SessionRefusal ||
+    (error instanceof ConnectorRefusal &&
+      (error.status === 400 || error.code === "connector_operation_not_allowed"))
   );
 }
 
 class StartUncertain extends Error {
-  public readonly refusal: ConnectorRefusal | undefined;
-
-  public constructor(refusal?: ConnectorRefusal) {
+  public constructor(public readonly cause: unknown) {
     super("start_uncertain");
-    this.refusal = refusal;
   }
 }
 
@@ -887,10 +885,9 @@ function connectorServer(
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
         const { id, ...started } = await starting.catch((error: unknown) => {
           if (startNeverRan(error)) throw error;
-          throw new StartUncertain(error instanceof ConnectorRefusal ? error : undefined);
+          throw new StartUncertain(error);
         });
-        if (started.status === "refused")
-          return failure(`${started.detail ?? "Nothing started."} Places: ${JSON.stringify(started.places)}`);
+        if (started.status === "refused") return failure(started.detail ?? "Nothing started.");
         return text({ ...(id === undefined ? {} : { agent: id }), ...started });
       }
       if (call.params.name === "answer_prompt") {
@@ -1134,7 +1131,7 @@ function connectorServer(
     } catch (error) {
       if (error instanceof StartUncertain)
         return failure(
-          `${error.refusal === undefined ? "" : `${refusalText(error.refusal)} `}I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
+          `${error.cause instanceof ConnectorRefusal ? `${refusalText(error.cause)} HTTP ${error.cause.status}. ` : "The start_agent transport failed or its answer was lost. "}I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
         );
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);

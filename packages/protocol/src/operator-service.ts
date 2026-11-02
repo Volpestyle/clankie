@@ -1602,7 +1602,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
-      /** `places` lists where it can start; `started` names the new seat; `refused` says why not. */
+      /** `places` lists where it can start; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
       status: z.enum(["places", "started", "refused"]),
       places: z.array(StartAgentPlaceSchema).max(256),
       seatId: z.string().max(OPERATOR_CONVERSATION_REF_MAX).optional(),

@@ -22,6 +22,10 @@ it; none takes precedence over another.
   ([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)).
   If a desktop hire doesn't come up or can't be messaged, tell the owner rather
   than hiring into a TUI pane.
+- **Read a refused start as stated.** A blocking hire names its allocation, native
+  receipt when recorded, pane when observed, age and owner recovery commands.
+  A gateway failure or timeout is uncertain: call `list_agents` and inspect that
+  place before retrying; a lost answer can leave an agent running.
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
