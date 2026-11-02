@@ -30,7 +30,6 @@
         ".agents/skills/shared-checkout/scripts/land.test.mjs",
         "scripts/evals/codex.mjs",
         "scripts/evals/report.mjs",
-        "scripts/testing/evidence-landing-guard.mjs",
         "scripts/check-swallowed-rejections.mjs",
         "scripts/check-changed-tests.mjs",
         "scripts/testing/baseline-failures.mjs",

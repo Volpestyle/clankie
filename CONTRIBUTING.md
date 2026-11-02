@@ -53,6 +53,13 @@ pnpm docs:check
 pnpm docs:public:build
 ```
 
+`pnpm docs:check` also runs [docs hygiene](scripts/check-docs-hygiene.mjs), which pull
+request CI runs too: proof goes in pull request comments or CI artifacts, so a new file
+under `docs/testing` other than a short `README.md` fails, as do a line over 10,000
+characters, an AGENTS.md over 16 KB and a new ADR without a `Status:` line. The root
+`.ignore` keeps dated proof, proposals and generated data out of ripgrep; search them
+with `rg -uu` or by naming the path.
+
 Preview the built site through a local HTTP server; its links are root-relative.
 The [docs app guide](apps/docs/README.md) gives the command and source map.
 

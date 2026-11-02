@@ -1,0 +1,10 @@
+# ripgrep (and tools built on it) skip these: dated proof, proposals and
+# generated data drown code in search results. Search them with `rg -uu` or by
+# naming the path, e.g. `rg landing docs/testing`.
+docs/testing/
+docs/verification/
+docs/proposals/
+docs/release-notes-*.md
+docs/adr/test-pruning-review.md
+packages/model-registry/data/models-dev-snapshot.json
+pnpm-lock.yaml
