@@ -1,6 +1,6 @@
 # ADR 0240: Changes land directly on main
 
-Status: Accepted (James, 2026-10-07). Retires the mandatory landing queue in
+Status: partly superseded: the optional `clankie integrate` queue is retired ([ADR 0345](0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)), and pull requests that merge on green checks ([ADR 0332](0332-clankies-own-pull-requests-merge-on-green-checks.md)) are the usual route. A direct landing through `pnpm check:landing` stays available to the lead. Previously: accepted (James, 2026-10-07). Retires the mandatory landing queue in
 [integration](../integration.md); `clankie integrate` remains an optional tool.
 Amended 2026-10-10 for gate revalidation (VUH-2024) and timed deploy holds
 (VUH-2049). Amended 2026-10-21 by [ADR 0287](0287-a-standing-reviewer-gates-every-landing.md):

@@ -1,6 +1,6 @@
 # 0142. The install tells him the truth
 
-Accepted 2026-08-29. Applies the harness-truth principle from
+Status: accepted (2026-08-29). Applies the harness-truth principle from
 [ADR 0072](0072-the-harness-tells-him-the-truth.md) to the machine he is
 running on. Amends [ADR 0104](0104-clankie-works-where-you-launched-him.md)
 (which skills the service root contributes) and

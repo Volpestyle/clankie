@@ -1,6 +1,7 @@
 # 0269: Browser pairing binds an account session to one device
 
-- Status: Accepted
+Status: retired by [ADR 0326](0326-the-last-hosted-leftovers-are-removed.md), which removed browser-session pairing. Previously: accepted.
+
 - Work: VUH-2122, VUH-2123
 - Builds on: [0268](0268-account-owned-device-revocation-survives-a-sleeping-body.md)
 

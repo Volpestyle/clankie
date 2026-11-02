@@ -1,6 +1,6 @@
 # 0140. Esc interrupts the turn
 
-Accepted 2026-08-29.
+Status: accepted (2026-08-29).
 
 ## Context
 

@@ -1,6 +1,6 @@
 # ADR 0285: Hosted presence has no idle clock
 
-Status: accepted by the owner, 2026-10-20 ([VUH-2575](https://linear.app/vuhlp/issue/VUH-2575)). Managed-service rollout pending.
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. Previously: accepted by the owner, 2026-10-20 ([VUH-2575](https://linear.app/vuhlp/issue/VUH-2575)). Managed-service rollout pending.
 
 ## Context
 

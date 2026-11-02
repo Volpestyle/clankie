@@ -1,6 +1,6 @@
 # ADR 0237: Hosted bodies update themselves to official releases
 
-Status: Accepted (2026-10-06). Amends the hosted-image rule in commit `05f17fd1`
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. Previously: accepted (2026-10-06). Amends the hosted-image rule in commit `05f17fd1`
 ("hosted images never update themselves"). Builds on
 [ADR 0183](0183-the-harness-is-public-the-hosted-service-is-private.md) and
 [ADR 0055](0055-launcher-owned-local-services.md).

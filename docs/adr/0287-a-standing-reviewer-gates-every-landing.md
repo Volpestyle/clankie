@@ -1,6 +1,6 @@
 # ADR 0287: A standing reviewer gates every landing
 
-Status: accepted (James, 2026-10-21, "go for it" on
+Status: superseded for Clankie's own repositories by [ADR 0332](0332-clankies-own-pull-requests-merge-on-green-checks.md) (2026-11-01): no merge waits on a reviewer, and the lead picks a reviewer or none. The `pnpm check:landing` reviewer hold stays for a project that names one. Previously: accepted (James, 2026-10-21, "go for it" on
 [VUH-2616](https://linear.app/vuhlp/issue/VUH-2616); design approved by the lead
 the same day). Amends [ADR 0240](0240-changes-land-directly-on-main.md): the root
 landing gate also holds a change until its project's reviewer approves that exact

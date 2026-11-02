@@ -1,6 +1,6 @@
 # 0174. Finished files belong to conversations
 
-Accepted 2026-09-20.
+Status: accepted (2026-09-20).
 
 ## Context
 

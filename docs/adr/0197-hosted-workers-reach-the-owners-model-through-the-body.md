@@ -1,6 +1,6 @@
 # ADR 0197: Hosted workers reach the owner's model through the body
 
-Status: accepted (2026-09-26; James chose option c), corrected 2026-10-02 for VUH-1520. Tracks
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. Hosted workers and included usage went with it. Previously: accepted (2026-09-26; James chose option c), corrected 2026-10-02 for VUH-1520. Tracks
 [VUH-1373](https://linear.app/vuhlp/issue/VUH-1373). Builds on the included
 model forwarder (VUH-1371) and the customer-model rule of `96cb9f9b`.
 

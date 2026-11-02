@@ -1,6 +1,6 @@
 # 0157. Herdr is an owned runtime
 
-Accepted 2026-09-04. Tracked in VUH-1109 under the hosted Clankie plan.
+Status: accepted (2026-09-04). Tracked in VUH-1109 under the hosted Clankie plan.
 
 ## Context
 

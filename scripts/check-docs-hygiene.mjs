@@ -67,9 +67,8 @@ for (const path of added) {
 
 for (const path of new Set([...lines(git("ls-files", "docs/adr")), ...added])) {
   if (!adr.test(path) || status.test(readFileSync(path, "utf8"))) continue;
-  // TODO(doc-bloat part C): fail every ADR without a Status: line once part C
-  // has marked the existing ones. Until then only new ADRs fail.
-  (added.has(path) ? errors : warnings).push(`${path} has no Status: line`);
+  // Every ADR carries a Status: line; docs/adr/README.md's index is generated from it.
+  errors.push(`${path} has no Status: line`);
 }
 
 for (const warning of warnings) console.warn(`[docs] warning: ${warning}`);

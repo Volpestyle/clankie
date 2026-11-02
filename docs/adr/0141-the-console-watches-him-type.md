@@ -1,6 +1,6 @@
 # 0141. The console watches him type
 
-Accepted 2026-08-29.
+Status: accepted (2026-08-29).
 
 ## Context
 

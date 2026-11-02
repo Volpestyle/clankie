@@ -1,6 +1,6 @@
 # 0143. `/btw` is an ephemeral Pi fork
 
-Accepted 2026-08-29.
+Status: accepted (2026-08-29).
 
 ## Context
 

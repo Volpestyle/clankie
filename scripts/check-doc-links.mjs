@@ -1,5 +1,6 @@
 import { access, glob, readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { withAdrIndex } from "./adr-index.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const markdown = [];
@@ -82,12 +83,20 @@ for (const skillRoot of [".claude/skills", ".codex/skills", "integrations/claude
     }
   }
 }
+// The ADR index is generated from each record's title and Status line.
+const adrReadme = await readFile(resolve(root, "docs/adr/README.md"), "utf8");
+try {
+  if (withAdrIndex(root, adrReadme) !== adrReadme)
+    failures.push("docs/adr/README.md index is stale; run node scripts/adr-index.mjs");
+} catch (error) {
+  failures.push(String(error.message));
+}
 if (failures.length) {
   console.error("Documentation errors:");
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exitCode = 1;
 } else {
   console.log(
-    `Checked ${markdown.length} markdown files; local links resolve; ADR numbers have no new collisions.`,
+    `Checked ${markdown.length} markdown files; local links resolve; ADR numbers have no new collisions; the ADR index is current.`,
   );
 }

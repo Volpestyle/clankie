@@ -1,6 +1,6 @@
 # 0172. Herdr sessions follow official releases
 
-Accepted 2026-09-20. Amends executable sourcing in ADR 0157 and ADR 0164.
+Status: accepted (2026-09-20). Amends executable sourcing in ADR 0157 and ADR 0164.
 
 ## Context
 
