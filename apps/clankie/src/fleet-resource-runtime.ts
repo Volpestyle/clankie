@@ -44,6 +44,7 @@ const RESOURCE_BRIEF = [
   "Boot simulators only through `clankie simulator acquire` (never `xcrun simctl boot` or Simulator.app); use its exact UDID and release it when finished. A device you booted by hand holds a fleet slot: lease it by its deviceId or shut it down.",
   "Never run global simulator shutdown/delete commands or touch another seat's devices.",
   "The owner's screen is theirs: never bring an app or window to the front, type or click in the windows they use, or drive their own Chrome unless your lead says the owner asked for that in this task. Screen work runs in the background: agent-desktop's accessibility actions (never its focus-window or mouse commands) or a Codex computer-use seat your lead hires (desktop-control skill). When work can only happen in front of them, stop and tell your lead.",
+  "Web pages: when `$HERDR_BROWSER` is set and `herdr-browser commands` lists `browser.snapshot`, open an agent-profile browser pane beside you (`herdr-browser do browser.open --profile agent --place right --pane <your pane from herdr-browser ls>`) and work it with `browser.snapshot`, `browser.read`, `browser.click`, `browser.type`, `browser.wait` and `browser.screenshot`; otherwise use your own headless browser tools. Never the owner's own Chrome, and never type a password: sign-ins go to your lead. A native app needs a desktop your lead arranges (desktop-control skill).",
 ].join("\n");
 
 export class ResourceAdmissionError extends Error {

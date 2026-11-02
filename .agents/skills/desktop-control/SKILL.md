@@ -48,6 +48,39 @@ are using, or open a window over theirs. A Claude in Chrome seat fronts Chrome
 windows, so it needs the owner's yes for that task, asked right then. When the
 work can only happen in front of them, stop and say so.
 
+## Web pages go to a browser pane first
+
+Most screen work is a web page, and a page does not need a desktop
+([ADR 0344](../../../docs/adr/0344-agents-drive-herdr-browser-panes-through-herdr.md)).
+Pick the first that fits:
+
+1. **A browser pane in the workspace.** When `$HERDR_BROWSER` is set and
+   `herdr-browser commands` lists `browser.snapshot`, open an agent-profile
+   pane beside you and drive it through Herdr's own commands. They act on the
+   page in process, so the owner's window is never fronted:
+
+   ```sh
+   herdr-browser do browser.open --profile agent --place right --pane "$MY_PANE" --url https://example.com
+   herdr-browser do browser.snapshot          # lines like: e12 button "Sign in"
+   herdr-browser do browser.click --ref e12
+   herdr-browser do browser.type --ref e7 --text "query" --submit true
+   herdr-browser do browser.read --format markdown
+   ```
+
+   Without `--pane`, a command means the browser pane your terminal opened.
+   Refs expire when the page changes; snapshot again. The agent profile is not
+   signed in as the owner. A `person` pane needs `--confirmed true`, which you
+   pass only when your lead says the owner asked for that page in this task.
+   When the stock Herdr app or another workspace ships its own browser
+   commands, use them the same way.
+2. **Your own headless browser tools** when the workspace has no browser pane.
+3. **A desktop** for native apps only, in the machine's desktop mode
+   ([ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)):
+   ask your lead.
+
+Never type a password into a page or a pane. A sign-in goes to your lead, who
+brings it to the owner's sign-in card.
+
 The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate
