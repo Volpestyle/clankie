@@ -753,6 +753,7 @@ export function createSimulatorManager(input: {
    */
   const failPreparation = async (lease: SimulatorReservation, what: string): Promise<SimulatorResult> => {
     abandon(lease.id);
+    // allow-swallowed-rejection -- an unreadable journal answers lease_unavailable; nothing is settled on a guess.
     const current = await find(lease.id).catch(() => undefined);
     if (!current || current.token !== lease.token) return unavailable(lease.id);
     if (current.phase === "reserved" || current.phase === "created") {
@@ -790,6 +791,7 @@ export function createSimulatorManager(input: {
       if (abandoned.has(lease.id)) throw new Error("Simulator preparation was abandoned");
       return work();
     });
+    // allow-swallowed-rejection -- the race below reads this result or its error; a stage past its bound is abandoned.
     void running.catch(() => undefined);
     try {
       const result = await Promise.race([running.catch((error: unknown) => ({ error })), expired]);
@@ -838,6 +840,7 @@ export function createSimulatorManager(input: {
         const pinned = lease.deviceId ? { ...request, deviceId: lease.deviceId } : request;
         let plan = await choose(pinned, devices, others);
         if (plan.kind === "create")
+          // allow-swallowed-rejection -- without a catalog the plan cannot create, and says so as device_unavailable.
           plan = await choose(pinned, devices, others, await adapter.catalog().catch(() => undefined));
         if (plan.kind === "waiting") {
           await forget(lease);
@@ -927,6 +930,7 @@ export function createSimulatorManager(input: {
     if (lease.phase === "booted") return { outcome: "acquired", lease: view(lease, requested) };
     // Released while the boot was being marked: nothing was booted, so it settles here.
     if (abandoned.has(lease.id)) {
+      // allow-swallowed-rejection -- the lease may already be gone; either way nothing was booted.
       await forget(lease, "released").catch(() => undefined);
       return rejected("lease_unavailable", "The lease was released before its boot was submitted.");
     }
