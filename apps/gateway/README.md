@@ -51,6 +51,7 @@ service's database; nothing over the network unpins a key:
 
 ```sh
 node dist/host-keys-cli.cjs reset HOST_ID --database "$CLANKIE_GATEWAY_HOST_KEYS_DATABASE"
+# in the image: docker exec clankie-gateway node host-keys-cli.cjs reset HOST_ID --database "$CLANKIE_GATEWAY_HOST_KEYS_DATABASE"
 ```
 
 It prints one `gateway.host.key_reset` line. The next proven connection for that
