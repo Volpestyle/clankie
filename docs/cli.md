@@ -1106,15 +1106,19 @@ original key, brief fingerprint, pane observation (shell PID when present) and
 inventory digest. It claims neither launch nor delivery. The original moves to
 `local-settled:ORIGINAL_UUID` in the receipt journal, so a new hire into that
 directory starts normally. Nothing is sent, replayed or closed, and repeating
-the command reads the retained disposition. A local project allocation whose
-original pane is absent or holds only its own shell can then be released with
-`release-allocation`. Failed starts expose the original native `receiptId` to
+the command reads the retained disposition. The same settlement then frees the
+hire's own local project allocation (same harness, directory and recorded pane)
+through `release-allocation`'s checks, so the place takes a new hire. The result
+names it in `allocationId`, and its `detail` says whether it was released or why
+the place is still held, such as another worker in that directory. Settling the
+receipt again retries that release; `release-allocation` remains available.
+Failed starts expose the original native `receiptId` to
 the hiring lead. Older failures that omitted it can be recovered by the operator
 with `clankie hire-receipt settle ALLOCATION_UUID abandoned`: the service resolves
 exactly one retained local receipt with the same harness, directory and pane,
-then applies the same two-census abandonment. The result returns that native
-receipt UUID. Follow with `clankie hire-receipt settle ALLOCATION_UUID
-release-allocation`; no launch history is rewritten and no brief is replayed.
+then applies the same two-census abandonment and allocation release. The result
+returns that native receipt UUID. No launch history is rewritten and no brief is
+replayed.
 
 `clankie hire-receipt settle ID adopt` is the operator's path for a local hire
 that launched but never confirmed, so its hiring lead cannot reach it (`message_seat`

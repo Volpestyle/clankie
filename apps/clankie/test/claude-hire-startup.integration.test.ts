@@ -579,10 +579,17 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
     state: "refused",
   });
   inventory = [];
+  // Settling the original frees its allocation too, so the place takes a new hire.
   expect(await store.settleHireReceipt(allocation.id, async () => {}, "abandoned")).toMatchObject({
     state: "abandoned",
     receiptId: original.messageId,
     evidence: { journal: "local-host-inventory", pane: { paneId: f.agent.paneId, present: false } },
+    allocationId: allocation.id,
+    detail: expect.stringContaining("released too"),
+  });
+  expect(new ProjectHires(`${path}.project-hires.json`).recoveryCandidate(allocation.id)).toMatchObject({
+    gone: true,
+    operatorRelease: expect.any(Object),
   });
   store.close();
   const restored = open();
@@ -596,6 +603,64 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
   expect(new ProjectHires(`${path}.project-hires.json`).recoveryCandidate(allocation.id)).toMatchObject({
     gone: true,
     operatorRelease: expect.any(Object),
+  });
+});
+
+it("settling a failed start whose pane kept only its shell frees its allocation, even settled again later", async () => {
+  const { DeliveryFence, deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const { ProjectHires } = await import("../src/captain/project-hires.ts");
+  const { ProjectsSettingsSchema } = await import("@clankie/protocol/projects");
+  const f = await fixture();
+  const path = join(f.root, "shell-watch.json");
+  const ledger = new ProjectHires(`${path}.project-hires.json`);
+  const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "clankie", name: "Clankie" }] });
+  const allocation = ledger.reserve(settings, "clankie", {
+    schemaVersion: 1,
+    harness: "codex",
+    title: "Codex start that never drew",
+    workingDirectory: f.root,
+  });
+  ledger.launch(allocation.id, settings);
+  ledger.pane(allocation.id, f.agent.paneId);
+  const key = JSON.stringify(["local", "codex", f.root, "new"]);
+  const original = new DeliveryFence(`${path}.hire-receipts.json`).begin(key, {
+    fingerprint: deliveryFingerprint("brief"),
+    paneId: f.agent.paneId,
+    beforeIds: [],
+  });
+  const { session: _session, ...bare } = f.agent;
+  const shell: HerdrAgentSnapshot = { ...bare, agent: "unknown" };
+  let inventory: HerdrAgentSnapshot[] = [shell];
+  const store = new HerdrWatchStore(path, {
+    runner: {
+      get: async () => shell,
+      resolveTerminal: async () => undefined,
+      wait: async () => shell,
+      list: async () => inventory,
+      paneShell: async () => ({ shellPid: 7, foreground: [{ pid: 7, name: "zsh" }] }),
+    },
+  });
+  stores.push(store);
+  // Another worker in the same directory keeps the place held; the settlement still stands.
+  inventory = [shell, { ...f.agent, paneId: "w9:p9", terminalId: "term_other", workingDirectory: f.root }];
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    evidence: { pane: { paneId: f.agent.paneId, present: true, shellPid: 7 } },
+    allocationId: allocation.id,
+    detail: expect.stringContaining("still holds the place"),
+  });
+  expect(new ProjectHires(`${path}.project-hires.json`).recoveryCandidate(allocation.id)).toMatchObject({
+    gone: false,
+  });
+  // Settling the same receipt again, once the directory is clear, frees the place.
+  inventory = [shell];
+  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    allocationId: allocation.id,
+    detail: expect.stringContaining("released too"),
+  });
+  expect(new ProjectHires(`${path}.project-hires.json`).recoveryCandidate(allocation.id)).toMatchObject({
+    gone: true,
   });
 });
 
