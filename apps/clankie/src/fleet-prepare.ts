@@ -207,7 +207,7 @@ function installCommand(fleet: HerdrFleet, sourceSetup?: string, linkedOnly = fa
  * serves. A copy can lack one without a version change, and then every hire
  * there fails its first catalog (#379), so a gap names the refresh.
  */
-export function bridgeCatalog(
+function bridgeCatalog(
   fleet: string,
   expected: readonly string[],
   report: { claudeBridgeTools?: unknown; codex?: { pluginInstalled?: unknown; bridgeTools?: unknown } },
