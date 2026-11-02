@@ -241,6 +241,13 @@ type Plan =
 /** A reservation with no native effect after this long is stalled, not booting. */
 const RESERVED_LIMIT_MS = 300_000;
 /**
+ * One serial preparation stage, including its wait for the serial section, may
+ * take this long before the acquire fails and settles its own reservation. The
+ * slowest healthy stage is inventory, catalog and create, about 75 s of native
+ * timeouts (#386).
+ */
+const PREPARE_STAGE_LIMIT_MS = 120_000;
+/**
  * A cold iOS 27 boot burns about fifteen cores, re-renders its wallpaper posters
  * at ten or more about 150 seconds in, and then idles under one percent
  * (VUH-2353). Once its boot has settled, a device nobody has
@@ -289,6 +296,8 @@ export function createSimulatorManager(input: {
   processProbe?: typeof probeProcess;
   /** How long acquire waits on its boot before answering `booting`; the boot continues. */
   respondWithinMs?: number;
+  /** How long one preparation stage may take before the acquire fails and settles its reservation. */
+  prepareStageLimitMs?: number;
   /** A booted device's runaway check starts this long after its lease. */
   bootSettleMs?: number;
   observeUsage?: () => Promise<ReadonlyMap<string, SimulatorUsage>>;
@@ -297,6 +306,7 @@ export function createSimulatorManager(input: {
   const now = input.clock ?? Date.now;
   const probe = input.processProbe ?? probeProcess;
   const respondWithinMs = input.respondWithinMs ?? 20_000;
+  const prepareStageLimitMs = input.prepareStageLimitMs ?? PREPARE_STAGE_LIMIT_MS;
   const bootSettleMs = input.bootSettleMs ?? simulatorBootSettleMs;
   const observeUsage = input.observeUsage ?? observeSimulatorUsage;
   const authorized = async (authority?: SimulatorRequestOptions): Promise<boolean> => {
@@ -329,6 +339,15 @@ export function createSimulatorManager(input: {
   const acquisitionSelections = new Map<string, string>();
   /** Server-owned preparation by lease id; it outlives any request that started it. */
   const jobs = new Map<string, Promise<SimulatorResult>>();
+  /**
+   * Preparations told to stop before their next native effect: their stage ran
+   * past its limit, or their owner released them while the serial section was busy.
+   */
+  const abandoned = new Set<string>();
+  const abandon = (id: string) => {
+    abandoned.add(id);
+    if (abandoned.size > 256) abandoned.delete(abandoned.values().next().value!);
+  };
   const serial = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = operations.then(operation, operation);
     operations = result.catch(() => undefined);
@@ -719,6 +738,66 @@ export function createSimulatorManager(input: {
     };
   };
 
+  /**
+   * A preparation that failed or stalled says why, with the native error, and
+   * settles the caller's own reservation while no native effect is pending: a
+   * reservation, or a created device that was never booted (kept, not deleted).
+   */
+  const failPreparation = async (lease: SimulatorReservation, what: string): Promise<SimulatorResult> => {
+    abandon(lease.id);
+    const current = await find(lease.id).catch(() => undefined);
+    if (!current || current.token !== lease.token) return unavailable(lease.id);
+    if (current.phase === "reserved" || current.phase === "created") {
+      await forget(current, "acquire_aborted");
+      return rejected(
+        "internal_error",
+        `${what} The reservation was released${current.deviceId ? ` and device ${current.deviceId} kept, unbooted` : ""}; acquire again. If it repeats, check CoreSimulator with \`xcrun simctl list devices\`.`,
+      );
+    }
+    return rejected(
+      "internal_error",
+      `${what} Lease ${current.id} stays in phase ${current.phase} until its native state is reconciled; release it, then acquire again.`,
+    );
+  };
+  const nativeError = (error: unknown) =>
+    (error instanceof Error ? error.message : String(error)).replace(/\s+/gu, " ").trim().slice(0, 400);
+  /**
+   * A serial stage that answers within its limit, counting its wait for the
+   * section. Past the limit its preparation is abandoned, so the stage, if it
+   * ever resumes, cannot submit a native effect or boot.
+   */
+  const bounded = async (
+    lease: SimulatorReservation,
+    name: string,
+    work: () => Promise<SimulatorResult | SimulatorReservation>,
+  ): Promise<SimulatorResult | SimulatorReservation> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), prepareStageLimitMs);
+    });
+    const running = serial(async () => {
+      if (abandoned.has(lease.id)) throw new Error("Simulator preparation was abandoned");
+      return work();
+    });
+    void running.catch(() => undefined);
+    try {
+      const result = await Promise.race([running.catch((error: unknown) => ({ error })), expired]);
+      if (result && "error" in result)
+        return failPreparation(
+          lease,
+          `Simulator preparation failed while ${name}: ${nativeError(result.error)}.`,
+        );
+      if (result) return result;
+    } finally {
+      clearTimeout(timer);
+    }
+    abandon(lease.id);
+    return failPreparation(
+      lease,
+      `Simulator preparation stalled: ${name} did not finish within ${Math.round(prepareStageLimitMs / 1000)}s.`,
+    );
+  };
+
   /** Each stage runs in the serial section; the long boot wait does not block other seats. */
   const prepare = async (
     lease: SimulatorReservation,
@@ -728,119 +807,118 @@ export function createSimulatorManager(input: {
     const authority: SimulatorRequestOptions =
       request.authorize === undefined ? {} : { authorize: request.authorize };
     const requested = request.deviceId ? undefined : request.deviceType;
-    const stage = await serial(async (): Promise<SimulatorResult | SimulatorReservation> => {
-      try {
-        const proof = await proveSeat(owner);
-        // A failed observation keeps the admitted lease; the waiting acquire resumes it.
-        if ("unproven" in proof) return booting(lease, requested);
-        if (!("owner" in proof) || !matchesOwner(lease, proof.owner)) {
+    const stage = await bounded(lease, "choosing and creating its device", async () => {
+      const proof = await proveSeat(owner);
+      // A failed observation keeps the admitted lease; the waiting acquire resumes it.
+      if ("unproven" in proof) return booting(lease, requested);
+      if (!("owner" in proof) || !matchesOwner(lease, proof.owner)) {
+        await forget(lease);
+        return rejected("stale_owner");
+      }
+      if (!(await authorized(authority))) {
+        if (lease.phase === "reserved") await forget(lease);
+        return revoked();
+      }
+      if (lease.phase === "reserved") {
+        const { policy } = await input.governor.snapshot();
+        const devices = await inventory();
+        const leases = await reservations();
+        const others = leases.filter((entry) => entry.id !== lease.id);
+        const pinned = lease.deviceId ? { ...request, deviceId: lease.deviceId } : request;
+        let plan = await choose(pinned, devices, others);
+        if (plan.kind === "create")
+          plan = await choose(pinned, devices, others, await adapter.catalog().catch(() => undefined));
+        if (plan.kind === "waiting") {
           await forget(lease);
-          return rejected("stale_owner");
+          return blockersFor("simulator_capacity", await input.governor.snapshot(), plan.detail);
+        }
+        if (plan.kind === "refuse") {
+          await forget(lease);
+          return rejected("device_unavailable", plan.detail, plan.alternatives);
+        }
+        const excluding = plan.kind === "existing" ? plan.device.udid.toUpperCase() : undefined;
+        const occupancy =
+          externals(devices, leases).filter((device) => device.udid !== excluding).length + leases.length;
+        if (occupancy > policy.simulatorSlots) {
+          await forget(lease);
+          return rejected("capacity", "Another simulator was booted while this lease was admitted; retry.");
         }
         if (!(await authorized(authority))) {
-          if (lease.phase === "reserved") await forget(lease);
+          await forget(lease);
           return revoked();
         }
-        if (lease.phase === "reserved") {
-          const { policy } = await input.governor.snapshot();
-          const devices = await inventory();
-          const leases = await reservations();
-          const others = leases.filter((entry) => entry.id !== lease.id);
-          const pinned = lease.deviceId ? { ...request, deviceId: lease.deviceId } : request;
-          let plan = await choose(pinned, devices, others);
-          if (plan.kind === "create")
-            plan = await choose(pinned, devices, others, await adapter.catalog().catch(() => undefined));
-          if (plan.kind === "waiting") {
-            await forget(lease);
-            return blockersFor("simulator_capacity", await input.governor.snapshot(), plan.detail);
-          }
-          if (plan.kind === "refuse") {
-            await forget(lease);
-            return rejected("device_unavailable", plan.detail, plan.alternatives);
-          }
-          const excluding = plan.kind === "existing" ? plan.device.udid.toUpperCase() : undefined;
-          const occupancy =
-            externals(devices, leases).filter((device) => device.udid !== excluding).length + leases.length;
-          if (occupancy > policy.simulatorSlots) {
-            await forget(lease);
-            return rejected("capacity", "Another simulator was booted while this lease was admitted; retry.");
-          }
-          if (!(await authorized(authority))) {
-            await forget(lease);
-            return revoked();
-          }
-          if (plan.kind === "existing") {
-            const device = plan.device;
-            return update(lease, {
-              phase:
-                device.state === "Booted"
-                  ? "booted"
-                  : device.state === "Booting"
-                    ? "boot-submitted"
-                    : "created",
-              deviceId: device.udid.toUpperCase(),
-              deviceName: device.name,
-              deviceType: device.deviceType ?? request.deviceType ?? "unknown",
-              runtime: device.runtime,
-            });
-          }
-          const deviceName = `Clankie-${randomUUID()}`;
-          lease = await update(lease, {
-            phase: "create-submitted",
-            deviceName,
-            deviceType: plan.deviceType,
-            runtime: plan.runtime,
+        if (plan.kind === "existing") {
+          const device = plan.device;
+          return update(lease, {
+            phase:
+              device.state === "Booted"
+                ? "booted"
+                : device.state === "Booting"
+                  ? "boot-submitted"
+                  : "created",
+            deviceId: device.udid.toUpperCase(),
+            deviceName: device.name,
+            deviceType: device.deviceType ?? request.deviceType ?? "unknown",
+            runtime: device.runtime,
           });
-          if (!(await authorized(authority))) {
-            await forget(lease);
-            return revoked();
-          }
-          let deviceId: string;
-          try {
-            deviceId = await adapter.create(deviceName, plan.deviceType, plan.runtime);
-          } catch {
-            return held(await update(lease, { phase: "create-uncertain" }));
-          }
-          lease = await update(lease, { phase: "created", deviceId });
         }
-        return lease;
-      } catch {
-        return held(lease);
+        const deviceName = `Clankie-${randomUUID()}`;
+        lease = await update(lease, {
+          phase: "create-submitted",
+          deviceName,
+          deviceType: plan.deviceType,
+          runtime: plan.runtime,
+        });
+        if (!(await authorized(authority))) {
+          await forget(lease);
+          return revoked();
+        }
+        if (abandoned.has(lease.id)) throw new Error("Simulator preparation was abandoned");
+        let deviceId: string;
+        try {
+          deviceId = await adapter.create(deviceName, plan.deviceType, plan.runtime);
+        } catch {
+          return held(await update(lease, { phase: "create-uncertain" }));
+        }
+        lease = await update(lease, { phase: "created", deviceId });
       }
+      return lease;
     });
     if (!("token" in stage)) return stage;
     lease = stage;
     if (lease.phase === "booted") return { outcome: "acquired", lease: view(lease, requested) };
     // Mark the boot, then wait for it outside the serial section.
-    const submitted = await serial(async (): Promise<SimulatorResult | SimulatorReservation> => {
-      try {
-        if (lease.phase === "boot-submitted") return lease;
-        const devices = await inventory();
-        const created = deviceFor(lease, devices);
-        if (!created || !created.available) return held(lease);
-        if (created.state === "Booted") return update(lease, { phase: "booted" });
-        if (created.state !== "Shutdown") return held(lease);
-        const proof = await proveSeat(owner);
-        if ("unproven" in proof) return booting(lease, requested);
-        const { policy } = await input.governor.snapshot();
-        const leases = await reservations();
-        const occupancy = externals(devices, leases).length + leases.length;
-        if (!(await authorized(authority))) return revoked();
-        if (!("owner" in proof) || !matchesOwner(lease, proof.owner) || occupancy > policy.simulatorSlots)
-          return reconcile(lease, "acquire_aborted");
-        lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
-        if (!(await authorized(authority))) {
-          await update(lease, { phase: "created" });
-          return revoked();
-        }
-        return lease;
-      } catch {
-        return held(lease);
+    const submitted = await bounded(lease, "submitting its boot", async () => {
+      if (lease.phase === "boot-submitted") return lease;
+      const devices = await inventory();
+      const created = deviceFor(lease, devices);
+      if (!created || !created.available) return held(lease);
+      if (created.state === "Booted") return update(lease, { phase: "booted" });
+      if (created.state !== "Shutdown") return held(lease);
+      const proof = await proveSeat(owner);
+      if ("unproven" in proof) return booting(lease, requested);
+      const { policy } = await input.governor.snapshot();
+      const leases = await reservations();
+      const occupancy = externals(devices, leases).length + leases.length;
+      if (!(await authorized(authority))) return revoked();
+      if (!("owner" in proof) || !matchesOwner(lease, proof.owner) || occupancy > policy.simulatorSlots)
+        return reconcile(lease, "acquire_aborted");
+      if (abandoned.has(lease.id)) throw new Error("Simulator preparation was abandoned");
+      lease = await update(lease, { phase: "boot-submitted", lastUsedAtMs: now() });
+      if (!(await authorized(authority))) {
+        await update(lease, { phase: "created" });
+        return revoked();
       }
+      return lease;
     });
     if (!("token" in submitted)) return submitted;
     lease = submitted;
     if (lease.phase === "booted") return { outcome: "acquired", lease: view(lease, requested) };
+    // Released while the boot was being marked: nothing was booted, so it settles here.
+    if (abandoned.has(lease.id)) {
+      await forget(lease, "released").catch(() => undefined);
+      return rejected("lease_unavailable", "The lease was released before its boot was submitted.");
+    }
     let bootFailed = false;
     try {
       await adapter.boot(lease.deviceId!);
@@ -1383,7 +1461,15 @@ export function createSimulatorManager(input: {
       if (!lease) return { outcome: "released" };
       const refused = await owned(lease);
       if (refused) return refused;
-      if (lease.phase === "reserved") return forget(lease, "released");
+      // A reservation, or a created device never booted, has no native effect
+      // pending. Stop its preparation before its next effect, then free it
+      // (#386); a boot already marked keeps it until its effect settles.
+      if (lease.phase === "reserved" || lease.phase === "created") {
+        abandon(lease.id);
+        const current = await find(id);
+        if (!current) return { outcome: "released" };
+        if (current.phase === "reserved" || current.phase === "created") return forget(current, "released");
+      }
       // A native effect is in flight; the queued release settles it.
       return { outcome: "held", lease: view(lease), retryAfterMs: RETRY_MS };
     },

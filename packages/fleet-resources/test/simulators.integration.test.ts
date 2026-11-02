@@ -46,7 +46,9 @@ async function stop(child: ChildProcess) {
   child.kill("SIGTERM");
   await exited;
 }
-async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: number } = {}) {
+async function fixture(
+  settings: { respondWithinMs?: number; bootSettleMs?: number; prepareStageLimitMs?: number } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-simulator-fixture-"));
   const statePath = join(directory, "native.json");
   const logPath = join(directory, "commands.jsonl");
@@ -222,12 +224,14 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
     },
     /** `afterReservation` passes admission's own inventory read and wedges the preparation's. */
     pauseInventory: (afterCreate = false, afterReservation = false) => {
-      let entered!: () => void, resume!: () => void;
+      let entered!: () => void, resume!: () => void, fail!: (message: string) => void;
       const waiting = new Promise<void>((resolve) => {
         entered = resolve;
       });
-      const gate = new Promise<void>((resolve) => {
+      // `fail` makes the paused read reject with a native error, as a broken simctl would.
+      const gate = new Promise<void>((resolve, reject) => {
         resume = resolve;
+        fail = (message) => reject(new Error(message));
       });
       nativeReplyBarrier = async (args) => {
         if (
@@ -243,7 +247,7 @@ async function fixture(settings: { respondWithinMs?: number; bootSettleMs?: numb
         entered();
         await gate;
       };
-      return { waiting, resume };
+      return { waiting, resume, fail };
     },
     get manager() {
       return manager;
@@ -1463,4 +1467,85 @@ it("coalesces concurrent timer and census ticks instead of queueing native probe
   paused.resume();
   await Promise.all([ticking, ...redundant]);
   expect(f.observations.length - before).toBe(1);
+});
+
+// #386: an acquire sat in `created` for minutes without booting, and release
+// answered `held`. A preparation stage now answers within its bound with why,
+// settles only the caller's own reservation, keeps its created device, and
+// never boots after; release frees an unbooted created lease directly.
+const nativeEffects = async (f: Awaited<ReturnType<typeof fixture>>) =>
+  (await f.commands()).filter((args) => ["bootstatus", "boot", "shutdown", "delete"].includes(args[0]!));
+const retained = async (f: Awaited<ReturnType<typeof fixture>>) =>
+  Object.values((await f.read()).devices)
+    .flat()
+    .filter((device) => device.name.startsWith("Clankie-"));
+
+it("an acquire stalled in created fails within its bound, frees its own slot, keeps the device and never boots (#386)", async () => {
+  // Stage one spawns four real fixture commands; under a loaded suite it can take
+  // seconds, so the bound leaves room for it and the wedged read reaches it.
+  const f = await fixture({ respondWithinMs: 100, prepareStageLimitMs: 8_000 });
+  const paused = f.pauseInventory(true);
+  const started = Date.now();
+  expect(await f.http("/acquire", f.request)).toMatchObject({ outcome: "booting" });
+  let failed: SimulatorResult | undefined;
+  await expect
+    .poll(
+      async () => {
+        const answer = await f.http("/acquire", f.request);
+        if (answer.outcome === "rejected") failed = answer;
+        return answer.outcome;
+      },
+      { timeout: 30_000, interval: 100 },
+    )
+    .toBe("rejected");
+  // At most both stages' bounds, never the ten-minute boot wait or idle expiry.
+  expect(Date.now() - started).toBeLessThan(25_000);
+  expect(failed).toMatchObject({ reason: "internal_error" });
+  expect((failed as { detail?: string }).detail).toMatch(
+    /^Simulator preparation stalled: (choosing and creating its device|submitting its boot) did not finish within 8s\. The reservation was released and device [0-9A-F-]{36} kept, unbooted; acquire again\./u,
+  );
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  // The stalled read finishing later cannot boot the abandoned device.
+  paused.resume();
+  await f.manager.settled();
+  expect(await nativeEffects(f)).toEqual([]);
+  expect(await retained(f)).toEqual([expect.objectContaining({ state: "Shutdown" })]);
+  // The freed slot admits the seat's next acquire, which boots normally.
+  await f.manager.acquire(f.request);
+  await f.manager.settled();
+  const booted = lease(await f.manager.acquire(f.request));
+  expect(booted.phase).toBe("booted");
+  await f.manager.release(booted.id, f.owner);
+}, 30_000);
+
+it("a native error in a preparation stage is returned with the stage, not swallowed as held (#386)", async () => {
+  const f = await fixture({ respondWithinMs: 2_000 });
+  const paused = f.pauseInventory(true);
+  const pending = f.http("/acquire", f.request);
+  await paused.waiting;
+  paused.fail("simctl list: CoreSimulatorService connection became invalid");
+  const answer = await pending;
+  expect(answer).toMatchObject({ outcome: "rejected", reason: "internal_error" });
+  const detail = (answer as { detail?: string }).detail!;
+  expect(detail).toContain("failed while submitting its boot");
+  expect(detail).toContain("CoreSimulatorService connection became invalid");
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  await f.manager.settled();
+  expect(await nativeEffects(f)).toEqual([]);
+  expect(await retained(f)).toEqual([expect.objectContaining({ state: "Shutdown" })]);
+});
+
+it("releasing an acquire stalled in created settles it at once and nothing boots after (#386)", async () => {
+  const f = await fixture({ respondWithinMs: 100 });
+  const paused = f.pauseInventory(true);
+  const first = await f.http("/acquire", f.request);
+  await paused.waiting;
+  expect((await f.governor.simulatorReservations()).map((entry) => entry.phase)).toEqual(["created"]);
+  expect(await f.http("/release", { id: lease(first).id, owner: f.owner })).toEqual({ outcome: "released" });
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  paused.resume();
+  await f.manager.settled();
+  expect(await f.governor.simulatorReservations()).toEqual([]);
+  expect(await nativeEffects(f)).toEqual([]);
+  expect(await retained(f)).toEqual([expect.objectContaining({ state: "Shutdown" })]);
 });
