@@ -281,8 +281,8 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       }
       let response;
       phase = "receipt";
-      try {
-        response = await request("", {
+      const post = (kind, urgent) =>
+        request("", {
           method: "POST",
           // A redirect could follow an accepted original with another failed
           // connection. Never let fetch silently dispatch a second POST.
@@ -292,9 +292,22 @@ export function createInboundSender({ directory, scope, request, onObservation, 
             text,
             delivery: { id: record.deliveryId, binding },
             // A delivery hint only: it is not part of the original's fingerprint (VUH-2274).
-            ...(options?.urgent === true ? { urgent: true } : {}),
+            ...(urgent ? { urgent: true } : {}),
+            // Like urgent, a label only (#317): the service validates it and it is not fingerprinted.
+            ...(kind === undefined ? {} : { kind }),
           }),
         });
+      try {
+        const kind = typeof options?.kind === "string" ? options.kind : undefined;
+        response = await post(kind, options?.urgent === true);
+        // A service older than report kinds refuses the unknown field before it
+        // accepts anything. The same delivery ID and text again, unlabelled, is
+        // the same original (the service dedups by both); a blocked report keeps
+        // being heard at once through urgent.
+        if (kind !== undefined && response.status === 400) {
+          void response.body?.cancel().catch(() => undefined);
+          response = await post(undefined, options?.urgent === true || kind === "blocked");
+        }
       } catch (error) {
         if (!refusedConnection(error)) throw error;
         settle(record);

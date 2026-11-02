@@ -20,15 +20,20 @@ owner instruction. Send a concrete question or useful result when the assignment
 calls for it: outcome, branch and commit, checks, evidence links, open gaps and
 any decision needed.
 
-- Set `urgent: true` when you are blocked, something failed, or you need a
-  decision: your lead hears it at once. Leave it off for progress and finished
-  work; an idle Clankie lead hears those with its next round, within about ten minutes.
+- Set `kind` on every report: `done` when the work is finished, `blocked` when
+  you cannot go on until your lead answers (say what you need in one line), and
+  `update` for progress or news that needs no reply. Your lead reads the kind
+  before the text and answers `blocked` reports first.
+- `blocked` is heard at once, like `urgent: true`. Set `urgent: true` on its own
+  when something failed or needs a decision without stopping you. `done` and
+  `update` reach an idle Clankie lead with its next round, within about ten minutes.
   A connected lead that hired with `notify` gets a content-free webhook wake on
-  reports and settled watches: the first immediately, later events batched over
+  reports and settled watches, naming the report's kind: a `blocked` report wakes
+  it at once; others send the first immediately and batch later events over
   120 seconds. The report itself stays in `read_reports`.
 - **Never wait silently.** When something only your lead or the owner can unblock
   stops you (a decision, a refused or broken tool, a failing check outside your
-  change, missing access), tell your lead that same turn with `urgent: true`:
+  change, missing access), tell your lead that same turn with `kind: "blocked"`:
   what blocks you, what you tried, what you need and your recommendation. If the
   send returns uncertain, unconfirmed or `not_sent`, post the same blocker on
   your work item and check `message_clankie_status` again before your turn ends.

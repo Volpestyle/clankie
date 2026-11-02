@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+/**
+ * What a worker's report asks of its lead (#317): `done` (finished, nothing
+ * needed), `blocked` (it needs an answer before it can go on) or `update` (no
+ * reply needed). Optional: an untyped report is read in full as before.
+ */
+export const WorkerReportKindSchema = z.enum(["done", "blocked", "update"]);
+export type WorkerReportKind = z.infer<typeof WorkerReportKindSchema>;
+
 /** Durable worker output remains visible independently of its pane's lifetime. */
 export const WorkerReportSummarySchema = z
   .object({
@@ -11,6 +19,7 @@ export const WorkerReportSummarySchema = z
     acceptedAt: z.string(),
     state: z.enum(["pending", "attempting", "delivered", "uncertain", "read"]),
     stage: z.string().optional(),
+    kind: WorkerReportKindSchema.optional(),
   })
   .strict();
 export type WorkerReportSummary = z.infer<typeof WorkerReportSummarySchema>;

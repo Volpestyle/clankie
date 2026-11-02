@@ -1,4 +1,4 @@
-import { DeliveryStageSchema, WorkerReportRoutingSchema } from "@clankie/protocol";
+import { DeliveryStageSchema, WorkerReportKindSchema, WorkerReportRoutingSchema } from "@clankie/protocol";
 import { z } from "zod";
 import { ConversationOwnerSchema, NativeSeatRecipientSchema } from "../conversation-owner.ts";
 
@@ -98,6 +98,8 @@ export const InboundAcceptanceSchema = z
     recipient: InboundReportRecipientSchema.optional(),
     /** Delivered at once instead of with the lead seat's next round (VUH-2274). */
     urgent: z.literal(true).optional(),
+    /** The sender's own done/blocked/update label (#317). */
+    kind: WorkerReportKindSchema.optional(),
     acceptedAt: z.string().datetime().optional(),
     reportDelivery: InboundReportDeliverySchema.optional(),
   })

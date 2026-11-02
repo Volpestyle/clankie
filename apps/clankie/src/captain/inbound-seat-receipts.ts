@@ -2,6 +2,7 @@ import type {
   FleetSeatMessageDelivery,
   FleetSeatMessageReceipt,
   FleetSeatMessageStatus,
+  WorkerReportKind,
   WorkerReportRouting,
 } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
@@ -347,6 +348,8 @@ export class InboundSeatReceipts {
     senderSeatId?: string,
     /** Hiring app provenance captured by the service, never worker-supplied. */
     connectorHire?: { readonly deviceId: string; readonly ref?: string },
+    /** The sender's own done/blocked/update label (#317); not part of the fingerprint. */
+    kind?: WorkerReportKind,
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -410,6 +413,7 @@ export class InboundSeatReceipts {
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
           ...(recipient === undefined ? {} : { recipient }),
           ...(urgent ? { urgent: true as const } : {}),
+          ...(kind === undefined ? {} : { kind }),
         },
         conversationId,
         runner,

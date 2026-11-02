@@ -32,6 +32,12 @@ const Message = z.strictObject({
     .describe(
       "True when you are blocked, something failed, or you need a decision: your lead hears it at once. Otherwise it reaches an idle lead with its next round of reports.",
     ),
+  kind: z
+    .enum(["done", "blocked", "update"])
+    .optional()
+    .describe(
+      "done: the work is finished. blocked: you cannot go on until your lead answers; say what you need in one line, and your lead hears it at once. update: progress, no reply needed. Set it on every report.",
+    ),
 });
 const Status = z.strictObject({ deliveryId: z.uuid() });
 const reply = (body: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(body) }] });
@@ -197,6 +203,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                   text: message.text,
                   deliveryId: message.deliveryId,
                   ...(message.urgent === true ? { urgent: true } : {}),
+                  ...(message.kind === undefined ? {} : { kind: message.kind }),
                 },
                 {
                   owner: { conversationId: worker.binding.conversationId },

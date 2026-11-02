@@ -35,6 +35,11 @@ it; none takes precedence over another.
   receipt when recorded, pane when observed, age and owner recovery commands.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
   place before retrying; a lost answer can leave an agent running.
+- **Answer blocked workers first.** Workers label each report `kind`: `blocked`
+  (waiting on your answer), `done` or `update` (no reply needed). `read_inbox`
+  lists threads holding a blocked report first, with their count in `blocked`;
+  `read_reports` items carry `kind`, and a wake names it (`kind=blocked`, sent at
+  once rather than batched). An unlabelled report is read in full as before.
 - **Read bounded inbox pages.** `read_inbox` puts `unreadReports` first and bounds each serialized page to 24,000 characters and at most 50 held items. Pass `next` as `after` while `more` is true. Long held texts include a `readMore` pointer; pass its `item` (sequence number) and `offset` back to `read_inbox` for the next text chunk, repeating until `readMore` is absent. Reading does not acknowledge anything. Held items can age out of retention; an expired sequence returns an error. If `nextReportsAfter` is present, pass it as `reportsAfter` to read the remaining unread report threads separately from the held-item cursor.
 - **Hear your workers' reports.** Store a wake webhook once with
   `clankie connector wake set duet` (or your lead's name); Claude Code routine
@@ -43,8 +48,8 @@ it; none takes precedence over another.
   is 1–128 letters, digits, dots, underscores, colons or dashes. Keep the returned
   agent id with your thread. Reports and settled watches send kind `worker_report`
   immediately, with subsequent events batched at the end of a 120-second window
-  per lead. Wake text contains only agent/ref/event/time and a read hint, never
-  worker text. Read `read_reports` with `thread` from `read_inbox`, your `agent`,
+  per lead; a `blocked` report wakes at once. Wake text contains only
+  agent/ref/event/kind/time and a read hint, never worker text. Read `read_reports` with `thread` from `read_inbox`, your `agent`,
   and `newest: true`; acknowledge only the returned `ackDeliveryIds` after acting.
   Reads include only your app's hires, newest first by default. Your app's threads
   share a device, so keep your own agent ids or `ref`. To wait cheaply in the

@@ -1712,7 +1712,12 @@ export const OperatorLeadResultSchema = z
     unreadReports: z
       .array(
         z
-          .object({ conversationId: OperatorConversationIdSchema, count: z.number().int().positive() })
+          .object({
+            conversationId: OperatorConversationIdSchema,
+            count: z.number().int().positive(),
+            /** How many of them are `blocked`: answer those first (#317). */
+            blocked: z.number().int().positive().optional(),
+          })
           .strict(),
       )
       .max(256)

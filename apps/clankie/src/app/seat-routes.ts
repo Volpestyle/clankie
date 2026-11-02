@@ -819,7 +819,12 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       parsed.data.text,
       parsed.data.delivery,
       request,
-      parsed.data.urgent === true ? { urgent: true } : undefined,
+      parsed.data.urgent === true || parsed.data.kind !== undefined
+        ? {
+            ...(parsed.data.urgent === true ? { urgent: true } : {}),
+            ...(parsed.data.kind === undefined ? {} : { kind: parsed.data.kind }),
+          }
+        : undefined,
     );
     if (typeof received !== "boolean") return context.json(FleetSeatMessageReceiptSchema.parse(received));
     return received

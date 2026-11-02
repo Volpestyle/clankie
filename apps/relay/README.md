@@ -163,7 +163,10 @@ optional), `read_issue` (`project`, `issue`), `save_issue` (`project`;
 `start_agent` accepts `notify: {lead, ref}` to wake the hiring lead's stored
 webhook on reports and settled watches. These `worker_report` wakes carry only
 service-owned ids and facts; the first sends immediately and later events batch
-over 120 seconds per lead. Worker text stays in the inbox. `read_reports` scopes
+over 120 seconds per lead; a `blocked` report wakes at once and the wake names
+each report's `kind`. Worker text stays in the inbox. `read_reports` items and
+`read_inbox`'s `unreadReports` (a `blocked` count, those threads first) carry the
+worker's `done`/`blocked`/`update` label. `read_reports` scopes
 to the authenticated app's hires and defaults to newest first. Select the thread's
 own `agent` or hire `ref`; `waitSeconds` (0–45) then waits on report-change events
 and returns matching unread reports or empty at the deadline. A routine fire
