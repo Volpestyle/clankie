@@ -4,12 +4,18 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { heavyJobArgs, heavyJobLane } from "../src/parallelism.ts";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// `pnpm fmt`/`lint` mean the scripts of the package.json where pnpm runs, and the
+// classifier reads that same file. These are the repo root's aliases, so run
+// from the root wherever vitest was started (#490).
+const startedIn = process.cwd();
+beforeEach(() => process.chdir(repo));
+afterEach(() => process.chdir(startedIn));
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   const end = Date.now() + 20_000;
   for (;;) {
