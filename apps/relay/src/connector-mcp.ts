@@ -335,7 +335,7 @@ function connectorServer(
         name: "start_agent",
         title: "Start an agent",
         description:
-          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. Wakes contain only service-owned facts; read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. A pending answer means the service owns the brief and continues startup: call start_agent with only its startId to read progress; never repeat the hire. Its agent field names the pane as soon as allocated. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
+          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. Wakes contain only service-owned facts; read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
         inputSchema: {
           type: "object" as const,
           properties: {

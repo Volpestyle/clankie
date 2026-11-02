@@ -859,26 +859,6 @@ describe("Claude connector MCP endpoint", () => {
     await Promise.all([first.close(), second.close()]);
   });
 
-  it("reads a pending start receipt through MCP without repeating the hire arguments", async () => {
-    const relay = await startConnectorRelay();
-    const client = await connect(relay.url);
-    const startId = "019a3c5e-1d2a-7c8b-9e7f-6a5b4c3d2e1f";
-    try {
-      const result = JSON.parse(
-        textOf(await client.callTool({ name: "start_agent", arguments: { startId } })),
-      );
-      expect(result).toMatchObject({ status: "pending", startId, agent: "herdr:pc1/term_pending" });
-      expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
-        op: "start_agent",
-        schemaVersion: 1,
-        appDeviceId: connectorDevice.deviceId,
-        startId,
-      });
-    } finally {
-      await client.close();
-    }
-  });
-
   it("starts an agent only in a known project's place, through the connector's own allowlist", async () => {
     const relay = await startConnectorRelay();
     const client = await connect(relay.url);
@@ -1639,5 +1619,24 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { agent: "herdr:pc1/spike", path: "a.png" },
     });
     expect(textOf(unseated)).toContain("isn't one Clankie seats");
+  });
+  it("reads a pending start receipt through MCP without repeating the hire arguments", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    const startId = "019a3c5e-1d2a-7c8b-9e7f-6a5b4c3d2e1f";
+    try {
+      const result = JSON.parse(
+        textOf(await client.callTool({ name: "start_agent", arguments: { startId } })),
+      );
+      expect(result).toMatchObject({ status: "pending", startId, agent: "herdr:pc1/term_pending" });
+      expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+        op: "start_agent",
+        schemaVersion: 1,
+        appDeviceId: connectorDevice.deviceId,
+        startId,
+      });
+    } finally {
+      await client.close();
+    }
   });
 });
