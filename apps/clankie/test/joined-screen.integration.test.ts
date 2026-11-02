@@ -572,7 +572,8 @@ test("supervised JSON join exposes finite registration, local status and Stop wi
     await f.running;
     output = "";
     expect(await runJoinCommand(["leave", "--json"], { joinCredentialStore: f.store, stdout })).toBe(0);
-    expect(JSON.parse(output)).toEqual({ ok: true, left: true });
+    // Leave also reports whether home heard about it (#248).
+    expect(JSON.parse(output)).toEqual({ ok: true, left: true, homeNotified: true });
     output = "";
     expect(await runJoinCommand(["status", "--json"], { joinCredentialStore: f.store, stdout })).toBe(0);
     expect(JSON.parse(output)).toEqual({ configured: false });
