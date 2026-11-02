@@ -154,6 +154,29 @@ class LinuxProof(unittest.TestCase):
             self.assertIn(refused.exception.reason, ("attempts_exhausted", "budget_exhausted"))
             self.assertTrue(proof.census_refusals)
 
+    def test_exit_churn_skips_confirmed_exits_instead_of_restarting(self):
+        # Processes that never held the socket each exit while the census is
+        # reading them, after the first PID list (#440). Before #440 every exit
+        # restarted the whole census.
+        exiting = {self.child(lambda _: (self.client.close(), self.peer.close(), self.server.close()))
+                   for _ in range(12)}
+        with module.Proof() as proof:
+            observe = proof.identity
+
+            def identity_then_exit(directory, pid):
+                observed = observe(directory, pid)
+                if pid in exiting:
+                    exiting.remove(pid)
+                    self.reap(pid)
+                return observed
+
+            proof.identity = identity_then_exit
+            result = proof.socket_proof(self.ports)
+            self.assertEqual(result["owner"]["pid"], os.getpid())
+            self.assertFalse(exiting)
+            # Twelve exits, yet at most one restart, left for an unrelated birth on the machine.
+            self.assertLessEqual(len(proof.census_refusals), 1, proof.census_refusals)
+
     def test_private_thread_fd_table_cannot_hide_second_owner(self):
         self.admitted()
 
