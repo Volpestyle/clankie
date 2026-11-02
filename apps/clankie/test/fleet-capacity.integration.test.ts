@@ -302,7 +302,8 @@ it("reports each account's burn rate from Clankie's own readings and this Mac's 
     const historyPath = join(root, "state", "usage-history.json");
     let percent = 20;
     let observedAt = at(60);
-    const account = (): FleetCapacityAccountSource => ({
+    // The PC's newer read of the same account leaves out the reset, as its CLI does.
+    const account = (machine: string): FleetCapacityAccountSource => ({
       harness: "claude",
       label: "account-abc",
       home,
@@ -314,14 +315,15 @@ it("reports each account's burn rate from Clankie's own readings and this Mac's 
       usable: true,
       usage: {
         source: "claude-usage",
-        observedAt,
+        observedAt: machine === "pc" ? new Date(Date.parse(observedAt) + 1_000).toISOString() : observedAt,
         windows: [
           {
             id: "week",
             label: "Current week (all models)",
             usedPercent: percent,
-            windowMinutes: 10_080,
-            resetsAt: new Date(now + 48 * 3_600_000).toISOString(),
+            ...(machine === "pc"
+              ? {}
+              : { windowMinutes: 10_080, resetsAt: new Date(now + 48 * 3_600_000).toISOString() }),
           },
         ],
       },
@@ -337,7 +339,7 @@ it("reports each account's burn rate from Clankie's own readings and this Mac's 
         accounts: async (fleetId) => ({
           machine: fleetId ?? "local",
           // The same account read on a linked machine is one burn row.
-          accounts: [account()],
+          accounts: [account(fleetId ?? "local")],
         }),
         seats: async () => [
           {
@@ -372,7 +374,7 @@ it("reports each account's burn rate from Clankie's own readings and this Mac's 
     });
     const week = row.windows[0]!;
     expect(week.usedPercent).toBe(26);
-    expect(week.percentPerHour.recent).toBe(6);
+    expect(week.percentPerHour.recent).toBeCloseTo(6, 2);
     expect(week.percentPerHour.recentOverMinutes).toBe(60);
     // 26% over the 120 hours the week has run is about 0.217%/h.
     expect(week.percentPerHour.windowAverage).toBeCloseTo(26 / 120, 2);
@@ -380,7 +382,7 @@ it("reports each account's burn rate from Clankie's own readings and this Mac's 
     expect(week.percentPerHour.toUseAllByReset).toBeCloseTo(74 / 48, 2);
     // At 6%/h the 74% left lasts about 12.3 hours, before the reset.
     expect(week.projectedUsedAtReset).toBeCloseTo(26 + 6 * 48, 0);
-    expect(Date.parse(week.runsOutAt as string) - now).toBeCloseTo((74 / 6) * 3_600_000, -4);
+    expect(Date.parse(week.runsOutAt as string) - now).toBeCloseTo((74 / 6) * 3_600_000, -5);
 
     expect(row.lastHour).not.toBe("unknown");
     const lastHour = row.lastHour as Exclude<typeof row.lastHour, "unknown">;
