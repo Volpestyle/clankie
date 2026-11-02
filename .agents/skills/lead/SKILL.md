@@ -119,8 +119,17 @@ never from an old warning. To pace a push, read `burn` in `fleet_capacity`:
 a window whose recent percent per hour sits below `toUseAllByReset` will reset
 with capacity unused, so give it more independent work; one with `runsOutAt`
 before its reset is spending too fast, so move the next hires to another
-account. Its `lastHour` names which agents are spending it. Unrelated work goes to a fresh hire, not a finished
-seat: old context costs tokens every turn and invites mix-ups.
+account. Its `lastHour` names which agents are spending it.
+
+Where work goes is your judgment (#425). Before hiring, look at the workers you
+already lead: `workedOn` in `fleet_efficiency` (and the line in `list_agents`)
+says which issues, areas and pull requests each has worked on. A worker that
+knows the area and has context to spare often beats a fresh hire: hand it the
+work with `message_seat` and its `deliverable`, so what it holds stays true.
+Hire fresh when no one fits, the work needs another harness, worktree or
+account, or a worker's context would cost more than it saves: old context is
+re-read every turn and can mislead. Close a worker that is idle and unlikely to
+be useful again; nothing here is a timer.
 
 ## Brief an owned result
 
@@ -221,14 +230,16 @@ On each watch wake and periodic round, check **every seat you own**
 - **Context**: `fleet_efficiency` and `clankie fleet status` report native
   `contextTokens` for Claude and Codex; a context flag starts at 300K. Unknown
   after compaction stays unknown until the next call. The flag is evidence for
-  your decision and takes no action. Past about 300K tokens, retire the seat by the `work-items`
-  handoff protocol and start a fresh one from the item, unless its current
-  deliverable needs that context. A seat's whole context is re-read on every
+  your decision and takes no action. Weigh a large context against what it
+  knows: past about 300K tokens, retire the seat by the `work-items` handoff
+  protocol and start a fresh one from the item, unless its knowledge of the
+  area is worth carrying into the next item. A seat's whole context is re-read on every
   call, so a 1M window is a ceiling, not a budget.
 - **Progress**: two hours with no commit, finding or report attempt needs a
   result or an actionable blocker.
-- **Done or idle**: harvest once, then tidy or assign the next ready item, to
-  the same seat only for the same patch or its review changes.
+- **Done or idle**: harvest once, then give it the next ready item that fits
+  what it knows (with that item as its `deliverable`), or close it if nothing
+  does.
 - **No overlap**: one producer per result across everything you own.
 - **Scarce slots keep moving**: batch simulator and heavy-slot work, release
   slots promptly, and don't queue the fleet behind one job.

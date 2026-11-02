@@ -1019,6 +1019,14 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
             "The event_id of the lead message you are answering. Naming it confirms you received that message, so the sender's uncertain receipt resolves.",
         }),
       ),
+      deliverable: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 512,
+          description:
+            "The issue this message hands the seat, when you give a worker you lead new work (VUH-123, owner/repo#42). Once delivered it becomes the seat's deliverable, so its in-progress issue and work history stay true; the result's deliverable.recorded says whether it was.",
+        }),
+      ),
       questionAnswer: Type.Optional(
         Type.Object({
           requestId: Type.Union([Type.String({ minLength: 1, maxLength: 200 }), Type.Integer()]),
@@ -1046,6 +1054,9 @@ function messageSeatTool(message: MessageSeat, turn: TurnContext): ToolDefinitio
       const options = {
         ...(params.replaces === undefined ? {} : { replaces: params.replaces }),
         ...(params.inReplyTo === undefined ? {} : { inReplyTo: params.inReplyTo }),
+        ...(params.deliverable === undefined || params.questionAnswer !== undefined
+          ? {}
+          : { deliverable: params.deliverable }),
       };
       const result =
         params.questionAnswer === undefined

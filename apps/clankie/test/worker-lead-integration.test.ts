@@ -951,3 +951,47 @@ it("records what a worker has worked on, shows it to its lead and keeps it acros
   const reopened = f.open();
   expect((await fleet(reopened)).seats[0]?.workedOn).toEqual(seat.workedOn);
 }, 30_000);
+
+// #425: a lead re-tasks a worker it already leads by judgment. message_seat hands it the new
+// issue in the same step, and that issue becomes the seat's deliverable, as a review records
+// it. Nothing is recorded for a seat another conversation leads, or an unknown seat.
+it("hands a worker its next issue with message_seat, and records it only for its own lead", async () => {
+  const f = await fixture();
+  const message = async (lead: string, seat: string, deliverable: string) => {
+    const bank = await f.captain.laneToolBank("operator", lead);
+    const sent = await bank.tools
+      .find((tool) => tool.name === "message_seat")!
+      .call({ seat, message: `Next, take ${deliverable}.`, deliverable });
+    const text = sent.content.find((part) => part.type === "text");
+    return JSON.parse(text?.type === "text" ? text.text : "null") as Record<string, unknown>;
+  };
+  const assigned = async () => {
+    const bank = await f.captain.laneToolBank("operator", f.leads[0]!);
+    const shown = await bank.tools.find((tool) => tool.name === "fleet_efficiency")!.call({ action: "show" });
+    const text = shown.content.find((part) => part.type === "text");
+    const seats = (JSON.parse(text?.type === "text" ? text.text : "null") as { seats: OperatorFleetSeat[] })
+      .seats;
+    return seats.find((seat) => seat.seatId === f.agent.terminalId)?.efficiency?.assignedDeliverable;
+  };
+  type OperatorFleetSeat = z.infer<typeof OperatorFleetSeatSchema>;
+  expect(await assigned()).toBeUndefined();
+
+  // Another lead reaches the worker, but it keeps its lead and its deliverable.
+  expect(await message(f.leads[1]!, f.agent.terminalId, "CLK-401")).toMatchObject({
+    outcome: "delivered",
+    ownerConversationId: f.leads[0],
+    deliverable: { recorded: false, detail: expect.stringContaining("another conversation leads") },
+  });
+  expect(await message(f.leads[0]!, "no-such-seat", "CLK-402")).toMatchObject({
+    outcome: "unknown_seat",
+    deliverable: { recorded: false },
+  });
+  expect(await assigned()).toBeUndefined();
+
+  // Its own lead hands it the next issue.
+  expect(await message(f.leads[0]!, f.agent.terminalId, "CLK-400")).toMatchObject({
+    outcome: "delivered",
+    deliverable: { recorded: true },
+  });
+  expect(await assigned()).toBe("CLK-400");
+}, 30_000);
