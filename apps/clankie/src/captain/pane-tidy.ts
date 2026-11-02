@@ -30,7 +30,7 @@ import {
   type ConversationOwner,
 } from "./conversation-owner.ts";
 import { codexProcess, resolveCodexSessionId } from "./codex-seat.ts";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { DESKTOP_SEAT_FLEET, splitFleetQualified } from "../herdr-fleet.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import type { HireSeat } from "./port.ts";
 import type { SavedAgentSession } from "../agent-sessions.ts";
@@ -606,7 +606,8 @@ export class PaneTidy {
         ],
         handoffs,
       };
-    if (splitFleetQualified(agent.paneId))
+    const fleet = splitFleetQualified(agent.paneId)?.fleet;
+    if (fleet !== undefined && fleet !== DESKTOP_SEAT_FLEET)
       return { held: worktrees.filter((work) => work.state !== "reconciled"), handoffs };
     for (const work of worktrees) {
       if (work.state === "unknown" || work.dirtyFiles !== 0 || !work.head) {

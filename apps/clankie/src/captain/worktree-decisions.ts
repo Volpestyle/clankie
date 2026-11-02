@@ -17,7 +17,7 @@ import {
   type WorktreeReconciliation,
 } from "@clankie/protocol";
 import { reconcileWorktree } from "@clankie/settings";
-import { splitFleetQualified } from "../herdr-fleet.ts";
+import { DESKTOP_SEAT_FLEET, splitFleetQualified } from "../herdr-fleet.ts";
 
 const StateSchema = z.object({ version: z.literal(1), decisions: z.array(WorktreeDecisionSchema) }).strict();
 const KEEP = 2048;
@@ -94,7 +94,9 @@ export async function workerWorktreeHold(
         reason: "No verified worker work directory",
       },
     ];
-  if (splitFleetQualified(agent.paneId))
+  const fleet = splitFleetQualified(agent.paneId)?.fleet;
+  // Desktop-app seats are qualified too, but their directories are on this machine.
+  if (fleet !== undefined && fleet !== DESKTOP_SEAT_FLEET)
     return directories.map((path) => ({ path, state: "unknown", reason: "Remote fleet worktree" }));
   const held = new Map<string, WorktreeReconciliation>();
   for (const directory of directories) {

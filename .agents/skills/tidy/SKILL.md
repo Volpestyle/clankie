@@ -54,7 +54,9 @@ guarded paths in [mechanics](reference/mechanics.md).
 
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
-worker's dirty or unreadable worktree, or commits without a handoff. Clean
+worker's dirty or unreadable worktree, or commits without a handoff. Connector
+`close_agent` refusals report each tree's state, reason and known dirty-file and
+unlanded-commit counts; `unknown` is missing proof, not proof of unlanded commits. Clean
 unlanded commits allow close when every commit is in a live merge-queue request,
 reachable from a verified pushed remote ref, or covered by a `worth_landing` or
 `safe_to_drop` decision at the current HEAD. Stale tracking refs and stale
