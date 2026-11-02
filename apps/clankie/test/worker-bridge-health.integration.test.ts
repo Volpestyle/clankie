@@ -588,7 +588,11 @@ it("records a real subprocess binding timeout independently of its healthy tool 
   expect(decoded(reply.result)).toMatchObject({
     received: false,
     deliveryStage: "uncertain",
+    // No claim was written and nothing was posted, so calling again is safe (#378).
+    sent: false,
+    retryable: true,
   });
+  expect(decoded(reply.result)).not.toHaveProperty("deliveryId");
   await expect
     .poll(() => f.reportStatus())
     .toMatchObject({ outcome: "uncertain", reason: "binding_timeout" });
@@ -1126,4 +1130,43 @@ it("retains an expired stop stage and refuses unknown, malformed, other-pane and
   f.revoke();
   expect((await fetch(`${url}${original.deliveryId}/status`)).status).toBe(403);
   expect(f.messagePosts()).toBe(1);
+});
+
+it("a fresh bridge's first message_clankie, sent right after it starts, stores and returns its delivery ID (#378)", async () => {
+  const f = await fixture();
+  const call = await startBridge(f);
+  // The first tool call this bridge serves, before any other send or reconciliation.
+  const reply = await call("tools/call", {
+    name: "message_clankie",
+    arguments: { text: "First report from a fresh worker", kind: "update" },
+  });
+  expect(reply.error).toBeUndefined();
+  const receipt = decoded(reply.result);
+  expect(receipt).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+    deliveryId: expect.stringMatching(/^[a-f0-9-]{36}$/u),
+    sent: true,
+    retryable: false,
+  });
+  expect(f.messagePosts()).toBe(1);
+  await expect.poll(() => f.reportStatus()).toMatchObject({ outcome: "stored" });
+});
+
+it("a first message_clankie the service refuses as not admitted says nothing was sent and a retry cannot help (#378)", async () => {
+  const f = await fixture();
+  const call = await startBridge(f);
+  f.revoke();
+  const reply = await call("tools/call", {
+    name: "message_clankie",
+    arguments: { text: "First report before admission" },
+  });
+  expect(reply.error).toBeUndefined();
+  expect(decoded(reply.result)).toMatchObject({
+    received: false,
+    deliveryStage: "rejected",
+    sent: false,
+    retryable: false,
+  });
+  expect(f.messagePosts()).toBe(0);
 });
