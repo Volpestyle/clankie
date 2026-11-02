@@ -395,7 +395,9 @@ it("projects linked-session host bridge gaps into the roster without changing na
     harnessBridge: { status: process.platform === "darwin" ? "missing" : "unobserved" },
   });
   expect(fleet.seats[0]?.harnessBridge?.remediation).toEqual(
-    process.platform === "darwin" ? expect.stringContaining("clankie-worker@clankie") : undefined,
+    process.platform === "darwin"
+      ? expect.stringMatching(/--plugin-dir.*--channels plugin:clankie-worker@inline/u)
+      : undefined,
   );
 });
 

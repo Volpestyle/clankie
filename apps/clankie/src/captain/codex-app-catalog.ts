@@ -15,7 +15,9 @@ const pending = new Map();
 const fail = (error) => { failure ??= error; for (const entry of pending.values()) entry.reject(error); pending.clear(); };
 child.on('error', fail);
 child.on('close', (code, signal) => fail(new Error('Codex app catalog process exited (' + (signal ?? code) + ')' + (stderr.trim() ? ': ' + stderr.trim() : ''))));
-child.stdin.on('error', fail);
+// A failed startup can close stdin before its stderr has drained (EPIPE on Linux).
+// Let close report the native exit and stderr; other stream errors still fail promptly.
+child.stdin.on('error', (error) => { if (error.code !== 'EPIPE') fail(error); });
 child.stdout.on('data', (chunk) => {
   buffer += chunk.toString();
   // Native directory notifications observed during initialization are ~6.9 MB,
