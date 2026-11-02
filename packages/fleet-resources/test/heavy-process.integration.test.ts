@@ -29,6 +29,9 @@ afterEach(async () => {
 const driver = join(import.meta.dirname, "fixtures/heavy-driver.mjs");
 /** Ownership tests must not wait on how busy the host is; pressure has its own suites. */
 const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
+// The recorded name is the kernel's command name: Node 26 on Linux renames its
+// main thread, so `ps comm` reads node-MainThread there and node on macOS (#510).
+const nodeName = expect.stringMatching(/^node(-MainThread)?$/u);
 const command = join(import.meta.dirname, "fixtures/heavy-command.mjs");
 const registrationDriver = join(import.meta.dirname, "fixtures/registration-driver.mjs");
 async function eventually<T>(
@@ -658,7 +661,7 @@ describe("machine shared heavy permits with actual OS children", () => {
             seatId: "leftover",
             executable: "node",
             memberCount: 1,
-            members: [{ pid: orphan.pid, name: "node", startTime: orphan.startTime, signal, outcome }],
+            members: [{ pid: orphan.pid, name: nodeName, startTime: orphan.startTime, signal, outcome }],
           }),
         ]);
       } finally {
@@ -698,7 +701,7 @@ describe("machine shared heavy permits with actual OS children", () => {
           leaseId: lease.id,
           seatId: "dead-runner",
           runnerPid: lease.runner.pid,
-          members: [expect.objectContaining({ pid, name: "node", signal: "TERM", outcome: "exited" })],
+          members: [expect.objectContaining({ pid, name: nodeName, signal: "TERM", outcome: "exited" })],
         }),
       ]);
     } finally {
