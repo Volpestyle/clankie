@@ -121,6 +121,7 @@ setInterval(() => {}, 1 << 30);
     settingsStore: {},
     terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
     herdrRunner: runner,
+    herdrWatches: { stoppedReason: async () => undefined },
     // The fleet roster's hire claims, as the census projects them from hire-owners.
     liveSeats: [
       seat(hire.terminalId, hire.session!, true),

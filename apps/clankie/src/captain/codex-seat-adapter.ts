@@ -107,6 +107,10 @@ export function createCodexSeatAdapter(
       let state: SeatStatus = "idle";
       let latest: SeatEvent = { type: "turn_completed", at: new Date().toISOString(), ok: true };
       let closed = false;
+      // Set when the app-server ends under a live view; the TUI alone can do nothing.
+      let serverStopped: string | undefined;
+      // The brief crosses to the server only through control.send.
+      let briefDispatched = false;
       let releaseProcess: LocalCodexRegistration | undefined;
       let reporting: Promise<unknown> = Promise.resolve();
       let questionReporting: Promise<unknown> = Promise.resolve();
@@ -297,11 +301,10 @@ export function createCodexSeatAdapter(
           questions.clear();
           nativeInputWaiting = false;
           state = "offline";
-          settlement = {
-            type: "exited",
-            at,
-            code: typeof event.params.code === "number" ? event.params.code : null,
-          };
+          const code = typeof event.params.code === "number" ? event.params.code : null;
+          if (!closed)
+            serverStopped ??= `Its Codex app-server stopped${code === null ? "" : ` (exit code ${code})`}, so it can't work or take messages. Close it and hire again.`;
+          settlement = { type: "exited", at, code };
         } else return;
         report();
         if (settlement) {
@@ -590,7 +593,11 @@ export function createCodexSeatAdapter(
               if (closed || !holderId.startsWith("codex:") || !seat?.holderStatus) return "unknown";
               return seat.holderStatus(holderId.slice("codex:".length));
             },
+            async stopped() {
+              return serverStopped;
+            },
             async statusReason() {
+              if (serverStopped) return serverStopped;
               const pending = questions.keys().next();
               return pending.done ? undefined : `Waiting on a question (${String(pending.value)})`;
             },
@@ -647,6 +654,7 @@ export function createCodexSeatAdapter(
           controls.set(ref.sessionId, control);
           if (launch.brief) {
             await view.guard?.();
+            briefDispatched = true;
             const delivered = await control.send(launch.brief);
             if (delivered.outcome === "offline" && delivered.deliveryStage === "unavailable")
               return {
@@ -666,6 +674,8 @@ export function createCodexSeatAdapter(
             outcome: "failed",
             reason: /ENOENT|command not found/u.test(String(error)) ? "harness_unavailable" : "not_ready",
             detail: String(error),
+            // Startup failed before the brief was handed to the server, as when it dies starting.
+            ...(launch.brief && !briefDispatched ? { briefDelivery: "not_sent" as const } : {}),
           };
         }
       };

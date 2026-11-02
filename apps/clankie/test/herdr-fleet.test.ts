@@ -341,6 +341,7 @@ describe("fleet routing", () => {
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
       liveSeats: [],
+      herdrWatches: { stoppedReason: async () => undefined },
       herdrRunner: routeHerdrFleets(
         localRunner(),
         new Map([
@@ -426,6 +427,7 @@ describe("fleet routing", () => {
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
       liveSeats: [],
+      herdrWatches: { stoppedReason: async () => undefined },
       herdrRunner: routeHerdrFleets(
         localRunner(),
         // No shared poll: each read sees the pane as Herdr answers now.
@@ -682,6 +684,7 @@ describe("fleet routing", () => {
       settingsStore: {},
       terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
       liveSeats: [],
+      herdrWatches: { stoppedReason: async () => undefined },
       herdrRunner: routeHerdrFleets(
         localRunner(),
         new Map([

@@ -49,7 +49,11 @@ refused with the machine, profile and fix, never swapped. Relay a refusal's fix
 to the owner rather than signing anything in yourself.
 
 An uncertain hire is inspected, never retried with a changed model, harness or
-project; a resume cannot change its recorded role or launch a second agent. A
+project; a resume cannot change its recorded role or launch a second agent.
+A Codex hire whose app-server died reads `stopped` in the roster, and reading
+its pane says so: it does nothing more, so close it and hire again. If the
+server died before the first brief, the hire answers `briefDelivery: "not_sent"`,
+so the new hire duplicates nothing. A
 dirty, divergent or live-pane start is left as it is and the hire works in a
 fresh `origin/main` worktree under the start's `.local` (checkout rules: `tidy`'s
 [owner checkout sync](../../tidy/reference/mechanics.md#owner-checkout-sync)).

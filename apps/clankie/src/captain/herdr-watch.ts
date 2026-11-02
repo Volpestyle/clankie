@@ -2193,10 +2193,14 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(source.session === undefined ? {} : { session: source.session }),
         });
         if (control === undefined) return seat;
-        const [status, reason] = await Promise.all([
+        const [status, reason, stopped] = await Promise.all([
           control.status().catch(() => undefined),
           control.statusReason?.().catch(() => undefined),
+          control.stopped?.().catch(() => undefined),
         ]);
+        // Its runtime ended; the view left in the pane can still look busy.
+        if (stopped !== undefined)
+          return { ...seat, status: "stopped", summary: bounded(failure ?? stopped, 1_000) };
         return {
           ...seat,
           // Native idle proves quiescence, not that a completed worker became unfinished.
@@ -2417,6 +2421,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
         sessionKey,
         this.projectContexts.get(input)?.projectId ?? input.projectId,
       );
+  }
+
+  /** Why a hire's own runtime ended under its still-open pane; undefined while it runs. */
+  public async stoppedReason(agent: HerdrAgentSnapshot): Promise<string | undefined> {
+    return (await this.seatControl.attach(agent))?.stopped?.().catch(() => undefined);
   }
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */

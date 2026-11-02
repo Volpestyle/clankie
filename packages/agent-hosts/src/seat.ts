@@ -271,6 +271,12 @@ export interface SeatControl {
   holderStatus?(holderId: string): Promise<SeatStatus | "unknown">;
   /** Read-only native waiting detail for the roster; does not settle a completion watch. */
   statusReason?(): Promise<string | undefined>;
+  /**
+   * Why the harness's own runtime ended while its view may still hold the pane
+   * (a Codex hire's app-server exiting). Undefined while it runs. The roster
+   * shows such a seat as stopped, whatever the pane's view still claims.
+   */
+  stopped?(): Promise<string | undefined>;
   /** Read the exact currently pending native question; no transcript inference. */
   pendingQuestion?(requestId: string | number): Promise<SeatQuestion | undefined>;
   /** Answer one pending native request through its native control, without terminal fallback. */

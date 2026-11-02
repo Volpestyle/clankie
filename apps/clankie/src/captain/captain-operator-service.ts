@@ -911,10 +911,19 @@ export function createOperatorService(
               seat.owner?.hired === true &&
               seat.occupantId === occupantIdForHerdrSession(pane.session!),
           );
-        const { text, detail } =
+        const read =
           splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET || hired
             ? { text: history, detail: undefined }
             : scope.bound(request.terminalId, occupant, history, screen);
+        const { text } = read;
+        // Its screen may still look busy after the runtime under it ended.
+        const stopped = await ctx.herdrWatches.stoppedReason(pane);
+        const detail =
+          stopped === undefined
+            ? read.detail
+            : read.detail === undefined
+              ? stopped
+              : `${stopped} ${read.detail}`;
         return {
           op: "terminal_read",
           schemaVersion: 1,
