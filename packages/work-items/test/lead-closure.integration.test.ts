@@ -340,7 +340,7 @@ it("holds lead Done for a red, unfiled post-merge checkpoint (#280 repro)", asyn
     await f.ready();
     await expect(f.close()).rejects.toMatchObject({ reason: "main_red" });
     expect(await f.read()).not.toHaveProperty("leadCompletion");
-    checkpoint.link("sha");
+    checkpoint.link("url");
     expect(await f.close()).toHaveProperty("leadCompletion");
   } finally {
     await checkpoint.close();
