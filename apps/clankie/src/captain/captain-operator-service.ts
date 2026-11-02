@@ -389,7 +389,8 @@ export function createOperatorService(
           ...(request.limit === undefined ? {} : { limit: request.limit }),
           ...(seatId === undefined ? {} : { seatId }),
           ...(native === undefined ? {} : { paneId: native.paneId }),
-          newest: request.newest ?? true,
+          // Connected apps read their hires newest first; the owner's inbox stays oldest first (docs/cli.md).
+          newest: request.newest ?? request.appDeviceId !== undefined,
           ...(request.appDeviceId === undefined ? {} : { deviceId: request.appDeviceId }),
           ...(request.ref === undefined ? {} : { ref: request.ref }),
           ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
