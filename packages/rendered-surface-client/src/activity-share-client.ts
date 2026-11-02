@@ -150,6 +150,8 @@ export interface ActivityShareClient {
   switchSource(session: ActivityShareSession, source: ActivityShareSource): Promise<ActivityShareSession>;
   stop(session: ActivityShareSession): Promise<void>;
   grant(session: ActivityShareSession, ttlMs?: number): Promise<ActivityShareGrant>;
+  /** Ends a grant and every viewer already admitted with it; unknown grants are a no-op. */
+  revoke(shareId: string, grant: string): Promise<void>;
   status(): Promise<ActivityShareSession[]>;
   /** Private media-only stream; the controller credential never reaches a viewer. */
   openViewer(session: ActivityShareSession, grant: string, signal?: AbortSignal): Promise<Response>;
@@ -160,7 +162,7 @@ export interface ActivityShareClient {
   close(): void;
 }
 
-type Operation = "start" | "switch" | "stop" | "grant" | "status" | "viewer";
+type Operation = "start" | "switch" | "stop" | "grant" | "revoke" | "status" | "viewer";
 
 /** Failed effects are never retried automatically, including a lost response. */
 export class ActivityShareRequestError extends Error {
@@ -500,6 +502,23 @@ export function createActivityShareClient(options: ActivityShareClientOptions): 
         ),
         "grant",
         session,
+      );
+    },
+    async revoke(shareId, grant) {
+      ActivityShareSessionSchema.shape.shareId.parse(shareId);
+      ActivityShareGrantSchema.shape.grant.parse(grant);
+      parseResponse(
+        (value) => {
+          if (
+            typeof value !== "object" ||
+            value === null ||
+            (value as { revoked?: unknown }).revoked !== true ||
+            Object.keys(value).length !== 1
+          )
+            throw new Error("Invalid revoked response");
+        },
+        await request("revoke", `/shares/${shareId}/revoke`, { grant }),
+        "revoke",
       );
     },
     async status() {

@@ -587,6 +587,8 @@ const activityAdmission =
             apiKey(await operatorCredentialStore.get(DISCORD_ACTIVITY_CLIENT_SECRET_PROVIDER_ID)),
           botToken: async () => apiKey(await operatorCredentialStore.get(DISCORD_BOT_PROVIDER_ID)),
           grant: (guildId, channelId) => activityLaunches.grant(guildId, channelId),
+          // A viewer who leaves the Activity loses media within seconds, not at grant expiry (#373).
+          revoke: (shareId, grant) => activitySharing.revokeGrant(shareId, grant),
         });
         return {
           token: () => resolveActivityProducerCredential(),

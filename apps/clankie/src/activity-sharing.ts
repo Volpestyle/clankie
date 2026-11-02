@@ -159,6 +159,15 @@ export class ActivitySharing {
     return { session, ...(await (await this.getClient()).grant(session)) };
   }
 
+  /**
+   * Ends a viewer grant and the sockets already using it. The caller has proven,
+   * from Discord, that the viewer left the Activity instance (#373).
+   */
+  public async revokeGrant(shareId: string, grant: string): Promise<void> {
+    if (this.closed) return;
+    await (await this.getClient()).revoke(shareId, grant);
+  }
+
   public close(): void {
     this.closed = true;
     const active = [...this.active.values()];

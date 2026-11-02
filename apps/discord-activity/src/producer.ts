@@ -207,7 +207,7 @@ async function handleShareControl(
       response.writeHead(404).end();
       return;
     }
-    const action = /^\/shares\/([a-f0-9-]+)\/(switch|grant|stop|viewer)$/u.exec(path);
+    const action = /^\/shares\/([a-f0-9-]+)\/(switch|grant|revoke|stop|viewer)$/u.exec(path);
     if (path !== "/shares" && action === null) {
       response.writeHead(404).end();
       return;
@@ -226,16 +226,27 @@ async function handleShareControl(
       const kind = action![2];
       exactKeys(
         body,
-        kind === "viewer"
-          ? body.mode === "live"
-            ? ["generation", "mode"]
-            : ["generation", "grant"]
-          : kind === "switch"
-            ? ["generation", "source"]
-            : kind === "grant"
-              ? ["generation", "ttlMs"]
-              : ["generation"],
+        kind === "revoke"
+          ? ["grant"]
+          : kind === "viewer"
+            ? body.mode === "live"
+              ? ["generation", "mode"]
+              : ["generation", "grant"]
+            : kind === "switch"
+              ? ["generation", "source"]
+              : kind === "grant"
+                ? ["generation", "ttlMs"]
+                : ["generation"],
       );
+      if (kind === "revoke") {
+        // The service's revalidation found the viewer gone (#373): end the grant and its sockets.
+        if (typeof body.grant !== "string" || body.grant.length > 128)
+          throw new ActivityShareError("invalid_grant", 400);
+        options.shares.revokeGrant(shareId, body.grant);
+        response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        response.end(JSON.stringify({ revoked: true }));
+        return;
+      }
       const generation = optionalNumber(body.generation) ?? 0;
       if (kind === "viewer") {
         if (body.mode !== "live" && (typeof body.grant !== "string" || body.grant.length > 128)) {

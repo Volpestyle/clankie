@@ -97,6 +97,7 @@ async function discordFixture() {
     },
   };
   const seen: string[] = [];
+  const outage = { on: false };
   const body = async (request: IncomingMessage) => {
     let text = "";
     for await (const chunk of request) text += String(chunk);
@@ -132,18 +133,20 @@ async function discordFixture() {
     const instance = /^\/applications\/(\d+)\/activity-instances\/([^/]+)$/u.exec(url.pathname);
     if (request.method === "GET" && instance !== null) {
       if (request.headers.authorization !== "Bot fixture-bot") return json(401, {});
+      if (outage.on) return json(503, {});
       const found = instances[decodeURIComponent(instance[2]!)];
       return found === undefined ? json(404, { code: 10_000 }) : json(200, found);
     }
     json(404, {});
   });
-  return { url: await listen(server), seen };
+  return { url: await listen(server), seen, instances, users, outage };
 }
 
 async function stack(
   options: {
     clientSecret?: string | undefined;
     lockTimeoutMs?: number;
+    revalidateMs?: number;
     presenceRuntime?: NonNullable<Parameters<typeof createClankieApp>[0]["discordPresenceRuntime"]>;
   } = {},
 ) {
@@ -201,8 +204,11 @@ async function stack(
     clientSecret: async () => ("clientSecret" in options ? options.clientSecret : "fixture-secret"),
     botToken: async () => "fixture-bot",
     grant: (guildId, channelId) => launches.grant(guildId, channelId),
+    revoke: (shareId, grant) => sharing.revokeGrant(shareId, grant),
+    ...(options.revalidateMs === undefined ? {} : { revalidateMs: options.revalidateMs }),
     discordApi: discord.url,
   });
+  cleanup.push(() => admission.close());
   const service = await createClankieApp({
     captain: createStubCaptain(),
     extensionRoutes: [
@@ -324,6 +330,69 @@ it("admits a verified participant of Clankie's own launch to live play media, th
   expect(again.body.session.shareId).toBe(admitted.body.session.shareId);
   expect(s.shares.stats()).toHaveLength(1);
 });
+
+it("a viewer who leaves the Activity instance loses media within seconds; one still in it keeps watching (#373)", async () => {
+  const s = await stack();
+  s.discord.users["friend-code"] = "504";
+  (s.discord.instances["i-here"] as { users: string[] }).users.push("504");
+  const playSink = s.play.createSink("FireRed");
+  s.launches.launched(GUILD, CHANNEL);
+  const watch = async (code: string) => {
+    const admitted = await s.admit(code, "i-here");
+    expect(admitted.status).toBe(200);
+    const socket = new WebSocket(`ws://127.0.0.1:${s.viewerPort}${admitted.body.mediaPath}`, {
+      headers: TUNNEL,
+    });
+    cleanup.push(() => socket.terminate());
+    const frames: unknown[] = [];
+    let closedAt: number | undefined;
+    socket.on("message", (raw) => {
+      if ((JSON.parse(raw.toString()) as { kind: string }).kind === "frame") frames.push(raw);
+    });
+    socket.on("close", () => (closedAt = Date.now()));
+    await new Promise<void>((done, reject) => {
+      socket.once("open", done);
+      socket.once("error", reject);
+    });
+    socket.send(JSON.stringify({ kind: "admit", grant: admitted.body.grant }));
+    return { frames, closedAt: () => closedAt };
+  };
+  const leaver = await watch("member-code");
+  const friend = await watch("friend-code");
+  let sequence = 1;
+  const publish = () => {
+    sequence += 1;
+    playSink.publishFrame({ ...frame, sequence, schemaVersion: 1, surface: "gba_emulator", frame: sequence });
+  };
+  await vi.waitFor(() => {
+    publish();
+    expect(leaver.frames.length).toBeGreaterThan(0);
+    expect(friend.frames.length).toBeGreaterThan(0);
+  });
+
+  // A Discord outage proves nothing about who left: both keep watching through a pass.
+  s.discord.outage.on = true;
+  const reads = () => s.discord.seen.filter((line) => line.endsWith("/activity-instances/i-here")).length;
+  const before = reads();
+  await vi.waitFor(() => expect(reads()).toBeGreaterThan(before), { timeout: 15_000 });
+  expect(leaver.closedAt()).toBeUndefined();
+  s.discord.outage.on = false;
+
+  // 501 leaves the voice channel: the bot's next read of the instance no longer lists them.
+  const instance = s.discord.instances["i-here"] as { users: string[] };
+  instance.users = instance.users.filter((id) => id !== "501");
+  const left = Date.now();
+  await vi.waitFor(() => expect(leaver.closedAt()).toBeDefined(), { timeout: 15_000, interval: 100 });
+  expect(leaver.closedAt()! - left).toBeLessThan(15_000);
+
+  // The friend, still in the instance, keeps receiving media after that pass.
+  const seenByFriend = friend.frames.length;
+  await vi.waitFor(() => {
+    publish();
+    expect(friend.frames.length).toBeGreaterThan(seenByFriend);
+  });
+  expect(friend.closedAt()).toBeUndefined();
+}, 45_000);
 
 it("refuses outsiders, unlaunched channels, foreign apps, forged bearers and a missing play source", async () => {
   const s = await stack();

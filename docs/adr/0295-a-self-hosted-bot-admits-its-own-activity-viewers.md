@@ -58,12 +58,19 @@ authorizing again with `prompt: "none"` through the same SDK instance and
 admitting again, then swaps sockets without clearing the picture. Each renewal
 re-reads the instance.
 
-## Known limit
+## Leaving ends media within seconds
 
-A viewer who leaves the voice channel, or loses permission, keeps the current
-grant until it lapses. Revocation is bounded at about five minutes, against
-hosted's 15-second revalidation. [VUH-2834](https://linear.app/vuhlp/issue/VUH-2834)
-tracks tightening it.
+Amended by [#373](https://github.com/Volpestyle/clankie/issues/373) (was the
+known limit tracked as VUH-2834). The service also re-reads, with the bot
+token, every instance it admitted a viewer from, every five seconds. When a
+viewer is no longer in the instance's `users`, or Discord no longer has the
+instance, the service revokes that viewer's grants through the Activity's
+private control listener (`POST /shares/{id}/revoke`). That ends sockets
+already using them, so a viewer who leaves loses media within about 15
+seconds, in line with hosted's revalidation. A Discord outage or rate limit
+(429 or 5xx, or no answer) removes nobody; the next pass decides. Only the
+bot's own read decides, never a client claim. A grant that fails to revoke
+stays tracked and is revoked again on the next pass.
 
 Room share tools launch through the same path
 ([VUH-2835](https://linear.app/vuhlp/issue/VUH-2835)): with self-hosted

@@ -313,7 +313,7 @@ superseded or retired record in its own status paragraph, starting with
 - [0292: Onboarding opens an explicit local seat](0292-onboarding-opens-an-explicit-local-seat.md) — Accepted (VUH-2784, James's 1a decision, 2026-10-25).
 - [0293: A seat is sized by its work, not its window](0293-a-seat-is-sized-by-its-work-not-its-window.md) — Accepted (lead, 2026-10-26, ratifying the budgets James requested).
 - [0294: Owner activity glimpses follow live presence](0294-owner-activity-glimpses-follow-live-presence.md) — Accepted (VUH-2819, 2026-10-25).
-- [0295: A self-hosted bot admits its own Activity viewers](0295-a-self-hosted-bot-admits-its-own-activity-viewers.md) — Accepted (VUH-2833, 2026-10-25).
+- [0295: A self-hosted bot admits its own Activity viewers](0295-a-self-hosted-bot-admits-its-own-activity-viewers.md) — Accepted (VUH-2833, 2026-10-25), amended 2026-11-02 so a viewer who leaves loses media within about 15 seconds (#373).
 - [0296: Hired workers run under an OS profile that keeps the owner's credentials](0296-hired-workers-run-under-an-os-profile.md) — Accepted for implementation (VUH-2592, 2026-10-26).
 - [0297: Hosted evidence uses renewable tenant credentials](0297-hosted-evidence-uses-renewable-tenant-credentials.md) — Retired by ADR 0300, which removed the hosted body.
 - [0298: Linked repos are read-only sources, never owners](0298-linked-repos-are-read-only-sources.md) — Accepted by the lead for LOCAL-VUH-41, 2026-10-27.
