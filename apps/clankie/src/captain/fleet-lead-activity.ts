@@ -2,7 +2,7 @@ import type { FleetLeadTouch } from "@clankie/protocol/fleet-leads";
 
 export interface LeadActivityObservation {
   deviceId?: string;
-  channel?: string;
+  channel?: string | undefined;
   at: string;
   touch?: FleetLeadTouch;
 }
