@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import WebSocket, { WebSocketServer } from "ws";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
 import { RemoteCodexSeats } from "../src/remote-codex-seats.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -226,8 +226,8 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
     expect(catalogReceived).toBe(false);
     seat.expectTools?.(["clankie_tools", "clankie_call"]);
     const firstTurn = seat.send("first brief");
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(statusReads).toBeGreaterThan(0);
+    // The send is held on the assignment check: wait for that check, not a fixed time.
+    await vi.waitFor(() => expect(statusReads).toBeGreaterThan(0), { timeout: 10_000, interval: 5 });
     expect(turns).toBe(0);
     assigned = true; // Trusted SeatView.bound callback completes before adapter sends.
     const reply = await catalog;
