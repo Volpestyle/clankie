@@ -93,6 +93,20 @@ const INSTRUCTIONS =
   "A question or decision you need from your lead goes to Clankie with message_clankie, then continue " +
   "with other work or wait for his reply; do not ask it through your harness's own ask-the-user prompt, " +
   "which only the person at this pane sees.";
+/**
+ * What a worker needs from every message_clankie result (#378): whether this
+ * call's message reached Clankie (`sent`: true, false or "unknown") and whether
+ * calling again can help (`retryable`). A call again never sends an original
+ * twice: the bridge's receipt journal only reconciles it.
+ */
+function typedReceipt(receipt, retained = false) {
+  if (receipt.received === true) return { ...receipt, sent: true, retryable: false };
+  // An earlier unresolved original was reported in place of this message.
+  if (retained) return { ...receipt, sent: false, retryable: true };
+  // A receipt with a delivery ID may have reached the service; one without was never posted.
+  const sent = receipt.deliveryStage === "uncertain" && receipt.deliveryId !== undefined ? "unknown" : false;
+  return { ...receipt, sent, retryable: receipt.deliveryStage !== "rejected" };
+}
 /** Clankie admits a local agent by its pane's process tree; a shared Codex daemon is outside it. */
 const SHARED_DAEMON_NOTE =
   "This Codex session runs its tools on the shared app-server daemon, which belongs to no pane, " +
@@ -1203,15 +1217,27 @@ export function runSeatChannel({
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
-    await reconcileRefresh();
-    const receipt =
-      retainedInbound ??
-      (await sendInbound(body.slice(0, TEXT_MAX), {
-        urgent: urgent === true,
-        ...(REPORT_KINDS.has(kind) ? { kind } : {}),
-      }));
-    retainedInbound = undefined;
-    return { isError: !receipt.received, text: JSON.stringify(receipt) };
+    let receipt;
+    let retained = false;
+    try {
+      await reconcileRefresh();
+      retained = retainedInbound !== undefined;
+      receipt =
+        retainedInbound ??
+        (await sendInbound(body.slice(0, TEXT_MAX), {
+          urgent: urgent === true,
+          ...(REPORT_KINDS.has(kind) ? { kind } : {}),
+        }));
+      retainedInbound = undefined;
+    } catch (error) {
+      // Never a bare tool failure (#378): the receipt journal still fences any original.
+      receipt = {
+        received: false,
+        deliveryStage: "uncertain",
+        detail: `The report bridge failed before returning a receipt (${error instanceof Error ? error.message : String(error)}). Call message_clankie again: it only reconciles an earlier original and never sends it twice.`,
+      };
+    }
+    return { isError: !receipt.received, text: JSON.stringify(typedReceipt(receipt, retained)) };
   }
 
   const seenPermissions = new Set();

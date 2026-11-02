@@ -2,7 +2,7 @@
 export const MESSAGE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
+    'Send Clankie, the agent leading this machine\'s fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message. Every result says sent (true, false, or "unknown" when it may have arrived) and retryable (whether calling again can help).',
   inputSchema: {
     type: "object",
     properties: {

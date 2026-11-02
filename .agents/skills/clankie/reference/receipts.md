@@ -13,6 +13,14 @@ own pane's native prompt; this does not create an app ask or supply an answer.
 Notification failures include a credential-redacted cause in the hook reason
 and service log. Permission prompts remain denied if notification fails.
 
+Every `message_clankie` result says `sent` (`true`, `false`, or `"unknown"` when
+the message may have arrived) and `retryable` (whether calling again can help).
+Calling again is always safe: it only reconciles an unresolved original and never
+sends it twice. `sent: false` with `retryable: true` means nothing reached
+Clankie yet, for example a fresh bridge whose binding wasn't ready; call again.
+`retryable: false` on a refusal means a retry cannot help until the seat is
+admitted again.
+
 Sender progress also arrives as `worker-report-receipt` channel events: stored,
 taken into a lead turn, then acknowledged. They never wake you on their own;
 they arrive with your next real event, such as your lead's next message, and
