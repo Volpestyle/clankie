@@ -245,9 +245,11 @@ into their terminal (ADR 0207), and their reads pass through the same
 agent-only scope as Herdr's (ADR 0307). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 It answers only for a pane with a live coding agent, and only with what that
-agent showed after the line that launched it (ADR 0307); its refusal is final.
-When that line can't be found, the agent's first screen is held back and the
-read carries a `note` saying so. Only
+agent showed (ADR 0307); its refusal is final. A pane Clankie hired into (a
+tab he opened for that hire, on this Mac or a linked PC, still held by the
+hired occupant) is read whole, so a quiet hire still shows its last screen. For
+an agent the owner started by hand, what the pane showed at its first read is
+held back and the read carries a `note` saying so. Only
 against an older service without `terminal_read` does it fall back to the tail
 stream, which reaches this Mac's panes only. `list_agents` asks the catalog to probe each linked machine
 (`includeMachines`). It names every linked machine, even one running no

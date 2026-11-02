@@ -111,3 +111,13 @@ agent showed.
   terminal runs only a silent launcher that execs the harness Clankie started, so
   nothing in it is the owner's, and holding back its first screen would only
   blind its lead. The owner's own desktop-app terminals keep the cut.
+- A hire in a Herdr pane, on this Mac or a linked PC, is read whole too
+  (amended 2026-11-01, #298). Clankie opened that tab for the hire, so its
+  history holds only the shell's start, his own launch line and the agent's
+  output; holding back the first screen left a quiet hire (waiting on CI)
+  unreadable to its lead. It counts only while the fleet roster carries a hire
+  claim (`owner.hired`) for that seat and for the exact native session in the
+  pane now; an adopted or hand-started agent, or a different session in the
+  same pane, keeps the cut. The claim names the session, not the process, so a
+  hired session the owner resumes by hand in that pane after shell work there
+  would show that shell work, the same kind of gap as the suspend case above.
