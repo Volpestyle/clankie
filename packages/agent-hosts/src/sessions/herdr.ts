@@ -306,11 +306,23 @@ export function createHerdrSessionSource(
           status: "refused",
           detail: `It's ${refusal.status}, not finished. Close it once it's idle, or message it to wrap up first.`,
         };
-      const where = refusal.worktrees.map((worktree) => worktree.path).join(", ");
+      const where = refusal.worktrees
+        .map((worktree) => {
+          const details = [
+            `state=${worktree.state}`,
+            ...(worktree.reason === undefined ? [] : [`reason=${worktree.reason}`]),
+            ...(worktree.dirtyFiles === undefined ? [] : [`dirtyFiles=${worktree.dirtyFiles}`]),
+            ...(worktree.unlandedCommits === undefined
+              ? []
+              : [`unlandedCommits=${worktree.unlandedCommits}`]),
+          ];
+          return `${worktree.path}: ${details.join("; ")}`;
+        })
+        .join(" | ");
       return {
         id,
         status: "refused",
-        detail: `Its worktree has work that hasn't landed${where.length === 0 ? "" : ` (${where})`}. Land it first, or close again with leave_unlanded saying why it can stay behind.`,
+        detail: `Its worktree is held${where.length === 0 ? "" : ` (${where})`}. Reconcile it first, or close again with leave_unlanded saying why it can stay behind.`,
       };
     },
 

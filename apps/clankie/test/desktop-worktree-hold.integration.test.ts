@@ -11,9 +11,13 @@ it("observes local desktop worktrees while retaining dirty, unlanded, unreadable
   const root = join(scratch, "repository");
   await mkdir(root);
   const git = async (...args: string[]) =>
-    promisify(execFile)("git", ["-C", root, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args], {
-      env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
-    });
+    promisify(execFile)(
+      "git",
+      ["-C", root, "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...args],
+      {
+        env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))),
+      },
+    );
   try {
     await git("init", "--initial-branch=main");
     await git("config", "user.name", "Fixture");
@@ -23,12 +27,18 @@ it("observes local desktop worktrees while retaining dirty, unlanded, unreadable
     await git("commit", "-m", "baseline");
     await git("update-ref", "refs/remotes/origin/main", "HEAD");
     const tree = join(scratch, "worker");
-    await git("worktree", "add", "-b", "read-only", tree, "origin/main");
+    await git("worktree", "add", "--no-track", "-b", "read-only", tree, "origin/main");
     const hold = (paneId = "herdr-core/tproof", foregroundWorkingDirectory?: string) =>
-      workerWorktreeHold({ paneId, workingDirectory: tree, ...(foregroundWorkingDirectory ? { foregroundWorkingDirectory } : {}) });
+      workerWorktreeHold({
+        paneId,
+        workingDirectory: tree,
+        ...(foregroundWorkingDirectory ? { foregroundWorkingDirectory } : {}),
+      });
     expect(await hold()).toEqual([]);
     await writeFile(join(tree, "draft"), "unfinished\n");
-    expect(await hold()).toMatchObject([{ path: tree, state: "unreconciled", dirtyFiles: 1, unlandedCommits: 0 }]);
+    expect(await hold()).toMatchObject([
+      { path: tree, state: "unreconciled", dirtyFiles: 1, unlandedCommits: 0 },
+    ]);
     await git("-C", tree, "add", "draft");
     await git("-C", tree, "commit", "-m", "unlanded work");
     expect(await hold()).toMatchObject([{ state: "unreconciled", dirtyFiles: 0, unlandedCommits: 1 }]);
@@ -38,7 +48,9 @@ it("observes local desktop worktrees while retaining dirty, unlanded, unreadable
     expect(await hold("herdr-core/tproof", root)).toMatchObject([{ path: root, dirtyFiles: 1 }]);
     await git("update-ref", "-d", "refs/remotes/origin/main");
     expect(await hold()).toMatchObject([{ state: "unknown", reason: expect.any(String) }]);
-    expect(await hold("other-mac/term_proof")).toEqual([{ path: tree, state: "unknown", reason: "Remote fleet worktree" }]);
+    expect(await hold("other-mac/term_proof")).toEqual([
+      { path: tree, state: "unknown", reason: "Remote fleet worktree" },
+    ]);
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

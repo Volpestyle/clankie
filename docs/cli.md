@@ -2136,7 +2136,10 @@ agent Clankie or a connected app hired, only while it is idle or done, and only
 when its worktree has no unlanded work, unless the app gives `leave_unlanded`
 with a reason, which is recorded as left behind. An agent you started, or one
 you asked Clankie to hire, stays yours to close. Each close the app asks is
-logged as `connector.close_agent` with its device.
+logged as `connector.close_agent` with its device. A worktree refusal includes each
+path's reconciliation state, Git observation reason when unavailable, dirty-file
+count and unlanded-commit count when known. Local `herdr-core/` hires are checked
+on this machine, including both their starting and foreground directories.
 
 `clankie connector detect` says whether Herdr sessions are discovered
 ([ADR 0312](adr/0312-a-cleared-session-is-rediscovered.md)). It is on until you

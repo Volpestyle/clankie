@@ -404,8 +404,10 @@ async function startConnectorRelay(
               {
                 path: "C:\\code\\kh2-wt",
                 state: "unreconciled",
+                dirtyFiles: 3,
                 unlandedCommits: 2,
               },
+              { path: "/unreadable/tree", state: "unknown", reason: "Git observation unavailable" },
             ],
           });
         if (request.seatId === "pc1/done" || request.seatId === "pc1/unlanded") return closeOf();
@@ -1086,6 +1088,10 @@ describe("Claude connector MCP endpoint", () => {
     const held = await close("herdr:pc1/unlanded");
     expect(held.isError).toBe(true);
     expect(textOf(held)).toContain("kh2-wt");
+    expect(textOf(held)).toContain("state=unreconciled");
+    expect(textOf(held)).toContain("dirtyFiles=3");
+    expect(textOf(held)).toContain("unlandedCommits=2");
+    expect(textOf(held)).toContain("/unreadable/tree: state=unknown; reason=Git observation unavailable");
     expect(textOf(held)).toContain("leave_unlanded");
     const left = await close("herdr:pc1/unlanded", {
       leave_unlanded: "  superseded by #212  ",
