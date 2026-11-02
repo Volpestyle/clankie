@@ -609,8 +609,9 @@ it("names the generated key when a drop is unavailable, so a retry with it files
   const offline = await f.cli(...args);
   expect(offline.status).toBe(1);
   expect(offline.output).toContain("An attachment couldn't be stored, so the drop was not filed.");
-  const key = /Retry with --key (\S+): it never files twice\./u.exec(offline.output)?.[1];
+  const key = /Retry with --key=(\S+): it never files twice\./u.exec(offline.output)?.[1];
   if (key === undefined) throw new Error(offline.output);
+  expect(key).toMatch(/^[a-f0-9]{36}$/u);
   vi.spyOn(f.evidence, "upload").mockRejectedValueOnce(new Error("evidence store offline"));
   const json = await f.cli(...args, "--json");
   expect(JSON.parse(json.output)).toMatchObject({

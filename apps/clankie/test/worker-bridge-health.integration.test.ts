@@ -1000,8 +1000,15 @@ it.each([false, true])(
       name: "message_clankie",
       arguments: { text: "report after admission loss" },
     });
-    expect(decoded(result.result).detail).toContain("Ask Clankie");
-    expect(f.requests()).toBe(before);
+    // Explicit reports recheck current admission even after background polling stops.
+    expect(decoded(result.result)).toMatchObject({ received: true, deliveryStage: "stored" });
+    expect(f.bindingGets()).toBe(1);
+    expect(f.messagePosts()).toBe(1);
+    const afterReport = f.requests();
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(f.requests()).toBe(afterReport);
+    expect(f.mailboxPolls()).toBe(1);
+    expect(f.mailboxAcks()).toBe(ack ? 1 : 0);
   },
 );
 
