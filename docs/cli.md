@@ -5745,6 +5745,11 @@ proofs are in
 
 ### `join`
 
+On the home Mac, `clankie machines legacy-joins [on|off]` reads or changes
+whether new legacy machine joins may start (Advanced, CLI only; default on).
+Turning it off applies immediately; pending ticket claims and already joined
+machines keep working. Re-enable it before starting another legacy join.
+
 An outbound machine connection needs no SSH alias or inbound port. On the
 joining Mac or Windows PC, run:
 
