@@ -303,7 +303,7 @@ async function linkedCheckpointBug(
       (url) => url === runUrl,
     ) ||
     ((text.match(/\b[a-f0-9]{7,64}\b/giu) ?? []).some((sha) => commit.startsWith(sha.toLowerCase())) &&
-      failingJobs.every((name) => (text.match(/\b[\w-]+\b/gu) ?? []).includes(name)));
+      failingJobs.every((name) => (text.match(/\b[\w-]+\b/gu) ?? []).some((word) => word === name)));
   for (const term of [runUrl, commit, commit.slice(0, 12), commit.slice(0, 8), commit.slice(0, 7)]) {
     const q = encodeURIComponent(`repo:${repo} is:issue "${term}"`);
     for (let page = 1; page <= 10; page++) {
