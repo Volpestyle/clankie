@@ -63,9 +63,14 @@ it("resolves a local-only commit by SHA without reaching origin", async () => {
     expect(await updateCommit(f.checkout, ref, f.base, run)).toMatchObject({ newCommit: local });
 });
 
-it("refuses an unknown abbreviation", async () => {
+it("refuses an unknown abbreviation or branch with git's reason, not its command line (#377)", async () => {
   const f = fixture();
-  await expect(updateCommit(f.checkout, "deadbeef0", f.base, run)).rejects.toThrow();
+  await expect(updateCommit(f.checkout, "deadbeef0", f.base, run)).rejects.toThrow(
+    /^Update ref "deadbeef0" could not be resolved now: fatal: Needed a single revision$/u,
+  );
+  await expect(updateCommit(f.checkout, "no-such-branch", f.base, run)).rejects.toThrow(
+    /^Update ref "no-such-branch" could not be resolved now: fatal: couldn't find remote ref/u,
+  );
 });
 
 it("refuses a 7-digit prefix shared by a local old commit and a fetched-only new commit", async () => {

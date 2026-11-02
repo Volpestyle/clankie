@@ -38,6 +38,7 @@ import { managedService, stopTarget } from "../bin/services.ts";
 
 import { createClankieApp } from "../../clankie/src/app.ts";
 import { createStubCaptain } from "../../clankie/src/captain/port.ts";
+import { DeployHolds } from "../../clankie/src/deploy-holds.ts";
 import { ClankieSettingsSchema } from "@clankie/settings";
 import { text } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -349,6 +350,67 @@ it("audits the CLI initiating operator and labels environment attribution as cla
     await new Promise<void>((resolve) => server.close(() => resolve()));
     service.close();
   }
+});
+
+it("words an unresolvable --ref the same way with and without deploy holds, through the CLI (#377)", async () => {
+  const f = fixture();
+  const holds = new DeployHolds(join(f.home, "holds"));
+  await holds.acquire({ id: randomUUID(), holder: "fixture", reason: "hold the deploy", minutes: 30 });
+  const unresolvable = /^Error: Update ref "deadbee7" could not be resolved now: fatal: /u;
+  for (const deployHolds of [undefined, holds]) {
+    const service = await createClankieApp({
+      captain: createStubCaptain(),
+      settings: { load: async () => ClankieSettingsSchema.parse({ schemaVersion: 1 }) },
+      eventLogPath: join(f.home, "events.jsonl"),
+      runtimeUpdater: f.updater,
+      ...(deployHolds === undefined ? {} : { deployHolds }),
+      authenticateOperator: async (request) =>
+        request.headers.get("authorization") === "Bearer fixture-owner"
+          ? { operatorId: "owner-id" }
+          : undefined,
+    });
+    const server = createHttpServer(async (request, response) => {
+      const body = await text(request);
+      const result = await service.app.request(request.url!, {
+        method: request.method ?? "GET",
+        headers: Object.fromEntries(
+          Object.entries(request.headers).map(([name, value]) => [
+            name,
+            Array.isArray(value) ? value.join(",") : (value ?? ""),
+          ]),
+        ),
+        ...(body ? { body } : {}),
+      });
+      response.writeHead(result.status, Object.fromEntries(result.headers));
+      response.end(await result.text());
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw Error("No fixture address");
+    const cli = {
+      host: `http://127.0.0.1:${address.port}`,
+      env: { CLANKIE_OPERATOR_TOKEN: "fixture-owner" },
+    };
+    // A hold is only passed by an owner override; the ref is then the reason it refuses.
+    const override = deployHolds === undefined ? [] : ["--override-holds", "--reason", "fixture override"];
+    try {
+      const refused = (await runUpdateCommand(["--ref", "deadbee7", ...override, "--json"], cli)) as {
+        error?: string;
+        detail?: string;
+      };
+      expect(refused.error).toBe("update_refused");
+      expect(refused.detail).toMatch(unresolvable);
+      expect(refused.detail).not.toContain("rev-parse");
+      expect(f.launches).toHaveLength(0);
+      expect(f.updater.status().pending).toBeUndefined();
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      service.close();
+    }
+  }
+  // An abbreviation that exists still resolves.
+  expect((await f.updater.preview!(f.latest.slice(0, 9))).newCommit).toBe(f.latest);
 });
 
 async function port() {
