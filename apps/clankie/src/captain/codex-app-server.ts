@@ -169,7 +169,7 @@ export class CodexAppServerClient {
   request(method: string, params: RecordValue, timeoutMs = this.timeoutMs): Promise<unknown> {
     // A connection that already failed never writes this request.
     if (this.failure) return Promise.reject(new CodexNotSentError(this.failure));
-    if (this.socket.readyState !== WebSocket.OPEN)
+    if (this.socket.readyState === WebSocket.CLOSING || this.socket.readyState === WebSocket.CLOSED)
       return Promise.reject(new CodexNotSentError(new Error("Codex app-server disconnected")));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
