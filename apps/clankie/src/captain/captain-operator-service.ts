@@ -1012,12 +1012,17 @@ export function createOperatorService(
     }
     if (request.op === "herdr_core_list") {
       const listed = await herdrCore().list();
+      // An agent on this Mac carries the Mac's own name, as its fleet seats do, so the
+      // Mac is listed once rather than again as a separate machine (#244).
+      const local = hostname().slice(0, 64);
       return listed.status === "listed"
         ? {
             op: "herdr_core_list",
             schemaVersion: 1,
             status: "listed",
-            agents: [...listed.agents],
+            agents: listed.agents.map((agent) =>
+              agent.machine === undefined && local.length > 0 ? { ...agent, machine: local } : agent,
+            ),
           }
         : {
             op: "herdr_core_list",

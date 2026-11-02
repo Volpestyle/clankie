@@ -107,8 +107,10 @@ export function createHerdrSessionSource(
             source: "herdr",
             harness: terminal.agent,
             machine:
-              machines.get(runtime ?? "default") ??
-              (runtime === undefined || runtime === "default" ? localMachine : runtime),
+              runtime === undefined || runtime === "default"
+                ? // This Mac's name from any of its seats, Herdr's or the desktop app's (#244).
+                  (machines.get("default") ?? machines.get("herdr-core") ?? localMachine)
+                : (machines.get(runtime) ?? runtime),
             ...(terminal.label.length === 0 ? {} : { title: terminal.label }),
             canMessage: false,
           });
