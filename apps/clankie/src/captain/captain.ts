@@ -866,6 +866,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     return selectHireProject(source, destination, input.projectId);
   };
   const herdrWatches: HerdrWatchStore = new HerdrWatchStore(join(options.stateDir, "herdr-watches.json"), {
+    onWorkerSettled: (seatId, occupantId) => {
+      const starter = herdrWatches.seatStarter(seatId, occupantId);
+      if (starter?.kind === "app" && starter.notify)
+        deps.leadWakes?.workerReport(starter.notify.lead, {
+          agent: `herdr:${seatId}`,
+          ref: starter.notify.ref,
+          event: "settled",
+          at: new Date().toISOString(),
+        });
+    },
     requireWorkerAccess: (fleet) => requireAccess(fleet, "workers"),
     // A re-adopted seat named only after its pane's title takes a handle (VUH-2667).
     onReadopted: (seat) => {
@@ -6284,6 +6294,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     : `; observed lead pane ${route.diagnostic.leadPaneId}`
                 }.\n\n${message}`
               : message;
+          const starter = agent.session
+            ? herdrWatches.seatStarter(agent.terminalId, occupantIdForHerdrSession(agent.session))
+            : undefined;
           const accepted = await inboundReceipts.accept(
             agent.paneId,
             delivery,
@@ -6298,8 +6311,25 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             route.native ?? { kind: "conversation", owner: target },
             options?.urgent === true,
             agent.terminalId,
+            starter?.kind === "app"
+              ? {
+                  deviceId: starter.deviceId,
+                  ...(starter.notify === undefined ? {} : { ref: starter.notify.ref }),
+                }
+              : undefined,
           );
           if (accepted.received) {
+            try {
+              if (starter?.kind === "app" && starter.notify)
+                deps.leadWakes?.workerReport(starter.notify.lead, {
+                  agent: `herdr:${agent.terminalId}`,
+                  ref: starter.notify.ref,
+                  event: "report",
+                  at: new Date().toISOString(),
+                });
+            } catch (error) {
+              console.warn("Worker report notification failed", String(error));
+            }
             try {
               paneTidy.keepReport(agent, text);
             } catch {
@@ -6487,6 +6517,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async close(): Promise<void> {
       clearInterval(usageSampler);
+      deps.leadWakes?.close();
       shutdown.abort(new SeatLinkInterruptedError());
       seatEfficiency.close();
       fleetRoster.close();

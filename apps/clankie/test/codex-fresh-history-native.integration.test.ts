@@ -142,9 +142,13 @@ async function nativeFixture(managedNaming = false) {
       )
       .not.toBe("active");
   };
-  const start = (startView: () => Promise<void>, resumeThreadId?: string) =>
+  const start = (
+    startView: (args: readonly string[]) => Promise<void>,
+    resumeThreadId?: string,
+    cwd = root,
+  ) =>
     startCodexAppServerSeat({
-      cwd: root,
+      cwd,
       server,
       startView,
       ...(resumeThreadId === undefined ? {} : { resumeThreadId }),
@@ -384,4 +388,40 @@ nativeIt(
     expect(await readFile(String(named.path), "utf8")).toContain(brief);
   },
   60_000,
+);
+
+// No prompt or turn/start: native thread creation is credential-free and costs nothing.
+nativeIt.each([false, true])(
+  "the hire passes its cwd to a real Codex thread and refuses a server-cwd fallback=%s",
+  async (fallback) => {
+    const f = await nativeFixture();
+    const work = join(f.root, "hire checkout");
+    await mkdir(work);
+    const starting = f.start(
+      async (args) => {
+        expect(args[args.indexOf("--cd") + 1]).toBe(work);
+        // The native view creates the thread. Exercise that API against an owned app-server
+        // whose process cwd deliberately differs, without starting an authenticated TUI.
+        await f.view.request("thread/start", {
+          ...(fallback ? {} : { cwd: args[args.indexOf("--cd") + 1] }),
+          ephemeral: false,
+          approvalPolicy: "never",
+          sandbox: "read-only",
+        });
+      },
+      undefined,
+      work,
+    );
+    if (fallback) {
+      await expect(starting).rejects.toThrow(/thread cwd does not match the prepared checkout/);
+    } else {
+      const seat = await starting;
+      cleanups.push(() => seat.close());
+      const thread = object(
+        object(await f.view.request("thread/read", { threadId: seat.threadId, includeTurns: false })).thread,
+      );
+      expect(thread.cwd).toBe(work);
+      expect(thread.turns).toEqual([]);
+    }
+  },
 );

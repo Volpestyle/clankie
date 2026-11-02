@@ -195,6 +195,7 @@ const HerdrWatchRecordSchema = z
     wakeReceipt: HerdrWatchWakeReceiptSchema.optional(),
     /** A nonterminal working notice was accepted; retain observation without repeating it. */
     workingNoticeDelivered: z.boolean().optional(),
+    workerSettledNotified: z.boolean().optional(),
     noticeSequence: z.number().int().nonnegative().optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
@@ -1037,7 +1038,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireResourceNotices = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
-  private readonly projectRecoveryOnly = new WeakSet<SpawnOperatorSeat>();
+  private readonly projectRecoveryOnly = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectLiveReuse = new WeakSet<SpawnOperatorSeat>();
   private readonly projectContexts = new WeakMap<
     SpawnOperatorSeat,
@@ -1128,6 +1129,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | undefined;
   private readonly accountHolds: (() => Promise<readonly WorkerAccountHold[]>) | undefined;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
+  private readonly onWorkerSettled: ((seatId: string, occupantId: string) => void) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
 
   public constructor(
@@ -1233,6 +1235,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       ) => Promise<boolean | FleetSeatDelivery>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
+      /** Best-effort notification before a settled watch waits for its lead's report round. */
+      readonly onWorkerSettled?: (seatId: string, occupantId: string) => void;
       /** A seat re-adopted by its hiring conversation, for its persona's name (VUH-2667). */
       readonly onReadopted?: (seat: {
         occupantId: string;
@@ -1242,6 +1246,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }) => void;
     } = {},
   ) {
+    this.onWorkerSettled = options.onWorkerSettled;
     this.path = path;
     this.remoteHireReceipts = options.remoteHireReceipts;
     this.channelReceipt = options.channelReceipt;
@@ -2555,6 +2560,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return { ...proof, pane };
   }
 
+  /** Describe the original blocker and existing operator recovery commands; never changes it. */
+  private projectHireBlocker(id: string): string {
+    const allocation = this.projectHires.allocation(id);
+    const request = allocation?.request;
+    const baseKey =
+      request === undefined
+        ? undefined
+        : JSON.stringify([request.fleet ?? "local", request.harness, request.workingDirectory, "new"]);
+    const receipts = this.hireReceipts.all().filter(([key, record]) => {
+      if (request?.freshIntent !== undefined) return record.freshHire?.id === request.freshIntent.id;
+      if (baseKey === undefined) return false;
+      return (
+        (record.freshHire?.baseKey ?? record.hireBaseKey ?? key) === baseKey &&
+        (allocation?.pane === undefined || record.paneId === allocation.pane)
+      );
+    });
+    const receipt = receipts.length === 1 ? receipts[0]![1] : undefined;
+    const receiptId = receipt?.messageId;
+    return `${this.projectHires.describe(id)}; native receipt ${receiptId ?? "not recorded"}. Owner: inspect the original agent; if it is gone, run \`clankie hire-receipt settle ${receiptId ?? id} abandoned\`, then \`clankie hire-receipt settle ${id} release-allocation\``;
+  }
+
   public async spawnSeat(
     inputRequest: HireRequest,
     subjectOverride?: string,
@@ -2725,7 +2751,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return {
           outcome: "failed",
           reason: "start_unconfirmed",
-          detail: "The earlier hire is still starting. Wait for its result before trying again.",
+          detail: `The earlier hire is still starting. No new agent was started. Blocking ${this.projectHireBlocker(reserved.id)}.`,
         };
       allocation = reserved.id;
       const harness = reserved.request.harness;
@@ -2740,7 +2766,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(authority === undefined ? {} : { authority }),
       });
       if (reused) this.projectLiveReuse.add(seat);
-      if (reserved.reused) this.projectRecoveryOnly.add(seat);
+      if (reserved.reused) this.projectRecoveryOnly.set(seat, reserved.id);
       this.activeProjectHires.add(allocation);
       const result = await this.spawnAdmittedSeat(
         seat,
@@ -3010,7 +3036,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Who asked, for display only (ADR 0321): a connected app, the owner's own app, else Clankie.
       const startedBy =
         authority.connectorPlace?.deviceId !== undefined
-          ? ({ kind: "app", deviceId: authority.connectorPlace.deviceId } as const)
+          ? ({
+              kind: "app",
+              deviceId: authority.connectorPlace.deviceId,
+              ...(authority.connectorPlace.notify === undefined
+                ? {}
+                : { notify: authority.connectorPlace.notify }),
+            } as const)
           : authority.ownerHire !== undefined
             ? ({ kind: "owner" } as const)
             : undefined;
@@ -3293,17 +3325,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptId: pending.messageId,
           reason: "delivery_unconfirmed",
           deliveryStage: "uncertain",
-          detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
+          detail: this.projectRecoveryOnly.has(input)
+            ? `The earlier hire still needs checking. No new agent was started. Blocking ${this.projectHireBlocker(this.projectRecoveryOnly.get(input)!)}.`
+            : `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
         };
       } finally {
         this.activeHires.delete(receiptKey);
       }
     }
-    if (this.projectRecoveryOnly.has(input))
+    const blockingAllocation = this.projectRecoveryOnly.get(input);
+    if (blockingAllocation !== undefined)
       return {
         outcome: "failed",
         reason: "start_unconfirmed",
-        detail: "The earlier hire still needs checking. No new agent was started.",
+        detail: `The earlier hire still needs checking. No new agent was started. Blocking ${this.projectHireBlocker(blockingAllocation)}.`,
       };
     let receipt: UncertainReceipt;
     try {
@@ -3841,6 +3876,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptId: receipt.messageId,
           place: key,
           pane: receipt.paneId ?? "none recorded",
+          ...(settled.allocationId === undefined
+            ? {}
+            : { allocationId: settled.allocationId, allocation: settled.detail }),
         });
     }
   }
@@ -3859,7 +3897,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const settled = this.hireReceipts.settlement(receiptId);
     if (settled)
       return settled.journal === "local-host-inventory" && settled.disposition === "abandoned"
-        ? { state: "abandoned", receiptId, evidence: settled }
+        ? this.releaseSettledHireAllocation(settled.receiptKey, settled.pane?.paneId, guard, {
+            state: "abandoned",
+            receiptId,
+            evidence: settled,
+          })
         : refused("Original receipt already has a different retained disposition.");
     const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
     if (!original) return refused("No unresolved original local hire receipt; nothing settled.");
@@ -3887,6 +3929,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         "Complete local Herdr inventory and pane process info are unavailable; nothing settled.",
       );
     this.activeHires.add(key);
+    let abandoned: HireReceiptSettlement & { state: "abandoned" };
     try {
       const observe = async () => {
         const inventory = await this.runner.list!(inventoryFleet);
@@ -3936,13 +3979,58 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(final.pane === undefined ? {} : { pane: final.pane }),
       };
       this.hireReceipts.settleLocal(key, receiptId, evidence);
-      return { state: "abandoned", receiptId, evidence };
+      abandoned = { state: "abandoned", receiptId, evidence };
     } catch (error) {
       return refused(
         `Local settlement refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
       );
     } finally {
       this.activeHires.delete(key);
+    }
+    return this.releaseSettledHireAllocation(key, receipt.paneId, guard, abandoned);
+  }
+
+  /**
+   * A settled local hire's own project allocation would otherwise keep refusing
+   * every new hire in its place ("The earlier hire still needs checking"). Free it
+   * through the operator release-allocation path, with that path's own complete
+   * inventory checks: nothing in the original pane but its shell, and no worker in
+   * its directory. The settlement stands whether or not the release passes.
+   */
+  private async releaseSettledHireAllocation(
+    receiptKey: string,
+    paneId: string | undefined,
+    guard: () => Promise<void>,
+    abandoned: HireReceiptSettlement & { state: "abandoned" },
+  ): Promise<HireReceiptSettlement> {
+    if (paneId === undefined) return abandoned;
+    const [, harness, cwd] = JSON.parse(receiptKey) as string[];
+    if (!harness || !cwd) return abandoned;
+    const candidates = this.projectHires.unresolvedLocal(cwd, paneId, harness);
+    if (candidates.length !== 1) return abandoned;
+    const allocationId = candidates[0]!.id;
+    try {
+      const released = await this.settleNativeHireReceipt(allocationId, guard, "release-allocation");
+      return {
+        ...abandoned,
+        allocationId,
+        detail:
+          released.state === "allocation-released"
+            ? "Its project allocation was released too, so its place takes a new hire."
+            : `Its project allocation still holds the place: ${"detail" in released ? released.detail : released.state}`.slice(
+                0,
+                OPERATOR_CONVERSATION_SUMMARY_MAX,
+              ),
+      };
+    } catch (error) {
+      return {
+        ...abandoned,
+        allocationId,
+        detail: `Its project allocation still holds the place: ${reasonDetail(error)}`.slice(
+          0,
+          OPERATOR_CONVERSATION_SUMMARY_MAX,
+        ),
+      };
     }
   }
 
@@ -4520,6 +4608,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(sessionId === undefined ? {} : { sessionId }),
       });
     }
+    if (input.harness === "codex" && agent.workingDirectory !== input.workingDirectory)
+      throw new Error("The seat cwd does not match the prepared checkout; startup is unconfirmed");
     const allocation = this.projectAllocations.get(input);
     if (allocation) {
       this.projectHires.pane(allocation, agent.paneId);
@@ -5200,6 +5290,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
             const matches = (current: HerdrAgentSnapshot) =>
               current.paneId === paneId &&
               current.agent === ref.harness &&
+              (ref.harness !== "codex" || current.workingDirectory === input.workingDirectory) &&
               current.status !== "offline" &&
               current.status !== "unknown" &&
               nativeSessionId(current) === ref.sessionId;
@@ -5535,6 +5626,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }
       const args = [
         ...skillLaunch.args,
+        // Bare Codex hires use its shared daemon: the terminal cwd does not select the thread cwd.
+        ...(input.harness === "codex" ? ["--cd", input.workingDirectory] : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
@@ -6646,6 +6739,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.save();
         },
       };
+      if (!workingObservation && record.occupantId && !record.workerSettledNotified && this.onWorkerSettled) {
+        record.workerSettledNotified = true;
+        this.save();
+        try {
+          this.onWorkerSettled(record.terminalId, record.occupantId);
+        } catch (error) {
+          console.warn("Worker settled notification failed", String(error));
+        }
+      }
       if (!this.wake) return;
       if (routine && owner.discord === undefined && record.wakeReceipt === undefined) {
         // A blocker arriving before the round must not wait behind this notice.

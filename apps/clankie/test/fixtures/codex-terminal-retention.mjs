@@ -49,9 +49,15 @@ server.on("connection", (socket) => {
       request.method === "thread/loaded/list"
         ? { data: [threadId], nextCursor: null }
         : request.method === "thread/read"
-          ? { thread: { id: threadId, turns: request.params.includeTurns && idleTurn ? [idleTurn] : [] } }
+          ? {
+              thread: {
+                id: threadId,
+                cwd: process.cwd(),
+                turns: request.params.includeTurns && idleTurn ? [idleTurn] : [],
+              },
+            }
           : request.method === "thread/resume"
-            ? { thread: { id: threadId, turns: [] } }
+            ? { thread: { id: threadId, cwd: process.cwd(), turns: [] } }
             : request.method === "thread/turns/list"
               ? { data: [] }
               : {};

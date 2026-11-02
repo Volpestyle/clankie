@@ -21,6 +21,34 @@ Production mounts the public Cognito discovery document at
 issuer's JWKS. A Mac route is derived from the authenticated account subject and
 its random installation id, so there is no host registry.
 
+Account access tokens must include `iat`, have a positive lifetime (`exp - iat`)
+of at most 3600 seconds, and be unexpired. Every account-authenticated
+`/gateway/v1/hosts/connect` also checks provider authorization with Cognito
+[GetUser](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GetUser.html),
+using the access token itself and its `aws.cognito.signin.user.admin` scope;
+no IAM credentials are needed. The gateway caches status for the exact token
+for up to 30 seconds (never past expiry), coalesces concurrent checks, and bounds
+the cache to 10,000 entries. Web authorization's default remains uncached.
+
+Cognito uses `origin_jti` to associate tokens with a revoked refresh-token
+family. The [revocation endpoint](https://docs.aws.amazon.com/cognito/latest/developerguide/revocation-endpoint.html)
+revokes refresh tokens; it is not an access-token introspection endpoint. Local
+JWT signature verification alone cannot observe revocation.
+[Global sign-out](https://docs.aws.amazon.com/cognito-user-identity-pools/latest/APIReference/API_GlobalSignOut.html)
+also invalidates access tokens for token-authorized Cognito operations, including
+GetUser.
+
+Open account host sockets schedule the next authorization check within 30 seconds
+after the preceding check, or at expiry if sooner. Confirmed provider refusal closes the socket with code
+4001 and reason `host credential revoked or invalid`; expiry closes it with
+4001 and `host credential expired`. Cached successes and the next recheck
+can delay detection; each provider request has a five-second timeout.
+If Cognito is unreachable, throttled, or returns an unusable response, new
+connects fail closed once any cached success expires. Existing sockets remain
+open during that outage, with retries, but always close at the original token
+expiry. Rechecks never extend that deadline. Legacy static host credentials do
+not use account-token revocation checks.
+
 The legacy `CLANKIE_GATEWAY_HOST_TOKENS_FILE` path remains during migration. It
 points to a JSON object from opaque host id to a random token of at least 32
 characters. The inline JSON forms exist only for local development; configuring
@@ -118,6 +146,14 @@ The locally generated approval code and execution token never travel in plaintex
 Channel and leave use independently authenticated encrypted machine envelopes;
 the body verifies registry identity and one-use challenges, and the receiver
 checks its original consent ceiling and directories before effects.
+
+Start admission allows four requests per client and refills one per minute,
+while the shared host budget remains 32 requests and refills 0.2/s. During the
+five-minute ticket lifetime, a single address can admit at most nine starts.
+Clients sharing an address share this budget; the gateway uses forwarding
+addresses only from its configured trusted proxy. The home's owner can disable
+new starts immediately with `clankie machines legacy-joins off` (default on).
+Pending claims and existing joined-machine channels remain available.
 
 `/v1/machine-joins/approve` remains inside the ordinary encrypted device request
 with owner/Take Control authorization. Sending it directly returns `426`.

@@ -1479,6 +1479,10 @@ const operatorSeatMigrations = new OperatorSeatMigrations(
   join(stateRoot, "operator-migrations", "migrations.json"),
 );
 const connectorDetection = new ConnectorDetection(join(stateRoot, "connector-detection.json"));
+const leadWakes = createLeadWakes({
+  store: operatorCredentialStore,
+  log: (fields, message) => logger.info({ event: "lead.wake", ...fields }, message),
+});
 const captain = createCaptain(
   {
     inboundReportMigrationReady:
@@ -1491,6 +1495,7 @@ const captain = createCaptain(
               ? {}
               : { operation: process.env.CLANKIE_UPDATE_OPERATION }),
           }),
+    leadWakes,
     harnessProcesses,
     refreshWorkerCatalogs: (input, authority) => workerToolRefresh.refresh(input, authority),
     // World's tools reach him only when World is on at start (ADR 0328).
@@ -2509,10 +2514,7 @@ const clankie = await createClankieApp({
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
-  leadWakes: createLeadWakes({
-    store: operatorCredentialStore,
-    log: (fields, message) => logger.info({ event: "lead.wake", ...fields }, message),
-  }),
+  leadWakes,
   setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,
   evidenceStore,

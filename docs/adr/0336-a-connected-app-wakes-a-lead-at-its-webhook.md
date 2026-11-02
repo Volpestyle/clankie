@@ -48,9 +48,9 @@ of thing: a job's text.
   everything else. There is no other target: a wake goes only to a webhook the
   owner stored.
 
-Clankie does not post worker reports to a lead's webhook. Reports stay in his
-lead threads for `read_inbox` and `read_reports`; a later change may wake a
-lead when reports arrive, on the same stored webhook.
+[ADR 0343](0343-connected-hires-wake-their-lead-on-reports.md) adds content-free
+worker report and settled-watch notifications on the same stored webhook.
+Reports stay in the inbox for `read_reports`; their text never enters these wakes.
 
 ## Consequences
 

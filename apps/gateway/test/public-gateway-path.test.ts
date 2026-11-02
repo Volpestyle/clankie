@@ -1,3 +1,4 @@
+import { runMachinesCommand } from "../../../apps/tui/src/command/machines.ts";
 import { FileCredentialStore } from "../../../packages/credential-broker/src/index.ts";
 import { SettingsStore } from "../../../packages/settings/src/index.ts";
 import { MachineJoins } from "../../../apps/clankie/src/machine-joins.ts";
@@ -66,6 +67,7 @@ describe("public gateway product path", () => {
       const hostId = signedIn ? derivePublicGatewayHostId(accountId, installationId) : HOST_ID;
       const gateway = createPublicGateway({
         hostTokens: new Map([[HOST_ID, HOST_TOKEN]]),
+        trustedProxy: { trusts: () => true, refresh: async () => {} },
         accountConfig: {
           schemaVersion: 1,
           account: {
@@ -238,6 +240,31 @@ describe("public gateway product path", () => {
           },
           body: JSON.stringify(body),
         });
+      const control = (value?: "on" | "off") =>
+        runMachinesCommand(["legacy-joins", ...(value ? [value] : [])], {
+          host: controlOrigin,
+          env: { CLANKIE_OPERATOR_TOKEN: "operator-secret" },
+        });
+      expect(await control()).toEqual({ enabled: true });
+      const settingsUrl = controlOrigin + "/v1/machine-joins/settings";
+      expect(
+        (
+          await fetch(settingsUrl, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: '{"enabled":false}',
+          })
+        ).status,
+      ).toBe(401);
+      expect(
+        (
+          await fetch(settingsUrl, {
+            method: "PATCH",
+            headers: { authorization: "Bearer operator-secret", "content-type": "application/json" },
+            body: '{"enabled":"false"}',
+          })
+        ).status,
+      ).toBe(400);
       const code = randomBytes(32).toString("base64url");
       const claimSecret = randomBytes(32).toString("base64url");
       const started = await post("/v1/machine-joins/start", {
@@ -249,6 +276,33 @@ describe("public gateway product path", () => {
       });
       expect(started.status).toBe(200);
       const ticket = (await started.json()) as { joinId: string };
+      const advertisement = {
+        name: "extra native host",
+        platform: "darwin",
+        directories: [directory],
+        claimSecret,
+        approvalHash: machineJoinHash(randomBytes(32).toString("base64url")),
+      };
+      // Real starts fill only this client's admission budget, leaving another
+      // trusted-proxy client able to create a real ticket in the same home.
+      for (let index = 0; index < 3; index++)
+        expect((await post("/v1/machine-joins/start", advertisement)).status).toBe(200);
+      expect((await post("/v1/machine-joins/start", advertisement)).status).toBe(429);
+      const otherStart = () =>
+        fetch(hostBaseUrl + "/v1/machine-joins/start", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.2" },
+          body: JSON.stringify(advertisement),
+        });
+      expect((await otherStart()).status).toBe(200);
+      expect(await control("off")).toEqual({ enabled: false });
+      expect((await new SettingsStore(join(directory, "settings.json")).load()).legacyMachineJoins).toBe(
+        false,
+      );
+      const refused = await otherStart();
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: "legacy_joins_disabled" });
+
       expect(
         await (await post("/v1/machine-joins/status", { joinId: ticket.joinId }, claimSecret)).json(),
       ).toEqual({ state: "pending" });
@@ -283,6 +337,8 @@ describe("public gateway product path", () => {
         ),
       );
       expect(status.sealedLease).not.toContain(lease.token);
+      // The pending ticket was approved and claimed with admission disabled;
+      // leave it disabled while the real joined shell below keeps operating.
       const machineCredential = { origin: hostBaseUrl, lease, localDirectories: [directory] };
       const abort = new AbortController();
       let capturedEnvelope: unknown;
@@ -307,6 +363,8 @@ describe("public gateway product path", () => {
           { kind: "shell", directory, command: "printf 'joined-through-private-gateway'" },
           4000,
         );
+        expect(await control("on")).toEqual({ enabled: true });
+        expect((await otherStart()).status).toBe(200);
         // The joined machine reports its own exit status first (core VUH-2319).
         expect(result).toMatchObject({ ok: true, output: "[exit 0]\njoined-through-private-gateway" });
         // The native loop uses the real guarded local shell, with no SSH route.

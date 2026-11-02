@@ -67,6 +67,13 @@ export function notifyInboundReportChange(ctx: ConversationStore): void {
   } catch {
     // Observers never change durable admission or dispatch evidence.
   }
+  for (const listener of ctx["inboundReportListeners"]) {
+    try {
+      listener();
+    } catch {
+      /* Observers cannot fail durable report admission. */
+    }
+  }
 }
 
 /** Retained reports survive event trimming, restart and a vanished worker pane. */
@@ -77,6 +84,10 @@ export function inboundReports(
     includeRead?: boolean;
     acceptedAfterMs?: number;
     sender?: { paneId: string; binding: string };
+    seatId?: string | undefined;
+    paneId?: string | undefined;
+    deviceId?: string | undefined;
+    ref?: string | undefined;
   } = {},
 ): InboundReport[] {
   return [...ctx["metas"].values()]
@@ -89,6 +100,12 @@ export function inboundReports(
         .filter(
           (value) =>
             (options.includeRead || value.reportDelivery?.state !== "read") &&
+            (options.deviceId === undefined || value.connectorHire?.deviceId === options.deviceId) &&
+            (options.ref === undefined || value.connectorHire?.ref === options.ref) &&
+            (options.seatId === undefined ||
+              (value.seatId === undefined
+                ? value.paneId === (options.paneId ?? options.seatId)
+                : value.seatId === options.seatId)) &&
             (options.sender === undefined ||
               (value.paneId === options.sender.paneId && value.binding === options.sender.binding)) &&
             (options.acceptedAfterMs === undefined ||
@@ -155,11 +172,20 @@ export function inboundReportSummaries(
 export function readInboundReports(
   ctx: ConversationStore,
   conversationId: string,
-  options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
+  options: {
+    limit?: number | undefined;
+    deliveryIds?: readonly string[] | undefined;
+    seatId?: string | undefined;
+    paneId?: string | undefined;
+    newest?: boolean | undefined;
+    deviceId?: string | undefined;
+    ref?: string | undefined;
+  } = {},
 ): WorkerReportPage {
   const meta = ctx["metas"].get(conversationId);
   if (!meta) throw new Error("Unknown worker-report conversation");
-  const unread = ctx["inboundReports"](conversationId);
+  const unread = ctx["inboundReports"](conversationId, options);
+  if (options.newest) unread.reverse();
   const selectedIds = options.deliveryIds === undefined ? undefined : new Set(options.deliveryIds);
   const selected =
     selectedIds === undefined ? unread : unread.filter((report) => selectedIds.has(report.deliveryId));

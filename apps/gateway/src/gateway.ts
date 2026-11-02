@@ -1,3 +1,4 @@
+import { CognitoRevocationUnavailableError } from "./cognito-jwt.ts";
 import { z } from "zod";
 import {
   isMachineJoinTransportRoute,
@@ -196,6 +197,7 @@ interface HostConnection {
   readonly socket: WebSocket;
   readonly pendingRequestIds: Set<string>;
   readonly credentialDeadline?: ReturnType<typeof setTimeout>;
+  revocationDeadline?: ReturnType<typeof setTimeout>;
   /** The Mac sent `x-clankie-gateway-streams: 1`: it opens a device's sealed stream. */
   readonly carriesStreams: boolean;
   readonly streamIds: Set<string>;
@@ -771,10 +773,22 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       const capacity = bootstrap ? 32 : 512;
       const perSecond = bootstrap ? 0.2 : 256;
       const peer = clientAddress(request, options.trustedProxy);
+      // Four immediate starts and at most five more during a ticket's five-minute
+      // life leave room in the 32-ticket pool for other clients. Never use
+      // caller-supplied forwarding headers unless the socket proxy is trusted.
       if (
-        !takeBudget(joinBudgets, `${category}:peer:${peer}`, capacity, perSecond) ||
-        !takeBudget(joinBudgets, `${category}:host:${hostRoute.hostId}`, capacity, perSecond)
+        !takeBudget(
+          joinBudgets,
+          `${category}:peer:${peer}`,
+          bootstrap ? 4 : capacity,
+          bootstrap ? 1 / 60 : perSecond,
+        )
       ) {
+        response.setHeader("retry-after", bootstrap ? "60" : "1");
+        sendJson(response, 429, { error: "machine_join_rate_limited" });
+        return null;
+      }
+      if (!takeBudget(joinBudgets, `${category}:host:${hostRoute.hostId}`, capacity, perSecond)) {
         response.setHeader("retry-after", bootstrap ? "5" : "1");
         sendJson(response, 429, { error: "machine_join_rate_limited" });
         return null;
@@ -883,6 +897,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
           denyUpgrade(socket);
           return;
         }
+        if (principal.expiresAtMs <= clock()) {
+          denyUpgrade(socket);
+          return;
+        }
         expiresAtMs = principal.expiresAtMs;
         ownerId = `account:${principal.accountId}`;
       } catch {
@@ -894,7 +912,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     // An older Mac never sends the header, so it is never offered a device's stream.
     const carriesStreams = request.headers[PUBLIC_GATEWAY_STREAMS_HEADER] === "1";
     webSockets.handleUpgrade(request, socket, head, (webSocket) =>
-      attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs),
+      attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs, staticAccepted ? undefined : token),
     );
   }
 
@@ -1125,6 +1143,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     socket: WebSocket,
     carriesStreams: boolean,
     expiresAtMs?: number,
+    accountToken?: string,
   ): void {
     const prior = hosts.get(hostId);
     if (prior !== undefined) {
@@ -1133,6 +1152,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
       }
       endHostStreams(prior);
+      if (prior.credentialDeadline !== undefined) clearTimeout(prior.credentialDeadline);
+      if (prior.revocationDeadline !== undefined) clearTimeout(prior.revocationDeadline);
       prior.socket.close(1012, "host connection replaced");
     }
     const credentialDeadline =
@@ -1152,6 +1173,31 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       alive: true,
     };
     hosts.set(hostId, connection);
+    if (accountToken !== undefined && expiresAtMs !== undefined) {
+      const schedule = () => {
+        if (closing || hosts.get(hostId) !== connection || socket.readyState !== WebSocket.OPEN) return;
+        const remaining = expiresAtMs - clock();
+        if (remaining <= 0) {
+          socket.close(4001, "host credential expired");
+          return;
+        }
+        connection.revocationDeadline = setTimeout(() => void recheck(), Math.min(30_000, remaining));
+        connection.revocationDeadline.unref();
+      };
+      const recheck = async () => {
+        try {
+          await options.authenticateAccountToken!(accountToken);
+        } catch (error) {
+          if (!(error instanceof CognitoRevocationUnavailableError)) {
+            socket.close(4001, "host credential revoked or invalid");
+            return;
+          }
+          // An outage cannot extend credentialDeadline. New connects still fail closed.
+        }
+        schedule();
+      };
+      schedule();
+    }
     socket.on("pong", () => {
       connection.alive = true;
     });
@@ -1326,6 +1372,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     if (hosts.get(connection.hostId) !== connection) return;
     hosts.delete(connection.hostId);
     if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
+    if (connection.revocationDeadline !== undefined) clearTimeout(connection.revocationDeadline);
     for (const requestId of connection.pendingRequestIds) {
       const exchange = pending.get(requestId);
       if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
@@ -1496,6 +1543,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       for (const stream of Array.from(streams.values())) endStream(stream, 1001, "gateway");
       for (const connection of hosts.values()) {
         if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
+        if (connection.revocationDeadline !== undefined) clearTimeout(connection.revocationDeadline);
         connection.socket.close(1001, "gateway shutting down");
       }
       webSockets.close();

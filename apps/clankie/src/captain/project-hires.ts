@@ -53,6 +53,8 @@ const AllocationSchema = z
     policy: z.string(),
     request: SpawnOperatorSeatSchema,
     started: z.boolean(),
+    /** Legacy allocations predate a recorded start time. */
+    beganAt: z.number().int().nonnegative().optional(),
     pane: z.string().optional(),
     seat: z.string().optional(),
     occupantId: z.string().optional(),
@@ -258,6 +260,7 @@ export class ProjectHires {
         request,
         policy: launchPolicy(settings, projectId, request.role),
         started: false,
+        beganAt: Date.now(),
         confirmed: false,
         gone: false,
       };
@@ -265,9 +268,19 @@ export class ProjectHires {
       return { ...structuredClone(allocation), reused: false };
     });
   }
+  /** Read-only identity and age for a refused retry; never settles the original hire. */
+  public describe(id: string): string {
+    const entry = this.read().allocations.find((allocation) => allocation.id === id);
+    if (!entry) return `allocation ${id} (age unknown)`;
+    const age =
+      entry.beganAt === undefined
+        ? "age unknown; legacy hire has no recorded start time"
+        : `age ${Math.max(0, Math.floor((Date.now() - entry.beganAt) / 1_000))}s`;
+    return `allocation ${id}${entry.pane === undefined ? "" : ` in pane ${entry.pane}`} (${age})`;
+  }
   private blockerDetail(entry: Allocation): string {
     const intent = entry.request.freshIntent?.id;
-    return `Allocation ${entry.id} retains pane ${entry.pane ?? "unobserved"} (seat ${entry.seat ?? "unobserved"}; intent ${intent ?? "legacy"}). ${intent ? (this.receiptDetail?.(intent) ?? "Inspect original receipt.") : "Inspect original receipt."} Blocks different intent or launch scope. Settlement leaves allocation held. Owning lead: keep report; close_worker_pane with reason (owner/process/draft/work guards). Complete pane-absent inventory releases it. Never replay or substitute intent.`;
+    return `Blocking hire ${this.describe(entry.id)} retains pane ${entry.pane ?? "unobserved"} (seat ${entry.seat ?? "unobserved"}; intent ${intent ?? "legacy"}). ${intent ? (this.receiptDetail?.(intent) ?? "Inspect original receipt.") : "Inspect original receipt."} Blocks different intent or launch scope. Settlement leaves allocation held. Owning lead: keep report; close_worker_pane with reason (owner/process/draft/work guards). Complete pane-absent inventory releases it. Never replay or substitute intent.`;
   }
   /** Exact retained launch for retirement; this does not confer confirmed project membership. */
   public retirementCandidate(fleet: string, pane: string) {
@@ -496,6 +509,18 @@ export class ProjectHires {
   /** Operator recovery snapshots retain the original allocation; they confer no launch authority. */
   public recoveryCandidate(id: string): Allocation | undefined {
     return this.read().allocations.find((a) => a.id === id && !a.confirmed && (!a.gone || a.operatorRelease));
+  }
+  /** Read only: this machine's unresolved allocations recorded for one pane in one directory. */
+  public unresolvedLocal(workingDirectory: string, pane: string, harness: string): Allocation[] {
+    return this.read().allocations.filter(
+      (a) =>
+        !a.confirmed &&
+        !a.gone &&
+        a.request.fleet === undefined &&
+        a.pane === pane &&
+        a.request.workingDirectory === workingDirectory &&
+        (a.request.harness ?? "codex") === harness,
+    );
   }
   public release(candidate: Allocation, inventory: unknown): void {
     this.change((state) => {

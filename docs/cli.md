@@ -1106,15 +1106,19 @@ original key, brief fingerprint, pane observation (shell PID when present) and
 inventory digest. It claims neither launch nor delivery. The original moves to
 `local-settled:ORIGINAL_UUID` in the receipt journal, so a new hire into that
 directory starts normally. Nothing is sent, replayed or closed, and repeating
-the command reads the retained disposition. A local project allocation whose
-original pane is absent or holds only its own shell can then be released with
-`release-allocation`. Failed starts expose the original native `receiptId` to
+the command reads the retained disposition. The same settlement then frees the
+hire's own local project allocation (same harness, directory and recorded pane)
+through `release-allocation`'s checks, so the place takes a new hire. The result
+names it in `allocationId`, and its `detail` says whether it was released or why
+the place is still held, such as another worker in that directory. Settling the
+receipt again retries that release; `release-allocation` remains available.
+Failed starts expose the original native `receiptId` to
 the hiring lead. Older failures that omitted it can be recovered by the operator
 with `clankie hire-receipt settle ALLOCATION_UUID abandoned`: the service resolves
 exactly one retained local receipt with the same harness, directory and pane,
-then applies the same two-census abandonment. The result returns that native
-receipt UUID. Follow with `clankie hire-receipt settle ALLOCATION_UUID
-release-allocation`; no launch history is rewritten and no brief is replayed.
+then applies the same two-census abandonment and allocation release. The result
+returns that native receipt UUID. No launch history is rewritten and no brief is
+replayed.
 
 `clankie hire-receipt settle ID adopt` is the operator's path for a local hire
 that launched but never confirmed, so its hiring lead cannot reach it (`message_seat`
@@ -2019,6 +2023,22 @@ sign-in waits with that code, or `already_decided`. Approve only a code you see
 on a page you opened. An approved connector is a device in `clankie devices`
 with `scope: "connector"`; `clankie devices revoke ID` disconnects it.
 
+Refresh tokens rotate on use and expire after 90 idle days. Presenting a verified
+refresh token older than the device's current binding disconnects that connector
+device and ends every access and refresh token it holds. The `device.revoked`
+event names the device and app (`revokedBy: "connector-refresh-reuse"`); the
+owner's conversation receives the existing service notice, `clankie devices
+--json` shows the revocation, and `clankie doctor` names the disconnected app
+and device (`connectorRefreshRevocations` in JSON). Sign in again to reconnect.
+Malformed tokens, invalid signatures and tokens for another client return
+`invalid_grant` without disconnecting the device. Concurrent sessions and lost
+refresh responses have a narrow race window: the token matching the immediately
+previous binding returns `invalid_grant` without revoking while the current
+binding is less than 60 seconds old. The service warns `connector.refresh.raced`
+with the device id. This does not return the already-issued token pair. The
+previous binding survives restart through event replay. A token two rotations
+old revokes immediately, and the previous token revokes at 60 seconds or later.
+
 The same URL works in Claude Code and Codex, which sign in through a loopback
 callback, and in hosted apps such as Grok, which return to their own https
 address; each shows the same kind of code to approve, and the sign-in names the
@@ -2027,7 +2047,12 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `start_agent` takes an optional
+`start_agent` existed sign in again to use it. A service refusal keeps its own words.
+A blocked project hire names its allocation, native receipt when recorded, pane
+when observed, age (unknown for legacy records), and existing owner recovery
+commands. A lost answer or HTTP 502 stays uncertain: read `list_agents` before
+retrying, because the agent may already exist. No refusal automatically settles
+the blocking hire. `start_agent` takes an optional
 `account`, a label exactly as `fleet_capacity` names it for that machine and
 harness ([ADR 0340](adr/0340-connected-apps-name-the-hire-account.md)). Left out,
 Clankie picks the account with the most spare capacity and skips any the owner
@@ -2137,6 +2162,20 @@ leads with a webhook (JSON `{ "ok": true, "leads": [...] }`), `wake clear LEAD`
 forgets one, and `wake send LEAD TEXT` hands the lead a job as you, exiting 1
 unless its webhook took it. Connected apps send one with the connector's
 `wake_lead` tool; the lead answers on the notes board.
+
+Connected hires may opt into that webhook with `start_agent`'s
+`notify: {lead: "duet", ref: "thread-id"}`. Worker reports and settled watches
+send `kind: "worker_report"`, containing only service-owned ids and event facts,
+never worker text. The first event sends immediately; later events batch over
+120 seconds per lead. Read the durable report with `read_reports`, using its
+`thread` and `agent` or hire `ref`. Connected reads include only the authenticated
+app's hires, newest first by default. `waitSeconds` (0–45) waits without polling
+for a matching unread report, returning empty at the deadline; a positive wait
+requires `agent` or `ref`. Keep your thread's ids/ref: OAuth identifies the app,
+whose threads share a device. Claude Code routine fire starts a fresh session
+and cannot resume the hiring Duet thread; the bounded read can wait in that
+thread itself. Anthropic routine fire webhooks
+receive `anthropic-version: 2026-10-21`.
 
 ```bash
 printf '%s\n%s\n' "$WEBHOOK_URL" "$WEBHOOK_KEY" | clankie connector wake set grok
@@ -5211,7 +5250,9 @@ is refused while the desktop app isn't running. `herdr` keeps them in panes, and
 `auto`, the default, keeps them in panes until the desktop app's hires are
 proven. Other harnesses stay in Herdr panes for now, and hires already running
 stay where they are. A Codex hire in the desktop app keeps its tools until the
-service restarts; rehire it after that.
+service restarts; rehire it after that. New Codex hires explicitly select their
+prepared checkout with `--cd`; startup refuses a different or missing pane cwd,
+and briefed hires also verify the native thread cwd before sending the brief.
 
 `--closure` and `--machine-setup` both default to `lead`:
 
@@ -5740,6 +5781,11 @@ proofs are in
 [VUH-2583 evidence](testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
 
 ### `join`
+
+On the home Mac, `clankie machines legacy-joins [on|off]` reads or changes
+whether new legacy machine joins may start (Advanced, CLI only; default on).
+Turning it off applies immediately; pending ticket claims and already joined
+machines keep working. Re-enable it before starting another legacy join.
 
 An outbound machine connection needs no SSH alias or inbound port. On the
 joining Mac or Windows PC, run:

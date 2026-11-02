@@ -143,3 +143,14 @@ Access refusals are retained per machine and required level and appear in
 read is `GET /v1/machines/access-refusals`, also available as
 `clankie machines access-refusals --json`; it names the machine and owner fix.
 Resolved refusals leave the doctor view after the owner's grant covers them.
+
+## Legacy machine join admission
+
+On the home Mac, `clankie machines legacy-joins [on|off]` reads or changes
+`legacyMachineJoins` through owner-authenticated `GET|PATCH /v1/machine-joins/settings`
+(`{ "enabled": false }`). This Advanced control defaults on and applies immediately.
+Off refuses new starts with `legacy_joins_disabled`; pending claims and joined
+machine channels keep working. Turn it on before initiating another legacy join.
+The gateway admits four starts per client, refilling one per minute, alongside
+the shared host budget (32 starts, refilling 0.2/s). Clients sharing an address
+share a budget; only configured trusted proxies supply client addresses.

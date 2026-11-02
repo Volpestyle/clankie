@@ -100,6 +100,20 @@ own `/mcp` on a trusted network.
   with `scope: "connector"` and `CONNECTOR_GRANTS`; its device session token is
   the access token (an hour), and refresh tokens rotate on every use and stop
   working after 90 idle days. `clankie devices revoke` ends both.
+  Amendment (2026-11-01): presenting a verified refresh token older than the
+  device's current binding revokes that connector device and all its tokens.
+  The revocation records the device and app and sends an owner service notice;
+  the device list and `clankie doctor` show it. Invalid tokens remain
+  `invalid_grant` without revocation. The immediately previous binding gets a
+  narrow race window while the current binding is less than 60 seconds old:
+  return `invalid_grant` without revocation and warn `connector.refresh.raced`
+  with the device id. This accommodates concurrent Claude sessions and lost
+  refresh responses without storing tokens or returning the issued pair.
+  The previous binding is projected from the activation and refresh events,
+  including on replay. Any older token, or the previous one at 60 seconds or
+  later, revokes the device. An attacker who refreshes first is still caught
+  when the real client next refreshes, normally much later than 60 seconds.
+  Sign in again after revocation to reconnect.
 - **Narrow by the scope, not the grants.** The service answers a connector
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it

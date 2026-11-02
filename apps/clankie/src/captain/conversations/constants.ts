@@ -84,6 +84,11 @@ export const InboundAcceptanceSchema = z
     binding: z.string(),
     fingerprint: z.string(),
     paneId: z.string(),
+    seatId: z.string().optional(),
+    connectorHire: z
+      .object({ deviceId: z.string().min(1), ref: z.string().min(1).optional() })
+      .strict()
+      .optional(),
     text: z.string(),
     message: z.string(),
     runId: z.string(),

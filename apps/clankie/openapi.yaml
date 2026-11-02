@@ -79,6 +79,37 @@ paths:
         "403": { description: Owner grant or browser origin refused }
         "409": { description: Settings or owner authority changed; read before reviewing again }
         "503": { description: Settings unavailable }
+  /v1/machine-joins/settings:
+    get:
+      tags: [Workers]
+      operationId: getLegacyMachineJoins
+      summary: Read whether new legacy joins are enabled (owner only)
+      responses:
+        "200": { description: Object with enabled boolean; defaults true }
+        "401": { description: Owner authentication required }
+        "403": { description: Owner authority required }
+        "503": { description: Join registry unavailable }
+    patch:
+      tags: [Workers]
+      operationId: setLegacyMachineJoins
+      summary: Enable or disable new legacy join starts (owner only, immediate)
+      description: Pending claims and existing joined machines keep working. Advanced CLI control.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Object with enabled boolean }
+        "400": { description: Malformed setting }
+        "401": { description: Owner authentication required }
+        "403": { description: Owner authority required }
+        "503": { description: Join registry unavailable }
   /v1/machine-joins/start:
     post:
       tags: [Workers]
@@ -100,6 +131,8 @@ paths:
       responses:
         "200": { description: joinId and expiresAt; no approval secret or execution capability }
         "400": { description: Invalid advertisement or capacity exceeded }
+        "403": { description: legacy_joins_disabled; the owner has disabled new starts }
+        "429": { description: Gateway client or host start budget exhausted }
         "503": { description: Join registry unavailable }
   /v1/machine-joins/status:
     post:

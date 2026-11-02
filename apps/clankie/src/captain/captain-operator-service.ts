@@ -356,14 +356,40 @@ export function createOperatorService(
         };
       }
       if (request.op === "worker_reports") {
-        return {
-          op: request.op,
-          schemaVersion: 1,
-          page: ctx.conversations.readInboundReports(request.conversationId, {
-            ...(request.limit === undefined ? {} : { limit: request.limit }),
-            ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
-          }),
+        const seatId =
+          request.agent === undefined
+            ? undefined
+            : request.agent.startsWith("herdr:")
+              ? request.agent.slice(6)
+              : "";
+        // Older reports predate retained seat ids; a current seat can still find its pane's reports.
+        const native = seatId
+          ? await ctx.herdrRunner.resolveTerminal(seatId).catch(() => undefined)
+          : undefined;
+        await assertConversationAuthority(admitted);
+        if (request.waitSeconds && request.agent === undefined && request.ref === undefined)
+          throw new ConversationRefusedError("Waiting for reports requires your agent or hire ref");
+        const filter = {
+          ...(request.limit === undefined ? {} : { limit: request.limit }),
+          ...(seatId === undefined ? {} : { seatId }),
+          ...(native === undefined ? {} : { paneId: native.paneId }),
+          newest: request.newest ?? true,
+          ...(request.appDeviceId === undefined ? {} : { deviceId: request.appDeviceId }),
+          ...(request.ref === undefined ? {} : { ref: request.ref }),
+          ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
         };
+        const page = request.waitSeconds
+          ? await ctx.conversations.waitForInboundReports(
+              request.conversationId,
+              filter,
+              request.waitSeconds,
+              tailSignal === undefined
+                ? ctx.shutdown.signal
+                : AbortSignal.any([tailSignal, ctx.shutdown.signal]),
+            )
+          : ctx.conversations.readInboundReports(request.conversationId, filter);
+        await assertConversationAuthority(admitted);
+        return { op: request.op, schemaVersion: 1, page };
       }
       if (request.op === "acknowledge_worker_report_history") {
         if (!authority || authority.principal.kind !== "operator")
@@ -976,10 +1002,15 @@ export function createOperatorService(
           owner: { conversationId: lead },
           // The owner granted this place; Clankie's thread only leads the seat, so its own
           // agent's project doesn't decide where the new one works.
-          // The asking app's device is kept only to say who started the agent (ADR 0321).
+          // Keep the hiring app and optional report wake reference with the seat (ADR 0343).
           connectorPlace: {
             projectId: chosen.projectId,
-            ...(authority?.principal.kind === "device" ? { deviceId: authority.principal.id } : {}),
+            ...(request.notify === undefined ? {} : { notify: request.notify }),
+            ...(request.appDeviceId !== undefined
+              ? { deviceId: request.appDeviceId }
+              : authority?.principal.kind === "device"
+                ? { deviceId: authority.principal.id }
+                : {}),
           },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
@@ -1012,12 +1043,17 @@ export function createOperatorService(
     }
     if (request.op === "herdr_core_list") {
       const listed = await herdrCore().list();
+      // An agent on this Mac carries the Mac's own name, as its fleet seats do, so the
+      // Mac is listed once rather than again as a separate machine (#244).
+      const local = hostname().slice(0, 64);
       return listed.status === "listed"
         ? {
             op: "herdr_core_list",
             schemaVersion: 1,
             status: "listed",
-            agents: [...listed.agents],
+            agents: listed.agents.map((agent) =>
+              agent.machine === undefined && local.length > 0 ? { ...agent, machine: local } : agent,
+            ),
           }
         : {
             op: "herdr_core_list",
@@ -1764,18 +1800,14 @@ function startAgentPlaces(settings: ClankieSettings): {
 }
 
 function startAgentRefusal(reason: string, detail?: string, receiptId?: string): string {
-  // An earlier start that never confirmed holds its directory until the owner settles it,
-  // so the refusal names the receipt and how: adopt a harness still running in its own
-  // terminal, abandon one whose terminal is gone or holds only a shell.
+  // A service answer is authoritative, including an explicit refusal that started nothing.
+  // Do not infer uncertainty from the broad hire failure reason (ADR 0207).
+  if (detail?.trim()) return detail.length <= 1_200 ? detail : `${detail.slice(0, 1_199)}…`;
   const settle =
     receiptId !== undefined && (reason === "delivery_unconfirmed" || reason === "start_unconfirmed")
-      ? ` To clear it, the owner runs \`clankie hire-receipt settle ${receiptId} adopt\` if that agent is still running, otherwise \`clankie hire-receipt settle ${receiptId} abandoned\`.`
+      ? ` Inspect original hire receipt ${receiptId} before trying again.`
       : "";
-  const words = `${startAgentRefusalWords(reason)}${settle}`;
-  const why = detail?.trim();
-  if (!why) return words;
-  const full = `${words} Clankie said: ${why.endsWith(".") ? why : `${why}.`}`;
-  return full.length <= 1_200 ? full : `${full.slice(0, 1_199)}…`;
+  return `${startAgentRefusalWords(reason)}${settle}`;
 }
 
 function startAgentRefusalWords(reason: string): string {

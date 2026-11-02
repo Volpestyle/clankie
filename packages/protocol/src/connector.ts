@@ -234,6 +234,17 @@ export const LeadWakeNameSchema = z
   .trim()
   .toLowerCase()
   .regex(/^[a-z0-9][a-z0-9-]{0,31}$/u, "A lead's name is 1 to 32 letters, digits or dashes, such as grok");
+export const WorkerNotifySchema = z
+  .object({
+    lead: LeadWakeNameSchema,
+    ref: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9._:-]+$/u),
+  })
+  .strict();
+export type WorkerNotify = z.infer<typeof WorkerNotifySchema>;
 export const LeadWakeResultSchema = z
   .object({
     outcome: z.enum(["sent", "not_set", "refused", "uncertain", "unavailable"]),
