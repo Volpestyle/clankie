@@ -178,7 +178,9 @@ export type FleetHealthAlertDelivery =
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
-  /** Host-selected prototype lane; does not grant room or machine authority. */
+  /** Retain the full request so a durable turn can resume it (ADR 0284); grants no authority. */
+  retainsDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
+  /** A durable turn (or a follow-up it absorbed) left unsettled by an earlier process. */
   canResumeDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   fleetRoster?(options?: {
     includeWork?: boolean;

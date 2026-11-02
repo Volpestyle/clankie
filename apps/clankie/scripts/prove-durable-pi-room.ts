@@ -67,7 +67,6 @@ const env: NodeJS.ProcessEnv = {
   VITEST: "true",
   CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(root, "fleet-resources"),
   CLANKIE_CAPTAIN_STEER_SOURCE_LANE: "discord_text",
-  CLANKIE_DURABLE_PI_ROOM: "dm:99999000002",
 };
 const authorization = `Bearer ${preset.CLANKIE_CAPTAIN_TOKEN}`;
 const url = preset.CLANKIE_CAPTAIN_URL!;

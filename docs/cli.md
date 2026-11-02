@@ -1340,14 +1340,14 @@ one loop run one at a time. Keep it on a scratch service until the
 [ADR 0291](adr/0291-a-room-thinks-in-one-loop.md) eval passes: the lanes eval's
 `--room-loop` flag sets it for its private service.
 
-#### Durable Pi room prototype (VUH-2574)
+#### Durable Pi turns (VUH-2574, #368)
 
-A service host may opt one text-room target into restart recovery with
-`CLANKIE_DURABLE_PI_ROOM=guildId:channelId` (or `dm:channelId`). It is disabled
-when absent and refuses a linked main conversation or native room driver. It
-uses existing channel-turn POST/GET routes and delivery IDs; the setting grants
-no room or machine authority. Keep it on a private scratch service until the
-[rollout requirements](adr/0284-a-service-restart-pauses-one-pi-room-turn.md) pass.
+A Pi turn for an owner-only audience survives a service restart: the owner's own
+messages through the official bot in a DM or a proven owner-only room. There is no
+setting. Recovery waits for the Discord body to redeliver the same message, uses the
+existing channel-turn POST/GET routes and delivery IDs, and grants no room or machine
+authority ([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). Mixed
+rooms, voice and native children keep their existing interruption behaviour.
 
 Run the manual real-model proof from the checkout with an existing API credential
 for the chosen model (no OAuth credential is copied):
