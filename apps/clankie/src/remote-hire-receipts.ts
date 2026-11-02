@@ -34,7 +34,8 @@ export interface RemoteHireReceipts {
   ): Promise<RemoteHireClaim | undefined>;
   reserve(claim: RemoteHireClaim): Promise<void>;
   launch(claim: RemoteHireClaim): Promise<void>;
-  seal(claim: RemoteHireClaim): Promise<HireNoLaunchEvidence>;
+  /** `commandUnsent`: the launch was committed but only an unconfirmed workspace create ran (#326). */
+  seal(claim: RemoteHireClaim, options?: { readonly commandUnsent?: true }): Promise<HireNoLaunchEvidence>;
   recover(claim: RemoteHireClaim, recovery: RemoteHireRecovery): Promise<HireRecoveryEvidence>;
 }
 
@@ -77,13 +78,19 @@ export function remoteHireReceiptCommand(
   recovery?: RemoteHireRecovery,
   /** Printed only by the loader's refusal; unique per dispatch so no program output can imitate it. */
   refusal = `${PROGRAM_MISSING}${randomBytes(8).toString("hex")}`,
+  commandUnsent?: true,
 ): string {
   return boundedCommand(claim.target.shell, [
     "-e",
     LOADER,
     REMOTE_HIRE_RECEIPT_PROGRAM_DIGEST,
     refusal,
-    JSON.stringify({ op, claim, ...(recovery ? { recovery } : {}) }),
+    JSON.stringify({
+      op,
+      claim,
+      ...(recovery ? { recovery } : {}),
+      ...(commandUnsent ? { commandUnsent } : {}),
+    }),
   ]);
 }
 
@@ -119,6 +126,7 @@ export function createRemoteHireReceipts(options: {
     claim: RemoteHireClaim,
     op: "reserve" | "launch" | "seal" | "recover",
     recovery?: RemoteHireRecovery,
+    commandUnsent?: true,
   ) => {
     const fleet = await options.fleet(claim.target.fleet);
     if (!fleet || !isDeepStrictEqual(target(fleet), claim.target))
@@ -139,7 +147,7 @@ export function createRemoteHireReceipts(options: {
         },
       );
     const refusal = `${PROGRAM_MISSING}${randomBytes(8).toString("hex")}`;
-    const command = remoteHireReceiptCommand(claim, op, recovery, refusal);
+    const command = remoteHireReceiptCommand(claim, op, recovery, refusal, commandUnsent);
     let result = await dispatch(command);
     // Only the loader's own refusal, which precedes the program, admits a second dispatch.
     if ("error" in result && result.error.includes(refusal)) {
@@ -196,9 +204,12 @@ export function createRemoteHireReceipts(options: {
         throw new Error("Host recovery did not match the original receipt");
       return proof;
     },
-    async seal(claim) {
-      const proof = HireNoLaunchEvidenceSchema.parse(await operation(claim, "seal"));
+    async seal(claim, options) {
+      const proof = HireNoLaunchEvidenceSchema.parse(
+        await operation(claim, "seal", undefined, options?.commandUnsent),
+      );
       if (
+        (proof.journal === "launch-committed-command-unsent") !== (options?.commandUnsent === true) ||
         proof.receiptId !== claim.receiptId ||
         proof.receiptKey !== claim.receiptKey ||
         proof.fingerprint !== claim.fingerprint ||

@@ -3816,7 +3816,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (disposition !== "not-launched") return this.recoverHireReceipt(receiptId, guard, disposition);
     const settled = this.hireReceipts.settlement(receiptId);
     if (settled)
-      return settled.journal === "reserved-to-sealed-without-launch" || settled.journal === "never-reserved"
+      return settled.journal === "reserved-to-sealed-without-launch" ||
+        settled.journal === "never-reserved" ||
+        settled.journal === "launch-committed-command-unsent"
         ? { state: "settled-not-launched", receiptId, evidence: settled }
         : refused("Original receipt already has a different retained disposition.");
     const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
@@ -3827,7 +3829,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (
       !claim ||
       !this.remoteHireReceipts ||
-      receipt.remoteLaunchCommitted ||
+      (receipt.remoteLaunchCommitted && !receipt.remoteCommandUnsent) ||
       receipt.paneId ||
       receipt.sessionId ||
       receipt.occupantId
@@ -3837,7 +3839,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
       );
     try {
       await guard();
-      const evidence = await this.remoteHireReceipts.seal(claim);
+      const evidence = await this.remoteHireReceipts.seal(
+        claim,
+        receipt.remoteCommandUnsent ? { commandUnsent: true } : undefined,
+      );
       await guard();
       if (this.activeHires.has(key))
         return refused("Original hire became active during census; local receipt remains fenced.");
@@ -5211,6 +5216,21 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (remote === undefined && caught instanceof HireLayoutNotStarted) {
         const allocation = this.projectAllocations.get(input);
         if (allocation) this.projectHires.notStarted(allocation);
+      }
+      // Only the workspace create went unanswered: no harness command left this
+      // service and nothing prepared ran first, so the PC's journal may seal it (#326).
+      if (
+        caught instanceof HireLayoutUnconfirmed &&
+        caught.commandUnsent &&
+        caught.paneId === undefined &&
+        remote !== undefined &&
+        nativePrepared === undefined &&
+        prepared === undefined &&
+        receiptKey !== undefined
+      ) {
+        const receipt = this.hireReceipts.pending(receiptKey);
+        if (receipt?.remoteLaunchCommitted && !receipt.paneId)
+          this.hireReceipts.update(receiptKey, receipt.messageId, { remoteCommandUnsent: true });
       }
       if (caught instanceof HireLayoutUnconfirmed && caught.paneId) {
         const pane = remote === undefined ? caught.paneId : `${remote}/${caught.paneId}`;

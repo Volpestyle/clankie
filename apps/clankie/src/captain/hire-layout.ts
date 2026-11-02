@@ -43,11 +43,23 @@ const SOURCE = "clankie-hire-layout";
 export class HireLayoutNotStarted extends Error {}
 export class HireLayoutUnconfirmed extends Error {
   readonly paneId: string | undefined;
-  constructor(detail: string, paneId?: string) {
+  /**
+   * Only a workspace create was unconfirmed: it carries no harness command, so
+   * at most a starter shell can exist for the hire (#326).
+   */
+  readonly commandUnsent: boolean;
+  constructor(detail: string, paneId?: string, commandUnsent = false) {
     super(detail);
     this.paneId = paneId;
+    this.commandUnsent = commandUnsent;
   }
 }
+/**
+ * A workspace create starts the workspace's own shell before it answers. Over a
+ * fleet link that also pays SSH and, on Windows, a PowerShell host per write, so
+ * the 20 s read timeout lost creates on a joined PC that did not finish in time (#326).
+ */
+export const WORKSPACE_CREATE_TIMEOUT_MS = 60_000;
 interface HireLayoutInput {
   readonly cwd: string;
   readonly label: string;
@@ -58,7 +70,7 @@ interface HireLayoutInput {
   readonly env?: Readonly<Record<string, string>>;
   readonly command?: readonly string[];
 }
-type Run = (args: readonly string[]) => Promise<string>;
+type Run = (args: readonly string[], signal?: AbortSignal, timeoutMs?: number) => Promise<string>;
 
 /** One runner per bound Herdr server; serialize its new allocations, never existing panes. */
 export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandTab) => Promise<string>) {
@@ -159,7 +171,11 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
           .object({ result: z.object({ workspace: Workspace, tab: z.object({ tab_id: z.string() }) }) })
           .parse(
             JSON.parse(
-              await run(["workspace", "create", "--cwd", repo.cwd, "--label", repo.label, "--no-focus"]),
+              await run(
+                ["workspace", "create", "--cwd", repo.cwd, "--label", repo.label, "--no-focus"],
+                undefined,
+                WORKSPACE_CREATE_TIMEOUT_MS,
+              ),
             ),
           ).result;
         workspace = created.workspace;
@@ -177,6 +193,8 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       } catch (error) {
         throw new HireLayoutUnconfirmed(
           `First hire workspace creation unconfirmed; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+          undefined,
+          true,
         );
       }
     }
@@ -273,16 +291,20 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
           })
           .parse(
             JSON.parse(
-              await run([
-                "workspace",
-                "create",
-                "--cwd",
-                input.cwd,
-                "--label",
-                repo.label,
-                "--no-focus",
-                ...(input.command ? [] : envArgs),
-              ]),
+              await run(
+                [
+                  "workspace",
+                  "create",
+                  "--cwd",
+                  input.cwd,
+                  "--label",
+                  repo.label,
+                  "--no-focus",
+                  ...(input.command ? [] : envArgs),
+                ],
+                undefined,
+                WORKSPACE_CREATE_TIMEOUT_MS,
+              ),
             ),
           ).result;
         created = {
@@ -293,6 +315,8 @@ export function createHireLayout(run: Run, commandTab?: (input: PreparedCommandT
       } catch (error) {
         throw new HireLayoutUnconfirmed(
           `Hire workspace creation unconfirmed; inspect Herdr before retrying: ${error instanceof Error ? error.message : String(error)}`,
+          undefined,
+          true,
         );
       }
       if (input.command) {

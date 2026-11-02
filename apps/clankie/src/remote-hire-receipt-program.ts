@@ -84,7 +84,11 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
         }
         if (request.op !== "recover" && record.state === "sealed" && record.evidence)
             return record.evidence;
-        if (request.op !== "recover" && record.state !== "reserved")
+        // A committed launch whose only effect was an unconfirmed workspace create (#326).
+        const commandUnsent = request.op === "seal" && request.commandUnsent === true;
+        if (request.commandUnsent !== undefined && !(commandUnsent && existing && record.state === "launching"))
+            throw new Error("Command-unsent settlement requires the original launching journal");
+        if (request.op !== "recover" && record.state !== "reserved" && !commandUnsent)
             throw new Error("Host history crossed the launch boundary");
         const priorUnknown = record.recoveries?.at(-1);
         if (priorUnknown?.request?.disposition === "abandoned-unknown" &&
@@ -265,11 +269,13 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
         }
         // The reserved journal covers the entire interval: every authorized effect needs launch CAS.
         // Absence from a live listing alone is never sufficient and cannot recover legacy records.
-        if (neverReserved) {
+        if (neverReserved || commandUnsent) {
             const cwd = JSON.parse(claim.receiptKey)[2];
             const normalize = value => typeof value !== "string" ? value : process.platform === "win32" ? path.win32.normalize(value).toLowerCase() : path.resolve(value);
-            if (typeof cwd !== "string" || panes.some(pane => normalize(pane.cwd) === normalize(cwd)))
-                throw new Error("A pane runs in the original hire's directory; it may have launched without this host's journal");
+            if (typeof cwd !== "string" || [...panes, ...finalPanes].some(pane => normalize(pane.cwd) === normalize(cwd)))
+                throw new Error(neverReserved
+                    ? "A pane runs in the original hire's directory; it may have launched without this host's journal"
+                    : "A pane runs in the original hire's directory; its workspace create may have landed late. Close it before settling");
         }
         const observedAt = Date.now();
         const evidence = {
@@ -287,7 +293,7 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                     .length,
                 sha256: digest([panes, agents, processes]),
             },
-            journal: neverReserved ? "never-reserved" : "reserved-to-sealed-without-launch",
+            journal: neverReserved ? "never-reserved" : commandUnsent ? "launch-committed-command-unsent" : "reserved-to-sealed-without-launch",
         };
         // Created exclusively, so a reserve arriving later finds it sealed and refuses.
         write({ ...record, state: "sealed", evidence }, neverReserved);

@@ -45,6 +45,11 @@ export const ReceiptSchema = z
       .optional(),
     /** Irreversible service-owned barrier; a remote journal reset cannot erase launch intent. */
     remoteLaunchCommitted: z.literal(true).optional(),
+    /**
+     * After the launch was committed, only a workspace create was attempted and it
+     * went unconfirmed: no harness command was sent, no pane was mapped (#326).
+     */
+    remoteCommandUnsent: z.literal(true).optional(),
     /** Native hire may exist; its first brief provably never crossed the turn RPC. Retain launch guard. */
     briefNotSent: z.literal(true).optional(),
     /** Operator recovery permanently excludes ordinary launch/adoption/reconciliation. */
@@ -416,7 +421,10 @@ export class DeliveryFence {
         fields.recoveryRequested !== true) ||
       (previous.remoteLaunchCommitted &&
         Object.hasOwn(fields, "remoteLaunchCommitted") &&
-        fields.remoteLaunchCommitted !== true)
+        fields.remoteLaunchCommitted !== true) ||
+      // Only a committed launch that mapped no pane can record that its command never left.
+      (fields.remoteCommandUnsent === true &&
+        (!previous.remoteLaunchCommitted || previous.paneId || previous.sessionId || previous.occupantId))
     )
       throw new Error("Missing original delivery receipt");
     this.records.set(key, { ...previous, ...fields });
@@ -436,7 +444,11 @@ export class DeliveryFence {
       this.unreadable ||
       previous?.messageId !== messageId ||
       !previous.remoteAdmission ||
-      previous.remoteLaunchCommitted ||
+      // A committed launch settles only when its command provably never left (#326).
+      (previous.remoteLaunchCommitted &&
+        !(previous.remoteCommandUnsent && proof.journal === "launch-committed-command-unsent")) ||
+      (proof.journal === "launch-committed-command-unsent" &&
+        !(previous.remoteLaunchCommitted && previous.remoteCommandUnsent)) ||
       previous.recoveryRequested ||
       previous.paneId ||
       previous.sessionId ||

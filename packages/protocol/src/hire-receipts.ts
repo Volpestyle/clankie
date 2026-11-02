@@ -27,8 +27,16 @@ export const HireNoLaunchEvidenceSchema = z
         sha256: z.string().regex(/^[a-f0-9]{64}$/u),
       })
       .strict(),
-    /** never-reserved: the host has no journal for the claim and no pane in its directory (VUH-2920). */
-    journal: z.enum(["reserved-to-sealed-without-launch", "never-reserved"]),
+    /**
+     * never-reserved: the host has no journal for the claim and no pane in its directory (VUH-2920).
+     * launch-committed-command-unsent: the launch was committed, but only a workspace create
+     * (which carries no harness command) was attempted and no pane runs in the directory (#326).
+     */
+    journal: z.enum([
+      "reserved-to-sealed-without-launch",
+      "never-reserved",
+      "launch-committed-command-unsent",
+    ]),
   })
   .strict();
 export type HireNoLaunchEvidence = z.infer<typeof HireNoLaunchEvidenceSchema>;

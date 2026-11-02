@@ -1045,6 +1045,16 @@ the original key/fingerprint, target, host identity, interval and census digest.
 An irreversible service launch flag and the host's exclusive launch/seal transition
 prevent a late dispatch or a reset host journal from granting settlement.
 
+One committed launch also settles as not launched (#326): when the only effect
+after the launch flag was a workspace create that went unanswered (it carries no
+harness command, and nothing prepared ran first), the receipt records that the
+command never left. The host then seals its `launching` journal as
+`launch-committed-command-unsent`, but only if its census shows no pane in the
+hire's directory; a create that landed late leaves one, and the original stays
+fenced until that pane is closed. Over a fleet link a workspace create gets 60 s
+rather than the 20 s of other Herdr calls, since a joined PC can take longer than
+20 s to start the workspace's shell.
+
 Legacy receipts without that recorded window, already allocated panes, attempted
 launches, incomplete census, changed connection or revoked authority are refused.
 Current absence cannot reconstruct history. Receipts and evidence are retained;
