@@ -1067,10 +1067,8 @@ export function createLocalCodexCatalogCoordinator(input: {
           let revision = deployedRevision;
           const signalPath = candidate.catalogConfig?.signalPath;
           if (signalPath) {
-            const stat = await lstat(signalPath).catch((error: NodeJS.ErrnoException) => {
-              if (error.code === "ENOENT") return undefined;
-              throw error;
-            });
+            // Usually absent and polled per seat each second: never throw for a missing file (#485).
+            const stat = lstatSync(signalPath, { throwIfNoEntry: false });
             if (stat !== undefined)
               requireProof(
                 stat.isFile() &&
@@ -1080,10 +1078,13 @@ export function createLocalCodexCatalogCoordinator(input: {
                   dirname(signalPath) === dirname(candidate.endpoint!.slice("unix://".length)),
                 "invalid_codex_catalog_signal_path",
               );
-            const signal = await readFile(signalPath, "utf8").catch((error: NodeJS.ErrnoException) => {
-              if (error.code === "ENOENT") return undefined;
-              throw error;
-            });
+            const signal =
+              stat === undefined
+                ? undefined
+                : await readFile(signalPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+                    if (error.code === "ENOENT") return undefined;
+                    throw error;
+                  });
             if (signal !== undefined) {
               requireProof(/^[a-f0-9-]{36}$/u.test(signal), "invalid_codex_catalog_signal");
               revision = `${deployedRevision}:${signal}`;
