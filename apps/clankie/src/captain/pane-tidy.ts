@@ -1058,7 +1058,19 @@ export class PaneTidy {
   /** What closing this seat would leave behind; the operator close path (TUI, app) holds on it too. */
   async seatWorktreeHold(seatId: string): Promise<WorktreeReconciliation[]> {
     const agent = await this.ports.runner.resolveTerminal(seatId).catch(() => undefined);
-    return agent ? workerWorktreeHold(agent) : [];
+    if (!agent) return [];
+    const held = await workerWorktreeHold(agent);
+    // The same exact-HEAD decided drop that admits the guarded prune. Dirt and unknown
+    // state still hold the close; a decision never covers a later commit or edited file.
+    return held.filter(
+      (work) =>
+        !(
+          work.state !== "unknown" &&
+          work.dirtyFiles === 0 &&
+          work.head &&
+          this.decisions.latest(work.path, work.head)?.decision === "safe_to_drop"
+        ),
+    );
   }
   /** The close record keeps the reason; the decision ledger lets doctor and tidy see it per worktree. */
   recordLeftBehind(unlanded: { reason: string; worktrees: WorktreeReconciliation[] }, by: string): void {

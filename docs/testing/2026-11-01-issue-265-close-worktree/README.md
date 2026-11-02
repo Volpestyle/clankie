@@ -18,7 +18,7 @@ The proof binds its own native sessions to the real hire journal and calls produ
 
 Earlier proof attempts correctly refused unstyled input (the harness inherited `NO_COLOR=1`) and protected a tree nested under a live main-checkout cwd. The final harness explicitly enables terminal styling, uses its onboarded native profile, and locates its owned tree outside that shared parent; production draft, pane and process guards remain intact. A temporary settling retry was removed after identifying that protected-parent cause.
 
-Focused real-Git cases also exercise merged branch deletion, evidence preservation, another live pane, explicit `unlandedReason`, and a thrown prune failure with successful close. Existing close suites passed 74 checks before adding those four cases. Clankie source and all 16 test typecheck shards passed; final checks are recorded on the PR.
+Focused real-Git cases also exercise merged branch deletion, evidence preservation, another live pane, explicit `unlandedReason`, and a thrown prune failure with successful close. The `safe_to_drop` case checks the operator hold against real Git: the exact clean HEAD is admitted, dirt and a later commit hold again until a new decision, then pruning preserves the exact commits and retains the unmerged branch. Existing close suites passed 74 checks before adding the five cleanup cases. Clankie source and all 16 test typecheck shards passed; final checks are recorded on the PR.
 
 `freedBytes` estimates allocated bytes removed, excluding retained evidence; APFS shared blocks may free less physical disk. Discarded caches use the existing asynchronous sweep.
 
