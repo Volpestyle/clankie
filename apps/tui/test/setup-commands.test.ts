@@ -65,6 +65,7 @@ const report: InstallDoctorReport = {
         executableDetail: "Native Codex unavailable",
         registered: false,
         pluginInstalled: false,
+        bridgeTools: null,
         registration: "absent",
         registrationIdentityForwarding: false,
         bridge: false,
