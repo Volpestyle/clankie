@@ -296,6 +296,14 @@ Codex snapshot and can age, and Claude context and effort and OpenCode or
 remote telemetry stay unknown. Automatic commit evidence needs the seat's own
 branch and exclusive linked worktree.
 
+Each seat also carries `workedOn`: what its persona has worked on, newest first,
+across seats and service restarts (#425). That covers the issue it held, its
+branch, the top-level areas its own commits touched (`apps/clankie`, `docs`) and
+the pull requests its done reports named. `list_agents` shows the newest three as
+one line. It is evidence for routing related work to a worker that already knows
+the area, and it controls nothing. Areas need the same exclusive linked worktree
+as commit evidence; a seat in a shared checkout records only its issue.
+
 Record a changed inspected scope or real progress with `action: "review"`, the
 `seatId` and `evidence`, plus whatever you can establish of `assignmentStatus`,
 `offScope`, `deliverable` and `progressAt` (when the progress happened, not when

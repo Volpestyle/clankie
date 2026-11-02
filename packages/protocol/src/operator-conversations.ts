@@ -3,7 +3,7 @@ import { TurnModelUsageSchema } from "./model-keys.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { ClosedWorktreeSchema, CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
-import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
+import { OperatorSeatEfficiencySchema, OperatorSeatWorkedOnSchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
 import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
@@ -976,6 +976,8 @@ export const OperatorFleetSeatSchema = z
     workerReports: z.array(WorkerReportSummarySchema).max(100).optional(),
     /** Evidence for the leading conversation's periodic and watch-time review. */
     efficiency: OperatorSeatEfficiencySchema.optional(),
+    /** What this seat's persona has worked on, newest first (#425); absent when nothing is known. */
+    workedOn: z.array(OperatorSeatWorkedOnSchema).max(8).optional(),
     /**
      * Native subagents the occupying harness started inside its own TUI
      * (Claude Code's Agent/Task tool), newest first (ADR 0208). Present only

@@ -5,7 +5,9 @@ import {
 } from "./fleet-projection-diagnostics.ts";
 import { CheckoutObservationCache } from "./checkout-observation-cache.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
+import type { PersonaWorkHistory } from "./persona-work-history.ts";
 import {
+  createChangedAreasReader,
   readSeatCommitClaim,
   readSeatTelemetry,
   readSeatActivity,
@@ -99,6 +101,8 @@ export interface FleetProjectionContext {
   readonly observedCommitBaselines: Map<string, Promise<SeatCommitBaseline | undefined>>;
   readonly preparedTelemetry: Set<string>;
   readonly seatEfficiency: SeatEfficiencyStore;
+  /** What each persona has worked on, for routing new work (#425). */
+  readonly workHistory: PersonaWorkHistory;
   readonly issueStatus: SeatIssueKeeper;
   readonly fleetRoster: FleetRoster;
   readonly waitingRosterSeats: () => Set<string>;
@@ -153,10 +157,12 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
     observedCommitBaselines,
     preparedTelemetry,
     seatEfficiency,
+    workHistory,
     issueStatus,
     fleetRoster,
     waitingRosterSeats,
   } = ctx;
+  const changedAreas = createChangedAreasReader();
 
   let seatSubagents = "";
   const withRemoteGoals = createRemoteCodexGoals({ shell: (fleet) => deps.fleets?.shell?.(fleet) });
@@ -594,9 +600,26 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
             commitBaseline: exclusive ? baseline : undefined,
           }),
         });
+        // #425: record what this persona works on, so its lead can route like work to it.
+        if (seat.personaId !== undefined) {
+          const issue = liveSeatIssue(seat).keys[0]?.trim();
+          workHistory.observe(seat.personaId, {
+            ...(issue ? { issue } : {}),
+            ...(exclusive && baseline
+              ? {
+                  branch: baseline.branchRef.slice("refs/heads/".length),
+                  areas: await changedAreas.read(baseline),
+                }
+              : {}),
+          });
+        }
       }),
     );
     stopGit();
+    for (const seat of projected) {
+      const workedOn = seat.personaId === undefined ? [] : workHistory.read(seat.personaId).slice(0, 8);
+      if (workedOn.length > 0) seat.workedOn = [...workedOn];
+    }
     for (const seat of projected) {
       const efficiency = seat.efficiency;
       if (!efficiency?.assignedDeliverable) continue;

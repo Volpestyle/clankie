@@ -20,6 +20,8 @@ export interface Session {
   readonly title?: string;
   /** What it last said it's doing. */
   readonly doing?: string;
+  /** What it has worked on lately, newest first: issue, branch areas and pull requests (#425). */
+  readonly workedOn?: string;
   /**
    * Who started it, as Clankie records it (ADR 0321): "the owner", "Clankie",
    * a connected app's device name, or the agent that started it. Says who asked,
