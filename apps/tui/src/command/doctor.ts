@@ -77,6 +77,7 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
           : `Never repeat this launch. Inspect clankie seat migrate status ${row.id}; once its exact binding is ready, run clankie seat migrate complete ${row.id}.`
       }`;
     }) ?? [];
+  // Only a disconnected app is the owner's to act on; an unreadable list stays in --json.
   const connectorRevocations = report.connectorRefreshRevocations;
   const connectorNotices =
     connectorRevocations && "devices" in connectorRevocations
@@ -84,9 +85,7 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
           (device) =>
             `Connector app ${JSON.stringify(device.name)} (${device.deviceId}) disconnected at ${device.revokedAt}: a rotated refresh token was reused. Sign in again to reconnect.`,
         )
-      : connectorRevocations
-        ? [`Connector refresh revocations: ${connectorRevocations.detail}`]
-        : [];
+      : [];
   const detail = [summary, ...connectorNotices, ...seats, ...migrations].join("\n");
   const observed =
     binding && "available" in binding && binding.mode !== "enforce" && !report.pendingEnforcingUpdate
