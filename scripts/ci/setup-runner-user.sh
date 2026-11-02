@@ -51,7 +51,19 @@ RUNNER_ROOT="$CI_HOME/actions-runner"
 
 step() { printf '\n==> %s\n' "$*"; }
 run() {
-  printf '    $ %s\n' "$*"
+  # Echo a redacted command, but execute the original arguments unchanged.
+  local arg redact=0
+  printf '    $'
+  for arg in "$@"; do
+    if [ "$redact" = 1 ]; then
+      printf ' %s' '***'
+      redact=0
+    else
+      printf ' %s' "$arg"
+      case "$arg" in -password) redact=1 ;; esac
+    fi
+  done
+  printf '\n'
   if [ "$APPLY" = 1 ]; then "$@"; fi
 }
 as_ci() { run sudo -u "$CI_USER" -H "$@"; }
