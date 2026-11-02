@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "path": "raw-reports.tar",
+      "size": 327680,
+      "sha256": "00e38b52b8eacc3d4f467c34be7a63c1991551010a9988ffd0f31dc2aa0c2cb2",
+      "url": "clankie://evidence/sha256/00e38b52b8eacc3d4f467c34be7a63c1991551010a9988ffd0f31dc2aa0c2cb2"
+    }
+  ]
+}

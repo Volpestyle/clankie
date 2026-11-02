@@ -34,7 +34,7 @@ import {
 } from "./owner-credential-recovery.ts";
 import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
-import { hireWorktreeStart, projectPathContains } from "@clankie/settings";
+import { checkoutGit, hireWorktreeStart, projectPathContains } from "@clankie/settings";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
@@ -2770,8 +2770,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
     },
     mainCheckpoint: async (agent) => {
-      if (!deps.workItems?.mainCheckpoint)
-        return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint reader unavailable" };
       const qualified = splitFleetQualified(agent.paneId);
       await refreshFleets();
       const fleet = qualified && remoteFleets.find((entry) => entry.id === qualified.fleet);
@@ -2803,14 +2801,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           projectPathContains(baseline.worktreeRoot, path, process.platform === "win32" ? "windows" : "posix")
             ? baseline.head
             : hireWorktreeBase(qualified?.fleet, path);
-        const held = await deps.workItems.mainCheckpoint(
-          path,
+        const remoteGit =
           fleet && shell
-            ? async (command, args, cwd) =>
+            ? async (command: string, args: readonly string[], cwd: string) =>
                 shell(remoteProgramCommand(fleet.ssh.shell, command, ["-C", cwd, ...args]), 30_000)
-            : undefined,
-          startHead,
-        );
+            : undefined;
+        if (!deps.workItems?.mainCheckpoint) {
+          // A non-Git research directory has no landed merge to account for.
+          // A lost checkout with a recorded baseline still needs positive proof.
+          try {
+            if (remoteGit) await remoteGit("git", ["rev-parse", "--show-toplevel"], path);
+            else await checkoutGit(path, ["rev-parse", "--show-toplevel"]);
+          } catch (error) {
+            if (!startHead && /not a git repository/iu.test(String(error))) continue;
+          }
+          return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint reader unavailable" };
+        }
+        const held = await deps.workItems.mainCheckpoint(path, remoteGit, startHead);
         if (held) return held;
       }
       return undefined;

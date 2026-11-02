@@ -707,6 +707,20 @@ test("native prepared hire survives real census/roster reconciliation and exits 
   expect(roster).toMatchObject({ seats: [{ seatId: "term_unaddressed456" }] });
 });
 
+test("a Git working directory without a checkpoint reader holds native close", async () => {
+  const f = await fixture();
+  await promisify(execFile)("git", ["init", "--quiet", f.root]);
+  expect(
+    await f.captain.serveOperatorConversation({
+      schemaVersion: 1,
+      op: "close_seat",
+      seatId: f.hired.seat.seatId,
+      unlandedReason: "Disposable empty Git fixture; exercise the independent checkpoint guard",
+    }),
+  ).toMatchObject({ closed: false, refusal: { reason: "main_unknown" } });
+  expect(f.counts()).toEqual({ exitCommands: 0, physicalCloses: 0 });
+});
+
 test("a switched native session cannot exit through the previously hired seat", async () => {
   const f = await fixture();
   f.switchRoute();
