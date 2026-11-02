@@ -6,6 +6,7 @@ import { machineJoinHash, machineJoinKey } from "../../../apps/clankie/src/machi
 import {
   exchangeJoinedMachine,
   runJoinedMachineChannel,
+  saveJoinedMachineCredential,
 } from "../../../apps/tui/bin/joined-machine-client.ts";
 import { MachineJoinLeaseSchema, machineJoinLeaseAad } from "@clankie/protocol/machine-join";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
@@ -351,9 +352,12 @@ describe("public gateway product path", () => {
         }
         return fetch(input, init);
       };
+      // The channel serves only while its store still holds this exact lease, as `clankie join` saves it.
+      const machineStore = new FileCredentialStore(join(directory, "fixture-native-secrets.json"));
+      await saveJoinedMachineCredential(machineStore, machineCredential);
       const channel = runJoinedMachineChannel(machineCredential, {
         fetchImpl: capturedFetch,
-        store: new FileCredentialStore(join(directory, "fixture-native-secrets.json")),
+        store: machineStore,
         signal: abort.signal,
         intervalMs: 20,
       });
