@@ -42,11 +42,7 @@ A local agent can state its current assignment with `clankie work-on "Objective"
 from its own Herdr pane. Add `--repo REPO_ID --issue ISSUE_ID` to link the exact
 registered repo and its existing tracker item; use `clankie work repos` to find
 repo IDs. Clear the pointer with `clankie work-on clear` when it no longer
-applies. It writes nothing to the tracker, but it is what "in progress" means:
-work reads, `list_issues`, the app's views and `clankie metrics --issues` count an
-open issue as `in_progress` only while a live agent holds it this way (`heldBy`
-names them). An unheld issue the tracker calls in progress reads `todo`, with
-`trackerStatus` showing the tracker's word. Clear it when you stop.
+applies. This changes display metadata, not the issue's status or ownership.
 The pointer follows the native session through a pane move and service restart;
 a new session does not inherit it. Keep transient actions in `clankie stance`
 notes. Local Codex `/goal` state appears automatically, including paused,

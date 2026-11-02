@@ -150,13 +150,6 @@ export const WorkItemSchema = z
      * (ADR 0208). Absent from items and bodies that predate it.
      */
     labels: z.array(WorkItemLabelSchema).max(WORK_ITEM_LABELS_MAX).optional(),
-    /**
-     * The live seats working on it now (#318). `status` is `in_progress` only while
-     * one does; absent when none does, and from services that predate it.
-     */
-    heldBy: z.array(z.string().trim().min(1).max(256)).max(16).optional(),
-    /** What the tracker itself says, when the live status above differs from it. */
-    trackerStatus: WorkItemStatusSchema.optional(),
   })
   .strict();
 export type WorkItem = z.infer<typeof WorkItemSchema>;

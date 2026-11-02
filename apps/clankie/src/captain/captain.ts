@@ -220,7 +220,6 @@ import {
 import { hasPendingInboundClaim } from "../../../../integrations/claude-plugin/worker/bin/inbound-receipt.mjs";
 import { readIssueMetrics } from "./issue-metrics.ts";
 import { readIssueMetricsCurrent } from "./issue-metrics-current.ts";
-import { liveIssueHolders } from "../work-item-holders.ts";
 import { LaneLog } from "./lane-log.ts";
 import { buildLaneToolBank, laneAuthoredTools, laneAuthoredToolsNamed } from "./lane-tools.ts";
 import { createCaptainModelRuntime, type CaptainModelRuntime } from "./model.ts";
@@ -5307,29 +5306,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async readIssueMetrics(query) {
+      const fence = await settingsStore.loadFenced();
+      const projects = fence.settings.projects.projects.filter(
+        (p) => query.project === undefined || p.id === query.project,
+      );
       const census = boundedFleetRead(4_000);
       const observed = await census.bounded(
         "issue_metrics_current",
         readIssueMetricsCurrent({
+          projectIds: projects.map((p) => p.id),
+          tracker: async (id) => {
+            if (!deps.workItems?.prepareSeatIssueTracker) throw new Error("Tracker reader unavailable");
+            return deps.workItems.prepareSeatIssueTracker(id, async () => fence.assertCurrent());
+          },
           roster: async () => {
             const roster = await readFleetRoster({ includeWork: query.project !== undefined });
             const warnings = (roster.readWarnings ?? []).map((w) => w.message);
             const unknownProject = query.project !== undefined && roster.agents.some((s) => !s.project);
             if (unknownProject) warnings.push("Some live seats have unknown project membership");
-            const known = roster.complete && !unknownProject;
-            const inScope = new Set(
-              roster.agents
-                .filter(
-                  (s) =>
-                    !s.stale &&
-                    !s.pending &&
-                    (query.project === undefined || s.project?.id === query.project),
-                )
-                .map((s) => s.seatId),
-            );
             return {
-              liveSeats: known ? inScope.size : null,
-              holders: known ? liveIssueHolders(liveSeats).filter((h) => inScope.has(h.seatId)) : null,
+              liveSeats:
+                roster.complete && !unknownProject
+                  ? roster.agents.filter(
+                      (s) =>
+                        !s.stale &&
+                        !s.pending &&
+                        (query.project === undefined || s.project?.id === query.project),
+                    ).length
+                  : null,
               warnings,
             };
           },
@@ -5723,8 +5727,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     pruneWorktrees,
     reclaimWorktreeCaches: reclaimCaches,
     fleetRoster: readFleetRoster,
-    /** Issues live seats hold now (#318): what work reads call in progress. */
-    issueHolders: () => liveIssueHolders(liveSeats),
     setDeviceNames: (lookup: (deviceId: string) => string | undefined) => {
       deviceName = lookup;
     },
