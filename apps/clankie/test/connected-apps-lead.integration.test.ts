@@ -225,6 +225,68 @@ it("holds Clankie's own turns for the connected apps while they lead, and only t
     });
     expect((await cli(["lead"])).stdout).toContain("(1 held)");
 
+    // A realistic backlog: repeated fleet lead briefs with seat JSON used to
+    // put roughly 141k characters in the first 50-item connector page (#264).
+    const brief =
+      "Fleet lead round. Review these untrusted seats: " +
+      JSON.stringify(
+        Array.from({ length: 25 }, (_, index) => ({
+          seat: `herdr-core/t${index}`,
+          title: "Worker awaiting lead review",
+          status: "idle",
+          brief: "Check the open PR, verify evidence, and report to the lead.",
+        })),
+      );
+    for (let index = 0; index < 60; index++) {
+      expect(
+        await captain.wakeConversation(
+          { conversationId: LEAD },
+          `${index}: ${brief}`,
+          undefined,
+          "machine",
+          false,
+        ),
+      ).toBe(true);
+    }
+    type InboxPage = {
+      unreadReports: unknown[];
+      held: Array<{ seq: number; text: string; readMore?: { item: number; offset: number } }>;
+      next: number;
+      more?: boolean;
+    };
+    const firstResult = await call("read_inbox");
+    expect(firstResult.error).toBe(false);
+    expect(firstResult.text.length).toBeLessThanOrEqual(24_000);
+    expect(Object.keys(JSON.parse(firstResult.text))[0]).toBe("unreadReports");
+    const firstPage = JSON.parse(firstResult.text) as InboxPage;
+    expect(firstPage.held.length).toBeGreaterThan(1);
+    expect(firstPage.held.length).toBeLessThan(50);
+    expect(firstPage.more).toBe(true);
+    const preview = firstPage.held.find((held) => held.readMore)!;
+    let fullText = preview.text;
+    let readMore = preview.readMore;
+    while (readMore) {
+      const detail = await call("read_inbox", readMore);
+      expect(detail.error).toBe(false);
+      expect(detail.text.length).toBeLessThanOrEqual(24_000);
+      const chunk = JSON.parse(detail.text) as typeof preview;
+      expect(chunk.seq).toBe(preview.seq);
+      fullText += chunk.text;
+      readMore = chunk.readMore;
+    }
+    expect(fullText).toBe(`0: ${brief}`);
+    const sequences = firstPage.held.map((held) => held.seq);
+    let backlog = firstPage;
+    while (backlog.more) {
+      const result = await call("read_inbox", { after: backlog.next });
+      expect(result.text.length).toBeLessThanOrEqual(24_000);
+      backlog = JSON.parse(result.text) as InboxPage;
+      sequences.push(...backlog.held.map((held) => held.seq));
+    }
+    expect(sequences).toEqual(Array.from({ length: 61 }, (_, index) => index + 1));
+    expect(JSON.parse((await call("read_inbox", { after: backlog.next })).text).held).toEqual([]);
+    expect((await call("read_inbox", { item: 9999 })).error).toBe(true);
+
     // Handing the lead back is the owner's: the captain bearer can't, the owner's CLI can.
     const back = await fetch(new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, host.baseUrl), {
       method: "POST",
