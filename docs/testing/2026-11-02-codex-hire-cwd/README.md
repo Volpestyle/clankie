@@ -44,6 +44,12 @@ native cwd proof.
 - Remote discovery and terminal-retention regressions: 2 passed. Resource-holder,
   seat-adapter-hire and project-hire-pane checks also passed.
 - Scoped formatting and lint passed for the changed files.
+- App source typechecking passed. The package check then caught an own fixture
+  narrowing error; it was corrected and the protocol file's 22 tests passed.
+  A final `pnpm exec tsc --project .local/tsconfig-cwd.json --noEmit` passed with
+  roots restricted to the changed TypeScript files, extending the app config
+  and resolving Node types from the app's `node_modules/@types`. Remaining
+  package test shards and full checks are left to CI.
 
 ## After the next update
 
