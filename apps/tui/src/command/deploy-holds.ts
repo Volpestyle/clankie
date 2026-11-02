@@ -9,7 +9,7 @@ import {
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
 
-export const DEPLOY_HOLDS_USAGE = `Usage: clankie update holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--id UUID] [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
+const DEPLOY_HOLDS_USAGE = `Usage: clankie update holds | hold --holder NAME --reason TEXT --minutes 1-${DEPLOY_HOLD_MAX_MINUTES} [--id UUID] [--pane ID|--seat ID] | release UUID --actor NAME --reason TEXT
 A hold keeps deploys off the running service and lifts on its own when its minutes run out; merging to main never waits for one.`;
 
 function deployHoldRequest(args: readonly string[]) {

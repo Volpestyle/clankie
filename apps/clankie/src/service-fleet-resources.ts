@@ -4,8 +4,8 @@ import { tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { createFleetResourceRuntime } from "./fleet-resource-runtime.ts";
 
-/** The integration supervisor and service runtime use the same fixture-only boundary. */
-export async function serviceResourceDirectory(env: NodeJS.ProcessEnv = process.env) {
+/** The service runtime keeps fixture fleet resources out of the live registry. */
+async function serviceResourceDirectory(env: NodeJS.ProcessEnv = process.env) {
   if (env.VITEST !== "true" && env.NODE_ENV !== "test")
     return { directory: undefined, dispose: async () => {} };
   const override = env.CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY?.trim();
