@@ -188,7 +188,7 @@ async function hiredFixture(
       owner,
     );
     if (startup.observedCwd) {
-      expect(hire).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(hire).toMatchObject({ outcome: "failed" });
     } else {
       expect(hire).toMatchObject({
         outcome: "spawned",
@@ -1430,7 +1430,12 @@ it.each([false, true])(
     await correct.close();
     const wrong = await hiredFixture({}, false, { bare, observedCwd: "/old/shared/worktree" });
     try {
-      expect(wrong.hire).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      // The brief never left Clankie, so it is reported as not sent (#362).
+      expect(wrong.hire).toMatchObject(
+        bare
+          ? { outcome: "failed", reason: "start_unconfirmed" }
+          : { outcome: "failed", reason: "not_ready", briefDelivery: "not_sent" },
+      );
       expect(wrong.native.requests.some(({ method }) => method === "turn/start")).toBe(false);
     } finally {
       await wrong.close();

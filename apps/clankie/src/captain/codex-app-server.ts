@@ -167,7 +167,10 @@ export class CodexAppServerClient {
   }
 
   request(method: string, params: RecordValue, timeoutMs = this.timeoutMs): Promise<unknown> {
-    if (this.failure) return Promise.reject(this.failure);
+    // A connection that already failed never writes this request.
+    if (this.failure) return Promise.reject(new CodexNotSentError(this.failure));
+    if (this.socket.readyState !== WebSocket.OPEN)
+      return Promise.reject(new CodexNotSentError(new Error("Codex app-server disconnected")));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -1311,12 +1314,18 @@ export async function startCodexAppServerSeat(options: {
         let turnId: string;
         try {
           const response = record(
-            await client!.request(steering ? "turn/steer" : "turn/start", {
-              threadId,
-              input,
-              ...(steering ? { expectedTurnId: steering } : {}),
-              ...(answer === undefined ? {} : { clientUserMessageId: answer.clientUserMessageId }),
-            }),
+            await client!
+              .request(steering ? "turn/steer" : "turn/start", {
+                threadId,
+                input,
+                ...(steering ? { expectedTurnId: steering } : {}),
+                ...(answer === undefined ? {} : { clientUserMessageId: answer.clientUserMessageId }),
+              })
+              .catch((error: unknown) => {
+                // The connection had already failed: this turn was never written.
+                if (error instanceof CodexNotSentError) dispatched = false;
+                throw error;
+              }),
           );
           const returnedId = steering ? response.turnId : record(response.turn).id;
           firstDispatch = false;
