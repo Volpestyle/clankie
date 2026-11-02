@@ -379,9 +379,9 @@ export class PublicGatewayConnector {
     let installationKey: InstallationKey | undefined;
     let credential: { readonly token: string; readonly expiresAt?: number; readonly refreshAt?: number };
     try {
-      installationKey = await this.resolveInstallationKey?.();
       credential =
         this.resolveHostToken === undefined ? { token: this.hostToken ?? "" } : await this.resolveHostToken();
+      installationKey = await this.resolveInstallationKey?.();
     } catch (error) {
       if (!this.started) return;
       if (this.tokenErrorIsTerminal(error)) {

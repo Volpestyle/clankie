@@ -12,7 +12,8 @@ export async function ensureInstallationKey(
   store: CredentialStore = createDefaultCredentialStore(),
 ): Promise<InstallationKey> {
   if (!/^[A-Za-z0-9_-]{22}$/u.test(installationId)) throw new Error("Invalid installation id");
-  const id = `gateway-installation-key:${installationId}`;
+  // Broker identifiers are case-insensitive; installation ids are not.
+  const id = `gateway-installation-key:${Buffer.from(installationId, "utf8").toString("hex")}`;
   if (store.updateMany === undefined) throw new Error("Installation keys require atomic credential storage");
   const group = await store.updateMany([id], async (current) => {
     if (current[id] !== undefined) return current;

@@ -84,7 +84,7 @@ describe("public gateway", () => {
 
   it("pins installation keys across restarts, refuses other keys and unproven hosts, and replaces only with the same key", async () => {
     const directory = await mkdtemp(join(tmpdir(), "gateway-host-keys-"));
-    const installationId = "i".repeat(22);
+    const installationId = "I".repeat(22);
     const accountId = "proof-account";
     const id = derivePublicGatewayHostId(accountId, installationId);
     const dbPath = join(directory, "host-keys.sqlite");
@@ -135,6 +135,9 @@ describe("public gateway", () => {
         ensureInstallationKey(installationId, store),
       ]);
       expect(key.publicKey).toBe(sameKey.publicKey);
+      expect((await ensureInstallationKey(installationId.toLowerCase(), store)).publicKey).not.toBe(
+        key.publicKey,
+      );
       const differentKey = await ensureInstallationKey(
         installationId,
         new FileCredentialStore(join(directory, "other.json")),
