@@ -148,9 +148,3 @@ machine channels keep working. Turn it on before initiating another legacy join.
 The gateway admits four starts per client, refilling one per minute, alongside
 the shared host budget (32 starts, refilling 0.2/s). Clients sharing an address
 share a budget; only configured trusted proxies supply client addresses.
-
-Account gateway hosts prove a broker-held Ed25519 installation key before any
-traffic is routed. The first proven connect pins the public key at the gateway;
-a different key cannot replace it. Old Macs without proof connect only until
-that host has a pinned key. Preserve broker keys and the gateway's persistent
-`CLANKIE_GATEWAY_HOST_KEYS_DATABASE`; see [gateway reference](../../../../apps/gateway/README.md).

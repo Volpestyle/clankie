@@ -40,7 +40,9 @@ const trustedProxy =
 // Account keys must survive restarts independently of optional push delivery.
 const hostKeysPath = process.env.CLANKIE_GATEWAY_HOST_KEYS_DATABASE?.trim();
 if (accountConfig !== undefined && (hostKeysPath === undefined || !isAbsolute(hostKeysPath))) {
-  throw new Error("Account gateways require CLANKIE_GATEWAY_HOST_KEYS_DATABASE as an absolute persistent SQLite path");
+  throw new Error(
+    "Account gateways require CLANKIE_GATEWAY_HOST_KEYS_DATABASE as an absolute persistent SQLite path",
+  );
 }
 const hostKeys = accountConfig === undefined ? undefined : new HostKeys(hostKeysPath!);
 const gateway = createPublicGateway({
@@ -72,7 +74,10 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     // after the gateway stops handing them work.
     void gateway
       .close()
-      .then(async () => { hostKeys?.close(); await push?.close(); })
+      .then(async () => {
+        hostKeys?.close();
+        await push?.close();
+      })
       .finally(() => process.exit(0));
   });
 }

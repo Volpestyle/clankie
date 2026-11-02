@@ -204,8 +204,10 @@ export class PublicGatewayConnector {
       throw new Error("Renewable gateway credentials require an installation id");
     }
     this.installationId = options.installationId;
-    this.resolveInstallationKey = options.installationId === undefined ? undefined :
-      options.resolveInstallationKey ?? (() => ensureInstallationKey(options.installationId!));
+    this.resolveInstallationKey =
+      options.installationId === undefined
+        ? undefined
+        : (options.resolveInstallationKey ?? (() => ensureInstallationKey(options.installationId!)));
     this.hostToken = options.hostToken;
     this.resolveHostToken = options.resolveHostToken;
     this.tokenErrorIsTerminal = options.tokenErrorIsTerminal ?? (() => false);
@@ -251,7 +253,9 @@ export class PublicGatewayConnector {
     if (this.signInRequiredSince !== undefined) {
       return { state: "sign_in_required", since: this.signInRequiredSince };
     }
-    return this.ready && this.socket?.readyState === WebSocket.OPEN ? { state: "connected" } : { state: "connecting" };
+    return this.ready && this.socket?.readyState === WebSocket.OPEN
+      ? { state: "connected" }
+      : { state: "connecting" };
   }
 
   /**
@@ -347,6 +351,7 @@ export class PublicGatewayConnector {
     this.closeAllStreams();
     this.socket?.close(1001, "connector shutting down");
     this.socket = undefined;
+    this.ready = false;
     for (const waiter of this.connectionWaiters) {
       clearTimeout(waiter.deadline);
       waiter.reject(new Error("Gateway connector closed"));
@@ -420,8 +425,8 @@ export class PublicGatewayConnector {
         } else socket.terminate();
       });
     const connected = () => {
-      this.ready = true;
       if (this.socket !== socket) return;
+      this.ready = true;
       this.reconnectDelayMs = this.reconnectMinimumMs;
       this.signInRequiredSince = undefined;
       for (const waiter of this.connectionWaiters) {
@@ -448,24 +453,43 @@ export class PublicGatewayConnector {
       this.onDoorwayChange?.({ state: "connected" });
     };
     let proofSent = false;
-    const proofDeadline = installationKey === undefined ? undefined : setTimeout(() => socket.close(1008, "installation proof timed out"), CONNECT_TIMEOUT_MS);
+    const proofDeadline =
+      installationKey === undefined
+        ? undefined
+        : setTimeout(() => socket.close(1008, "installation proof timed out"), CONNECT_TIMEOUT_MS);
     proofDeadline?.unref();
-    socket.once("open", () => { if (installationKey === undefined) connected(); });
+    socket.once("open", () => {
+      if (installationKey === undefined) connected();
+    });
     socket.on("message", (data, isBinary) => {
-      if (this.ready) { this.handleMessage(socket, data, isBinary); return; }
+      if (this.socket !== socket) return;
+      if (this.ready) {
+        this.handleMessage(socket, data, isBinary);
+        return;
+      }
       try {
-        if (isBinary || installationKey === undefined || this.installationId === undefined) throw new Error("invalid proof handshake");
+        if (isBinary || installationKey === undefined || this.installationId === undefined)
+          throw new Error("invalid proof handshake");
         const frame = JSON.parse(data.toString());
         if (!proofSent) {
           const challenge = PublicGatewayHostChallengeSchema.parse(frame);
           proofSent = true;
-          socket.send(JSON.stringify({ kind: "host_proof", publicKey: installationKey.publicKey,
-            signature: installationKey.sign(publicGatewayHostProofPayload(this.hostId, this.installationId, challenge.nonce)) }));
+          socket.send(
+            JSON.stringify({
+              kind: "host_proof",
+              publicKey: installationKey.publicKey,
+              signature: installationKey.sign(
+                publicGatewayHostProofPayload(this.hostId, this.installationId, challenge.nonce),
+              ),
+            }),
+          );
         } else if (frame.kind === "host_ready" && Object.keys(frame).length === 1) {
           clearTimeout(proofDeadline);
           connected();
         } else throw new Error("invalid proof handshake");
-      } catch { socket.close(1008, "invalid installation proof handshake"); }
+      } catch {
+        socket.close(1008, "invalid installation proof handshake");
+      }
     });
     socket.once("error", (error) => {
       this.logger.warn({ hostId: this.hostId, error: error.name }, "public gateway connection error");
@@ -474,8 +498,18 @@ export class PublicGatewayConnector {
       clearTimeout(proofDeadline);
       // Enumerate gateway-owned reasons; never log arbitrary remote text.
       const closeReason = reason.toString();
-      if (["host connection replaced", "installation key mismatch", "installation proof required", "invalid installation proof"].includes(closeReason)) {
-        this.logger.warn({ event: "gateway.host.connection_closed", hostId: this.hostId, code, reason: closeReason }, "public gateway host connection closed");
+      if (
+        [
+          "host connection replaced",
+          "installation key mismatch",
+          "installation proof required",
+          "invalid installation proof",
+        ].includes(closeReason)
+      ) {
+        this.logger.warn(
+          { event: "gateway.host.connection_closed", hostId: this.hostId, code, reason: closeReason },
+          "public gateway host connection closed",
+        );
       }
       if (this.socket === socket) this.lastCloseCode = code;
       this.disconnected(socket);

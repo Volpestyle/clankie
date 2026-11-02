@@ -1,5 +1,7 @@
 import { runMachinesCommand } from "../../../apps/tui/src/command/machines.ts";
-import { FileCredentialStore } from "../../../packages/credential-broker/src/index.ts";
+import { WebSocket } from "ws";
+import { accountHost, proveHost } from "./host-proof-fixture.ts";
+import { FileCredentialStore, ensureInstallationKey } from "../../../packages/credential-broker/src/index.ts";
 import { SettingsStore } from "../../../packages/settings/src/index.ts";
 import { MachineJoins } from "../../../apps/clankie/src/machine-joins.ts";
 import { machineJoinHash, machineJoinKey } from "../../../apps/clankie/src/machine-join-crypto.ts";
@@ -134,16 +136,18 @@ describe("public gateway product path", () => {
       });
       const relayOrigin = await listen(relayServer);
 
+      const encryptionKey = randomBytes(32);
       connector = new PublicGatewayConnector({
         gatewayUrl: gatewayOrigin,
         hostId,
         ...(signedIn
           ? {
               installationId,
+              resolveInstallationKey: () => ensureInstallationKey(installationId, secrets),
               resolveHostToken: async () => ({ token: accessToken, expiresAt: Date.now() + 6 * 3600000 }),
             }
           : { hostToken: HOST_TOKEN }),
-        encryptionKey: randomBytes(32),
+        encryptionKey,
         controlPlaneUrl: controlOrigin,
         relayUrl: relayOrigin,
       });
@@ -159,6 +163,60 @@ describe("public gateway product path", () => {
       const offer = (await offerResponse.json()) as { readonly deepLink: string };
       const offerSecret = new URL(offer.deepLink).searchParams.get("offer");
       expect(offerSecret).toBeTruthy();
+
+      if (signedIn) {
+        const extraSockets: WebSocket[] = [];
+        try {
+          const otherKey = await ensureInstallationKey(
+            installationId,
+            new FileCredentialStore(join(directory, "other-secrets.json")),
+          );
+          const other = accountHost(gatewayOrigin, hostId, installationId, accessToken);
+          extraSockets.push(other);
+          expect(await proveHost(other, hostId, installationId, otherKey)).toEqual({
+            code: 1008,
+            reason: "installation key mismatch",
+          });
+          const unproven = accountHost(gatewayOrigin, hostId, installationId, accessToken, false);
+          extraSockets.push(unproven);
+          const [code, reason] = await once(unproven, "close");
+          expect([code, reason.toString()]).toEqual([1008, "installation proof required"]);
+          expect(connector.doorway.state).toBe("connected");
+          expect((await fetch(`${hostBaseUrl}/v1/gateway/challenge`)).status).toBe(200);
+          // A second real Mac connector can replace using the same broker key.
+          // Stop the old one's retries when it sees the existing close event.
+          const previous = connector;
+          let replaced = false;
+          const replacement = new PublicGatewayConnector({
+            gatewayUrl: gatewayOrigin,
+            hostId,
+            installationId,
+            resolveHostToken: async () => ({ token: accessToken, expiresAt: Date.now() + 6 * 3600000 }),
+            resolveInstallationKey: () => ensureInstallationKey(installationId, secrets),
+            encryptionKey,
+            controlPlaneUrl: controlOrigin,
+            relayUrl: relayOrigin,
+            onDoorwayChange: (change) => {
+              if (change.state === "connected") {
+                replaced = true;
+                previous.close();
+              }
+            },
+          });
+          connectors.push(replacement);
+          replacement.start();
+          // Publishing waits for proof acceptance and the gateway's route acknowledgement.
+          await replacement.publishPairingOffer({
+            offerSecret: "replacement-test-offer-secret",
+            code: "replacement-test-code",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          });
+          expect(replaced).toBe(true);
+          connector = replacement;
+        } finally {
+          for (const socket of extraSockets) socket.close();
+        }
+      }
 
       const credential = GatewayEncryptionCredentialSchema.parse(
         Object.fromEntries(new URLSearchParams(new URL(offer.deepLink).hash.slice(1))),

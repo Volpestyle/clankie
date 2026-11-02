@@ -7,6 +7,7 @@ import {
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
   generatePublicGatewayInstallationId,
+  ensureInstallationKey,
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
@@ -202,6 +203,7 @@ export async function gatewayEnableWithAccount(
     url: input.gatewayUrl,
     installationId: current.installationId ?? generatePublicGatewayInstallationId(),
   });
+  await ensureInstallationKey(publicGateway.installationId!, credentials);
   await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, input.credential);
   await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
   return await gatewayConfigure(publicGateway, options);

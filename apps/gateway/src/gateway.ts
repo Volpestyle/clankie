@@ -922,11 +922,29 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
     }
 
+    if (
+      !staticAccepted &&
+      (closing || proving.size >= 1024 || !takeBudget(peerBudgets, `host-connect:${ownerId}`, 60, 1))
+    ) {
+      refuseUpgrade(socket, 429);
+      return;
+    }
     // An older Mac never sends the header, so it is never offered a device's stream.
     const carriesStreams = request.headers[PUBLIC_GATEWAY_STREAMS_HEADER] === "1";
     webSockets.handleUpgrade(request, socket, head, (webSocket) => {
-      const attach = () => attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs, staticAccepted ? undefined : token);
-      if (staticAccepted) { attach(); return; }
+      const attach = () =>
+        attachHost(
+          hostId,
+          ownerId,
+          webSocket,
+          carriesStreams,
+          expiresAtMs,
+          staticAccepted ? undefined : token,
+        );
+      if (staticAccepted) {
+        attach();
+        return;
+      }
       const installationId = url.searchParams.get("installationId")!;
       const refuse = (reason: string) => {
         logger.warn({ event: "gateway.host.refused", hostId, reason }, "gateway host connection refused");
@@ -938,9 +956,15 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         return;
       }
       const nonce = randomBytes(32).toString("base64url");
-      const deadline = setTimeout(() => { cleanup(); refuse("installation proof timed out"); }, 5000);
+      const deadline = setTimeout(() => {
+        cleanup();
+        refuse("installation proof timed out");
+      }, 5000);
       deadline.unref();
-      const cleanup = () => { clearTimeout(deadline); proving.delete(webSocket); };
+      const cleanup = () => {
+        clearTimeout(deadline);
+        proving.delete(webSocket);
+      };
       proving.add(webSocket);
       webSocket.once("close", cleanup);
       webSocket.once("error", () => undefined);
@@ -950,14 +974,32 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         try {
           if (isBinary || Buffer.byteLength(data.toString()) > 1024) throw new Error("invalid proof");
           const proof = PublicGatewayHostProofSchema.parse(JSON.parse(data.toString()));
-          const key = createPublicKey({ key: Buffer.from(proof.publicKey, "base64url"), format: "der", type: "spki" });
-          if (key.asymmetricKeyType !== "ed25519" ||
-              key.export({ format: "der", type: "spki" }).toString("base64url") !== proof.publicKey ||
-              !verify(null, Buffer.from(publicGatewayHostProofPayload(hostId, installationId, nonce)), key, Buffer.from(proof.signature, "base64url"))) {
-            refuse("invalid installation proof"); return;
+          const key = createPublicKey({
+            key: Buffer.from(proof.publicKey, "base64url"),
+            format: "der",
+            type: "spki",
+          });
+          if (
+            key.asymmetricKeyType !== "ed25519" ||
+            key.export({ format: "der", type: "spki" }).toString("base64url") !== proof.publicKey ||
+            !verify(
+              null,
+              Buffer.from(publicGatewayHostProofPayload(hostId, installationId, nonce)),
+              key,
+              Buffer.from(proof.signature, "base64url"),
+            )
+          ) {
+            refuse("invalid installation proof");
+            return;
           }
-          if (expiresAtMs === undefined || expiresAtMs <= clock()) { refuse("host credential expired"); return; }
-          if (!hostKeys.accept(hostId, proof.publicKey)) { refuse("installation key mismatch"); return; }
+          if (expiresAtMs === undefined || expiresAtMs <= clock()) {
+            refuse("host credential expired");
+            return;
+          }
+          if (!hostKeys.accept(hostId, proof.publicKey)) {
+            refuse("installation key mismatch");
+            return;
+          }
           webSocket.send(JSON.stringify({ kind: "host_ready" }));
           attach();
         } catch {

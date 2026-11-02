@@ -13,12 +13,17 @@ export class HostKeys {
       CREATE TABLE IF NOT EXISTS host_keys (host_id TEXT PRIMARY KEY, public_key TEXT NOT NULL);`);
   }
   get(hostId: string): string | undefined {
-    return this.database.prepare("SELECT public_key FROM host_keys WHERE host_id=?").get(hostId)?.public_key as string | undefined;
+    return this.database.prepare("SELECT public_key FROM host_keys WHERE host_id=?").get(hostId)
+      ?.public_key as string | undefined;
   }
   /** Insert-if-absent and read back: concurrent first proofs cannot replace a pinned key. */
   accept(hostId: string, publicKey: string): boolean {
-    this.database.prepare("INSERT INTO host_keys(host_id, public_key) VALUES (?, ?) ON CONFLICT(host_id) DO NOTHING").run(hostId, publicKey);
+    this.database
+      .prepare("INSERT INTO host_keys(host_id, public_key) VALUES (?, ?) ON CONFLICT(host_id) DO NOTHING")
+      .run(hostId, publicKey);
     return this.get(hostId) === publicKey;
   }
-  close(): void { this.database.close(); }
+  close(): void {
+    this.database.close();
+  }
 }
