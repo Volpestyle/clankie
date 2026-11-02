@@ -1213,9 +1213,18 @@ export function createTrackerPosting(options: TrackerPostingOptions) {
     },
     /** Moves or ends waiting posts whose project now tracks its work elsewhere (#159). */
     followMoves: sweep,
-    close() {
+    /**
+     * Stops listening and sweeping, then settles once the work already queued (a sweep,
+     * an answer, a drop mark) has finished writing its state, so nothing writes after it.
+     */
+    async close() {
       unobserve?.();
       if (sweeping !== undefined) clearInterval(sweeping);
+      // Queued work can queue more (an answer decides after its own turn), so wait it out.
+      for (let drained = queue; ; drained = queue) {
+        await drained;
+        if (drained === queue) return;
+      }
     },
   };
 }
