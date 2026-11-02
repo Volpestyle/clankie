@@ -2,12 +2,15 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import { createNativePaneGone } from "../src/captain/native-pane-gone.ts";
 import {
   createLeadSeatRelaunch,
   readClaudeSessionUsage,
@@ -803,6 +806,140 @@ it("hires into the routed project while an open relaunch's successor has no sess
   // A settled receipt proves nothing more about a pane without a session.
   await journal({ stage: "relaunched", sessionId: randomUUID(), seatId: "term_work" });
   expect(await hire()).toMatchObject(changed);
+  expect(spawn).toHaveBeenCalledOnce();
+});
+
+// #376: a lead round whose remembered pane is gone (its window closed, or the Mac
+// restarted with no live pane representing it) was refused as a changed agent. The
+// absence check is the service's own, over a native socket answering as Herdr does.
+it("hires into the routed project when the lead's remembered pane is gone, and refuses anything less", async () => {
+  // What Herdr answers for the lead's pane: gone, present, or an unrecognized error.
+  let herdrSays: "gone" | "present" | "error" = "present";
+  let proofUnavailable = false;
+  const socketDirectory = await mkdtemp(join(tmpdir(), "pane-gone-"));
+  const socketPath = join(socketDirectory, "herdr.sock");
+  const herdr = createServer((socket) => {
+    socket.once("data", (chunk) => {
+      const { id } = JSON.parse(chunk.toString()) as { id: string };
+      socket.end(
+        `${JSON.stringify(
+          herdrSays === "gone"
+            ? { id, error: { code: "pane_not_found" } }
+            : herdrSays === "error"
+              ? { id, error: { code: "internal" } }
+              : { id, result: { process_info: {} } },
+        )}\n`,
+      );
+    });
+  });
+  herdr.listen(socketPath);
+  await once(herdr, "listening");
+  cleanup.push(async () => {
+    await new Promise<void>((done) => herdr.close(() => done()));
+    await rm(socketDirectory, { recursive: true, force: true });
+  });
+  const f = await leadChatFixture(false, cleanup, {
+    nativeSourceProof: true,
+    defaultLead: true,
+    // As the service's own observer reports the pane: nothing when it is gone or unread.
+    projectHireIdentity: async (fleet, pane) => {
+      if (herdrSays === "gone" || proofUnavailable) return undefined;
+      const occupant = f.current();
+      return {
+        fleet,
+        pane,
+        nativeOccupantId: occupantIdForHerdrSession(occupant.session!),
+        binding: { socketPath },
+        processes: [{ pid: process.pid, startTime: "fixture" }],
+        shell: { pid: process.pid, startTime: "fixture" },
+      };
+    },
+    projectHirePaneGone: createNativePaneGone({
+      binding: async () => ({ socketPath }),
+      coreSeats: () => {
+        throw new Error("No desktop app in this fixture");
+      },
+    }),
+  });
+  const conversation = "global-default";
+  await f.captain.pollSeatEvents(50, undefined, conversation, capabilities);
+
+  // global-default leads `clankie` by Auto routing; `unrouted` is no project it leads.
+  const folder = async (name: string) => {
+    await mkdir(join(f.root, name));
+    return realpath(join(f.root, name));
+  };
+  const clankie = await folder("clankie");
+  const unrouted = await folder("unrouted");
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "clankie",
+          name: "Clankie",
+          auto: true,
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: clankie }],
+        },
+        {
+          id: "unrouted",
+          name: "Unrouted",
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: unrouted }],
+        },
+      ],
+    }),
+  }));
+  const bank = await f.captain.laneToolBank("operator", conversation);
+  const spawn = vi.spyOn(HerdrWatchStore.prototype, "spawnSeat");
+  const hire = async (workingDirectory = clankie, projectId: string | null = "clankie") => {
+    const result = await bank.tools
+      .find((tool) => tool.name === "hire_agent")!
+      .call({
+        harness: "codex",
+        effort: "medium",
+        effortReason: "One bounded runtime fix and its proof.",
+        title: "Iris",
+        role: "builder",
+        workingDirectory,
+        ...(projectId === null ? {} : { projectId }),
+        brief: "Own #376.",
+      });
+    const text = result.content.find((part) => part.type === "text");
+    return JSON.parse(text?.type === "text" ? text.text : "null") as Record<string, unknown>;
+  };
+  const refused = (detail: string) => ({
+    outcome: "failed",
+    reason: "not_ready",
+    detail: expect.stringContaining(detail),
+  });
+  const changed = refused("original agent has changed");
+
+  // The pane is there but its proof could not be read, or Herdr gave no clear answer.
+  proofUnavailable = true;
+  expect(await hire()).toMatchObject(changed);
+  herdrSays = "error";
+  expect(await hire()).toMatchObject(changed);
+  proofUnavailable = false;
+  // The pane is there and now holds another session.
+  herdrSays = "present";
+  f.occupy({ sessionId: randomUUID() });
+  expect(await hire()).toMatchObject(changed);
+  expect(spawn).not.toHaveBeenCalled();
+
+  // The pane is gone. Only the project this conversation's routing assigns it, in its folder.
+  herdrSays = "gone";
+  const unassigned = refused("pane is gone, and the conversation leads no project to hire into");
+  expect(await hire(unrouted, "unrouted")).toMatchObject(unassigned);
+  expect(await hire(clankie, null)).toMatchObject(unassigned);
+  expect(await hire(unrouted, "clankie")).toMatchObject(refused("different projects"));
+  expect(spawn).not.toHaveBeenCalled();
+  // The routed project: the hire passes both project admissions and stops only because
+  // this fixture has no harness adapter.
+  expect(await hire()).toMatchObject({
+    outcome: "failed",
+    reason: "harness_unavailable",
+    control: { reason: "pane_run_unavailable" },
+  });
   expect(spawn).toHaveBeenCalledOnce();
 });
 

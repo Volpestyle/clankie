@@ -24,6 +24,7 @@ import {
   liveDesktopTerminal,
 } from "./captain/herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./captain/herdr-core-seats.ts";
+import { createNativePaneGone } from "./captain/native-pane-gone.ts";
 import { LinearMirrors } from "./linear-mirror.ts";
 import { LinearCutover } from "./linear-cutover.ts";
 import { linearGraphqlCredential } from "./linear-graphql.ts";
@@ -1669,6 +1670,10 @@ const captain = createCaptain(
       const refused = desktopProofRefusals.get(pane);
       return refused === undefined ? undefined : `${refused.reason} at ${refused.checkpoint}`;
     },
+    projectHirePaneGone: createNativePaneGone({
+      binding: localFleetBinding,
+      coreSeats: () => createHerdrCoreSeats({ socketPath: herdrCoreSocketPath(process.env) }),
+    }),
     projectHireIdentityBatch: remoteProjectBatchObserver,
     fleetProjectMembership: () => fleetProjectMembership,
     projectHireTools: (projectId) => workerMcp.expectedProjectToolNames(projectId),

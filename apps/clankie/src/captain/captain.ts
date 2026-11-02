@@ -825,18 +825,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           expectedOccupant = proof?.nativeOccupantId;
         }
       }
+      // #376: the remembered pane is gone altogether, as after the lead's window closed or
+      // the Mac restarted with no live pane representing it. Nothing there can have changed
+      // into another agent, so the conversation hires as one without a native source does:
+      // only into the project its owner binding or Auto routing assigns it. A pane that
+      // could not be read, or that now holds another occupant, is checked as before.
+      const gone =
+        proof === undefined && origin !== undefined
+          ? // allow-swallowed-rejection -- an unanswered absence check proves nothing; the guard below refuses.
+            await options.projectHirePaneGone?.(fleet, native.paneId).catch(() => false)
+          : false;
+      if (gone === true && configuredProject === undefined && projects.projects.length > 0)
+        throw new Error(
+          "This conversation's agent pane is gone, and the conversation leads no project to hire into here. Name the projectId its owner binding or Auto routing assigns it, or hire from that project's own conversation.",
+        );
       source =
-        pending !== undefined &&
-        leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined
+        gone === true
           ? configuredProject
-          : await nativeHireProject(
-              projects,
-              expectedOccupant,
-              proof,
-              (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
-              options.projectHireWorkspace,
-              configuredProject,
-            );
+          : pending !== undefined &&
+              leadSeats.pendingReceipt(origin!, leadSeatPane(native), leadSeatPane(pending)) !== undefined
+            ? configuredProject
+            : await nativeHireProject(
+                projects,
+                expectedOccupant,
+                proof,
+                (current) => herdrWatches.projectHireAssignment(fleet, native.paneId, current),
+                options.projectHireWorkspace,
+                configuredProject,
+              );
     } else if (configuredProject !== undefined) {
       source = configuredProject;
     } else if (origin !== undefined) {

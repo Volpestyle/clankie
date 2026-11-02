@@ -60,7 +60,10 @@ for hours, the conversation still hires: only into the project its owner binding
 or Auto routing assigns it, and only while the receipt is open, the process
 observer proves a launched process with no session, and a fresh read shows the
 receipt's harness in the same terminal (VUH-2868). A missing proof or read, any
-session, or another terminal is refused as a changed agent. The old session
+session, or another terminal is refused as a changed agent. When the lead's
+pane is gone altogether, which Herdr or the desktop app's core must say outright,
+the conversation hires the same way, only into the project its routing assigns it
+(#376); a pane that can't be read still counts as present. The old session
 stays on disk and resumable. Each restart records a service notice in the
 conversation.
 
