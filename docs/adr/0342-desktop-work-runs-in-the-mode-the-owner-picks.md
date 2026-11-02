@@ -96,7 +96,8 @@ store and pass credentials, the way Grok Bot and Muse do it. So:
   site's origin (for example `https://github.com`) and the field shape
   (username and password, or a one-time code). It never names or sees a value.
 - Clankie shows the owner a small sign-in card on the surface he is using: the
-  app's feed, the desktop pet or a Discord DM from the official bot to him.
+  app's feed, the desktop pet, the TUI or a Discord DM from the official bot to
+  him.
   The card names the agent, the machine, the site and why it was asked. He
   types the username and password there, chooses "fill once" or "save for this
   site", or declines.
@@ -107,6 +108,14 @@ store and pass credentials, the way Grok Bot and Muse do it. So:
   guest). It never enters a model context, a transcript, a tool result, a log,
   the notes board or a work record. Tool results say only `filled`,
   `declined`, `saved` or `failed`.
+- On a terminal, the same card is a modal in the Clankie TUI (and
+  `clankie credentials answer` in a plain shell): a masked input that reads
+  keystrokes with echo off and sends them over the local API straight to the
+  broker. Nothing is written to the console's chat log, the seat's transcript
+  or scrollback. The hire's own Herdr pane never takes the secret: it shows
+  only that it is waiting for a sign-in to that origin and where the owner can
+  answer, and typing a password into an agent's pane is never the route,
+  because the pane is the agent's input and its transcript.
 - Saved credentials live in the broker (Keychain on macOS), scoped to the
   exact origin, one entry per origin and username. A fill is allowed only into
   a page whose top-level origin matches exactly; a redirect, an iframe on
