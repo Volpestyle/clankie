@@ -38,11 +38,11 @@ JWT signature verification alone cannot observe revocation.
 also invalidates access tokens for token-authorized Cognito operations, including
 GetUser.
 
-Open account host sockets recheck authorization every 30 seconds or at expiry,
-whichever comes first. Confirmed provider refusal closes the socket with code
+Open account host sockets schedule the next authorization check within 30 seconds
+after the preceding check, or at expiry if sooner. Confirmed provider refusal closes the socket with code
 4001 and reason `host credential revoked or invalid`; expiry closes it with
-4001 and `host credential expired`. Revocation can take up to the cache/recheck
-window plus the provider request (a five-second timeout) to be observed.
+4001 and `host credential expired`. Cached successes and the next recheck
+can delay detection; each provider request has a five-second timeout.
 If Cognito is unreachable, throttled, or returns an unusable response, new
 connects fail closed once any cached success expires. Existing sockets remain
 open during that outage, with retries, but always close at the original token
