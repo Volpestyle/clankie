@@ -116,6 +116,19 @@ from VUH-2574 and the [testing record](https://github.com/Volpestyle/clankie-ops
 Both SIGKILL and SIGTERM proofs passed against unchanged source, with one memory,
 one shell append and one saved HTTP reply each.
 
+The automated regression base is
+[`durable-pi-room-restart.integration.test.ts`](../../apps/clankie/test/durable-pi-room-restart.integration.test.ts)
+(2026-11-02, [#368](https://github.com/Volpestyle/clankie/issues/368)). It runs the
+same real service, Pi, journal, file memory and shell, killed with SIGKILL mid-shell
+and started again with no new input. Only the model is a scripted loopback endpoint,
+so it costs nothing and proves the restart contract rather than model behaviour. It
+checks:
+
+- the shell call surfaces as "possibly ran", with one effect and one memory;
+- after the restart the model is asked only for the answer, since completed steps come from the journal;
+- the same delivery replays its saved result, a changed request is refused, and a later clean restart replays it with no model call;
+- a grant changed while the service was down fails the resumed turn closed, with no model or tool step.
+
 Before enabling more lanes:
 
 1. Obtain an approved private Discord test destination and prove the full mouth
