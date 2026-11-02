@@ -1,5 +1,5 @@
-// Manual native proof (#362): a real `codex app-server`, started by the real hire path, is
-// killed under its hire. Only the Herdr pane and the native TUI are stood in for: the view
+// Manual native proof (#362, #427): a real `codex app-server`, started by the real hire path,
+// takes a fresh thread's first brief, and is killed under its hire. Only the Herdr pane and the native TUI are stood in for: the view
 // is a second client on the same server that creates the thread, as `codex --remote` does.
 // Credential-free: the server gets an empty CODEX_HOME, so no model is ever reached.
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
@@ -115,25 +115,9 @@ async function deadServerFixture(killBeforeBrief: boolean) {
         if (!socket) throw new Error("The view could not reach its app-server");
         view = new CodexAppServerClient(socket, () => {}, 15_000);
         await view.initialize(true);
-        const thread = (await view.request("thread/start", { cwd: directory })) as { thread: { id: string } };
-        if (killBeforeBrief) return kill();
-        // The owner typed first, and that turn has ended: codex 0.166 can refuse a
-        // metadata-only resume while a fresh thread's first turn runs (filed separately).
-        const threadId = thread.thread.id;
-        await view.request("turn/start", {
-          threadId,
-          input: [{ type: "text", text: "Owner's first line.", text_elements: [] }],
-        });
-        await vi.waitFor(
-          async () => {
-            const read = (await view!.request("thread/read", { threadId, includeTurns: true })) as {
-              thread: { status: { type: string }; turns: { status: string }[] };
-            };
-            expect(read.thread.status.type).not.toBe("active");
-            expect(read.thread.turns.at(-1)?.status).not.toBe("inProgress");
-          },
-          { timeout: 20_000, interval: 100 },
-        );
+        // A fresh, unmaterialized thread: the brief will be its first turn.
+        await view.request("thread/start", { cwd: directory });
+        if (killBeforeBrief) await kill();
       },
       get: async () => snapshot(),
       resolveTerminal: async () => snapshot(),
@@ -153,13 +137,15 @@ async function deadServerFixture(killBeforeBrief: boolean) {
   const close = async () => {
     store.close();
     view?.close();
+    // The detached server leads its own process group; its helpers (a plugin
+    // clone, say) outlive a kill of the server alone.
     if (serverPid !== undefined)
       try {
-        process.kill(serverPid, "SIGKILL");
+        process.kill(-serverPid, "SIGKILL");
       } catch {
         /* already gone */
       }
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   };
   try {
     const hire = await store.spawnSeat(
@@ -207,6 +193,25 @@ async function deadServerFixture(killBeforeBrief: boolean) {
     throw error;
   }
 }
+
+nativeIt(
+  "reports a fresh thread's first brief as delivered once its turn started (#427)",
+  async () => {
+    const f = await deadServerFixture(false);
+    try {
+      // Codex 0.166 refuses history reads for a moment as that first turn starts;
+      // the turn RPC's own identity proves delivery.
+      expect(f.hire, JSON.stringify(f.hire)).toMatchObject({
+        outcome: "spawned",
+        control: { mode: "adapter" },
+      });
+      expect(f.hire).not.toHaveProperty("deliveryStage", "uncertain");
+    } finally {
+      await f.close();
+    }
+  },
+  60_000,
+);
 
 nativeIt(
   "shows a hire whose real app-server was killed as stopped, not working",
