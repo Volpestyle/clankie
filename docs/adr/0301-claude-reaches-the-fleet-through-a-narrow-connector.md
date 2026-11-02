@@ -104,10 +104,16 @@ own `/mcp` on a trusted network.
   device's current binding revokes that connector device and all its tokens.
   The revocation records the device and app and sends an owner service notice;
   the device list and `clankie doctor` show it. Invalid tokens remain
-  `invalid_grant` without revocation. There is no retry grace: access tokens
-  contain a random nonce that is not stored, so the issued pair cannot be
-  reconstructed. A retry of a just-superseded token gets `invalid_grant` and
-  revokes the device too; sign in again to reconnect.
+  `invalid_grant` without revocation. The immediately previous binding gets a
+  narrow race window while the current binding is less than 60 seconds old:
+  return `invalid_grant` without revocation and warn `connector.refresh.raced`
+  with the device id. This accommodates concurrent Claude sessions and lost
+  refresh responses without storing tokens or returning the issued pair.
+  The previous binding is projected from the activation and refresh events,
+  including on replay. Any older token, or the previous one at 60 seconds or
+  later, revokes the device. An attacker who refreshes first is still caught
+  when the real client next refreshes, normally much later than 60 seconds.
+  Sign in again after revocation to reconnect.
 - **Narrow by the scope, not the grants.** The service answers a connector
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it

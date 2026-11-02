@@ -251,6 +251,7 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     const rotated = (await refreshed.json()) as { access_token: string; refresh_token: string };
     expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
     await host.restart();
+    host.advance(1);
     const afterRestart = await token(host.baseUrl, {
       grant_type: "refresh_token",
       client_id: clientId,
@@ -284,10 +285,24 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
       ).status,
     ).toBe(200);
 
-    // The same immediately superseded token, even within 30s, ends the whole device.
-    // The random access-token nonce is not stored, so no retry grace is offered.
+    // The immediately previous binding survives replay and concurrent-session retries.
     await host.restart();
     const reuse = { grant_type: "refresh_token", client_id: clientId, refresh_token: rotated.refresh_token };
+    host.advance(59_999);
+    expect(await (await token(host.baseUrl, reuse)).json()).toEqual({ error: "invalid_grant" });
+    expect(
+      (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${latest.access_token}` },
+        })
+      ).status,
+    ).toBe(200);
+    expect(notices).toEqual([]);
+    expect(invalidated).toEqual([]);
+
+    // Exactly 60 seconds after the current binding, the same token revokes.
+    host.advance(1);
+    await host.restart();
     expect(await (await token(host.baseUrl, reuse)).json()).toEqual({ error: "invalid_grant" });
     expect(invalidated).toEqual([self.deviceId]);
     expect(notices).toHaveLength(1);
@@ -366,6 +381,65 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     await host.close();
   }
 }, 30_000);
+
+it("revokes immediately for a token two rotations old, across restart", async () => {
+  const host = await createQaService();
+  try {
+    const { client_id: clientId } = (await (await register(host.baseUrl)).json()) as { client_id: string };
+    const signIn = await startSignIn(host.baseUrl, clientId);
+    expect(await cli(host).run(["approve", signIn.code!])).toBe(0);
+    const code = new URL((await status(host.baseUrl, signIn.request!)).redirect!).searchParams.get("code")!;
+    const initial = (await (
+      await token(host.baseUrl, {
+        grant_type: "authorization_code",
+        client_id: clientId,
+        redirect_uri: CALLBACK,
+        code,
+        code_verifier: signIn.verifier,
+      })
+    ).json()) as { access_token: string; refresh_token: string };
+    const refresh = (refreshToken: string) =>
+      token(host.baseUrl, {
+        grant_type: "refresh_token",
+        client_id: clientId,
+        refresh_token: refreshToken,
+      });
+    host.advance(1);
+    const concurrent = await Promise.all([refresh(initial.refresh_token), refresh(initial.refresh_token)]);
+    expect(concurrent.map((response) => response.status).sort()).toEqual([200, 400]);
+    const rotated = (await concurrent.find((response) => response.status === 200)!.json()) as {
+      access_token: string;
+      refresh_token: string;
+    };
+    await host.restart();
+    // The initial activation is the previous binding after the very first refresh.
+    expect(await (await refresh(initial.refresh_token)).json()).toEqual({ error: "invalid_grant" });
+    expect(
+      (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${rotated.access_token}` },
+        })
+      ).status,
+    ).toBe(200);
+    host.advance(1);
+    const second = await refresh(rotated.refresh_token);
+    expect(second.status).toBe(200);
+    const latest = (await second.json()) as { access_token: string; refresh_token: string };
+    await host.restart();
+    // The oldest binding is two generations behind, within the current binding's 60s window.
+    expect(await (await refresh(initial.refresh_token)).json()).toEqual({ error: "invalid_grant" });
+    expect(
+      (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${latest.access_token}` },
+        })
+      ).status,
+    ).toBe(401);
+    expect(await (await refresh(latest.refresh_token)).json()).toEqual({ error: "invalid_grant" });
+  } finally {
+    await host.close();
+  }
+});
 
 it("a token from the owner's approval opens the relay's tools, and revoking the device closes them", async () => {
   const host = await createQaService();

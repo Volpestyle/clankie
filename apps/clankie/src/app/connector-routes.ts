@@ -56,6 +56,8 @@ const AUTHORIZATION_CODE_TTL_MS = 60_000;
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 /** A refresh token unused this long stops working; signing in again pairs anew. */
 const REFRESH_IDLE_MS = 90 * 24 * 60 * 60_000;
+/** Concurrent sessions may retry the immediately previous refresh binding. */
+const REFRESH_RACE_MS = 60_000;
 const PENDING_SIGN_INS_MAX = 32;
 const CLIENT_PURPOSE = "connector-client-v1";
 const REFRESH_PURPOSE = "connector-refresh-v1";
@@ -553,6 +555,16 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         // Keep reuse detection and rotation under the same device lock, including
         // across restart: the binding and revocation both replay from the log.
         if (Date.parse(claims.t) < Date.parse(boundAt)) {
+          if (
+            claims.t === record.previousRefreshAt &&
+            now.getTime() - Date.parse(boundAt) < REFRESH_RACE_MS
+          ) {
+            logger.warn(
+              { event: "connector.refresh.raced", deviceId: record.deviceId },
+              "connector refresh raced with the previous binding",
+            );
+            return tokenError(context, "invalid_grant");
+          }
           applyDeviceEvent(
             ctx.devices,
             ctx.recordEvent("device.revoked", `device:${record.deviceId}`, now.toISOString(), {

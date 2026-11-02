@@ -2027,10 +2027,13 @@ owner's conversation receives the existing service notice, `clankie devices
 --json` shows the revocation, and `clankie doctor` names the disconnected app
 and device (`connectorRefreshRevocations` in JSON). Sign in again to reconnect.
 Malformed tokens, invalid signatures and tokens for another client return
-`invalid_grant` without disconnecting the device. There is no retry grace:
-the access token's random nonce is not stored, so the issued pair cannot be
-reconstructed. Retrying even a just-superseded refresh token returns
-`invalid_grant` and disconnects the device.
+`invalid_grant` without disconnecting the device. Concurrent sessions and lost
+refresh responses have a narrow race window: the token matching the immediately
+previous binding returns `invalid_grant` without revoking while the current
+binding is less than 60 seconds old. The service warns `connector.refresh.raced`
+with the device id. This does not return the already-issued token pair. The
+previous binding survives restart through event replay. A token two rotations
+old revokes immediately, and the previous token revokes at 60 seconds or later.
 
 The same URL works in Claude Code and Codex, which sign in through a loopback
 callback, and in hosted apps such as Grok, which return to their own https

@@ -89,7 +89,14 @@ export function applyDeviceEvent(devices: DeviceRegistry, event: DomainEvent): v
       if (record.status !== "active") {
         throw new Error(`device ${record.deviceId} refreshed from ${record.status}`);
       }
-      devices.set(record.deviceId, DeviceRecordSchema.parse({ ...record, lastRefreshAt: event.occurredAt }));
+      devices.set(
+        record.deviceId,
+        DeviceRecordSchema.parse({
+          ...record,
+          previousRefreshAt: record.lastRefreshAt ?? record.activatedAt,
+          lastRefreshAt: event.occurredAt,
+        }),
+      );
       return;
     }
     case "device.push.changed": {
