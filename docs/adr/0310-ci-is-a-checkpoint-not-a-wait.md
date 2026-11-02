@@ -114,7 +114,7 @@ before other changes can proceed.
 The merge is the first commit on main's first-parent history containing the
 worker's landed HEAD. Its own checkpoint is authoritative, even when a newer
 descendant finishes. Only a cancelled own run permits using the newest
-non-cancelled descendant checkpoint; a red descendant needs evidence for that
+finished, non-cancelled descendant checkpoint; a red descendant needs evidence for that
 descendant’s run, not the original merge.
 Cancelled runs do not count as results. Running, missing or unreachable evidence
 holds close-out; PR checks and unrelated jobs cannot supply main's proof.

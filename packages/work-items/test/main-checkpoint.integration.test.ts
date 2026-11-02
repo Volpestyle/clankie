@@ -152,3 +152,12 @@ it("requires the descendant's bug when a cancelled own run uses red descendant c
   f.link("descendant-url");
   expect(await f.check()).toBeUndefined();
 });
+
+
+it("uses the newest finished descendant after cancellation even when a newer run is running", async () => {
+  const f = await fixture();
+  f.mode("running-descendant-red-finished-cancelled-own");
+  expect(await f.check()).toMatchObject({ reason: "main_red", runUrl: f.runUrl.replace("280", "281") });
+  f.link("descendant-url");
+  expect(await f.check()).toBeUndefined();
+});

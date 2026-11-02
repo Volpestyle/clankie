@@ -126,8 +126,10 @@ export async function checkpointFixture() {
                   "red-descendant-green-own",
                   "green-descendant-running-own",
                   "red-descendant-cancelled-own",
+                  "running-descendant-red-finished-cancelled-own",
                 ].includes(mode)
               ? [
+                  ...(mode.startsWith("running-descendant") ? [run(282, tip, "in_progress", null)] : []),
                   run(281, tip, "completed", mode.startsWith("green-descendant") ? "success" : "failure"),
                   run(
                     280,

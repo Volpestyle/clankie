@@ -243,7 +243,8 @@ async function observeCheckpoint(
           own = { run, jobs };
           break runs;
         }
-        if (!descendant && run.conclusion !== "cancelled") descendant = { run, jobs };
+        if (!descendant && run.status === "completed" && run.conclusion !== "cancelled")
+          descendant = { run, jobs };
       }
       if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) {
         scanned = true;
