@@ -1,7 +1,7 @@
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
-import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -675,9 +675,30 @@ describe("project hiring", () => {
     f.projectSettings.projects[0]!.roles[0]!.harness = "pi";
     f.projectSettings.projects[0]!.roles[0]!.model = "new-model";
     const restarted = new HerdrWatchStore(f.path, f.options);
-    expect(await restarted.spawnSeat({ ...request(f.root), harness: "claude" })).toMatchObject({
-      outcome: "failed",
-    });
+    const receipts = JSON.parse(await readFile(`${f.path}.hire-receipts.json`, "utf8"));
+    const refused = await restarted.spawnSeat({ ...request(f.root), harness: "claude" });
+    expect(refused).toMatchObject({ outcome: "failed" });
+    const ledger = JSON.parse(await readFile(`${f.path}.project-hires.json`, "utf8"));
+    const allocation = ledger.allocations[0];
+    const receiptId = refused.outcome === "failed" ? refused.receiptId : undefined;
+    expect(receiptId).toBeDefined();
+    expect(refused.outcome === "failed" && refused.detail).toContain("No new agent was started.");
+    expect(refused.outcome === "failed" && refused.detail).toContain(`allocation ${allocation.id}`);
+    expect(refused.outcome === "failed" && refused.detail).toContain(`native receipt ${receiptId}`);
+    expect(refused.outcome === "failed" && refused.detail).toMatch(/age \d+s/u);
+    expect(refused.outcome === "failed" && refused.detail).toContain(
+      `clankie hire-receipt settle ${receiptId} abandoned`,
+    );
+    expect(refused.outcome === "failed" && refused.detail).toContain(
+      `clankie hire-receipt settle ${allocation.id} release-allocation`,
+    );
+    // Describing the blocker changes no receipt and launches no replacement.
+    expect(JSON.parse(await readFile(`${f.path}.hire-receipts.json`, "utf8"))).toEqual(receipts);
+    // Old persisted allocations remain readable without inventing their age.
+    delete allocation.beganAt;
+    await writeFile(`${f.path}.project-hires.json`, JSON.stringify(ledger));
+    const legacy = await restarted.spawnSeat({ ...request(f.root), harness: "claude" });
+    expect(legacy.outcome === "failed" && legacy.detail).toContain("age unknown; legacy hire");
     expect(f.runner.startAgent).toHaveBeenCalledOnce();
     expect(await restarted.spawnSeat({ ...request(f.root), workingDirectory: tmpdir() })).toMatchObject({
       outcome: "failed",

@@ -103,22 +103,23 @@ export interface ConnectorMcpOptions {
 }
 
 /**
- * Only a malformed request or an op the connector may never call proves nothing started. The
+ * A session refusal, malformed request or forbidden op proves nothing started. The
  * relay rechecks sign-in after a dispatch too, so even a 401 or 403 can follow a started hire.
  */
 function startNeverRan(error: unknown): boolean {
   return (
-    error instanceof ConnectorRefusal &&
-    (error.status === 400 || error.code === "connector_operation_not_allowed")
+    error instanceof SessionRefusal ||
+    (error instanceof ConnectorRefusal &&
+      (error.status === 400 || error.code === "connector_operation_not_allowed"))
   );
 }
 
 class StartUncertain extends Error {
-  public readonly refusal: ConnectorRefusal | undefined;
+  public readonly transportError: unknown;
 
-  public constructor(refusal?: ConnectorRefusal) {
+  public constructor(transportError: unknown) {
     super("start_uncertain");
-    this.refusal = refusal;
+    this.transportError = transportError;
   }
 }
 
@@ -887,10 +888,9 @@ function connectorServer(
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
         const { id, ...started } = await starting.catch((error: unknown) => {
           if (startNeverRan(error)) throw error;
-          throw new StartUncertain(error instanceof ConnectorRefusal ? error : undefined);
+          throw new StartUncertain(error);
         });
-        if (started.status === "refused")
-          return failure(`${started.detail ?? "Nothing started."} Places: ${JSON.stringify(started.places)}`);
+        if (started.status === "refused") return failure(started.detail ?? "Nothing started.");
         return text({ ...(id === undefined ? {} : { agent: id }), ...started });
       }
       if (call.params.name === "answer_prompt") {
@@ -1132,10 +1132,18 @@ function connectorServer(
       }
       return failure(`There's no tool called ${call.params.name}.`);
     } catch (error) {
-      if (error instanceof StartUncertain)
+      if (error instanceof StartUncertain) {
+        const cause = error.transportError;
+        const detail =
+          cause instanceof ConnectorRefusal
+            ? `${cause.status >= 500 ? "The start_agent transport failed." : refusalText(cause)} HTTP ${cause.status} (${cause.code}).`
+            : cause instanceof Error && (cause.name === "TimeoutError" || cause.name === "AbortError")
+              ? "The start_agent transport timed out or was interrupted."
+              : "The start_agent transport failed or its answer was lost.";
         return failure(
-          `${error.refusal === undefined ? "" : `${refusalText(error.refusal)} `}I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
+          `${detail} I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
         );
+      }
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);
       if (error instanceof ConnectorImageRefusal) return failure(error.message);

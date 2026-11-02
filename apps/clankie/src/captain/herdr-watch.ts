@@ -1037,7 +1037,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly hireResourceNotices = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
-  private readonly projectRecoveryOnly = new WeakSet<SpawnOperatorSeat>();
+  private readonly projectRecoveryOnly = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectLiveReuse = new WeakSet<SpawnOperatorSeat>();
   private readonly projectContexts = new WeakMap<
     SpawnOperatorSeat,
@@ -2555,6 +2555,27 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return { ...proof, pane };
   }
 
+  /** Describe the original blocker and existing operator recovery commands; never changes it. */
+  private projectHireBlocker(id: string): string {
+    const allocation = this.projectHires.allocation(id);
+    const request = allocation?.request;
+    const baseKey =
+      request === undefined
+        ? undefined
+        : JSON.stringify([request.fleet ?? "local", request.harness, request.workingDirectory, "new"]);
+    const receipts = this.hireReceipts.all().filter(([key, record]) => {
+      if (request?.freshIntent !== undefined) return record.freshHire?.id === request.freshIntent.id;
+      if (baseKey === undefined) return false;
+      return (
+        (record.freshHire?.baseKey ?? record.hireBaseKey ?? key) === baseKey &&
+        (allocation?.pane === undefined || record.paneId === allocation.pane)
+      );
+    });
+    const receipt = receipts.length === 1 ? receipts[0]![1] : undefined;
+    const receiptId = receipt?.messageId;
+    return `${this.projectHires.describe(id)}; native receipt ${receiptId ?? "not recorded"}. Owner: inspect the original agent; if it is gone, run \`clankie hire-receipt settle ${receiptId ?? id} abandoned\`, then \`clankie hire-receipt settle ${id} release-allocation\``;
+  }
+
   public async spawnSeat(
     inputRequest: HireRequest,
     subjectOverride?: string,
@@ -2725,7 +2746,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return {
           outcome: "failed",
           reason: "start_unconfirmed",
-          detail: "The earlier hire is still starting. Wait for its result before trying again.",
+          detail: `The earlier hire is still starting. No new agent was started. Blocking ${this.projectHireBlocker(reserved.id)}.`,
         };
       allocation = reserved.id;
       const harness = reserved.request.harness;
@@ -2740,7 +2761,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(authority === undefined ? {} : { authority }),
       });
       if (reused) this.projectLiveReuse.add(seat);
-      if (reserved.reused) this.projectRecoveryOnly.add(seat);
+      if (reserved.reused) this.projectRecoveryOnly.set(seat, reserved.id);
       this.activeProjectHires.add(allocation);
       const result = await this.spawnAdmittedSeat(
         seat,
@@ -3293,17 +3314,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptId: pending.messageId,
           reason: "delivery_unconfirmed",
           deliveryStage: "uncertain",
-          detail: `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
+          detail: this.projectRecoveryOnly.has(input)
+            ? `The earlier hire still needs checking. No new agent was started. Blocking ${this.projectHireBlocker(this.projectRecoveryOnly.get(input)!)}.`
+            : `The original hire remains uncertain${pending.paneId === undefined ? "" : ` in pane ${pending.paneId}`}; reconcile its exact session and brief before any retry. No new seat was started.`,
         };
       } finally {
         this.activeHires.delete(receiptKey);
       }
     }
-    if (this.projectRecoveryOnly.has(input))
+    const blockingAllocation = this.projectRecoveryOnly.get(input);
+    if (blockingAllocation !== undefined)
       return {
         outcome: "failed",
         reason: "start_unconfirmed",
-        detail: "The earlier hire still needs checking. No new agent was started.",
+        detail: `The earlier hire still needs checking. No new agent was started. Blocking ${this.projectHireBlocker(blockingAllocation)}.`,
       };
     let receipt: UncertainReceipt;
     try {

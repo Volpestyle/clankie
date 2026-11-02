@@ -2031,7 +2031,12 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 `start_agent`, which starts a Claude Code or Codex agent in a known project's
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
-`start_agent` existed sign in again to use it. `start_agent` takes an optional
+`start_agent` existed sign in again to use it. A service refusal keeps its own words.
+A blocked project hire names its allocation, native receipt when recorded, pane
+when observed, age (unknown for legacy records), and existing owner recovery
+commands. A lost answer or HTTP 502 stays uncertain: read `list_agents` before
+retrying, because the agent may already exist. No refusal automatically settles
+the blocking hire. `start_agent` takes an optional
 `account`, a label exactly as `fleet_capacity` names it for that machine and
 harness ([ADR 0340](adr/0340-connected-apps-name-the-hire-account.md)). Left out,
 Clankie picks the account with the most spare capacity and skips any the owner
