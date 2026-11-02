@@ -1460,6 +1460,19 @@ export class WorkerMcp {
     ];
   }
 
+  /**
+   * The served tools a linked machine's own bridge copy must define (#379).
+   * clankie_tools and clankie_call are forwarded from here through any copy.
+   */
+  async expectedBridgeToolNames(): Promise<readonly string[]> {
+    const forwarded = new Set(FLEET_TOOLS.map((tool) => tool.name));
+    return [
+      ...new Set(["message_clankie", "message_clankie_status", ...(await this.expectedFleetToolNames())]),
+    ]
+      .filter((name) => !forwarded.has(name))
+      .sort();
+  }
+
   private async fleetToolsEnabled(): Promise<boolean> {
     return (await this.options.fleetTools?.()) !== "off";
   }

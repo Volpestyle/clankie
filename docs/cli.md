@@ -10245,6 +10245,16 @@ timeout; a successful connected-tool call clears it. These diagnostics grant
 no account, project or native peer authority.
 Unregistered or disconnected machines never supply an arbitrary SSH target.
 
+`clankie doctor --machine NAME` also carries `harnesses.catalog`: the tools this
+service serves that each worker bridge copy on that machine must define itself
+(`expected`; `clankie_tools` and `clankie_call` are forwarded through any copy),
+and for the Claude copy and, when installed, the Codex copy, whether it
+`reported` its tools and which are `missing`. A copy can lack a served tool
+without a version change, and every Claude or Codex hire there then fails its
+first catalog. `refreshNeeded: true` with a `reason` naming the missing tools, or
+a copy that predates tool reporting, means run `clankie herdr prepare NAME` before
+hiring there.
+
 On Windows, Codex detection resolves a unique installed native executable from
 PATH or the fixed npm package layouts, including the per-user npm root when SSH
 omits it from PATH. It does not execute command shims or dotfiles launchers and

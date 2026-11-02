@@ -3729,7 +3729,7 @@ paths:
       tags: [Operator]
       operationId: inspectFleetHarnesses
       summary: Inspect native harness registration on one registered remote fleet
-      description: Reports profile activation, service versus installed version, bridge, hooks and skill presence. Static registration never establishes live process membership or receiver proof.
+      description: Reports profile activation, service versus installed version, bridge, hooks and skill presence, and a catalog comparing the tools each bridge copy defines with the tools this service serves (refreshNeeded names any missing tool). Static registration never establishes live process membership or receiver proof.
       security: [{ operatorBearer: [] }]
       parameters:
         - in: path

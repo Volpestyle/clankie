@@ -202,9 +202,53 @@ function installCommand(fleet: HerdrFleet, sourceSetup?: string, linkedOnly = fa
       );
 }
 
+/**
+ * Whether each bridge copy on the machine defines every tool this service
+ * serves. A copy can lack one without a version change, and then every hire
+ * there fails its first catalog (#379), so a gap names the refresh.
+ */
+export function bridgeCatalog(
+  fleet: string,
+  expected: readonly string[],
+  report: { claudeBridgeTools?: unknown; codex?: { pluginInstalled?: unknown; bridgeTools?: unknown } },
+) {
+  const check = (tools: unknown) =>
+    Array.isArray(tools)
+      ? { reported: true, missing: expected.filter((name) => !tools.includes(name)) }
+      : { reported: false, missing: [] as string[] };
+  const claude = check(report.claudeBridgeTools);
+  const codex = report.codex?.pluginInstalled === true ? check(report.codex.bridgeTools) : null;
+  const gaps: string[] = [];
+  for (const [harness, result] of [
+    ["Claude", claude],
+    ["Codex", codex],
+  ] as const) {
+    if (result === null) continue;
+    if (!result.reported) gaps.push(`${harness}'s worker bridge predates tool reporting`);
+    else if (result.missing.length)
+      gaps.push(`${harness}'s worker bridge lacks ${result.missing.join(", ")}`);
+  }
+  return {
+    expected,
+    claude,
+    codex,
+    refreshNeeded: gaps.length > 0,
+    ...(gaps.length
+      ? {
+          reason: `${gaps.join("; ")} on ${fleet}; hires there fail until \`clankie herdr prepare ${fleet}\` refreshes it.`,
+        }
+      : {}),
+  };
+}
+
 export async function inspectFleetHarnesses(
   fleet: HerdrFleet,
-  options: { shell: FleetShellRun; workerPluginDir: string },
+  options: {
+    shell: FleetShellRun;
+    workerPluginDir: string;
+    /** The served tools each bridge copy there must define; omitted, the catalog goes unchecked. */
+    expectedBridgeTools?: () => Promise<readonly string[]>;
+  },
 ): Promise<unknown> {
   const expected = JSON.parse(
     await readFile(join(options.workerPluginDir, ".claude-plugin", "plugin.json"), "utf8"),
@@ -217,7 +261,9 @@ export async function inspectFleetHarnesses(
       : posixScriptCommand(
           `node "$HOME/${MARKETPLACE_DIR}/worker/bin/harness-inspect.mjs" ${posixQuote(expected)}`,
         );
-  return JSON.parse(await options.shell(command, 60_000));
+  const report = JSON.parse(await options.shell(command, 60_000));
+  if (!options.expectedBridgeTools) return report;
+  return { ...report, catalog: bridgeCatalog(fleet.id, await options.expectedBridgeTools(), report) };
 }
 
 export async function prepareFleet(
