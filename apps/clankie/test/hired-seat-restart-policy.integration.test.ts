@@ -446,3 +446,61 @@ it("Codex native user events count as owner input even without display-message m
   expect(f.requests()).toBe(0);
   expect((await f.policy.status()).seats[0]!.waiting!.reason).toBe("owner_active");
 });
+
+// #425: a lead clears a hire's context on demand. The same protocol and guards as a 450K
+// restart run for that session at any context size; only its own lead may ask, only while
+// the owner's seat restarts are on, and a settled restart is never asked for again.
+it("restarts a hire its lead asked for below 450K, through the same handoff, and refuses anyone else", async () => {
+  const f = await fixture();
+  f.setTokens(120_000);
+  await f.native();
+  const handoffs: string[] = [];
+  const original = f.candidate.requestHandoff.bind(f.candidate);
+  f.candidate.requestHandoff = (message, guard, signal) => {
+    handoffs.push(message);
+    return original(message, guard, signal);
+  };
+  const sessionId = f.candidate.agent.session!.value;
+  const pane = f.candidate.agent.paneId;
+  // Below budget and unasked, nothing happens.
+  await f.policy.tick();
+  expect(f.requests()).toBe(0);
+
+  expect(await f.policy.request(pane, sessionId, { conversationId: "another-lead" })).toEqual({
+    outcome: "refused",
+    reason: "not_your_hire",
+  });
+  expect(await f.policy.request(pane, "an-earlier-session", { conversationId: "lead" })).toEqual({
+    outcome: "refused",
+    reason: "not_a_hired_seat",
+  });
+  f.disable();
+  expect(await f.policy.request(pane, sessionId, { conversationId: "lead" })).toEqual({
+    outcome: "refused",
+    reason: "seat_restarts_off",
+  });
+  const enabled = createHiredSeatRestarts({ ...f.deps, enabled: async () => true });
+  await enabled.tick();
+  expect(f.requests()).toBe(0);
+
+  // Its own lead asks: the request survives a service restart, then the next tick hands off
+  // and restarts it with the original brief, as a 450K restart would.
+  expect(await enabled.request(pane, sessionId, { conversationId: "lead" })).toEqual({
+    outcome: "scheduled",
+  });
+  const resumed = createHiredSeatRestarts({ ...f.deps, enabled: async () => true });
+  expect((await resumed.status()).seats[0]).toMatchObject({ requested: { by: "lead" } });
+  await resumed.tick();
+  expect(f.requests()).toBe(1);
+  expect(f.restarts()).toBe(1);
+  expect(handoffs[0]).toContain("your lead asked for");
+  expect(f.recovery()).toContain(f.candidate.originalBrief);
+  expect(f.recovery()).toContain("LOCAL-TEST-1");
+  expect(await resumed.request(pane, sessionId, { conversationId: "lead" })).toEqual({
+    outcome: "refused",
+    reason: "already_restarted",
+  });
+  await resumed.tick();
+  expect(f.requests()).toBe(1);
+  expect(f.restarts()).toBe(1);
+});

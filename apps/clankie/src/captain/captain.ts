@@ -3924,6 +3924,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return headSeat;
     },
   });
+  // #425: a lead clears a hire's context on demand, through the hired-seat restart protocol.
+  herdrWatches.restartSeat = async (seatId, authority) => {
+    await assertConversationAuthority(authority);
+    // allow-swallowed-rejection -- a seat Herdr can't resolve is answered as not_a_hired_seat.
+    const agent = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+    const sessionId = agent?.session?.value;
+    if (agent === undefined || sessionId === undefined)
+      return { outcome: "refused", reason: "not_a_hired_seat" };
+    const result = await hiredSeatRestarts.request(agent.paneId, sessionId, authority.owner);
+    // allow-swallowed-rejection -- the tick records each refusal on the seat's restart status.
+    if (result.outcome === "scheduled") void hiredSeatRestarts.tick().catch(() => {});
+    return result;
+  };
   herdrWatches.start(
     async (conversationId, prompt, discord, guard, original) => {
       const owner = { conversationId, ...(discord === undefined ? {} : { discord }) };

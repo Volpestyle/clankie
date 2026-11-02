@@ -128,8 +128,11 @@ knows the area and has context to spare often beats a fresh hire: hand it the
 work with `message_seat` and its `deliverable`, so what it holds stays true.
 Hire fresh when no one fits, the work needs another harness, worktree or
 account, or a worker's context would cost more than it saves: old context is
-re-read every turn and can mislead. Close a worker that is idle and unlikely to
-be useful again; nothing here is a timer.
+re-read every turn and can mislead. Clear a worker's context with
+`restart_seat` when it should stay on its area but its context is bloated or no
+longer applies: it restarts fresh in its own pane with its brief and a handoff.
+Close a worker that is idle and unlikely to be useful again; nothing here is a
+timer.
 
 ## Brief an owned result
 
@@ -232,8 +235,9 @@ On each watch wake and periodic round, check **every seat you own**
   after compaction stays unknown until the next call. The flag is evidence for
   your decision and takes no action. Weigh a large context against what it
   knows: past about 300K tokens, retire the seat by the `work-items` handoff
-  protocol and start a fresh one from the item, unless its knowledge of the
-  area is worth carrying into the next item. A seat's whole context is re-read on every
+  protocol and start a fresh one from the item, or clear it in place with
+  `restart_seat`, unless its knowledge of the area is worth carrying into the
+  next item. A seat's whole context is re-read on every
   call, so a 1M window is a ceiling, not a budget.
 - **Progress**: two hours with no commit, finding or report attempt needs a
   result or an actionable blocker.

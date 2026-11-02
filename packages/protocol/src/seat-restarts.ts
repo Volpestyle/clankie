@@ -44,6 +44,8 @@ export const SeatRestartStatusSchema = z
             noticedAt: z.string().datetime().optional(),
           })
           .optional(),
+        /** The seat's lead asked for this session's fresh restart at any context size (#425). */
+        requested: z.object({ at: z.string().datetime(), by: z.string().min(1).max(256) }).optional(),
         handoff: SeatRestartHandoffSchema.optional(),
         handoffHistory: z
           .array(
