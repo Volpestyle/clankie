@@ -22,7 +22,8 @@ vi.mock("../src/process.ts", async (importOriginal) => {
   return {
     ...real,
     processIdentity: async (pid?: number) => {
-      if (pid !== undefined && unreadable.has(pid)) throw new Error("Fleet resource native observation failed");
+      if (pid !== undefined && unreadable.has(pid))
+        throw new Error("Fleet resource native observation failed");
       return real.processIdentity(pid);
     },
   };
