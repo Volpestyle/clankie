@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -810,6 +810,42 @@ describe("machine shared heavy permits with actual OS children", () => {
       await run.ready();
       const { pid } = JSON.parse(await readFile(run.receipt, "utf8")) as { pid: number };
       run.child.kill("SIGTERM");
+      expect(await run.done).toBe(143);
+      expect(await processIdentity(pid)).toBeUndefined();
+      expect((await f.governor.snapshot()).capacity.used).toBe(0);
+    } finally {
+      await f.close();
+    }
+  }, 20_000);
+
+  // #372: the 2 s KILL grace started when cancel began, not when TERM went out.
+  // TERM waits on a native identity read, so a read slower than the grace sent
+  // TERM and KILL back to back. The wrapper's own observer is stopped for real
+  // across the grace, then resumed: the group must still get TERM first.
+  it("gives a terminated command its full grace even when the identity read before TERM outlasts it", async () => {
+    const f = await fixture();
+    try {
+      const run = f.start("slow-identity");
+      await run.ready();
+      const { pid } = JSON.parse(await readFile(run.receipt, "utf8")) as { pid: number };
+      const listing = await new Promise<string>((resolve, reject) =>
+        execFile("ps", ["-A", "-o", "pid=,ppid=,command="], (error, stdout) =>
+          error ? reject(error) : resolve(stdout),
+        ),
+      );
+      const observer = listing
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/u))
+        .find(([, ppid, ...argv]) => Number(ppid) === run.child.pid && argv.at(-1) === "serve");
+      expect(observer, listing).toBeDefined();
+      const observerPid = Number(observer![0]);
+      process.kill(observerPid, "SIGSTOP");
+      try {
+        run.child.kill("SIGTERM");
+        await delay(2_500);
+      } finally {
+        process.kill(observerPid, "SIGCONT");
+      }
       expect(await run.done).toBe(143);
       expect(await processIdentity(pid)).toBeUndefined();
       expect((await f.governor.snapshot()).capacity.used).toBe(0);
