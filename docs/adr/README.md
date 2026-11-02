@@ -370,5 +370,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0349: Playwright reaches agent browser panes through a guarded DevTools pipe](0349-playwright-reaches-agent-browser-panes-through-a-guarded-pipe.md) — Accepted, 2026-11-03, implementing James's approved request relayed by his lead: "let agents drive the Herdr Browser with Playwright instead of reinventing it", with no open-to-anyone debug port, a token only Herdr hand…
 - [0350: The owner switches Clankie on and off from his app](0350-the-owner-switches-clankie-on-and-off-from-his-app.md) — Proposed, 2026-11-03, from James's ask, relayed by his lead, to switch Clankie's own main agent on and off from the Clankie iPhone app and see in the Message Clankie box when he's off.
 - [0351: Clankie proposes a setting change and the owner's tap applies it](0351-clankie-proposes-a-setting-and-the-owner-taps-it.md) — Proposed, 2026-11-03, from James's approval ("Add it") of an "Ask Clankie" row in the app's Settings, relayed by his lead.
+- [0351: Mac runners run as their own user behind a runner-side guard](0351-mac-runners-run-as-their-own-user-behind-a-runner-side-guard.md) — Proposed, 2026-11-02.
 
 <!-- adr-index:end -->

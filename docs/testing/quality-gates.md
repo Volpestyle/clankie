@@ -18,7 +18,8 @@ macOS-only tests run in the `mac` job on the owner's Mac runner: install, the
 pinned Herdr and `node scripts/check-changed-tests.mjs --base <commit>` (the landing gate's test
 selection, declared filesystem-input consumers included), for pushes and same-repository pull requests
 only, never forks. It stays off until the `CLANKIE_MAC_RUNNER` repository
-variable is `true`. The `codex-clean` commit status, posted by the Codex
+variable is `true`. The Mac's runners enforce that themselves, under their own
+user ([Mac runner](mac-runner.md)). The `codex-clean` commit status, posted by the Codex
 reviewer on the owner's Mac ([ADR 0329](../adr/0329-codex-reviews-on-the-owners-mac.md)),
 is advisory: a pull request merges on green checks without it, and its findings become follow-up issues. The landing job restores the Vox cargo cache a
 push to main saves, and checks three TypeScript programs at once. Run the

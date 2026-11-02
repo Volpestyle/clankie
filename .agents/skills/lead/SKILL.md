@@ -220,6 +220,9 @@ fleet stands behind
   `ci-finding` queue beside the regular issue queue so neither starves the
   other, sized to the queues, and at least one on `ci-finding` while any are
   open.
+- Merge on green only a pull request from a branch of the same repository,
+  opened by the owner or the fleet. A fork waits for the owner; never approve
+  its workflow run or merge one on its checks alone.
 - A failure already on the main branch never blocks other work. File it and
   get it fixed there; don't hold unrelated changes behind it.
 - Each change gets its full checks once, in one place: CI for a pull request,
