@@ -298,6 +298,10 @@ const landingNonVitestInputs = [
       "integrations/fleet-proof/test/linux-codex-proof.py",
       "Explicit Linux native Codex proof driver; requires its approved Linux lane.",
     ],
+    [
+      ".agents/dev-skills/verify-body-transfer/check.sh",
+      "Manual TLA+ check of the body-transfer model (Java and tla2tools); run through its dev skill when the model changes.",
+    ],
   ].map(([path, reason]) => ({ path, reason })),
 ];
 
