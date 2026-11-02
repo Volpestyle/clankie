@@ -885,6 +885,7 @@ describe("Claude connector MCP endpoint", () => {
             machine: "volpe@pc1",
             workingDirectory: "C:\\code\\kh2",
             harness: "codex",
+            name: "Netcode desync",
             prompt: "fix the netcode desync",
           },
         }),
@@ -901,6 +902,8 @@ describe("Claude connector MCP endpoint", () => {
       machine: "volpe@pc1",
       workingDirectory: "C:\\code\\kh2",
       harness: "codex",
+      // The app names the job, so the owner's app shows the hire as "kh2 · Netcode desync".
+      name: "Netcode desync",
       prompt: "fix the netcode desync",
     });
     // The app may name the account to hire on, as fleet_capacity names it; Clankie uses it exactly.

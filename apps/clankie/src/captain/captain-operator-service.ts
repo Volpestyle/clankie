@@ -47,6 +47,7 @@ import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
 import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
+import { connectedHireName } from "./hire-name.ts";
 import { nativeConversationPage } from "./native-conversation.ts";
 import { PersonaStore } from "./personas.ts";
 import type { CaptainPort, HireSeat } from "./port.ts";
@@ -952,9 +953,14 @@ export function createOperatorService(
           detail: "Clankie isn't running his own thread right now, so nobody would lead it.",
         });
       const harness = request.harness ?? "claude";
+      // Called after its project and its job, so the owner's app tells its workers apart: the
+      // caller's name for the job, else the brief's first line.
       const title = /discord|clyde/iu.test(chosen.place.project)
         ? harness
-        : chosen.place.project.slice(0, 80);
+        : connectedHireName(
+            chosen.place.project.slice(0, 80),
+            request.name ?? taskCaption(request.prompt, START_NAME_CAPTION_MAX),
+          );
       // Every work hire states its effort. Keep the project's own worker effort; otherwise the
       // everyday level both harnesses share, since a connected app can't size the job.
       const projectEffort = settings.projects.projects.find((project) => project.id === chosen.projectId)
@@ -987,9 +993,9 @@ export function createOperatorService(
           ...(request.account === undefined ? {} : { account: request.account }),
           ...(request.mcpServers === undefined ? {} : { mcpServers: request.mcpServers }),
           title,
-          // The tab the owner sees names the work, not just the project (every hire here
-          // would otherwise read "clankie · Work").
-          ...(caption === undefined ? {} : { taskTitle: caption }),
+          // A caller-named job's tab also shows the brief's first line; a name taken from that
+          // line already says it.
+          ...(caption === undefined || request.name === undefined ? {} : { taskTitle: caption }),
           workingDirectory: chosen.place.workingDirectory,
           ...(chosen.fleet === undefined ? {} : { fleet: chosen.fleet }),
           ...(freshIntent === undefined ? {} : { freshIntent }),
@@ -1833,14 +1839,17 @@ function startAgentRefusalWords(reason: string): string {
 }
 
 /** A short caption for a hire's tab from its first message: its first line, cut at a word. */
-function taskCaption(prompt: string | undefined): string | undefined {
+/** How much of a brief's first line names a connected app's hire when it names none. */
+const START_NAME_CAPTION_MAX = 32;
+
+function taskCaption(prompt: string | undefined, max = 48): string | undefined {
   const line = (prompt ?? "")
     .split(/\r?\n/u)
     .map((part) => part.replaceAll(/[\p{Cc}\s]+/gu, " ").trim())
     .find((part) => part.length > 0);
   if (line === undefined) return undefined;
-  if (line.length <= 48) return line;
-  const cut = line.slice(0, 48);
+  if (line.length <= max) return line;
+  const cut = line.slice(0, max);
   const space = cut.lastIndexOf(" ");
-  return `${(space > 20 ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/u, "")}…`;
+  return `${(space > Math.min(20, max / 2) ? cut.slice(0, space) : cut).replace(/[\s,.;:–—-]+$/u, "")}…`;
 }
