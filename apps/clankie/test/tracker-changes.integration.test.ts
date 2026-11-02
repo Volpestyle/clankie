@@ -99,6 +99,9 @@ async function fixture() {
   });
   const worker = new WorkerMcp({
     directory: join(root, "grants"),
+    // Nothing here restarts the worker or proves crash recovery, so its call receipts stay
+    // in memory: the durable store's ~12 fsyncs per call were most of this file's time (#383).
+    nonDurableCallReceipts: true,
     credentials,
     host,
     fleetTools: async () => (await settings.load()).fleet.tools,
