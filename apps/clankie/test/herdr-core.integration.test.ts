@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir, hostname, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -148,7 +148,8 @@ coreIt(
         id: "herdr-core:t1",
         source: "herdr-core",
         harness: "claude-code",
-        machine: "this Mac",
+        // This Mac's agents carry its own name, as its fleet seats do (#262).
+        machine: hostname().slice(0, 64),
         status: "idle",
         canMessage: false,
       }),
