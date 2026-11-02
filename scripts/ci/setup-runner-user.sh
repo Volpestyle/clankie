@@ -24,7 +24,9 @@ RUNNER_VERSION="2.338.2"
 LABELS="self-hosted,macOS,ARM64,james-mac"
 ALLOWED_ACTORS=""
 APPLY=0
-HOOK_DIR="/Library/Application Support/ClankieCI"
+# Runner v2.338.2 passes this to bash without shell quoting. Its .env parser
+# also preserves literal quotes, so the installed path must contain no spaces.
+HOOK_DIR="/Library/ClankieCI"
 HOOK="$HOOK_DIR/runner-job-guard.sh"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -113,7 +115,7 @@ if [ "$owner_home_mode" != 700 ] && [ "$owner_home_mode" != 750 ]; then
 fi
 
 step "4. The job guard, root-owned, outside any checkout"
-run sudo mkdir -p "$HOOK_DIR"
+run sudo install -d -o root -g wheel -m 0755 "$HOOK_DIR"
 run sudo install -o root -g wheel -m 0755 "$HERE/runner-job-guard.sh" "$HOOK"
 
 for n in $(seq 1 "$RUNNERS"); do
@@ -132,7 +134,8 @@ https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-run
 && tar xzf runner.tar.gz && rm runner.tar.gz"
   fi
 
-  # The runner reads .env at start: the guard, and nothing secret.
+  # The runner reads .env only at start: reload it when repairing the config.
+  env_changed=0
   env_file="$(mktemp)"
   {
     echo "ACTIONS_RUNNER_HOOK_JOB_STARTED=$HOOK"
@@ -143,8 +146,11 @@ https://github.com/actions/runner/releases/download/v$RUNNER_VERSION/actions-run
   } >"$env_file"
   printf '    write %s/.env:\n' "$dir"
   sed 's/^/      /' "$env_file"
-  if [ "$APPLY" = 1 ]; then
-    sudo install -o "$CI_USER" -g staff -m 0600 "$env_file" "$dir/.env"
+  if [ "$APPLY" = 1 ] && sudo cmp -s "$env_file" "$dir/.env"; then
+    echo "    $dir/.env is current"
+  else
+    run sudo install -o "$CI_USER" -g staff -m 0600 "$env_file" "$dir/.env"
+    env_changed=1
   fi
   rm -f "$env_file"
 
@@ -191,7 +197,12 @@ PLIST
   rm -f "$daemon"
   if ci_test -f "$dir/.runner" || [ -n "${RUNNER_TOKEN:-}" ]; then
     if [ "$APPLY" = 1 ] && sudo launchctl print "system/$label" >/dev/null 2>&1; then
-      echo "    $label is loaded"
+      if [ "$env_changed" = 1 ]; then
+        run sudo launchctl bootout system "$plist"
+        run sudo launchctl bootstrap system "$plist"
+      else
+        echo "    $label is loaded"
+      fi
     else
       run sudo launchctl bootstrap system "$plist"
     fi

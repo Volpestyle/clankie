@@ -14,6 +14,7 @@ The `mac` and `real-run` jobs run on the owner's Mac through self-hosted runners
 - Fork pull requests need an owner's approval before any workflow runs (`all_external_contributors`), as a repository setting.
 - Merging on green (0332) covers only the owner's and the fleet's own branches; a fork's pull request waits for the owner, and no agent approves a fork's workflow run.
 - No new CI job: the guard costs one shell script per Mac job, and the jobs keep their runners, their order and their speed.
+- Install the root:wheel 0755 guard at `/Library/ClankieCI/runner-job-guard.sh` and write that path unquoted in each runner's `.env`. Runner v2.338.2 preserves quotes in `.env` values but does not shell-quote the hook path when invoking bash, so the path must contain no spaces. An idempotent setup rerun migrates existing runners from `/Library/Application Support/ClankieCI`, reloading their LaunchDaemons only when configuration changes; existing registrations need no new token. Run repairs while those runners are idle and prove a real job on each before retiring the old runners.
 
 ## Consequences
 

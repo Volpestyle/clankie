@@ -15,7 +15,9 @@ flowchart LR
 ## What the setup does
 
 `scripts/ci/setup-runner-user.sh` prints each step and changes nothing without
-`--apply`; running it again repeats nothing already done.
+`--apply`; rerunning repairs changed configuration and leaves current runners
+running. Apply repairs while the new runners are idle: a changed `.env` reloads
+that runner's LaunchDaemon so its listener picks up the configuration.
 
 1. Creates the hidden standard user `clankie-ci` with its own home and a random
    password nobody keeps, and makes sure it is not an administrator.
@@ -23,7 +25,7 @@ flowchart LR
    `.clankie`, `.aws`, `.netrc` or keychains, or if the owner's home is readable
    by other users.
 3. Installs `scripts/ci/runner-job-guard.sh` root-owned at
-   `/Library/Application Support/ClankieCI/runner-job-guard.sh`.
+   `/Library/ClankieCI/runner-job-guard.sh` (root:wheel, mode 0755).
 4. For each runner (three by default): downloads the pinned runner release into
    `/Users/clankie-ci/actions-runner/clankie-N`, writes its `.env` (the guard and
    a plain `PATH`; nothing secret), registers it with the labels the workflows
@@ -44,6 +46,14 @@ gh api repos/Volpestyle/clankie/actions/runners --jq '.runners[] | [.name,.statu
 
 `--allowed-actors "login ..."` limits pull-request jobs to those authors as
 well. Agents never run this script; the owner does.
+
+For already registered runners, repair with `scripts/ci/setup-runner-user.sh --apply`;
+no registration token is needed. This also migrates the hook from
+the earlier `/Library/Application Support/ClankieCI` path. The new path is
+written unquoted in `.env`: runner v2.338.2 preserves literal quotes there,
+but passes the hook path to bash without shell quoting, so it must have no spaces.
+The script does not remove the old hook or retire old runners. Confirm a real
+job succeeds on each new runner before running the printed retirement commands.
 
 ## Tradeoffs
 
