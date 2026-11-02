@@ -3568,6 +3568,9 @@ export class DiscordVoiceSession {
         guildId,
         channelId,
         userId,
+        ...(this.roomRoster.get(userId)?.displayName === undefined
+          ? {}
+          : { userName: this.roomRoster.get(userId)!.displayName! }),
         transcript: request,
         ...(this.options.roomNames === undefined ? {} : { room: this.options.roomNames(guildId, channelId) }),
         roomContext: [

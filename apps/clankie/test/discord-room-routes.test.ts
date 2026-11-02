@@ -177,7 +177,9 @@ it("leaves unrelated routes alone when mounted at the service root", async () =>
 it("lists a room by its place, never by raw Discord IDs", () => {
   expect(discordRoomDisplayTitle("Discord text · Friends / #general")).toBe("#general · Friends");
   expect(discordRoomDisplayTitle("Discord voice · Friends / Lobby")).toBe("Lobby · Friends");
-  expect(discordRoomDisplayTitle("Discord DM · James")).toBe("James");
+  expect(discordRoomDisplayTitle("Discord DM · James")).toBe("DM with James");
+  expect(discordRoomDisplayTitle("Discord DM · 866430493889134672")).toBeUndefined();
+  expect(discordRoomDisplayTitle("Discord text · dm:866430493889134672")).toBeUndefined();
   expect(discordRoomDisplayTitle("Discord text · 866430493889134672 / #house-hunting")).toBe(
     "#house-hunting",
   );

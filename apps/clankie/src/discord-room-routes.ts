@@ -76,17 +76,20 @@ export function discordSettingsRevision(settings: ClankieSettings["discord"]): s
 const SNOWFLAKE = /^\d{5,}$/u;
 
 /**
- * The room as a device lists it: the place alone, `#channel · server` or the
- * person in a DM. The kind travels as the room's lane, and a room whose names
+ * The room as a device lists it: the place alone, `#channel · server` or
+ * `DM with <name>`. The kind travels as the room's lane, and a room whose names
  * the host has not heard yet has no title rather than raw Discord IDs. Stored
  * titles keep their full form for the captain and the TUI.
  */
 export function discordRoomDisplayTitle(title: string): string | undefined {
-  const match = /^Discord (?:text|voice|DM) · (.+)$/su.exec(title);
+  const match = /^Discord (text|voice|DM) · (.+)$/su.exec(title);
   if (match === null) return title;
-  const place = match[1]!.trim();
+  const place = match[2]!.trim();
+  // A DM room is titled by the other person once a message names them (#367).
+  if (match[1] === "DM") return SNOWFLAKE.test(place) ? undefined : `DM with ${place}`;
   const split = place.lastIndexOf(" / ");
-  if (split < 0) return /^\d+(?::\d+)?$/u.test(place) ? undefined : place;
+  // Unheard rooms carry their route as a title: `guild:channel`, a bare id or `dm:<user id>`.
+  if (split < 0) return /^(?:dm:)?\d+(?::\d+)?$/u.test(place) ? undefined : place;
   const server = place.slice(0, split).trim();
   const channel = place.slice(split + 3).trim();
   if (SNOWFLAKE.test(channel.replace(/^#/u, ""))) return undefined;

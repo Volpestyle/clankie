@@ -54,6 +54,9 @@ describe("Discord voice ingress", () => {
         },
       }),
     );
+    // The roster's name for the speaker titles the room job (#367); control characters never reach it.
+    await ingress.handle({ ...turn, deliveryId: "utterance-2", userName: " Nicky\u0007 " });
+    expect(submit.mock.calls.at(-1)?.[0].trigger).toMatchObject({ actorId: "24680", actorName: "Nicky" });
   });
 
   it("never speaks an approval payload into ambient voice", async () => {

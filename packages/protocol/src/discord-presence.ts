@@ -595,6 +595,11 @@ export const DiscordPresenceChannelTurnRequestSchema = z
         channelId: z.string().min(1),
         messageId: z.string().min(1).optional(),
         actorId: z.string().min(1),
+        /**
+         * The author's Discord display name as the gateway saw it (server nickname, else
+         * global name, else username): titles only. `actorId` stays the route and authority.
+         */
+        actorName: z.string().trim().min(1).max(100).optional(),
         body: z.string().min(1).max(DISCORD_PRESENCE_TRIGGER_BODY_MAX).optional(),
         /**
          * Images posted with the trigger message. An image is part of what was
