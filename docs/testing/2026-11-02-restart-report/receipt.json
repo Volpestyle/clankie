@@ -1,0 +1,51 @@
+{
+  "oldServicePid": 83157,
+  "newServicePid": 83288,
+  "hire": {
+    "serverPid": 83185,
+    "paneId": "herdr-core/t1",
+    "threadId": "01a19aa0-159a-7f22-bdeb-5856c06dcc10",
+    "view": {
+      "pid": 83179,
+      "name": "codex",
+      "argv": ["codex", "--remote", "unix:///private/tmp/codex-report-G2qyWX/clankie-codex-PdLMjN/rpc.sock"]
+    }
+  },
+  "originalBridge": [83205],
+  "foreignReplayStatus": 403,
+  "modelRequests": 6,
+  "codexVersion": "0.166.0",
+  "checks": {
+    "sameNativeBridge": true,
+    "realKernelListenerAndAncestry": true,
+    "reportsPersisted": 2
+  },
+  "storedReports": [
+    {
+      "deliveryId": "882f9800-9828-4703-9c0d-c17c019a68d9",
+      "text": "Before restart",
+      "paneId": "herdr-core/t1",
+      "acceptedAt": "2026-11-02T04:59:05.493Z"
+    },
+    {
+      "deliveryId": "d4a369ac-54cc-4ec7-b31e-cb3ed24e459b",
+      "text": "After restart",
+      "paneId": "herdr-core/t1",
+      "acceptedAt": "2026-11-02T04:59:06.783Z"
+    }
+  ],
+  "nativeToolOutputs": [
+    {
+      "callId": "proof-1",
+      "output": "Wall time: 0.2003 seconds\nOutput:\n{\"schemaVersion\":1,\"received\":true,\"deliveryStage\":\"stored\",\"deliveryId\":\"882f9800-9828-4703-9c0d-c17c019a68d9\",\"binding\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"fingerprint\":\"d54813c6c88b31d33a01a848ea4a597f8c666714901729b20056aa89a6ac9b7b\"}"
+    },
+    {
+      "callId": "proof-3",
+      "output": "Wall time: 0.0057 seconds\nOutput:\n{\"received\":false,\"deliveryStage\":\"rejected\",\"detail\":\"The service refused this native seat. Ask Clankie to confirm fleet admission; repeated retries cannot grant access. Nothing was sent.\"}"
+    },
+    {
+      "callId": "proof-5",
+      "output": "Wall time: 0.2924 seconds\nOutput:\n{\"schemaVersion\":1,\"received\":true,\"deliveryStage\":\"stored\",\"deliveryId\":\"d4a369ac-54cc-4ec7-b31e-cb3ed24e459b\",\"binding\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"fingerprint\":\"349580fd26fc704228b7c678d6074062fa2e916e6d6b730df684f76faa237c73\"}"
+    }
+  ]
+}
