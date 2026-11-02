@@ -21,7 +21,8 @@ it("shared Codex startup reaches the remote executable with host holder identiti
     const program = join(root, "capture.cjs");
     await writeFile(
       program,
-      `require('node:fs').writeFileSync(${JSON.stringify(receipt)}, JSON.stringify(process.env));`,
+      // Published by rename, so the poll below never reads a partial write.
+      `const fs=require('node:fs');fs.writeFileSync(${JSON.stringify(`${receipt}.tmp`)}, JSON.stringify(process.env));fs.renameSync(${JSON.stringify(`${receipt}.tmp`)}, ${JSON.stringify(receipt)});`,
     );
     await writeFile(
       join(bin, "codex"),
@@ -39,7 +40,9 @@ it("shared Codex startup reaches the remote executable with host holder identiti
         await exec("/bin/sh", ["-c", command], {
           env: { ...process.env, ...inherited, HOME: root, PATH: `${bin}:${process.env.PATH}` },
         });
-        for (let attempt = 0; attempt < 200; attempt++) {
+        // Wait for the executable's receipt, not a fixed 2 s: a loaded host can take that
+        // long just to start Node (#320). The deadline is only a hang detector.
+        for (const deadline = Date.now() + 20_000; Date.now() < deadline;) {
           try {
             await readFile(receipt, "utf8");
             throw new Error("Remote environment captured before forwarding");
