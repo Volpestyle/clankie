@@ -5204,6 +5204,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const receipt = this.hireReceipts.pending(receiptKey)!;
         this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
       }
+      authority?.onHirePane?.(paneId);
       const requestedModel =
         nativePrepared !== undefined
           ? nativeLaunch?.model

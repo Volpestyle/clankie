@@ -70,6 +70,8 @@ export function captureNativeSeatAuthority(source: NativeSeatAuthority): NativeS
 
 /** A live admitted turn. Persist only owner; refresh authority before each later wake. */
 export interface ConversationAuthority {
+  /** Service-owned progress observer; grants no authority and sends no brief. */
+  readonly onHirePane?: (paneId: string) => void;
   /** Host-verified owner app intent; never copied from model input. */
   readonly ownerHire?: {
     readonly surface: "phone" | "tablet" | "web" | "desktop";
@@ -107,6 +109,7 @@ export function captureConversationAuthority(
     owner: Object.freeze(owner),
     current: source.current,
     authorize: source.authorize,
+    ...(source.onHirePane === undefined ? {} : { onHirePane: source.onHirePane }),
     ...(source.ownerHire ? { ownerHire: Object.freeze({ ...source.ownerHire }) } : {}),
     ...(source.connectorPlace
       ? {

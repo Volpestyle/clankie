@@ -128,6 +128,7 @@ export interface SessionPlace {
 }
 
 export interface SessionStartRequest {
+  readonly startId?: string;
   readonly notify?: import("@clankie/protocol/connector").WorkerNotify;
   readonly machine?: string;
   readonly workingDirectory?: string;
@@ -142,10 +143,12 @@ export interface SessionStartRequest {
 
 /**
  * `places`: nothing started; these are where one can. `started`: the new
- * session's id. `refused`: nothing started, and `detail` says why.
+ * session's id. `pending`: startup continues under startId; id appears once allocated.
+ * `refused`: inspect detail for the admission or startup failure.
  */
 export interface SessionStartResult {
-  readonly status: "places" | "started" | "refused";
+  readonly status: "places" | "pending" | "started" | "refused";
+  readonly startId?: string;
   readonly id?: string;
   readonly places: readonly SessionPlace[];
   readonly detail?: string;

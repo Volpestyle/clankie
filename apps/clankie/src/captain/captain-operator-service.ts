@@ -1,3 +1,4 @@
+import { ConnectorStarts } from "./connector-starts.ts";
 import { WatchingError } from "../watch.ts";
 import {
   hireDeliveryStage,
@@ -172,6 +173,7 @@ export class ServiceShuttingDownError extends Error {
 export function createOperatorService(
   ctx: CreateOperatorServiceContext,
 ): CaptainPort["serveOperatorConversation"] {
+  const connectorStarts = new ConnectorStarts();
   let reportCursor: string | undefined;
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   let defaultHerdrCore: HerdrCore | undefined;
@@ -180,6 +182,7 @@ export function createOperatorService(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
+    onHirePane?: (id: string) => void,
   ): Promise<OperatorConversationServiceResult> {
     const tailSignal =
       request.op === "tail"
@@ -1000,6 +1003,7 @@ export function createOperatorService(
         request.prompt,
         {
           owner: { conversationId: lead },
+          ...(onHirePane === undefined ? {} : { onHirePane }),
           // The owner granted this place; Clankie's thread only leads the seat, so its own
           // agent's project doesn't decide where the new one works.
           // Keep the hiring app and optional report wake reference with the seat (ADR 0343).
@@ -1675,6 +1679,18 @@ export function createOperatorService(
   return async function serveOperatorConversation(request, authority, readSignal) {
     if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
     try {
+      if (request.op === "start_agent") {
+        const caller =
+          request.appDeviceId ??
+          `${authority?.principal.kind ?? "operator"}:${authority?.principal.id ?? "local"}`;
+        if (request.startId !== undefined) return connectorStarts.read(request.startId, caller);
+        if (request.machine !== undefined && request.workingDirectory !== undefined)
+          return await connectorStarts.start(caller, async (onPane) => {
+            const result = await serve(request, authority, undefined, onPane);
+            if (result.op !== "start_agent") throw new Error("Unexpected start result");
+            return result;
+          });
+      }
       return await serve(request, authority, readSignal);
     } catch (error) {
       if (!ctx.shutdown.signal.aborted) throw error;

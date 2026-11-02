@@ -335,10 +335,15 @@ function connectorServer(
         name: "start_agent",
         title: "Start an agent",
         description:
-          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. Wakes contain only service-owned facts; read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
+          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. Wakes contain only service-owned facts; read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. A pending answer means the service owns the brief and continues startup: call start_agent with only its startId to read progress; never repeat the hire. Its agent field names the pane as soon as allocated. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
         inputSchema: {
           type: "object" as const,
           properties: {
+            startId: {
+              type: "string",
+              description:
+                "Read a pending start using its receipt. Pass this alone; never repeats the hire or brief.",
+            },
             machine: { type: "string", description: "A machine from the places list." },
             workingDirectory: {
               type: "string",
@@ -887,6 +892,12 @@ function connectorServer(
         const harness = optionalString(args.harness);
         if (harness !== undefined && harness !== "claude" && harness !== "codex")
           return failure("harness is claude or codex.");
+        const startId = optionalString(args.startId);
+        if (
+          startId !== undefined &&
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(startId)
+        )
+          return failure("startId is the receipt returned by start_agent.");
         const machine = optionalString(args.machine);
         const workingDirectory = optionalString(args.workingDirectory);
         const prompt = optionalString(args.prompt);
@@ -915,6 +926,7 @@ function connectorServer(
             "notify requires a lead wake name and a 1-128 character ref using letters, digits, dot, underscore, colon or dash.",
           );
         const starting = sessions.start({
+          ...(startId === undefined ? {} : { startId }),
           ...(notify.data === undefined ? {} : { notify: notify.data }),
           ...(machine === undefined ? {} : { machine }),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),

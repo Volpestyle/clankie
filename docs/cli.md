@@ -2048,6 +2048,14 @@ connector also offers `clankie_guide`, which reads the skills Clankie ships, and
 checkout (on a linked machine, only a directory granted there) for Clankie to
 lead, and `list_places`, which only lists those places. Apps signed in before
 `start_agent` existed sign in again to use it. A service refusal keeps its own words.
+A hire returns `pending` as soon as its pane is allocated, or after five seconds
+of preparation, with `startId` and the agent ID once known. The service retains
+the original `prompt` and completes the hire after the HTTP caller disconnects.
+Call `start_agent` with only `startId` to read progress; it never starts another
+agent or replays the brief. Receipts are scoped to the hiring app and retained
+for up to 256 starts in the running service; pending starts are never evicted.
+After a restart or an unavailable receipt, inspect `list_agents` before hiring
+again. The gateway public request deadline is 60 seconds.
 A blocked project hire names its allocation, native receipt when recorded, pane
 when observed, age (unknown for legacy records), and existing owner recovery
 commands. A lost answer or HTTP 502 stays uncertain: read `list_agents` before
