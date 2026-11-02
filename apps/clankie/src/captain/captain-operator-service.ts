@@ -1312,7 +1312,14 @@ export function createOperatorService(
           refusal: { ...checkpoint, failingJobs: [...checkpoint.failingJobs] },
         };
       }
-      const closeWorktree = closingAgent ? await tidy?.worktreeForClose?.(closingAgent) : undefined;
+      // Every close of a seat says what became of its tree (#284).
+      const closeWorktree = closingAgent
+        ? await tidy?.worktreeForClose?.(closingAgent, {
+            hired: async () =>
+              (await ctx.fleetSnapshot()).snapshot.seats.find((seat) => seat.seatId === request.seatId)?.owner
+                ?.hired === true,
+          })
+        : { path: "", reason: "agent_unresolved" };
       let checkpointAtExit: Awaited<ReturnType<NonNullable<typeof tidy>["mainCheckpointHold"]>>;
       const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
         await refuseWhileWatching();
@@ -1334,8 +1341,8 @@ export function createOperatorService(
           throw new Error("busy");
       });
       const worktree =
-        closed && closeWorktree
-          ? await tidy?.pruneClosedWorktree(
+        closed && closeWorktree && tidy
+          ? await tidy.pruneClosedWorktree(
               closeWorktree,
               refuseWhileWatching,
               request.unlandedReason !== undefined,

@@ -447,15 +447,23 @@ export class PaneTidy {
     if (!this.ports.pruneMany) throw Error("Worktree pruning unavailable");
     return this.ports.pruneMany(repository, paths, () => this.authority(authority));
   }
-  /** Capture only this hire's checkout before its native process disappears. Never inspect remote paths locally. */
+  /**
+   * Capture only this hire's checkout before its native process disappears. Never inspect
+   * remote paths locally. A close always reports the tree or why it stays (#284).
+   * `hired` reads the roster's own hire record: a hire that survived a service restart can
+   * lose its tidy provenance, and the prune still checks the tree is landed and clean.
+   */
   async worktreeForClose(
     agent: HerdrAgentSnapshot,
-  ): Promise<{ path: string; repository?: string; reason?: string } | undefined> {
-    if (!agent.workingDirectory) return undefined;
+    options: { readonly hired?: () => Promise<boolean> } = {},
+  ): Promise<{ path: string; repository?: string; reason?: string }> {
+    if (!agent.workingDirectory) return { path: "", reason: "working_directory_unknown" };
     const cwd = agent.workingDirectory;
     try {
       const owner = this.ports.provenance(agent);
-      if (owner === "unknown" || owner === "owner_interactive") return undefined;
+      if (owner === "owner_interactive") return { path: cwd, reason: "owner_interactive" };
+      if (owner === "unknown" && (await options.hired?.()) !== true)
+        return { path: cwd, reason: "provenance_unknown" };
       const fleet = splitFleetQualified(agent.paneId)?.fleet;
       if (fleet && fleet !== DESKTOP_SEAT_FLEET && !(await this.ports.localFleet?.(fleet)))
         return { path: cwd, reason: "remote_worktree" };
