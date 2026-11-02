@@ -778,7 +778,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (await settings()).linearWebhook.projectChats,
       origin,
       async () => ({
-        leads: await leadChats(),
+        leads: await autoRoutingLeads(),
         defaultConversationId: conversations.defaultGlobalConversationId(),
       }),
       input.projectId,
@@ -1703,7 +1703,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     );
     if (routes.length > 1) throw new Error("Tracker lead route is ambiguous");
     // Auto routing's lead chats, read once; the write-time recheck drops any chat since closed.
-    const leads = projects[0]!.auto === true ? await leadChats() : [];
+    const leads = projects[0]!.auto === true ? await autoRoutingLeads() : [];
     const lead = () => {
       const current = trackerLeadConversation(
         projects[0]!,
@@ -1723,6 +1723,36 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     assertCurrent();
     return { expected, assertCurrent };
   };
+
+  /**
+   * The leads Auto routing chooses among (ADR 0264): the lead roster, plus every
+   * private top-level workspace chat bound to no project, so a project with no
+   * explicit lead goes to the one chat scoped to its workspace and machine (#430).
+   * Without the second set no project-less lead ever existed to match.
+   */
+  async function autoRoutingLeads(): Promise<
+    { conversationId: string; workspace: string; machine: string; projects: readonly { id: string }[] }[]
+  > {
+    const chats = await leadChats();
+    const listed = new Set(chats.map((chat) => chat.conversationId));
+    return [
+      ...chats,
+      ...conversations.listConversations().flatMap((conversation) =>
+        conversation.scope.kind === "workspace" &&
+        !listed.has(conversation.conversationId) &&
+        privateLeadConversation(conversation.conversationId)
+          ? [
+              {
+                conversationId: conversation.conversationId,
+                workspace: conversation.scope.workspaceId,
+                machine: conversation.scope.machineId ?? "local",
+                projects: [],
+              },
+            ]
+          : [],
+      ),
+    ];
+  }
 
   async function leadChats(): Promise<readonly LeadChat[]> {
     const current = await settings();
@@ -3792,7 +3822,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return namedLocal;
     },
     refreshFleet,
-    leadChats,
+    autoRoutingLeads,
     readWorkerAccounts,
     wakeConversation,
     noteFleetRoom,

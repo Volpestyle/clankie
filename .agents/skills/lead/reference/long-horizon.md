@@ -51,8 +51,9 @@ leaves to them. A project not on Auto gets no new work you start yourself.
 
 Auto rounds go to the existing configured lead chat owning the bound tracker
 project, even when that chat uses a different workspace. A lead assigned to
-another project never takes work by workspace matching; only unassigned leads
-may match that way. Absent or ambiguous ownership goes to the global head.
+another project never takes work by workspace matching; only an unassigned lead
+may match that way: the one top-level workspace chat scoped to the project's
+folder and machine. Absent or ambiguous ownership goes to the global head.
 Leads hear only their own Auto projects and wake independently when their
 evidence changes or after two hours idle. No separate Auto routing setting
 exists. Each round names its signals and the action it asks for; the sections

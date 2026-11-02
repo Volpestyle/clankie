@@ -95,6 +95,15 @@ project ownership now wins regardless of workspace. Workspace matching can
 select only a lead with no configured projects, never another project's owner.
 Ambiguous or absent ownership falls back to the global head.
 
+Amended 2026-11-02 ([#430](https://github.com/Volpestyle/clankie/issues/430)):
+the routing leads were the lead roster, which lists only the default chat and
+project-bound chats, so after this change no lead with no configured projects
+existed and the workspace match never fired. Auto routing (rounds, drift
+corrections, lead hires and lead closure) now also considers every private
+top-level `workspace` chat bound to no project, at its scope's workspace and
+machine. Explicit ownership still wins, and several matching chats still fall
+back to the global head.
+
 ### Separate Linear reference, 2026-10-12
 
 `trackerProjectId` keeps its built-in meaning and consumers. An optional
