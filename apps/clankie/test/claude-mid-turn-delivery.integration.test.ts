@@ -151,6 +151,7 @@ function fixture(options: {
   };
   const hooks = new SeatHookLog(join(home, "hooks.json"));
   const stagedPath = join(home, "staged-message.txt");
+  const sources: (string | undefined)[] = [];
   const adapter = createClaudeWorkerSeatAdapter({
     ...(options.staged
       ? {
@@ -172,11 +173,12 @@ function fixture(options: {
     mailbox: {
       bound: () => mailbox.bound() || mailbox.uncertain(),
       // As the service maps its fleet mailbox for Claude seats.
-      deliver: async (_seatId, text, _source, _binding, originalMessage) => {
+      deliver: async (_seatId, text, source, _binding, originalMessage) => {
+        sources.push(source);
         const delivery = await mailbox.deliver({
           kind: "message",
           conversationId: "pc/term_1",
-          source: "captain",
+          source: source ?? "captain",
           content: originalMessage ?? text,
           ...(originalMessage === undefined ? {} : { channelContent: text }),
           wantsReply: false,
@@ -223,6 +225,8 @@ function fixture(options: {
   return {
     adapter,
     stagedPath,
+    /** The source the adapter handed the service's mailbox for each message. */
+    sources,
     mailbox,
     control,
     absorbed,
@@ -390,3 +394,15 @@ it.each([20_480, 32_768])(
     expect(existsSync(f.stagedPath)).toBe(false);
   },
 );
+
+it("a message from the seat's own lead reaches its Claude mailbox as from its lead; others do not (#442)", async () => {
+  const f = fixture({ earlierChannel: true, absorbAfterMs: 50 });
+  expect((await f.resume()).outcome).toBe("started");
+  expect(
+    await f.control.deliverToSeat("term_1", "VUH-2779 lead redirect", undefined, { fromLead: true }),
+  ).toMatchObject({ outcome: "delivered" });
+  expect(await f.control.deliverToSeat("term_1", "VUH-2779 another lead's note")).toMatchObject({
+    outcome: "delivered",
+  });
+  expect(f.sources).toEqual(["lead", undefined]);
+});

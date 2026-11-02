@@ -94,6 +94,8 @@ export interface PeerDeliveryOptions {
   readonly recipientBinding?: string;
   /** Service-authored lead attribution, never a peer request field. */
   readonly conversationId?: string;
+  /** Service-proven: the sender owns the recipient worker (#442). Never a peer request field. */
+  readonly fromLead?: true;
   readonly fence?: ((agent: HerdrAgentSnapshot | undefined) => Promise<boolean>) & CurrentCheck;
   /**
    * Operator rediscovery (ADR 0312). `true` may redeliver once after the current

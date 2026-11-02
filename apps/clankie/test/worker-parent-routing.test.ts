@@ -1790,3 +1790,51 @@ it.each([
   expect(response.status).toBe(403);
   expect(await response.json()).toEqual({ error: "operator_authority_required" });
 });
+
+it.each([false, true])(
+  "a lead's message_seat reaches its %s worker's live channel marked as from its lead (#442)",
+  async (remote) => {
+    const f = await fixture({ remote, captainApi: true });
+    const worker = f.rows[1]!;
+    const seatId = f.pane(worker.terminal_id);
+    await hook(f.service, worker);
+    // The worker's own channel long-poll, as its worker plugin runs it.
+    const take = async () => {
+      const response = await f.service.nativeRequest(PARENT, `${fleetSeatEventsPath(PARENT)}?wait=20000`);
+      expect(response.status).toBe(200);
+      return OperatorSeatEventsPageSchema.parse(await response.json()).events;
+    };
+    const lead = await conversation(f.service);
+    const send = async (text: string) => {
+      const tool = (await f.service.captain.laneToolBank("operator", lead)).tools.find(
+        (candidate) => candidate.name === "message_seat",
+      )!;
+      const result = await tool.call({ seat: seatId, message: text });
+      const content = result.content.find((part) => part.type === "text");
+      return JSON.parse(content?.type === "text" ? content.text : "null");
+    };
+    // Live receiver first, so the message rides the channel and not the next-turn queue.
+    await expect
+      .poll(async () => {
+        await f.service.nativeRequest(PARENT, `${fleetSeatEventsPath(PARENT)}?wait=1`);
+        const roster = OperatorConversationServiceResultSchema.parse(
+          await f.service.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" }),
+        );
+        if (roster.op !== "roster") throw new Error("Wrong roster result");
+        return roster.seats.find((seat) => seat.seatId === seatId)?.messageReceiver?.state;
+      })
+      .toBe("live");
+    const polled = take();
+    const sent = send("Switch to the other issue");
+    const [event] = await polled;
+    expect(event).toMatchObject({ kind: "message", source: "lead" });
+    expect(event!.content).toContain("Switch to the other issue");
+    await f.service.nativeRequest(
+      PARENT,
+      `${fleetSeatEventsPath(PARENT)}/${encodeURIComponent(event!.id)}/ack`,
+      {},
+    );
+    expect(await sent).toMatchObject({ outcome: "delivered" });
+    expect(f.nativeSends).toEqual([]);
+  },
+);

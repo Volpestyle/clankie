@@ -573,10 +573,14 @@ export function createFleetSeatControl(
       begin();
       try {
         const delivery =
-          authorized || options?.delivery || options?.recipientBinding !== undefined
+          authorized || options?.delivery || options?.recipientBinding !== undefined || options?.fromLead
             ? await control.send(text, {
                 ...(authorized ? { beforeDispatch: authorized } : {}),
-                ...(options?.fence === undefined ? {} : { source: options.source ?? "peer" }),
+                ...(options?.fence === undefined
+                  ? options?.fromLead
+                    ? { source: "lead" }
+                    : {}
+                  : { source: options.source ?? "peer" }),
                 ...(options?.delivery === undefined ? {} : { delivery: options.delivery }),
                 ...(options?.recipientBinding === undefined
                   ? {}

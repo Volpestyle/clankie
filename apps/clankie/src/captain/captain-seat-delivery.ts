@@ -242,6 +242,7 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
       ...deliveryOptions,
       ...(directPrompt === undefined ? {} : { directPrompt }),
       conversationId: context.conversationId,
+      ...(context.fromLead ? { fromLead: true as const } : {}),
       ...(ctx.inboundBinding(current) === undefined
         ? {}
         : { recipientBinding: ctx.inboundBinding(current)! }),

@@ -3072,6 +3072,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             {
               conversationId: seat?.conversationId ?? seatId,
               source: "captain",
+              // Adoption just proved the sender owns this worker (#442).
+              ...(ownerConversationId === undefined ? { fromLead: true as const } : {}),
             },
           )
         : await herdrWatches.answerSeatQuestion(seatId, questionAnswer, authority);

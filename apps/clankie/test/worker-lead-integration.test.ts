@@ -540,6 +540,10 @@ it("the census names a hire's lead; another lead's message_seat delivers and the
   expect(own).toMatchObject({ outcome: "delivered", seatId: f.agent.terminalId });
   expect(own).not.toHaveProperty("ownerConversationId");
   expect(HerdrWatchStore.prototype.deliverToSeat).toHaveBeenCalledTimes(2);
+  // Only the hire's own lead is marked as its lead on the worker's channel (#442).
+  const [other, ownCall] = vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls;
+  expect(other![3]?.fromLead).toBeUndefined();
+  expect(ownCall![3]?.fromLead).toBe(true);
 });
 
 it("message_seat adopts another conversation's adopted worker before its immediate report and persists it across restart", async () => {
