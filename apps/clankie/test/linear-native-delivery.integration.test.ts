@@ -20,6 +20,11 @@ import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { TurnSettledLog } from "../src/captain/turn-metrics.ts";
 import { LinearWriteReceipts } from "../src/linear-webhook.ts";
 
+// The burst window the fixture's stores use, and how long a "nothing more arrives" check
+// waits: two whole windows (the old 1.8 s check covered 1.2 of the shipped 1.5 s ones).
+const BURST_WINDOW_MS = 100;
+const QUIET_MS = 2 * BURST_WINDOW_MS;
+
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -82,6 +87,9 @@ async function fixture(boundGraceMs = 20) {
   });
   let store = new ConversationStore(join(root, "conversations"), runner);
   const configure = () => {
+    // The shipped 1.5 s burst window only gathers activity into one wake; a short one
+    // keeps every case's ordering while each wake no longer waits seconds to flush (#383).
+    store.linearBurstWindowMs = BURST_WINDOW_MS;
     store.linearFollowing = async () => (await settings.load()).linearWebhook.following;
     store.linearWakeRouting = async () => (await settings.load()).linearWebhook;
     store.linearWakeReceiverAvailable = (id) =>
@@ -311,7 +319,7 @@ it.each([false, true])(
     await until(() =>
       f.events().some((event) => event.type === "turn" && event.deliveryStage === "uncertain"),
     );
-    expect(await f.poll(1800)).toEqual([]);
+    expect(await f.poll(QUIET_MS)).toEqual([]);
     expect(await f.ack(wake!.id)).toMatchObject({ acknowledged: true });
     if (restart) await f.restart(checkpoint);
     // A live native receiver keeps a poll parked while owner activity arrives.
@@ -337,7 +345,7 @@ it("suppresses deferred wakes when following turns off and keeps external histor
     ...value,
     linearWebhook: { ...value.linearWebhook, following: false },
   }));
-  expect(await f.poll(1800)).toEqual([]);
+  expect(await f.poll(QUIET_MS)).toEqual([]);
   expect(f.events().filter((event) => event.type === "message" && event.linear)).toHaveLength(1);
   expect(f.serviceStarts()).toBe(0);
 });

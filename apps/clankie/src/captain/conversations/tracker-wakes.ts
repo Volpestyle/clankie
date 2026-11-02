@@ -10,12 +10,7 @@ import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:
 import { join } from "node:path";
 import { z } from "zod";
 import type { TrackerActivity } from "../tracker-activity.ts";
-import {
-  LINEAR_BURST_WINDOW_MS,
-  LINEAR_REPLAY_RETENTION_MS,
-  LINEAR_WAKE_EVENTS_MAX,
-  ZERO_CURSOR,
-} from "./constants.ts";
+import { LINEAR_REPLAY_RETENTION_MS, LINEAR_WAKE_EVENTS_MAX, ZERO_CURSOR } from "./constants.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationRunner } from "./types.ts";
 
@@ -85,7 +80,7 @@ export function queueTrackerActivity(ctx: ConversationStore, id: string): void {
         ctx["linearHookQueued"].delete(id);
         console.error(`Linear wake in ${id} failed to queue`, error);
       });
-    }, LINEAR_BURST_WINDOW_MS),
+    }, ctx.linearBurstWindowMs),
   );
 }
 
