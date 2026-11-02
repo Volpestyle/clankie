@@ -6,18 +6,29 @@ import type { LeadWakeResult } from "@clankie/protocol/connector";
 // credential broker with `clankie connector wake set NAME`. This sends one job there:
 // the text and who sent it, nothing else. The address, the key and the webhook's reply
 // body never come back out. The lead answers the way connected leads already do, on
-// the notes board.
+// the notes board. Worker report wakes (ADR 0343) carry only service-owned facts;
+// worker text stays in the durable inbox.
 
 const TIMEOUT_MS = 15_000;
 /** Said to the lead with every job, so it knows where an answer is read. */
 const REPLY_HINT =
   "Answer with post_note on Clankie's connector; the sender reads the notes board with read_notes.";
 
+export interface WorkerWakeEvent {
+  readonly agent: string;
+  readonly ref: string;
+  readonly event: "report" | "settled";
+  readonly at: string;
+}
+
 export interface LeadWakes {
+  workerReport(lead: string, event: WorkerWakeEvent): void;
+  close(): void;
   send(input: {
     readonly lead: string;
     readonly from: string;
     readonly text: string;
+    readonly kind?: "lead_wake" | "worker_report";
   }): Promise<LeadWakeResult>;
 }
 
@@ -26,12 +37,67 @@ export function createLeadWakes(options: {
   readonly fetchImpl?: typeof fetch;
   readonly clock?: () => Date;
   readonly timeoutMs?: number;
+  readonly coalesceMs?: number;
   readonly log?: (fields: Record<string, unknown>, message: string) => void;
 }): LeadWakes {
   const fetchImpl = options.fetchImpl ?? fetch;
   const clock = options.clock ?? (() => new Date());
-  return {
-    async send({ lead, from, text }) {
+  const windows = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: WorkerWakeEvent[] }>();
+  const coalesceMs = options.coalesceMs ?? 120_000;
+  function postReports(lead: string, events: readonly WorkerWakeEvent[]) {
+    void wakes
+      .send({
+        lead,
+        from: "clankie",
+        kind: "worker_report",
+        text: events
+          .map(
+            ({ agent, ref, event, at }) =>
+              `agent=${agent} ref=${ref} event=${event} time=${at}\nRead with read_reports {"agent":${JSON.stringify(agent)}}.`,
+          )
+          .join("\n"),
+      })
+      .then((result) => {
+        if (result.outcome !== "sent")
+          options.log?.(
+            { lead, outcome: result.outcome },
+            "Worker report wake failed; report remains in inbox",
+          );
+      })
+      .catch(() => options.log?.({ lead }, "Worker report wake failed; report remains in inbox"));
+  }
+  function startWindow(lead: string) {
+    const pending: WorkerWakeEvent[] = [];
+    const timer = setTimeout(() => {
+      windows.delete(lead);
+      if (pending.length) {
+        startWindow(lead);
+        postReports(lead, pending);
+      }
+    }, coalesceMs);
+    timer.unref();
+    windows.set(lead, { timer, pending });
+  }
+  const wakes: LeadWakes = {
+    workerReport(lead, event) {
+      const state = windows.get(lead);
+      if (state) {
+        // One latest fact per agent/ref/event bounds duplicate watch observations.
+        const previous = state.pending.findIndex(
+          (item) => item.agent === event.agent && item.ref === event.ref && item.event === event.event,
+        );
+        if (previous >= 0) state.pending[previous] = event;
+        else state.pending.push(event);
+      } else {
+        startWindow(lead);
+        postReports(lead, [event]);
+      }
+    },
+    close() {
+      for (const state of windows.values()) clearTimeout(state.timer);
+      windows.clear();
+    },
+    async send({ lead, from, text, kind = "lead_wake" }) {
       let webhook;
       try {
         webhook = await readLeadWake(options.store, lead);
@@ -63,15 +129,21 @@ export function createLeadWakes(options: {
           // A webhook that sends the job elsewhere is not followed: the owner named this one.
           redirect: "manual",
           signal,
-          headers: { authorization: webhook.authorization, "content-type": "application/json" },
+          headers: {
+            authorization: webhook.authorization,
+            "content-type": "application/json",
+            ...(new URL(webhook.url).hostname === "api.anthropic.com"
+              ? { "anthropic-version": "2026-10-21" }
+              : {}),
+          },
           body: JSON.stringify({
             source: "clankie",
-            kind: "lead_wake",
+            kind,
             lead,
             from,
             text,
             sentAt: clock().toISOString(),
-            reply: REPLY_HINT,
+            ...(kind === "lead_wake" ? { reply: REPLY_HINT } : {}),
           }),
         });
       } catch {
@@ -111,4 +183,5 @@ export function createLeadWakes(options: {
       };
     },
   };
+  return wakes;
 }

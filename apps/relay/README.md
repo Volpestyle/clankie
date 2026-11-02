@@ -154,12 +154,21 @@ window, the last hour's tokens per local Claude session, permits, tracker
 budgets and live context; a missing number is `"unknown"`), `post_note`
 (`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
-`read_inbox` (`after` optional), `read_reports` (`thread`), `acknowledge_reports`
+`read_inbox` (`after` optional), `read_reports` (`thread`, optional `agent`, `ref`, `newest` and `waitSeconds`), `acknowledge_reports`
 (`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`
 optional), `read_issue` (`project`, `issue`), `save_issue` (`project`;
 `issue` to update; `title`, `description`, `status`, `priority`, `labels`,
 `addLabels`, `removeLabels`), `comment_issue` (`project`, `issue`, `body`) and
 `clankie_guide` (`topic` optional).
+`start_agent` accepts `notify: {lead, ref}` to wake the hiring lead's stored
+webhook on reports and settled watches. These `worker_report` wakes carry only
+service-owned ids and facts; the first sends immediately and later events batch
+over 120 seconds per lead. Worker text stays in the inbox. `read_reports` scopes
+to the authenticated app's hires and defaults to newest first. Select the thread's
+own `agent` or hire `ref`; `waitSeconds` (0–45) then waits on report-change events
+and returns matching unread reports or empty at the deadline. A routine fire
+starts a fresh session rather than resuming the hiring Duet thread.
+
 `post_note` and `read_notes` are the board the apps share (the `app_notes`
 op): the relay stamps the device it authenticated on a post as
 `appDeviceId`, refuses a request that already carries one (`400

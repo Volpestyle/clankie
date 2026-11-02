@@ -56,6 +56,7 @@ export type CreateChannelProjection = (host: ChannelProjectionHost) => ChannelPr
  * in-process function calls.
  */
 export interface CaptainDeps {
+  readonly leadWakes?: import("../lead-wakes.ts").LeadWakes;
   readonly skinDrafts?: import("../ports/media.ts").SkinDraftPort;
   readonly harnessProcesses?: import("../fleet-harness-processes.ts").FleetHarnessProcesses;
   gameExtensions?: Pick<import("../game-extension-projection.ts").InstalledGameExtensions, "projections">;

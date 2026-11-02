@@ -343,8 +343,10 @@ export class InboundSeatReceipts {
     recipient?: InboundReportRecipient,
     /** The sender asked to be heard at once rather than in the lead's next round. */
     urgent = false,
-    /** The sender's seat (Herdr terminal), when the host resolved one; for observers only. */
+    /** The host-resolved sender seat, retained for observers and report filtering. */
     senderSeatId?: string,
+    /** Hiring app provenance captured by the service, never worker-supplied. */
+    connectorHire?: { readonly deviceId: string; readonly ref?: string },
   ): FleetSeatMessageReceipt {
     const fingerprint = deliveryFingerprint(text);
     const previous = this.reconcile(paneId, delivery, fingerprint);
@@ -402,6 +404,8 @@ export class InboundSeatReceipts {
           binding: delivery.binding,
           fingerprint,
           paneId,
+          ...(senderSeatId === undefined ? {} : { seatId: senderSeatId }),
+          ...(connectorHire === undefined ? {} : { connectorHire }),
           text,
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
           ...(recipient === undefined ? {} : { recipient }),

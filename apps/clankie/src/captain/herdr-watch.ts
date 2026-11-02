@@ -195,6 +195,7 @@ const HerdrWatchRecordSchema = z
     wakeReceipt: HerdrWatchWakeReceiptSchema.optional(),
     /** A nonterminal working notice was accepted; retain observation without repeating it. */
     workingNoticeDelivered: z.boolean().optional(),
+    workerSettledNotified: z.boolean().optional(),
     noticeSequence: z.number().int().nonnegative().optional(),
     reason: z.string().min(1),
     createdAt: z.string().min(1),
@@ -1128,6 +1129,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | undefined;
   private readonly accountHolds: (() => Promise<readonly WorkerAccountHold[]>) | undefined;
   private readonly resumeInventory: ((fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>) | undefined;
+  private readonly onWorkerSettled: ((seatId: string, occupantId: string) => void) | undefined;
   private readonly resumeStarts = new Map<string, Promise<void>>();
 
   public constructor(
@@ -1233,6 +1235,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       ) => Promise<boolean | FleetSeatDelivery>;
       /** Include every configured Herdr server on the same exact SSH destination. */
       readonly resumeInventory?: (fleet?: string) => Promise<readonly HerdrAgentSnapshot[]>;
+      /** Best-effort notification before a settled watch waits for its lead's report round. */
+      readonly onWorkerSettled?: (seatId: string, occupantId: string) => void;
       /** A seat re-adopted by its hiring conversation, for its persona's name (VUH-2667). */
       readonly onReadopted?: (seat: {
         occupantId: string;
@@ -1242,6 +1246,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }) => void;
     } = {},
   ) {
+    this.onWorkerSettled = options.onWorkerSettled;
     this.path = path;
     this.remoteHireReceipts = options.remoteHireReceipts;
     this.channelReceipt = options.channelReceipt;
@@ -3031,7 +3036,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // Who asked, for display only (ADR 0321): a connected app, the owner's own app, else Clankie.
       const startedBy =
         authority.connectorPlace?.deviceId !== undefined
-          ? ({ kind: "app", deviceId: authority.connectorPlace.deviceId } as const)
+          ? ({
+              kind: "app",
+              deviceId: authority.connectorPlace.deviceId,
+              ...(authority.connectorPlace.notify === undefined
+                ? {}
+                : { notify: authority.connectorPlace.notify }),
+            } as const)
           : authority.ownerHire !== undefined
             ? ({ kind: "owner" } as const)
             : undefined;
@@ -6728,6 +6739,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
           this.save();
         },
       };
+      if (!workingObservation && record.occupantId && !record.workerSettledNotified && this.onWorkerSettled) {
+        record.workerSettledNotified = true;
+        this.save();
+        try {
+          this.onWorkerSettled(record.terminalId, record.occupantId);
+        } catch (error) {
+          console.warn("Worker settled notification failed", String(error));
+        }
+      }
       if (!this.wake) return;
       if (routine && owner.discord === undefined && record.wakeReceipt === undefined) {
         // A blocker arriving before the round must not wait behind this notice.

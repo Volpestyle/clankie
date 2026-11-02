@@ -163,6 +163,7 @@ export function createHerdrSessionSource(
       const result = await port.dispatch({
         op: "start_agent",
         schemaVersion: 1,
+        ...(request.notify === undefined ? {} : { notify: request.notify }),
         ...(request.machine === undefined ? {} : { machine: request.machine }),
         ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
         ...(request.harness === undefined ? {} : { harness: request.harness }),

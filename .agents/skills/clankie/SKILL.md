@@ -22,7 +22,10 @@ any decision needed.
 
 - Set `urgent: true` when you are blocked, something failed, or you need a
   decision: your lead hears it at once. Leave it off for progress and finished
-  work; an idle lead hears those with its next round, within about ten minutes.
+  work; an idle Clankie lead hears those with its next round, within about ten minutes.
+  A connected lead that hired with `notify` gets a content-free webhook wake on
+  reports and settled watches: the first immediately, later events batched over
+  120 seconds. The report itself stays in `read_reports`.
 - **Never wait silently.** When something only your lead or the owner can unblock
   stops you (a decision, a refused or broken tool, a failing check outside your
   change, missing access), tell your lead that same turn with `urgent: true`:

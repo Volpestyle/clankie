@@ -356,14 +356,40 @@ export function createOperatorService(
         };
       }
       if (request.op === "worker_reports") {
-        return {
-          op: request.op,
-          schemaVersion: 1,
-          page: ctx.conversations.readInboundReports(request.conversationId, {
-            ...(request.limit === undefined ? {} : { limit: request.limit }),
-            ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
-          }),
+        const seatId =
+          request.agent === undefined
+            ? undefined
+            : request.agent.startsWith("herdr:")
+              ? request.agent.slice(6)
+              : "";
+        // Older reports predate retained seat ids; a current seat can still find its pane's reports.
+        const native = seatId
+          ? await ctx.herdrRunner.resolveTerminal(seatId).catch(() => undefined)
+          : undefined;
+        await assertConversationAuthority(admitted);
+        if (request.waitSeconds && request.agent === undefined && request.ref === undefined)
+          throw new ConversationRefusedError("Waiting for reports requires your agent or hire ref");
+        const filter = {
+          ...(request.limit === undefined ? {} : { limit: request.limit }),
+          ...(seatId === undefined ? {} : { seatId }),
+          ...(native === undefined ? {} : { paneId: native.paneId }),
+          newest: request.newest ?? true,
+          ...(request.appDeviceId === undefined ? {} : { deviceId: request.appDeviceId }),
+          ...(request.ref === undefined ? {} : { ref: request.ref }),
+          ...(request.deliveryIds === undefined ? {} : { deliveryIds: request.deliveryIds }),
         };
+        const page = request.waitSeconds
+          ? await ctx.conversations.waitForInboundReports(
+              request.conversationId,
+              filter,
+              request.waitSeconds,
+              tailSignal === undefined
+                ? ctx.shutdown.signal
+                : AbortSignal.any([tailSignal, ctx.shutdown.signal]),
+            )
+          : ctx.conversations.readInboundReports(request.conversationId, filter);
+        await assertConversationAuthority(admitted);
+        return { op: request.op, schemaVersion: 1, page };
       }
       if (request.op === "acknowledge_worker_report_history") {
         if (!authority || authority.principal.kind !== "operator")
@@ -976,10 +1002,15 @@ export function createOperatorService(
           owner: { conversationId: lead },
           // The owner granted this place; Clankie's thread only leads the seat, so its own
           // agent's project doesn't decide where the new one works.
-          // The asking app's device is kept only to say who started the agent (ADR 0321).
+          // Keep the hiring app and optional report wake reference with the seat (ADR 0343).
           connectorPlace: {
             projectId: chosen.projectId,
-            ...(authority?.principal.kind === "device" ? { deviceId: authority.principal.id } : {}),
+            ...(request.notify === undefined ? {} : { notify: request.notify }),
+            ...(request.appDeviceId !== undefined
+              ? { deviceId: request.appDeviceId }
+              : authority?.principal.kind === "device"
+                ? { deviceId: authority.principal.id }
+                : {}),
           },
           current: () => ctx.conversations.runsCaptainTurns(lead),
           authorize: async () => ctx.conversations.runsCaptainTurns(lead),
