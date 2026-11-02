@@ -526,7 +526,10 @@ export class ProjectHires {
   public unresolvedLocalAt(workingDirectory: string): Allocation[] {
     return this.read().allocations.filter(
       (a) =>
-        !a.confirmed && !a.gone && a.request.fleet === undefined && a.request.workingDirectory === workingDirectory,
+        !a.confirmed &&
+        !a.gone &&
+        a.request.fleet === undefined &&
+        a.request.workingDirectory === workingDirectory,
     );
   }
   public release(candidate: Allocation, inventory: unknown): void {

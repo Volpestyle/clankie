@@ -718,13 +718,20 @@ describe("project hiring", () => {
       reason: "start_unconfirmed",
     });
     const fresh = await f.store.spawnSeat(request(f.root));
-    expect(fresh).toMatchObject({ outcome: "failed", detail: expect.stringContaining("No new agent was started.") });
-    expect(fresh.outcome === "failed" && fresh.detail).toContain("Its pane never appeared; it settles itself once 5 minutes old");
+    expect(fresh).toMatchObject({
+      outcome: "failed",
+      detail: expect.stringContaining("No new agent was started."),
+    });
+    expect(fresh.outcome === "failed" && fresh.detail).toContain(
+      "Its pane never appeared; it settles itself once 5 minutes old",
+    );
     f.store.close();
     // Six minutes later, after a restart: the place is still checked before it frees itself.
     const old = Date.now() - 6 * 60_000;
     const receipts = JSON.parse(await readFile(`${f.path}.hire-receipts.json`, "utf8"));
-    const [[, original]] = Object.entries(receipts) as [[string, { messageId: string; beganAt?: number; paneId?: string }]];
+    const [[, original]] = Object.entries(receipts) as [
+      [string, { messageId: string; beganAt?: number; paneId?: string }],
+    ];
     expect(original.beganAt).toEqual(expect.any(Number));
     expect(original.paneId).toBeUndefined();
     original.beganAt = old;
