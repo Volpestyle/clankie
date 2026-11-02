@@ -85,7 +85,7 @@ export interface StaffingSeat {
  * A key that names one tracker issue wherever it appears: `TEAM-n`, `LOCAL-TEAM-n` or
  * `owner/repo#n`. A bare `#n` names an issue only within its repo, so it never attributes.
  */
-export function unambiguousIssueKey(key: string): string | undefined {
+function unambiguousIssueKey(key: string): string | undefined {
   const trimmed = key.trim();
   if (/^(?:LOCAL-)?[A-Z][A-Z0-9]*-\d+$/iu.test(trimmed)) return trimmed.toUpperCase();
   const github = /^([\w.-]+\/[\w.-]+)#(\d+)$/u.exec(trimmed);
