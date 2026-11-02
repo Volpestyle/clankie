@@ -1,6 +1,7 @@
 name: CI
 # Every push gets the quick `check` job. A draft pull request stops there. A
-# ready pull request adds the real-app run; `check` and `real-run` are all a
+# ready pull request adds the real-app run, judged by the pull request's draft
+# state when the run starts (`pr-state`); `check` and `real-run` are all a
 # merge waits on (ADR 0332). The landing gate (typecheck and the test files a
 # change edits) and the tests it reaches through its imports run on main after
 # the merge (`landing`, `checkpoint` and `mac`), and the whole suite runs
@@ -333,12 +334,34 @@ jobs:
   # the service's own logs. It is the pull request's one Mac job, a few minutes,
   # and it runs once: main does not rerun what the pull request proved
   # (ADR 0310). Never code from a fork on that machine.
-  real-run:
+  # Whether the pull request is a draft when this run starts, not when its event
+  # fired. A push to a draft followed within seconds by `gh pr ready` can leave
+  # only the push's run, whose payload still says draft; a re-run reuses that
+  # payload. The live state lets that run, or its re-run, do the real run (#471).
+  pr-state:
     if: >-
       vars.CLANKIE_MAC_RUNNER == 'true' &&
       github.event_name == 'pull_request' &&
-      !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      ready: ${{ steps.state.outputs.ready }}
+    steps:
+      - id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft)
+          echo "draft now: $draft"
+          echo "ready=$([ "$draft" = false ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+  real-run:
+    needs: pr-state
+    if: needs.pr-state.outputs.ready == 'true'
     runs-on: [self-hosted, macOS, james-mac]
     timeout-minutes: 15
     steps:
