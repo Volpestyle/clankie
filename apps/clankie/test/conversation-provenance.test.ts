@@ -466,7 +466,7 @@ it("does not harvest a rebound native occupant or move an unowned worker", async
   store.close();
 });
 
-it("retains an unconfirmed hire after its pane closes until explicit operator settlement", async () => {
+it("retains an unconfirmed hire while its pane is open and settles it once the pane closes", async () => {
   const path = join(root(), "watches.json");
   let allowed = true;
   let panes: HerdrAgentSnapshot[] = [];
@@ -521,19 +521,15 @@ it("retains an unconfirmed hire after its pane closes until explicit operator se
     reason: "delivery_unconfirmed",
   });
   expect(createTab).toHaveBeenCalledOnce();
-  // Closing the pane does not authorize replay of an uncertain original.
+  // Once its pane is gone the original can't be running, so the next hire settles it from
+  // this machine's inventory and launches (ADR 0331); no operator step is needed.
   panes = [];
-  expect(await store.spawnSeat(request, undefined, undefined, undefined, blocked)).toMatchObject({
-    reason: "delivery_unconfirmed",
-    receiptId: initial.receiptId,
-  });
-  expect(createTab).toHaveBeenCalledOnce();
+  await store.spawnSeat(request, undefined, undefined, undefined, blocked);
+  expect(createTab).toHaveBeenCalledTimes(2);
   expect(await store.settleHireReceipt(initial.receiptId, async () => {}, "abandoned")).toMatchObject({
     state: "abandoned",
     evidence: { pane: { paneId: agent.paneId, present: false } },
   });
-  await store.spawnSeat(request, undefined, undefined, undefined, blocked);
-  expect(createTab).toHaveBeenCalledTimes(2);
   store.close();
 });
 
