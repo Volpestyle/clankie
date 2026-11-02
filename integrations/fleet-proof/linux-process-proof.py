@@ -223,8 +223,10 @@ class Proof:
         return inode, cookie
 
     def census(self, inode):
-        # Churn discards the entire census. No owner, partial FD table or PID
-        # omission survives an attempt; the original request deadline still binds.
+        # A process that appears discards the entire census, and so does a
+        # changed thread list. A confirmed exit of a process the socket was never
+        # seen in is skipped (#440): its descriptors closed with it. No owner,
+        # partial FD table or new PID survives an attempt; the deadline still binds.
         while True:
             self.bound()
             require(self.census_attempts < 16, "census", "attempts_exhausted")
@@ -240,84 +242,119 @@ class Proof:
             self.census_refusals.append({"attempt": self.census_attempts,
                                         "reason": reason, "errno": number})
 
+    def exited(self, pid, handle=None):
+        # Confirmed exit only: the pidfd proves whole-group exit, or the kernel
+        # has no such PID at all. Anything else is not an exit.
+        if handle is not None:
+            return not live(handle)
+        try:
+            handle = os.pidfd_open(pid, 0)
+        except ProcessLookupError:
+            return True
+        try:
+            return not live(handle)
+        finally:
+            os.close(handle)
+
     def complete_census(self, inode):
         owners = {}
         seen = set()
         pids = self.entries(self.root, MAX_PIDS)
         for pid in pids:
             self.bound()
-            # Even a zombie leader can retain live threads with private FD
-            # tables. Skip only a process whose pidfd proves whole-group exit.
-            directory = os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
-                                os.O_NOFOLLOW, dir_fd=self.root)
             try:
-                before = self.identity(directory, pid)
-                handle = os.pidfd_open(pid, 0)
-                try:
-                    if not live(handle):
-                        continue
-                    require(before == self.identity(directory, pid), "process", "process_changed")
-                    task = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
-                                   os.O_NOFOLLOW, dir_fd=directory)
-                    try:
-                        tids = self.entries(task, MAX_PIDS)
-                        require(bool(tids), "fd_list", "fd_list_unavailable")
-                        found = False
-                        for tid in tids:
-                            thread = os.open(str(tid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
-                                             os.O_NOFOLLOW, dir_fd=task)
-                            try:
-                                original = self.identity(thread, tid)
-                                fds = os.open("fd", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
-                                              os.O_NOFOLLOW, dir_fd=thread)
-                                try:
-                                    # Keep the iterator open during reads: our
-                                    # own census descriptor must not disappear
-                                    # between listing and readlink. Include FD 0.
-                                    with os.scandir(fds) as table:
-                                        count = 0
-                                        for entry in table:
-                                            self.bound()
-                                            require(bool(re.fullmatch(r"0|[1-9][0-9]*", entry.name)),
-                                                    "fd_list", "fd_record_invalid")
-                                            count += 1
-                                            require(count <= MAX_FDS, "fd_list", "fd_list_bounds")
-                                            target = os.readlink(entry.name, dir_fd=fds)
-                                            if target == f"socket:[{inode}]":
-                                                # Sharing is terminal as soon as
-                                                # observed, even if a later entry
-                                                # would otherwise trigger churn.
-                                                require(not seen or pid in seen, "socket_owner", "multiple_owners")
-                                                seen.add(pid)
-                                                found = True
-                                finally:
-                                    os.close(fds)
-                                require(original == self.identity(thread, tid), "process", "process_changed")
-                            except PermissionError:
-                                # Darwin also scans every readable foreign table.
-                                # Only an unreadable, freshly confirmed foreign
-                                # identity may be ignored. Same-user uncertainty
-                                # and any observed shared ownership refuse.
-                                if (found or self.uid in before[2][:2] or
-                                        self.uid in original[2][:2] or
-                                        original != self.identity(thread, tid)):
-                                    raise Refusal("fd_list", "fd_list_unavailable", 13)
-                            finally:
-                                os.close(thread)
-                        require(tids == self.entries(task, MAX_PIDS), "census", "process_census_changed")
-                    finally:
-                        os.close(task)
-                    require(live(handle) and before == self.identity(directory, pid),
-                            "process", "process_changed")
-                    if found:
-                        owners[pid] = before[0]
-                finally:
-                    os.close(handle)
-            finally:
-                os.close(directory)
-        require(pids == self.entries(self.root, MAX_PIDS), "census", "process_census_changed")
+                self.scan(pid, inode, seen, owners)
+            except (FileNotFoundError, ProcessLookupError):
+                # Exited mid-read. Where the socket was already seen, the census
+                # restarts as before; otherwise nothing it held can matter now.
+                if pid in seen or not self.exited(pid):
+                    raise
+        final = self.entries(self.root, MAX_PIDS)
+        # Only exits may differ: a PID that appeared restarts, as does an owner that left.
+        require(set(final) <= set(pids) and all(pid in final for pid in owners),
+                "census", "process_census_changed")
         require(len(owners) == 1, "socket_owner", "multiple_owners" if owners else "owner_not_found")
         return next(iter(owners.values()))
+
+    def scan(self, pid, inode, seen, owners):
+        """One process's every thread FD table; False when it held no socket or exited first."""
+        # Even a zombie leader can retain live threads with private FD
+        # tables. Skip only a process whose pidfd proves whole-group exit.
+        directory = os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
+                            os.O_NOFOLLOW, dir_fd=self.root)
+        try:
+            before = self.identity(directory, pid)
+            handle = os.pidfd_open(pid, 0)
+            try:
+                if not live(handle):
+                    return False
+                require(before == self.identity(directory, pid), "process", "process_changed")
+                task = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
+                               os.O_NOFOLLOW, dir_fd=directory)
+                try:
+                    tids = self.entries(task, MAX_PIDS)
+                    require(bool(tids), "fd_list", "fd_list_unavailable")
+                    found = False
+                    for tid in tids:
+                        thread = os.open(str(tid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
+                                         os.O_NOFOLLOW, dir_fd=task)
+                        try:
+                            original = self.identity(thread, tid)
+                            fds = os.open("fd", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
+                                          os.O_NOFOLLOW, dir_fd=thread)
+                            try:
+                                # Keep the iterator open during reads: our
+                                # own census descriptor must not disappear
+                                # between listing and readlink. Include FD 0.
+                                with os.scandir(fds) as table:
+                                    count = 0
+                                    for entry in table:
+                                        self.bound()
+                                        require(bool(re.fullmatch(r"0|[1-9][0-9]*", entry.name)),
+                                                "fd_list", "fd_record_invalid")
+                                        count += 1
+                                        require(count <= MAX_FDS, "fd_list", "fd_list_bounds")
+                                        target = os.readlink(entry.name, dir_fd=fds)
+                                        if target == f"socket:[{inode}]":
+                                            # Sharing is terminal as soon as
+                                            # observed, even if a later entry
+                                            # would otherwise trigger churn.
+                                            require(not seen or pid in seen, "socket_owner", "multiple_owners")
+                                            seen.add(pid)
+                                            found = True
+                            finally:
+                                os.close(fds)
+                            require(original == self.identity(thread, tid), "process", "process_changed")
+                        except PermissionError:
+                            # Darwin also scans every readable foreign table.
+                            # Only an unreadable, freshly confirmed foreign
+                            # identity may be ignored. Same-user uncertainty
+                            # and any observed shared ownership refuse. An exiting
+                            # process's table turns unreadable; a confirmed exit
+                            # it never showed the socket in is skipped (#440).
+                            if not found and pid not in seen and self.exited(pid, handle):
+                                return False
+                            if (found or self.uid in before[2][:2] or
+                                    self.uid in original[2][:2] or
+                                    original != self.identity(thread, tid)):
+                                raise Refusal("fd_list", "fd_list_unavailable", 13)
+                        finally:
+                            os.close(thread)
+                    require(tids == self.entries(task, MAX_PIDS), "census", "process_census_changed")
+                finally:
+                    os.close(task)
+                if not found and self.exited(pid, handle):
+                    # It exited after its table showed no socket (#440).
+                    return False
+                require(live(handle) and before == self.identity(directory, pid),
+                        "process", "process_changed")
+                if found:
+                    owners[pid] = before[0]
+                return found
+            finally:
+                os.close(handle)
+        finally:
+            os.close(directory)
 
     def ancestry(self, owner):
         chain = []
