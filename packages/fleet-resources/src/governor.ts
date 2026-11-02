@@ -1007,6 +1007,7 @@ export function createResourceGovernor(
     let exitCode: number | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
     const lane = options.server ? "server" : heavyJobLane(command, args);
     const store = laneStore(lane);
     try {
@@ -1141,11 +1142,18 @@ export function createResourceGovernor(
           if (lane === "server" && sig !== "SIGKILL") process.kill(-runner.pgid, "SIGCONT");
         }
       };
+      // The KILL grace starts once TERM has gone out: TERM first waits on an
+      // identity read, which under load can outlast the grace itself (#372).
+      // A failed read still arms it, and KILL re-checks the identity.
       const cancel = () => {
-        void sendSignal(interrupted.signal.reason === "SIGINT" ? "SIGINT" : "SIGTERM").catch(() => undefined);
-        killTimer = setTimeout(() => {
-          void sendSignal("SIGKILL").catch(() => undefined);
-        }, 2_000);
+        void sendSignal(interrupted.signal.reason === "SIGINT" ? "SIGINT" : "SIGTERM")
+          .catch(() => undefined)
+          .then(() => {
+            if (settled) return;
+            killTimer = setTimeout(() => {
+              void sendSignal("SIGKILL").catch(() => undefined);
+            }, 2_000);
+          });
       };
       signal.addEventListener("abort", cancel, { once: true });
       if (signal.aborted) {
@@ -1163,6 +1171,7 @@ export function createResourceGovernor(
         return interrupted.signal.reason === "SIGTERM" ? 143 : 130;
       throw error;
     } finally {
+      settled = true;
       if (killTimer) clearTimeout(killTimer);
       process.removeListener("SIGINT", onInt);
       process.removeListener("SIGTERM", onTerm);
