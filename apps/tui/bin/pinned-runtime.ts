@@ -35,6 +35,22 @@ export function pinnedCommit(checkout: string, ref: string, run: InstallCommand 
   return commit;
 }
 
+/** Git's first stderr line (`fatal: Needed a single revision`), else the error's first line. */
+function refFailureReason(error: unknown): string {
+  const stderr = (error as { stderr?: unknown } | undefined)?.stderr;
+  const text = typeof stderr === "string" || Buffer.isBuffer(stderr) ? String(stderr) : "";
+  const fromGit = text.split("\n").find((line) => line.trim());
+  if (fromGit !== undefined) return fromGit.trim();
+  const message = error instanceof Error ? error.message : String(error);
+  // execFile puts the command first and git's output after it.
+  return (
+    message
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith("Command failed:")) ?? message.split("\n")[0]!
+  );
+}
+
 /** Branch updates use the fetched origin tip, never the owner's local branch. */
 export async function updateCommit(
   checkout: string,
@@ -61,39 +77,43 @@ export async function updateCommit(
   if (!ref || ref.length > 256 || ref.startsWith("-") || ref.includes("\0") || /\s/u.test(ref))
     throw Error("Invalid runtime ref");
   let resolvedRef = ref;
-  if (/^[a-f0-9]{7,64}$/u.test(ref)) {
-    // A hex ref of Git's default abbreviation length or more is a commit, never `refs/heads/<hex>`
-    // (name such a branch `refs/heads/NAME`). An abbreviation is resolved after fetching main so a
-    // newly landed object can make it ambiguous instead of silently matching an older commit; an
-    // unreachable origin falls back to local objects. A full SHA resolves locally, else after the fetch.
-    // `async` wrappers also turn a synchronous runner's throw into a rejection.
-    const commit = async () =>
-      run("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], checkout);
-    const fetchMain = async () =>
-      run("git", ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], checkout);
-    if (ref.length < 40) {
-      // allow-swallowed-rejection -- an unreachable origin falls back to local objects; the lookup below still refuses an unknown ref
-      await fetchMain().catch(() => undefined);
-      resolvedRef = await commit();
-    } else {
-      resolvedRef = await commit().catch(async () => {
-        await fetchMain();
-        return commit();
-      });
+  // Every path words an unknown ref the same way: git's own command line is not the reason (#377).
+  const resolveRef = async () => {
+    if (/^[a-f0-9]{7,64}$/u.test(ref)) {
+      // A hex ref of Git's default abbreviation length or more is a commit, never `refs/heads/<hex>`
+      // (name such a branch `refs/heads/NAME`). An abbreviation is resolved after fetching main so a
+      // newly landed object can make it ambiguous instead of silently matching an older commit; an
+      // unreachable origin falls back to local objects. A full SHA resolves locally, else after the fetch.
+      // `async` wrappers also turn a synchronous runner's throw into a rejection.
+      const commit = async () =>
+        run("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`], checkout);
+      const fetchMain = async () =>
+        run("git", ["fetch", "--no-tags", "origin", "+refs/heads/main:refs/remotes/origin/main"], checkout);
+      if (ref.length < 40) {
+        // allow-swallowed-rejection -- an unreachable origin falls back to local objects; the lookup below still refuses an unknown ref
+        await fetchMain().catch(() => undefined);
+        resolvedRef = await commit();
+      } else {
+        resolvedRef = await commit().catch(async () => {
+          await fetchMain();
+          return commit();
+        });
+      }
+    } else if (ref !== "HEAD" && !ref.startsWith("refs/tags/")) {
+      const branch = ref.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/u, "");
+      await run("git", ["check-ref-format", `refs/heads/${branch}`], checkout);
+      resolvedRef = `refs/remotes/origin/${branch}`;
+      // An explicit refspec also handles clones with a narrow fetch configuration.
+      // Failed fetches refuse admission; a cached remote or local tip is not a fallback.
+      await run("git", ["fetch", "--no-tags", "origin", `+refs/heads/${branch}:${resolvedRef}`], checkout);
     }
-  } else if (ref !== "HEAD" && !ref.startsWith("refs/tags/")) {
-    const branch = ref.replace(/^(?:refs\/heads\/|refs\/remotes\/origin\/|origin\/)/u, "");
-    await run("git", ["check-ref-format", `refs/heads/${branch}`], checkout);
-    resolvedRef = `refs/remotes/origin/${branch}`;
-    // An explicit refspec also handles clones with a narrow fetch configuration.
-    // Failed fetches refuse admission; a cached remote or local tip is not a fallback.
-    await run("git", ["fetch", "--no-tags", "origin", `+refs/heads/${branch}:${resolvedRef}`], checkout);
-  }
-  const newCommit = await run(
-    "git",
-    ["rev-parse", "--verify", "--end-of-options", `${resolvedRef}^{commit}`],
-    checkout,
-  );
+    return run("git", ["rev-parse", "--verify", "--end-of-options", `${resolvedRef}^{commit}`], checkout);
+  };
+  const newCommit = await resolveRef().catch((error: unknown) => {
+    throw new Error(`Update ref "${ref}" could not be resolved now: ${refFailureReason(error)}`, {
+      cause: error,
+    });
+  });
   if (!/^[a-f0-9]{40,64}$/u.test(newCommit)) throw Error("Git did not resolve an exact commit");
   const ancestor = async (older: string, newer: string) => {
     try {
