@@ -31,9 +31,17 @@ export interface SelfHostedActivityAdmissionOptions {
     guildId: string,
     channelId: string,
   ) => Promise<{ session: ActivityShareSession; grant: string; expiresAt: string }>;
+  /**
+   * Ends a grant and its sockets once revalidation finds the viewer gone from
+   * the instance (#373). Without it, a viewer keeps media until the grant lapses.
+   */
+  revoke?: (shareId: string, grant: string) => Promise<void>;
+  /** How often admitted viewers' instances are read again; at most 15 seconds. */
+  revalidateMs?: number;
   fetch?: typeof fetch;
   /** Discord's API origin; a fixture in tests. */
   discordApi?: string;
+  now?: () => number;
 }
 
 export interface SelfHostedActivityAdmission {
@@ -71,7 +79,8 @@ export function createSelfHostedActivityAdmission(options: SelfHostedActivityAdm
   const fetcher = options.fetch ?? fetch;
   const api = (options.discordApi ?? "https://discord.com/api/v10").replace(/\/$/u, "");
   const denied = () => new ActivityAdmissionError("activity_admission_denied", 403);
-  const call = async (path: string, init: RequestInit) => {
+  const unavailable = () => new ActivityAdmissionError("activity_admission_unavailable", 503);
+  const call = async (path: string, init: RequestInit, { transient = false } = {}) => {
     let response: Response, text: string;
     try {
       response = await fetcher(`${api}${path}`, {
@@ -81,8 +90,10 @@ export function createSelfHostedActivityAdmission(options: SelfHostedActivityAdm
       });
       text = await response.text();
     } catch {
-      throw new ActivityAdmissionError("activity_admission_unavailable", 503);
+      throw unavailable();
     }
+    // Revalidation keeps a viewer through a Discord outage or rate limit; only an answer removes them.
+    if (transient && (response.status === 429 || response.status >= 500)) throw unavailable();
     if (!response.ok || text.length > 64 * 1024) throw denied();
     try {
       return JSON.parse(text) as unknown;
@@ -90,8 +101,99 @@ export function createSelfHostedActivityAdmission(options: SelfHostedActivityAdm
       throw denied();
     }
   };
+  const now = options.now ?? Date.now;
+  const revalidateMs = options.revalidateMs ?? 5_000;
+  if (!Number.isSafeInteger(revalidateMs) || revalidateMs <= 0 || revalidateMs > 15_000)
+    throw new RangeError("Activity revalidation must run at least every 15 seconds");
+  // Admitted viewers per instance: user id -> grant -> its share and expiry.
+  const admitted = new Map<string, Map<string, Map<string, { shareId: string; expiresAt: number }>>>();
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let checking: Promise<void> | undefined;
+  const revoke = options.revoke;
+  const remember = (
+    instanceId: string,
+    userId: string,
+    granted: { session: ActivityShareSession; grant: string; expiresAt: string },
+  ) => {
+    if (revoke === undefined) return;
+    const users =
+      admitted.get(instanceId) ?? new Map<string, Map<string, { shareId: string; expiresAt: number }>>();
+    const grants = users.get(userId) ?? new Map<string, { shareId: string; expiresAt: number }>();
+    grants.set(granted.grant, { shareId: granted.session.shareId, expiresAt: Date.parse(granted.expiresAt) });
+    users.set(userId, grants);
+    admitted.set(instanceId, users);
+    if (timer === undefined) {
+      timer = setInterval(() => void check(), revalidateMs);
+      timer.unref();
+    }
+  };
+  /** Ends a gone viewer's grants; one that fails to revoke is tried again next pass. */
+  const end = async (
+    users: Map<string, Map<string, { shareId: string; expiresAt: number }>>,
+    userId: string,
+  ) => {
+    const grants = users.get(userId);
+    for (const [grant, { shareId }] of grants ?? []) {
+      try {
+        await revoke!(shareId, grant);
+        grants!.delete(grant);
+      } catch {
+        // allow-swallowed-rejection -- the grant stays tracked, so the next pass revokes it again
+      }
+    }
+    if (grants?.size === 0) users.delete(userId);
+  };
+  const revalidate = async () => {
+    const botToken = await options.botToken();
+    for (const [instanceId, users] of admitted) {
+      for (const [userId, grants] of users) {
+        for (const [grant, { expiresAt }] of grants) if (expiresAt <= now()) grants.delete(grant);
+        if (grants.size === 0) users.delete(userId);
+      }
+      if (users.size > 0 && botToken) {
+        let present: ReadonlySet<string>;
+        try {
+          const instance = InstanceSchema.safeParse(
+            await call(
+              `/applications/${applicationId}/activity-instances/${encodeURIComponent(instanceId)}`,
+              { headers: { authorization: `Bot ${botToken}` } },
+              { transient: true },
+            ),
+          );
+          // An instance Discord no longer has, or no longer ours, holds nobody.
+          present =
+            instance.success &&
+            instance.data.application_id === applicationId &&
+            instance.data.instance_id === instanceId
+              ? new Set(instance.data.users)
+              : new Set();
+        } catch (error) {
+          if (error instanceof ActivityAdmissionError && error.status === 503) continue;
+          present = new Set();
+        }
+        for (const userId of users.keys()) if (!present.has(userId)) await end(users, userId);
+      }
+      if (users.size === 0) admitted.delete(instanceId);
+    }
+    if (admitted.size === 0 && timer !== undefined) {
+      clearInterval(timer);
+      timer = undefined;
+    }
+  };
+  // One pass at a time: a slow Discord read never stacks passes.
+  const check = () =>
+    (checking ??= revalidate()
+      // allow-swallowed-rejection -- a pass that failed to read anything leaves every grant tracked for the next one
+      .catch(() => undefined)
+      .finally(() => (checking = undefined)));
   return {
     applicationId,
+    /** Stops revalidation; grants already issued still lapse on their own. */
+    close() {
+      if (timer !== undefined) clearInterval(timer);
+      timer = undefined;
+      admitted.clear();
+    },
     async admit(input: unknown): Promise<SelfHostedActivityAdmission> {
       const request = ActivityAdmitRequestSchema.safeParse(input);
       if (!request.success) throw denied();
@@ -148,6 +250,7 @@ export function createSelfHostedActivityAdmission(options: SelfHostedActivityAdm
       } catch {
         throw denied();
       }
+      remember(request.data.instanceId, user.data.id, granted);
       return {
         ...granted,
         mediaPath: `/.proxy/activity/shares/${granted.session.shareId}/frames`,

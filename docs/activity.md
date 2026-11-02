@@ -59,8 +59,10 @@ service exchanges the code, reads the Activity instance with the bot token, and
 admits only a participant of an instance in a channel where Clankie's bot posted
 the launch. The first admission while play is running opens that channel's play
 share. Grants last five minutes; the viewer renews before expiry, and each
-renewal re-reads the instance, so a viewer who leaves keeps media for at most
-about five minutes ([VUH-2834](https://linear.app/vuhlp/issue/VUH-2834)).
+renewal re-reads the instance. Between renewals the service re-reads every
+admitted viewer's instance every five seconds and revokes the grants of anyone
+no longer in it, so a viewer who leaves loses media within about 15 seconds. A
+Discord outage removes nobody ([#373](https://github.com/Volpestyle/clankie/issues/373)).
 
 ## Local delegated viewer
 
