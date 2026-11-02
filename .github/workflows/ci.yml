@@ -15,7 +15,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Main checkpoints finish; only superseded pull request runs are cancelled.
+  # GitHub keeps one pending main run, replacing it when a newer push arrives.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -165,8 +167,8 @@ jobs:
 
   # The tests a merge reaches through its imports, on Linux, after it is on main
   # (ADR 0310). A pull request ran only the test files it edited. A red run here
-  # is a bug to file at the front of the queue, not a gate; a newer push cancels
-  # an older run, and the nightly run covers everything either way.
+  # is a bug to file at the front of the queue, not a gate. Running main
+  # checkpoints finish while newer pushes wait in the concurrency group.
   checkpoint:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
