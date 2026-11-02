@@ -430,9 +430,11 @@ describe("public gateway Mac connector", () => {
     expect(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, carrier)).toEqual({
       ok: true,
     });
-    expect(
-      (await exchange("/v1/joined-machines/challenge", { machineId: lease.machineId })).start,
-    ).toMatchObject({ status: 403 });
+    // After leaving, the home still issues a challenge so the machine receives an authenticated
+    // refusal (#248), and every request it seals is refused as revoked.
+    await expect(exchangeJoinedMachine(credential, { op: "poll", results: [] }, carrier)).rejects.toThrow(
+      "revoked",
+    );
   });
 
   it("no longer forwards retired hosted exchanges to the body in plaintext", async () => {
