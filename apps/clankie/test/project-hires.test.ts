@@ -69,6 +69,8 @@ async function fixture(harness: "claude" | "codex" = "claude") {
     title: "Implement",
     agent: harness,
     status: "working",
+    // Herdr reports the pane's cwd: the checkout this fixture hires into.
+    workingDirectory: root,
     session: { source: harness, kind: "id", value: "s1" },
   };
   const processProof = { ...proof, nativeOccupantId: occupantIdForHerdrSession(agent.session!) };

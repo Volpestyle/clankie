@@ -1679,6 +1679,8 @@ describe("hiring a seat", () => {
     agent: "codex",
     status: "idle",
     title: "Release prep",
+    // Herdr reports a live pane's cwd; a Codex hire must run in the checkout it asked for.
+    workingDirectory: tmpdir(),
     session: { source: "herdr:codex", kind: "id", value: "session-hired" },
   };
 
@@ -1891,7 +1893,7 @@ describe("hiring a seat", () => {
       title: "Release prep",
       workingDirectory: tmpdir(),
     });
-    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(["--cd", tmpdir(), ...fleetSeatCodexStartArgs()]);
     store.close();
   });
 
@@ -1967,6 +1969,8 @@ describe("hiring a seat", () => {
       effort: "high",
     });
     expect(startAgent.mock.calls[1]?.[0].args).toEqual([
+      "--cd",
+      tmpdir(),
       ...fleetSeatCodexStartArgs(),
       "--model",
       "gpt-5.3-codex",
@@ -2032,7 +2036,7 @@ describe("hiring a seat", () => {
     // Codex reaches Chrome through its own settings: no flag, and no failure.
     agent = { ...hired, agent: "codex" };
     await store.spawnSeat({ ...seat, harness: "codex" });
-    expect(startAgent.mock.calls[1]?.[0].args).toEqual(fleetSeatCodexStartArgs());
+    expect(startAgent.mock.calls[1]?.[0].args).toEqual(["--cd", tmpdir(), ...fleetSeatCodexStartArgs()]);
 
     const result = await store.spawnSeat({ ...seat, harness: "gemini" });
     expect(result).toMatchObject({ outcome: "failed", reason: "harness_unavailable" });
