@@ -4,7 +4,8 @@ Status: Proposed, 2026-11-02, from James's direction the same day ("Clankie will
 have a setting for how it does desktop use, 'raw-dog' or 'vm'", and "private
 browser is ok as long as we have a way to securely store and pass credentials"). Amended the same day: agents get only their own private browser by default, full
 screen control is its own `screen` mode, the VM is a sandbox option, and a lead
-may carry its own mode.
+may carry its own mode. The mode is a Common setting, with a Mac app page that
+checks each opt-in mode's macOS permissions.
 Tracks [#229](https://github.com/Volpestyle/clankie/issues/229). Narrows
 [ADR 0199](0199-hard-computer-work-goes-to-a-computer-use-harness.md) (hard
 computer work goes to a computer-use harness) by saying _where_ that harness
@@ -99,16 +100,37 @@ machine's ADR 0244 screen ceiling still caps every mode: `host` and `screen`
 need the screen ceiling on; `vm` does not use the owner's screen and only needs
 `workers`.
 
-**The setting lives in the CLI first and is Advanced.**
+**The setting lives in the CLI first and is Common.**
 `clankie computer mode [host|screen|vm|none] [--machine ID] [--lead NAME] --json`
 shows and sets it; `--lead` sets that lead's override.
-`clankie computer vm status|start|stop|create` manages the guest: `create`
-says the image size and free disk and needs `--yes`, because it downloads
-macOS and spends tens of gigabytes. `clankie doctor` reports the mode, and for
-`vm` whether the guest exists, runs, and has agent-desktop and a browser
-inside. The app shows the mode read-only on the machine's page and links to
-the CLI. It goes in the [settings inventory](../settings-inventory.md) under
-Advanced.
+`clankie computer permissions [--machine ID] --json` reports, for each mode,
+what it needs and whether that is in place. `clankie computer vm
+status|start|stop|create` manages the guest: `create` says the image size and
+free disk and needs `--yes`, because it downloads macOS and spends tens of
+gigabytes. `clankie doctor` reports the mode, and for `vm` whether the guest
+exists, runs, and has agent-desktop and a browser inside. The same API backs
+the app. The setting goes in the [settings inventory](../settings-inventory.md)
+under Common.
+
+**The Mac app has a page for it.** James approved a mock on 2026-11-02
+([clankie-app#41](https://github.com/Volpestyle/clankie-app/issues/41)).
+The page is titled "How much of your Mac can agents use?" and has one card per
+mode, in plain words. "Their own browser only" (`none`) is preselected and
+needs nothing, so skipping the page changes nothing. Each other card lists only
+what its mode needs:
+
+- `host`: Accessibility for the app that hosts the agents' terminals (Herdr
+  Browser on James's Mac).
+- `screen`: Accessibility and Screen Recording for that same app.
+- `vm`: enough free disk, and a guest that exists and is ready.
+
+A missing grant shows "Open Settings", which opens that pane of System
+Settings, and the row checks again when the app returns to the front. macOS
+gives a grant to the process that acts, so each check runs where the agents run
+(for example `agent-desktop status` in a terminal of that app), never from the
+Clankie app's own process. The page appears as an optional step in first setup
+and in the Mac's Settings. Phone and web show the chosen mode and whether its
+grants are on, and send the owner to the Mac to allow anything.
 
 **Sign-ins go through a credential vault the model never reads.**
 James set the condition: the private browser is fine only with a secure way to
