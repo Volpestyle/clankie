@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
+  fstatSync,
   fsyncSync,
   ftruncateSync,
   mkdirSync,
@@ -304,6 +305,9 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
     const line = `${JSON.stringify({ d: digest, r: changed })}\n`;
     const descriptor = openSync(join(`${this.path}.d`, log.file), "a", 0o600);
     try {
+      // Bytes this store did not commit (a torn write it never replayed) would glue
+      // onto the new line: start a fresh log at a checkpoint instead.
+      if (fstatSync(descriptor).size !== log.bytes) return false;
       writeSync(descriptor, line);
       fsyncSync(descriptor);
     } finally {

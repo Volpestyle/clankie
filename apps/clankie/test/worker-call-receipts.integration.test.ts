@@ -677,8 +677,11 @@ it("refuses connected dispatch when a committed shard is corrupt or missing, inc
   await writeFile(path, body);
   expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
   expect(f.effects).toHaveLength(1);
-  // A changed log line breaks its digest chain and refuses every call.
-  const log = join(`${journal}.d`, String(manifest.log));
+  // A changed log line breaks its digest chain and refuses every call. The log is
+  // read from the manifest each time: any checkpoint starts a new one.
+  const currentLog = async () =>
+    join(`${journal}.d`, String((JSON.parse(await readFile(journal, "utf8")) as { log: string }).log));
+  let log = await currentLog();
   const lines = await readFile(log, "utf8");
   await writeFile(log, lines.replace('"settled"', '"uncertain"'));
   expect(await f.call(invocation, session, undefined, id)).toMatchObject({
@@ -690,12 +693,19 @@ it("refuses connected dispatch when a committed shard is corrupt or missing, inc
     outcome: "refused",
     detail: expect.stringContaining("receipts are unreadable"),
   });
+  await writeFile(log, lines);
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
   // A torn final append, its newline never written, is dropped and cut away.
-  await writeFile(log, `${lines}{"d":"ab`);
+  log = await currentLog();
+  const intact = await readFile(log, "utf8");
+  await writeFile(log, `${intact}{"d":"ab`);
   expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
   expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({ outcome: "ok" });
-  expect((await readFile(log, "utf8")).startsWith(lines)).toBe(true);
-  expect((await readFile(log, "utf8")).includes('{"d":"ab')).toBe(false);
+  const after = await readFile(log, "utf8");
+  const evidence = `log ${log}, current ${await currentLog()}, tail ${JSON.stringify(after.slice(-160))}`;
+  expect(await currentLog(), evidence).toBe(log);
+  expect(after.startsWith(intact), evidence).toBe(true);
+  expect(after.includes('{"d":"ab'), evidence).toBe(false);
   expect(f.effects).toHaveLength(2);
 });
 
