@@ -45,11 +45,16 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
   await f.settings.update((settings) => ({
     ...settings,
     projects: {
+      ...settings.projects,
       projects: [
         {
           id: "proof",
           name: "Proof",
           workspaces: [{ id: "local", machineId: "local", platform: "posix", path: f.root }],
+          worktreeRoots: [],
+          roles: [],
+          labelRoleMap: [],
+          grants: [],
         },
       ],
     },
