@@ -12,6 +12,7 @@ import { ClankieApiClient, DiscordSetupClient } from "@clankie/api-client";
 import { DiscordSettingsSchema, parseProtocolResponse } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { personaStatus, personaUpdate } from "../src/command/persona.ts";
+import { runDiscordCommand } from "../src/command/discord.ts";
 import { createPersonaVoiceSettingsRoutes } from "../../clankie/src/persona-voice-settings-routes.ts";
 import { createDiscordRoomRoutes } from "../../clankie/src/discord-room-routes.ts";
 import { DiscordRoomObservations } from "../../clankie/src/discord-room-observations.ts";
@@ -176,6 +177,12 @@ async function fixture(beforeReply?: (path: string) => Promise<void>) {
     expect(await readFile(descriptorPath)).toEqual(descriptor);
     return JSON.parse(result.stdout);
   }
+  /** The same `discord` command the binary runs, in this process: no Node/tsx start per step. */
+  async function command(...args: string[]) {
+    const result = await runDiscordCommand(args, { env });
+    expect(await readFile(descriptorPath)).toEqual(descriptor);
+    return result;
+  }
   function shell(persona?: Parameters<typeof buildDiscordCommands>[0]["persona"]) {
     let revision: string | undefined;
     const commands = buildDiscordCommands({
@@ -204,6 +211,7 @@ async function fixture(beforeReply?: (path: string) => Promise<void>) {
   return {
     root,
     cli,
+    command,
     settings,
     shell,
     api,
@@ -651,6 +659,8 @@ it("an older four-sentence client refuses the incompatible setup model version e
 
 it("CLI owners and room skills round-trip through the revision-fenced API", async () => {
   const f = await fixture();
+  // The binary round-trips the first steps; the rest run the same command in-process,
+  // since each binary start (Node plus tsx) costs seconds under load (#320).
   await f.cli("setup", "connect", "--server", "Garden");
   await f.cli("owners", "--server", "10002", "--owners", "role", "--owner-role", "10003", "--role", "admin");
   expect((await f.settings.load()).discord.servers).toContainEqual({
@@ -659,18 +669,18 @@ it("CLI owners and room skills round-trip through the revision-fenced API", asyn
     owners: "role",
     ownerRoleId: "10003",
   });
-  await f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "house-hunting");
+  await f.command("room-skill", "--server", "10002", "--channel", "20011", "--skill", "house-hunting");
   expect((await f.settings.load()).discord.roomSkills).toEqual([
     { serverId: "10002", channelId: "20011", skill: "house-hunting" },
   ]);
   const before = (await f.api.discordSettings()).revision;
-  await expect(f.cli("owners", "--server", "10002", "--owners", "role")).rejects.toThrow();
+  await expect(f.command("owners", "--server", "10002", "--owners", "role")).rejects.toThrow();
   await expect(
-    f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "bash"),
+    f.command("room-skill", "--server", "10002", "--channel", "20011", "--skill", "bash"),
   ).rejects.toThrow();
-  await expect(f.cli("set", "--system-actor-guild-ids", "10002")).rejects.toThrow();
+  await expect(f.command("set", "--system-actor-guild-ids", "10002")).rejects.toThrow();
   expect((await f.api.discordSettings()).revision).toBe(before);
-  await f.cli("room-skill", "--server", "10002", "--channel", "20011", "--skill", "off");
+  await f.command("room-skill", "--server", "10002", "--channel", "20011", "--skill", "off");
   expect((await f.settings.load()).discord.roomSkills).toEqual([]);
 });
 
