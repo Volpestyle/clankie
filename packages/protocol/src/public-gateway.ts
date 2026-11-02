@@ -680,3 +680,19 @@ function isCanonicalBase64(value: string): boolean {
     return false;
   }
 }
+
+/** Account host proof is separate from routed tunnel frames. No data flows before ready. */
+export const PUBLIC_GATEWAY_HOST_PROOF_HEADER = "x-clankie-host-proof";
+export const PublicGatewayHostChallengeSchema = z.object({
+  kind: z.literal("host_challenge"),
+  nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
+}).strict();
+export const PublicGatewayHostProofSchema = z.object({
+  kind: z.literal("host_proof"),
+  publicKey: z.string().regex(/^[A-Za-z0-9_-]{59}$/u),
+  signature: z.string().regex(/^[A-Za-z0-9_-]{86}$/u),
+}).strict();
+/** Fixed field order and domain separation; both peers supply route and role locally. */
+export function publicGatewayHostProofPayload(hostId: string, installationId: string, nonce: string): string {
+  return JSON.stringify(["clankie.gateway.installation-proof.v1", hostId, installationId, "home", nonce]);
+}

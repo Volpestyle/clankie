@@ -1,4 +1,5 @@
 import {
+  ensureInstallationKey,
   CLANKIE_ACCOUNT_PROVIDER_ID,
   ClankieAccountAuthError,
   clankieAccountSignInRequired,
@@ -82,6 +83,7 @@ export async function connectBodyToGateway(options: {
           gatewayUrl: publicGateway.url,
           hostId,
           installationId: publicGateway.installationId,
+          resolveInstallationKey: () => ensureInstallationKey(publicGateway.installationId!, options.store),
           resolveHostToken: async () => {
             const credential = await resolveAccountToken();
             return { token: credential.token, expiresAt: credential.expiresAt };

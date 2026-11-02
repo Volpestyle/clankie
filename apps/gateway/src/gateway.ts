@@ -1,3 +1,4 @@
+import { HostKeys } from "./host-keys.ts";
 import { CognitoRevocationUnavailableError } from "./cognito-jwt.ts";
 import { z } from "zod";
 import {
@@ -12,7 +13,7 @@ import {
   JoinedMachineIdSchema,
   MachineJoinEnvelopeSchema,
 } from "@clankie/protocol/machine-join";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, verify, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   createServer,
@@ -43,6 +44,9 @@ import {
 import type { ApnsSender, ApnsResult } from "./apns.ts";
 import { PushRegistrationError, type PushRegistrations } from "./push-registrations.ts";
 import {
+  PUBLIC_GATEWAY_HOST_PROOF_HEADER,
+  PublicGatewayHostProofSchema,
+  publicGatewayHostProofPayload,
   PUBLIC_GATEWAY_CONFIG_PATH,
   PUBLIC_GATEWAY_HEALTH_PATH,
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
@@ -168,6 +172,8 @@ export interface PublicGatewayLogger {
 
 export interface PublicGatewayOptions {
   readonly hostTokens: ReadonlyMap<string, string>;
+  /** Persistent in production; omitted only for isolated gateway fixtures. */
+  readonly hostKeys?: HostKeys;
   readonly push?: { readonly registrations: PushRegistrations; readonly sender: ApnsSender };
   readonly accountConfig?: PublicGatewayConfig;
   readonly authenticateAccountToken?: PublicGatewayHostAuthenticator;
@@ -258,6 +264,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   const logger = options.logger ?? silentLogger;
   const clock = options.clock ?? Date.now;
   const requestIdFactory = options.requestIdFactory ?? (() => randomBytes(18).toString("base64url"));
+  const hostKeys = options.hostKeys ?? new HostKeys(":memory:");
+  const proving = new Set<WebSocket>();
   const hosts = new Map<string, HostConnection>();
   const pairingRoutes = new Map<PublicGatewayCapabilityHash, PairingRoute>();
   const pending = new Map<string, PendingExchange>();
@@ -879,6 +887,11 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     const staticToken = options.hostTokens.get(hostId);
     const staticAccepted =
       url.searchParams.size === 1 && staticToken !== undefined && constantTimeEqual(token, staticToken);
+    // Static routes never share the account namespace, even with a matching JWT.
+    if (!staticAccepted && staticToken !== undefined) {
+      denyUpgrade(socket);
+      return;
+    }
     if (!staticAccepted) {
       const installationId = url.searchParams.get("installationId");
       if (
@@ -911,9 +924,48 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
 
     // An older Mac never sends the header, so it is never offered a device's stream.
     const carriesStreams = request.headers[PUBLIC_GATEWAY_STREAMS_HEADER] === "1";
-    webSockets.handleUpgrade(request, socket, head, (webSocket) =>
-      attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs, staticAccepted ? undefined : token),
-    );
+    webSockets.handleUpgrade(request, socket, head, (webSocket) => {
+      const attach = () => attachHost(hostId, ownerId, webSocket, carriesStreams, expiresAtMs, staticAccepted ? undefined : token);
+      if (staticAccepted) { attach(); return; }
+      const installationId = url.searchParams.get("installationId")!;
+      const refuse = (reason: string) => {
+        logger.warn({ event: "gateway.host.refused", hostId, reason }, "gateway host connection refused");
+        webSocket.close(1008, reason);
+      };
+      if (request.headers[PUBLIC_GATEWAY_HOST_PROOF_HEADER] !== "1") {
+        if (hostKeys.get(hostId) !== undefined) refuse("installation proof required");
+        else attach(); // Rollout only: the first proven connection ends this compatibility window.
+        return;
+      }
+      const nonce = randomBytes(32).toString("base64url");
+      const deadline = setTimeout(() => { cleanup(); refuse("installation proof timed out"); }, 5000);
+      deadline.unref();
+      const cleanup = () => { clearTimeout(deadline); proving.delete(webSocket); };
+      proving.add(webSocket);
+      webSocket.once("close", cleanup);
+      webSocket.once("error", () => undefined);
+      webSocket.once("message", (data, isBinary) => {
+        cleanup();
+        if (closing || webSocket.readyState !== WebSocket.OPEN) return;
+        try {
+          if (isBinary || Buffer.byteLength(data.toString()) > 1024) throw new Error("invalid proof");
+          const proof = PublicGatewayHostProofSchema.parse(JSON.parse(data.toString()));
+          const key = createPublicKey({ key: Buffer.from(proof.publicKey, "base64url"), format: "der", type: "spki" });
+          if (key.asymmetricKeyType !== "ed25519" ||
+              key.export({ format: "der", type: "spki" }).toString("base64url") !== proof.publicKey ||
+              !verify(null, Buffer.from(publicGatewayHostProofPayload(hostId, installationId, nonce)), key, Buffer.from(proof.signature, "base64url"))) {
+            refuse("invalid installation proof"); return;
+          }
+          if (expiresAtMs === undefined || expiresAtMs <= clock()) { refuse("host credential expired"); return; }
+          if (!hostKeys.accept(hostId, proof.publicKey)) { refuse("installation key mismatch"); return; }
+          webSocket.send(JSON.stringify({ kind: "host_ready" }));
+          attach();
+        } catch {
+          refuse("invalid installation proof");
+        }
+      });
+      webSocket.send(JSON.stringify({ kind: "host_challenge", nonce }));
+    });
   }
 
   /**
@@ -1154,6 +1206,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       endHostStreams(prior);
       if (prior.credentialDeadline !== undefined) clearTimeout(prior.credentialDeadline);
       if (prior.revocationDeadline !== undefined) clearTimeout(prior.revocationDeadline);
+      logger.info({ event: "gateway.host.replaced", hostId }, "gateway host connection replaced");
       prior.socket.close(1012, "host connection replaced");
     }
     const credentialDeadline =
@@ -1538,6 +1591,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     server,
     async close() {
       closing = true;
+      for (const socket of proving) socket.terminate();
+      if (options.hostKeys === undefined) hostKeys.close();
       clearInterval(heartbeat);
       for (const exchange of pending.values()) finishExchange(exchange, 503, "gateway_closed");
       for (const stream of Array.from(streams.values())) endStream(stream, 1001, "gateway");

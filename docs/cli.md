@@ -2212,6 +2212,16 @@ invited email and one-time code; the rotating account credential goes to
 Keychain and the wizard restarts Clankie automatically. `disable` signs this Mac
 out and removes its installation binding.
 
+Account gateway connections also prove an Ed25519 installation key kept in the
+credential broker. The gateway pins the public key on the first proven connect;
+only that key can reconnect or replace the socket. A different key is refused
+without closing the live connection. Old Macs without proof work only until
+that host id has a recorded key; subsequent unproven connects are refused.
+Keep the broker key and the gateway's persistent
+`CLANKIE_GATEWAY_HOST_KEYS_DATABASE` across upgrades. Replacement is visible
+through the existing socket-close/doorway state path; gateway logs record
+refusals and replacements. See the [gateway reference](../apps/gateway/README.md).
+
 After sleep or an offline startup, the account connector backs off until the
 account endpoint responds to a harmless reachability probe. Lost refresh replies
 get up to three quick retries with the same token inside the rotation grace
