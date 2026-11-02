@@ -38,7 +38,7 @@ const AGENT_LABEL = "clankie.agent";
 const NAME_LABEL = "clankie.name";
 
 /** The harnesses a desktop-app terminal can start so far, by the binary its owner runs. */
-const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude" };
+const HARNESS_BINARIES: Readonly<Record<string, string>> = { claude: "claude", codex: "codex" };
 
 /**
  * A new hire's terminal runs this until Clankie hands it the harness command. The core
@@ -152,6 +152,18 @@ async function writePrivately(path: string, text: string): Promise<void> {
   }
 }
 
+/**
+ * What a hire's native controller reports about the harness it drives in one of
+ * Clankie's terminals, the way it reports a Herdr pane's agent (`pane report-agent`).
+ * Codex learns its thread only once its view is running, so its session arrives here
+ * rather than in the launch arguments, and its turns come from its app-server.
+ */
+export interface DesktopAgentReport {
+  readonly agent: string;
+  readonly state?: string;
+  readonly session?: string;
+}
+
 export interface HerdrCoreRunnerOptions {
   readonly seats: HerdrCoreSeats;
   /**
@@ -175,14 +187,17 @@ export interface HerdrCoreRunnerOptions {
 }
 
 /** A seat runner for the desktop app's core: it starts, reads, waits on and closes Clankie's hires. */
-export function createHerdrCoreRunner(
-  options: HerdrCoreRunnerOptions,
-): HerdrWatchRunner &
-  Required<Pick<HerdrWatchRunner, "list" | "readPane" | "closePane" | "createTab" | "startAgent">> {
+export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWatchRunner &
+  Required<Pick<HerdrWatchRunner, "list" | "readPane" | "closePane" | "createTab" | "startAgent">> & {
+    /** Records a controller's report on a harness Clankie started here (DesktopAgentReport). */
+    reportAgent(address: string, report: DesktopAgentReport): Promise<void>;
+  } {
   const { seats } = options;
   const pollMs = options.pollMs ?? POLL_MS;
   /** Terminals waiting at the launcher, by address, with the file their command goes in. */
   const pending = new Map<string, string>();
+  /** The turn a hire's native controller last reported, by address, for a harness with no hooks here. */
+  const reported = new Map<string, string>();
   /**
    * Names a new hire's space and tab once the window places it (on its next listing). One
    * pass at a time, in the background: a hire never waits on the window, and no window
@@ -216,6 +231,8 @@ export function createHerdrCoreRunner(
     if (terminal.state !== "live") return "offline";
     if (terminal.status !== undefined && STATUSES.has(terminal.status)) return terminal.status;
     if (terminal.labels[AGENT_LABEL] === undefined) return "unknown";
+    const controlled = reported.get(terminal.address);
+    if (controlled !== undefined) return controlled;
     return (session?.kind === "id" ? options.turn?.(session.value) : undefined) ?? "idle";
   };
   const snapshot = (terminal: HerdrCoreTerminal): HerdrAgentSnapshot => {
@@ -321,6 +338,7 @@ export function createHerdrCoreRunner(
     closePane: async (address, guard) => {
       await guard?.();
       pending.delete(address);
+      reported.delete(address);
       if ((await own(address)) === undefined) return;
       await seats.kill(address);
       if (options.seatDirectory !== undefined)
@@ -405,7 +423,10 @@ export function createHerdrCoreRunner(
       )
         await new Promise((resolve) => setTimeout(resolve, 25));
       // The session Clankie named or resumes stays on the terminal, since the core can't detect it.
-      const named = args.findIndex((arg) => arg === "--session-id" || arg === "--resume");
+      // Only Claude takes its session on the command line; Codex reports its thread once its
+      // view creates or restores it (reportAgent).
+      const named =
+        kind === "claude" ? args.findIndex((arg) => arg === "--session-id" || arg === "--resume") : -1;
       const session = named < 0 ? undefined : args[named + 1];
       await seats.label(paneId, {
         [NAME_LABEL]: name,
@@ -420,6 +441,81 @@ export function createHerdrCoreRunner(
           JSON.stringify({ pid: terminal.pid, agent: kind, session } satisfies DesktopSeatRecord),
         );
       }
+    },
+    reportAgent: async (address, report) => {
+      const terminal = await own(address);
+      if (terminal?.state !== "live") throw new Error(`Desktop-app terminal ${address} has ended`);
+      // Only the harness Clankie started here, once it is running in the terminal's place.
+      if (pending.has(address) || terminal.labels[AGENT_LABEL] !== report.agent)
+        throw new Error(`Desktop-app terminal ${address} is not running ${report.agent}`);
+      if (report.session !== undefined) {
+        const labeled = terminal.labels[SESSION_LABEL];
+        if (labeled !== undefined && labeled !== report.session)
+          throw new Error(`Desktop-app terminal ${address} already holds another session`);
+        if (labeled === undefined) await seats.label(address, { [SESSION_LABEL]: report.session });
+        // The record a seat's proof trusts, as a launch with a named session writes it.
+        if (options.seatDirectory !== undefined && terminal.pid !== undefined) {
+          const path = recordPath(options.seatDirectory, address);
+          const recorded = await readDesktopSeat(options.seatDirectory, address);
+          if (
+            recorded !== undefined &&
+            (recorded.session !== report.session || recorded.pid !== terminal.pid)
+          )
+            throw new Error(`Desktop-app terminal ${address} already records another seat`);
+          if (recorded === undefined) {
+            await mkdir(options.seatDirectory, { recursive: true, mode: 0o700 });
+            await writePrivately(
+              path,
+              JSON.stringify({
+                pid: terminal.pid,
+                agent: report.agent,
+                session: report.session,
+              } satisfies DesktopSeatRecord),
+            );
+          }
+        }
+      }
+      if (report.state !== undefined && STATUSES.has(report.state)) reported.set(address, report.state);
+    },
+  };
+}
+
+/**
+ * How a Codex seat's view in one of these terminals reaches the core runner (ADR 0341), in
+ * the shape the Codex adapter takes: no Herdr CLI answers for a `herdr-core/` pane, so the
+ * view's agent and thread are reported to the runner, and its end is read from the runner's
+ * own view of the terminal.
+ */
+export function desktopCodexViews(
+  runner: Pick<ReturnType<typeof createHerdrCoreRunner>, "reportAgent" | "resolveTerminal">,
+  pollMs = 3_000,
+) {
+  const address = (paneId: string) =>
+    paneId.startsWith(`${HERDR_CORE_FLEET}/`) ? paneId.slice(HERDR_CORE_FLEET.length + 1) : undefined;
+  return {
+    owns: (paneId: string) => address(paneId) !== undefined,
+    report: (paneId: string, report: { agent: "codex"; state: string; session: string }) =>
+      runner.reportAgent(address(paneId)!, report),
+    gone: (paneId: string, gone: () => void) => {
+      const terminal = address(paneId)!;
+      let ended = false;
+      const poll = setInterval(() => {
+        void runner
+          .resolveTerminal(terminal)
+          .then((agent) => {
+            if (ended || (agent !== undefined && agent.status !== "offline")) return;
+            ended = true;
+            clearInterval(poll);
+            gone();
+          })
+          // allow-swallowed-rejection -- an unanswered read is not an ended terminal; the next poll asks again
+          .catch(() => undefined);
+      }, pollMs);
+      poll.unref();
+      return () => {
+        ended = true;
+        clearInterval(poll);
+      };
     },
   };
 }

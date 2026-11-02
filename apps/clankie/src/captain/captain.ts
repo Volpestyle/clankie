@@ -198,7 +198,12 @@ import {
 import { FleetChangeClock, watchHerdrFleetChanges } from "./herdr-fleet-changes.ts";
 import { FleetCensusBreaker } from "./fleet-census-breaker.ts";
 import { createRemoteHerdrRunner, routeHerdrFleets } from "./herdr-fleet-runner.ts";
-import { HERDR_CORE_FLEET, createHerdrCoreRunner, herdrCoreCensusFleet } from "./herdr-core-runner.ts";
+import {
+  HERDR_CORE_FLEET,
+  createHerdrCoreRunner,
+  desktopCodexViews as desktopCodexViewsOf,
+  herdrCoreCensusFleet,
+} from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
 import { createHerdrWindow } from "./herdr-window.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
@@ -518,20 +523,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   });
   /**
-   * This machine's new Claude hires go to the desktop app's terminals when the owner
-   * pins them there (ADR 0319). Other harnesses, and prepared launches, stay in Herdr
-   * panes until their own desktop launch lands.
+   * This machine's new Claude and Codex hires go to the desktop app's terminals when the
+   * owner pins them there (ADR 0319, ADR 0341). Other harnesses, and prepared launches,
+   * stay in Herdr panes until their own desktop launch lands.
    */
   const placeLocalHire = async (request: {
     readonly harness?: string;
     readonly command?: readonly string[];
   }) => {
-    if (request.harness !== "claude" || request.command !== undefined) return undefined;
+    if (!["claude", "codex"].includes(request.harness ?? "") || request.command !== undefined)
+      return undefined;
     if ((await settingsStore.load()).fleet.seatHost !== "desktop") return undefined;
     if (!(await herdrCoreSeats.available()))
       throw new Error("Hires are set to start in the Herdr desktop app, and it isn't running on this Mac.");
     return HERDR_CORE_FLEET;
   };
+  /** A Codex view in one of the desktop app's terminals reports to, and is watched by, the core runner. */
+  const desktopCodexViews = desktopCodexViewsOf(herdrCoreRunner);
   const herdrRunner = routeHerdrFleets(
     options.nativeHerdrRunner ??
       createHerdrWatchRunner(
@@ -996,6 +1004,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ...(deps.herdrAvailable?.() === false || fleetFeedSocket === undefined
           ? {}
           : { paneGone: watchPaneGone }),
+        desktop: desktopCodexViews,
         catalogObserved: (ref, report) => observeCodexToolCatalog(ref, report),
         ...(options.localCodexProcess === undefined
           ? {}
@@ -1004,7 +1013,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               viewEnv: async (view) => ({
                 HERDR_ENV: "1",
                 HERDR_PANE_ID: view.paneId,
-                HERDR_SOCKET_PATH: options.localCodexSocket?.() ?? "",
+                HERDR_SOCKET_PATH: options.localCodexSocket?.(view.paneId) ?? "",
               }),
             }),
       }),

@@ -54,6 +54,15 @@ const processStart = async (
   return birth ? nativeProcessReceipt(birth, previous) : undefined;
 };
 
+/**
+ * One of Clankie's terminals in the Herdr desktop app (ADR 0319). A Codex hire there
+ * (ADR 0341) is registered in memory only: its records are never written to the launch
+ * file the Herdr-pane recovery, census and retirement paths read, so none of them acts on
+ * a terminal they cannot see. After a service restart such a seat is no longer admitted
+ * through its server; a rehire binds a new one.
+ */
+const DESKTOP_TERMINAL = /^herdr-core\/t[0-9a-z]+$/u;
+
 export type LocalCodexRegistration = (() => void) & {
   bindSession?(threadId: string, endpoint?: string): void | Promise<void>;
 };
@@ -87,8 +96,16 @@ export class LocalCodexSeats {
     signal?: AbortSignal,
   ) => Promise<string | undefined>;
   private readonly durable: DurableSeats | undefined;
-  constructor(binding: () => HerdrBinding | undefined, observeStart = processStart, durable?: DurableSeats) {
+  /** The desktop app core's binding, for a seat in one of its terminals; unset, none registers. */
+  private readonly coreBinding: (() => HerdrBinding | undefined) | undefined;
+  constructor(
+    binding: () => HerdrBinding | undefined,
+    observeStart = processStart,
+    durable?: DurableSeats,
+    coreBinding?: () => HerdrBinding | undefined,
+  ) {
     this.binding = binding;
+    this.coreBinding = coreBinding;
     this.observeStart = observeStart;
     this.durable = durable;
     if (durable) {
@@ -113,10 +130,16 @@ export class LocalCodexSeats {
     }
   }
 
+  /** The binding a seat in this pane must hold: the core's for a desktop-app terminal, else Herdr's. */
+  private bindingFor(pane: string): HerdrBinding | undefined {
+    if (DESKTOP_TERMINAL.test(pane)) return this.coreBinding?.();
+    return pane.includes("/") ? undefined : this.binding();
+  }
+
   private save(): void {
     if (!this.durable) return;
     const seats = [...this.seats].flatMap(([pid, seat]) =>
-      seat.capturedStart && seat.nativeOccupantId
+      seat.capturedStart && seat.nativeOccupantId && !DESKTOP_TERMINAL.test(seat.pane)
         ? [
             {
               pid,
@@ -158,7 +181,10 @@ export class LocalCodexSeats {
   /** Only completed controller-created registrations are candidates; records confer no mutation authority. */
   catalogCandidates(paneId?: string): LocalCodexRecord[] {
     return [...this.seats].flatMap(([pid, seat]) =>
-      seat.capturedStart && seat.nativeOccupantId && (paneId === undefined || paneId === seat.pane)
+      seat.capturedStart &&
+      seat.nativeOccupantId &&
+      !DESKTOP_TERMINAL.test(seat.pane) &&
+      (paneId === undefined || paneId === seat.pane)
         ? [
             {
               pid,
@@ -256,8 +282,8 @@ export class LocalCodexSeats {
   }
 
   register(pid: number, pane: string): LocalCodexRegistration {
-    const binding = this.binding();
-    if (!binding || !Number.isSafeInteger(pid) || pid <= 1 || pane.includes("/")) return () => {};
+    const binding = this.bindingFor(pane);
+    if (!binding || !Number.isSafeInteger(pid) || pid <= 1) return () => {};
     // Capture the spawned process lifetime now; never initialize it from an incoming request.
     const entry: Entry = { pane, binding, start: this.observeStart(pid).catch(() => undefined) };
     this.seats.set(pid, entry);
@@ -319,7 +345,7 @@ export class LocalCodexSeats {
         if (this.seats.get(pid) !== entry) return;
         if (!start) throw new Error("Private Codex process lifetime is unavailable");
         entry.capturedStart = start;
-        if (endpoint !== undefined && entry.parent === undefined) {
+        if (endpoint !== undefined && entry.parent === undefined && !DESKTOP_TERMINAL.test(pane)) {
           const parent = await this.captureParent(entry);
           if (this.seats.get(pid) !== entry) return;
           if (parent !== undefined) entry.parent = parent;
@@ -428,7 +454,7 @@ export class LocalCodexSeats {
         if (occupant !== seat.nativeOccupantId) continue;
       }
       signal?.throwIfAborted();
-      const current = this.binding();
+      const current = this.bindingFor(pane);
       if (
         this.seats.get(pid) === seat &&
         (nativeOccupantId === undefined || seat.nativeOccupantId === nativeOccupantId) &&

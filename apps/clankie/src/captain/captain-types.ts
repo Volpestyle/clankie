@@ -129,7 +129,8 @@ export interface CaptainOptions {
   /** First background reprobe of a linked fleet whose census failed; doubles to 30s. Defaults to 5s. */
   readonly fleetProbeMinMs?: number;
   readonly localCodexProcess?: (pid: number, pane: string) => LocalCodexRegistration;
-  readonly localCodexSocket?: () => string | undefined;
+  /** The socket a private Codex server's worker bridge names for its view's pane: Herdr's, or the desktop app core's. */
+  readonly localCodexSocket?: (paneId: string) => string | undefined;
   readonly remoteCodexProcess?: (launch: RemoteCodexLaunch) => RemoteCodexRegistration;
   /** The persona's look references, which its extension supplies (ADR 0328). */
   readonly personaLook?: PersonaLook;
