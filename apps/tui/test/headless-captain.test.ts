@@ -291,7 +291,7 @@ describe("headless clankie commands", () => {
       "--set",
       "--models",
       "/v1",
-      "docs/cli.md",
+      "clankie <command> --help",
       "/auth",
     ]) {
       expect(help).toContain(token);
