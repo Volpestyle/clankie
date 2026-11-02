@@ -85,6 +85,11 @@
       "pattern": "free official Clankie bot|official Clankie bot \\(free",
       "adr": "0326",
       "now": "Discord runs on the owner's own bot or lab user session; the shared official bot setting is gone."
+    },
+    {
+      "pattern": "keep (its|the|your) (pull request'?s? )?branch current with `?main",
+      "adr": "0345",
+      "now": "A pull request rebases onto origin/main once, right before it merges, and pushes with --force-with-lease to its own branch; it never merges main in repeatedly."
     }
   ]
 }

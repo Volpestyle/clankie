@@ -108,8 +108,15 @@ This repository is public. Both neighbors are private and consume
   change gets its full checks in one place, never twice: CI for a pull request,
   `pnpm check:landing` for a direct landing. While iterating, run only the tests
   for what you changed.
-- On a pull request, keep its branch current with `main` and resolve conflicts
-  yourself. A ready pull request in this repo, `clankie-app` or `clankie-ops`
+- On a pull request, leave the branch on its base while you work, and rebase it
+  onto a freshly fetched `origin/main` once, right before it merges; never merge
+  `main` into it. Push the rebase with `git push --force-with-lease` to your own
+  branch only. Resolve conflicts in your own files; if the rebase conflicts in
+  files you didn't touch, abort it and flag it to your lead. Pull requests don't
+  go through `clankie integrate` or GitHub's merge queue, and leads don't put
+  two workers on the same files at once
+  ([ADR 0345](docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+  A ready pull request in this repo, `clankie-app` or `clankie-ops`
   merges once its checks are green, with a plain merge; nothing else gates it
   ([ADR 0332](docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
   A local review (Codex on the owner's Mac through the `codex-review` skill,
