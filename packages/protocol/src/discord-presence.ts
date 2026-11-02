@@ -466,6 +466,8 @@ export type DiscordPresenceChannelIdentity = z.infer<typeof DiscordPresenceChann
 
 export const DISCORD_PRESENCE_TRIGGER_BODY_MAX = 16_384;
 export const DISCORD_PRESENCE_CONTEXT_MESSAGES_MAX = 50;
+/** How much of a replied-to message rides with a reply (#381). */
+export const DISCORD_PRESENCE_REPLY_EXCERPT_MAX = 500;
 
 /**
  * Images he can actually be shown. Deliberately the intersection of what
@@ -614,6 +616,20 @@ export const DiscordPresenceChannelTurnRequestSchema = z
          * stay silent on any turn — but he should know whether he was asked.
          */
         unprompted: z.boolean().optional(),
+        /**
+         * The message this one replies to, as the gateway read it (#381): which
+         * message, who wrote it, whether it was his own, and the start of its
+         * text. The excerpt is untrusted content like the body.
+         */
+        replyTo: z
+          .object({
+            messageId: z.string().min(1),
+            authorId: z.string().min(1),
+            fromYou: z.boolean(),
+            excerpt: z.string().max(DISCORD_PRESENCE_REPLY_EXCERPT_MAX),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     contextMessages: z

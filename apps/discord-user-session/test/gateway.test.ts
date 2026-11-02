@@ -67,6 +67,59 @@ describe("DiscordUserGateway", () => {
     gateway.close();
   });
 
+  it("carries the message a reply answers, and nothing for a forward (#381)", () => {
+    const socket = new FakeSocket();
+    const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });
+    const messages: DiscordGatewayMessage[] = [];
+    gateway.on("messageCreate", (message) => messages.push(message));
+    gateway.open();
+    socket.deliver({ op: 10, d: { heartbeat_interval: 45_000 } });
+    socket.deliver({ op: 0, s: 1, t: "READY", d: { session_id: "session-1", user: { id: "self-1" } } });
+    const original = {
+      id: "older-1",
+      channel_id: "channel-1",
+      content: `${"x".repeat(600)}`,
+      author: { id: "self-1" },
+    };
+    socket.deliver({
+      op: 0,
+      s: 2,
+      t: "MESSAGE_CREATE",
+      d: {
+        id: "reply-1",
+        type: 19,
+        channel_id: "channel-1",
+        content: "yes, that one",
+        author: { id: "human-1" },
+        message_reference: { message_id: "older-1", channel_id: "channel-1" },
+        referenced_message: original,
+      },
+    });
+    // A forward (type 0 with a reference) is not a reply.
+    socket.deliver({
+      op: 0,
+      s: 3,
+      t: "MESSAGE_CREATE",
+      d: {
+        id: "forward-1",
+        type: 0,
+        channel_id: "channel-1",
+        content: "",
+        author: { id: "human-1" },
+        message_reference: { type: 1, message_id: "older-1", channel_id: "channel-1" },
+        referenced_message: original,
+      },
+    });
+    expect(messages[0]?.replyTo).toEqual({
+      messageId: "older-1",
+      authorId: "self-1",
+      fromYou: true,
+      excerpt: "x".repeat(500),
+    });
+    expect(messages[1]?.replyTo).toBeUndefined();
+    gateway.close();
+  });
+
   it("surfaces ready identity, messages, and voice server updates", () => {
     const socket = new FakeSocket();
     const gateway = new DiscordUserGateway({ token: "user-token", connect: () => socket.asWebSocket() });

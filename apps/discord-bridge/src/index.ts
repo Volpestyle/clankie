@@ -24,6 +24,7 @@ import {
   DiscordTextInbox,
   discordSnowflakeAt,
   scanDiscordTextChannel,
+  discordReplyTarget,
   mentionsDiscordBot,
 } from "./text-inbox.ts";
 import { createServer } from "node:http";
@@ -800,6 +801,7 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
     }
     if (!textIngress) return;
     const selection = selectDiscordMessageImages(message);
+    const replyTo = await discordReplyTarget(message, client.user?.id);
     const inbound = {
       id: message.id,
       ...(message.guildId === null ? {} : { guildId: message.guildId }),
@@ -819,6 +821,7 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
             },
       attachments: selection.attachments,
       attachmentsOmitted: selection.omitted,
+      ...(replyTo === undefined ? {} : { replyTo }),
     };
     const routedRoomText = routeDiscordRoomText(
       { guildIds: ingressGuildIds, channelIds: ingressChannelIds },
