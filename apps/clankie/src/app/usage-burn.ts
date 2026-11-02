@@ -387,16 +387,20 @@ export async function projectUsageBurn(input: {
 }): Promise<{ burn: FleetCapacityBurn[]; notices: string[] }> {
   const notices: string[] = [];
   const seatByOccupant = new Map(input.seats.map((seat) => [seat.occupantId, seat]));
-  const rows = new Map<string, { account: BurnAccountSource; machines: string[] }>();
+  const rows = new Map<
+    string,
+    { account: BurnAccountSource; machines: string[]; readings: BurnAccountSource[] }
+  >();
   for (const machine of input.machines) {
     for (const account of machine.accounts) {
       if (account.harness !== "claude" && account.harness !== "codex") continue;
       if (account.usage === undefined || finiteTime(account.usage.observedAt) === undefined) continue;
       const key = `${account.harness}\0${account.label}`;
       const row = rows.get(key);
-      if (row === undefined) rows.set(key, { account, machines: [machine.machine] });
+      if (row === undefined) rows.set(key, { account, machines: [machine.machine], readings: [account] });
       else {
         row.machines.push(machine.machine);
+        row.readings.push(account);
         // The freshest reading of the same account speaks for it.
         if (finiteTime(account.usage.observedAt)! > finiteTime(row.account.usage!.observedAt)!)
           row.account = account;
@@ -404,11 +408,14 @@ export async function projectUsageBurn(input: {
     }
   }
   const burn: FleetCapacityBurn[] = [];
-  for (const { account, machines } of rows.values()) {
+  for (const { account, machines, readings } of rows.values()) {
     const usage = account.usage!;
     const observedAt = finiteTime(usage.observedAt)!;
     const windows: FleetCapacityBurnWindow[] = [];
-    for (const window of usage.windows) {
+    for (const read of usage.windows) {
+      // A machine whose usage read leaves out the reset (PC CLIs often do)
+      // borrows it from another machine's reading of the same account window.
+      const window = withKnownReset(read, readings, input.now);
       const resetsAt = finiteTime(window.resetsAt);
       const live = resetsAt !== undefined && resetsAt > input.now ? resetsAt : undefined;
       const hoursToReset = live === undefined ? undefined : (live - input.now) / HOUR;
@@ -512,4 +519,28 @@ export function claudeAccountHomes(accounts: readonly BurnAccountSource[]): Map<
     if (list.length) homes.set(account.label, [...new Set([...(homes.get(account.label) ?? []), ...list])]);
   }
   return homes;
+}
+
+function withKnownReset(
+  window: BurnWindowSource,
+  readings: readonly BurnAccountSource[],
+  now: number,
+): BurnWindowSource {
+  const known = (candidate: BurnWindowSource): boolean => {
+    const at = finiteTime(candidate.resetsAt);
+    return at !== undefined && at > now;
+  };
+  if (known(window)) return window;
+  for (const reading of readings) {
+    const other = reading.usage?.windows.find((candidate) => candidate.id === window.id && known(candidate));
+    if (other === undefined) continue;
+    return {
+      ...window,
+      resetsAt: other.resetsAt,
+      ...(window.windowMinutes === undefined && other.windowMinutes !== undefined
+        ? { windowMinutes: other.windowMinutes }
+        : {}),
+    };
+  }
+  return window;
 }
