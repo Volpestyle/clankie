@@ -34,7 +34,9 @@ close code 1008, `installation key mismatch`, without disturbing the live socket
 Refusals and replacements produce structured gateway log events. Replacement
 also reaches the Mac through its existing socket-close and doorway-state path.
 
-During rollout, old Macs without proof can connect only while their host id has
+Roll out the proof-capable gateway before updated Macs; updated Macs refuse to
+fall back to an unproven connection. During rollout, old Macs without proof can
+connect only while their host id has
 no recorded key. After the first proven connection, unproven connections close
 with 1008, `installation proof required`. Keep that Mac updated; removing a
 broker key does not reset the gateway binding. The legacy one-parameter
