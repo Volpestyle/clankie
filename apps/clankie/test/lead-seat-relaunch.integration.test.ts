@@ -855,7 +855,7 @@ it("hires into the routed project when the lead's remembered pane is gone, and r
       };
     },
     projectHirePaneGone: createNativePaneGone({
-      binding: async () => ({ socketPath }),
+      binding: async () => ({ runtime: "external" as const, session: "fixture", socketPath }),
       coreSeats: () => {
         throw new Error("No desktop app in this fixture");
       },
