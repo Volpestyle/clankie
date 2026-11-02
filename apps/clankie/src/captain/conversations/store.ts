@@ -619,7 +619,10 @@ export class ConversationStore {
           meta.roomHandoff = RoomHandoffMetadataSchema.parse(meta.roomHandoff);
           if (
             ["pending", "running", "waiting_user"].includes(meta.roomHandoff.state) &&
-            !(meta.roomHandoff.state === "running" && this.resumesRoomHandoff(meta.roomHandoff.deliveryId))
+            !(
+              (meta.roomHandoff.state === "running" || meta.roomHandoff.state === "pending") &&
+              this.resumesRoomHandoff(meta.roomHandoff.deliveryId)
+            )
           ) {
             meta.roomHandoff = {
               ...meta.roomHandoff,

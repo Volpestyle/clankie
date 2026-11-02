@@ -4350,6 +4350,49 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       // Participant rooms keep their native character path, as before.
       const durable =
         durablePiRoom.accepts(request) && participantPolicy(await readAuthoritySettings()) === undefined;
+      // A follow-up that steered a journaled turn before a restart is answered by
+      // that turn's journal, never run again on its own unless the turn never read it.
+      const steered =
+        durable && prior?.result === undefined ? durablePiRoom.parentOf(request.deliveryId) : undefined;
+      if (steered !== undefined) {
+        await resolveGrant();
+        const childId = roomHandoffConversationId(parentId, request.deliveryId);
+        // The bridge redelivers in order, so its parent normally resumed first. If
+        // not, resume it from its own saved request: every room guard and its
+        // journal's grant are checked again, and the coordinator joins it with the
+        // parent's own redelivery.
+        const parentResult =
+          steered.result ??
+          (await (durablePiRoom.runningFor(steered.parent) ?? this.submitDiscordTurn(steered.request)));
+        const consumed = durablePiRoom.parentOf(request.deliveryId)?.consumed === true;
+        if (!consumed) {
+          durablePiRoom.settleJoined(request.deliveryId);
+          conversations.updateRoomHandoff(childId, { state: "pending", doing: undefined });
+        } else {
+          const completed = parentResult.state !== "failed";
+          const result: CaptainChannelTurnResult = completed
+            ? {
+                state: "absorbed",
+                captainSessionId: parentResult.captainSessionId ?? roomTurns.sessionKey(request),
+                turnId: childId,
+                replyDeliveryId: steered.parent,
+              }
+            : { state: "failed", code: "captain_session_failed", turnId: childId };
+          conversations.updateRoomHandoff(
+            childId,
+            {
+              state: completed ? "completed" : "failed",
+              doing: undefined,
+              result: completed
+                ? `Answered with the resumed request ${roomHandoffConversationId(parentId, steered.parent)}.`
+                : "The request it joined failed.",
+            },
+            result,
+          );
+          durablePiRoom.settleJoined(request.deliveryId, result);
+          return result;
+        }
+      }
       // Even a saved private reply must pass today's audience/identity checks.
       if (prior?.result !== undefined) {
         await resolveGrant();
@@ -4365,7 +4408,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const joinKey = `${parentId}\n${request.deliveryId}`;
       let joining = roomBurstJoins.get(joinKey);
       const liveHandoff =
-        lane === "discord_presence" && !durable && prior === undefined && joining === undefined
+        lane === "discord_presence" && prior === undefined && joining === undefined
           ? roomBursts.latest(parentId, request.trigger.actorId, burstIdentity)
           : undefined;
       if (joining !== undefined || liveHandoff !== undefined) {
@@ -4397,18 +4440,35 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             // Tools now act on the newest message, as an absorbed 0118 turn did.
             run.capture.messageId = heard.messageId;
             run.capture.requestText = heard.heard;
+            const images = heard.images.map(toImageContent);
+            // A durable turn hears the follow-up from its journal after a restart:
+            // link, then journal, before Pi sees it.
+            if (run.journal !== undefined) {
+              durablePiRoom.link(request.deliveryId, liveHandoff.deliveryId);
+              run.journal.steer(request.deliveryId, heard.prompt, images);
+            }
             // steer() only queues; unlike prompt() it never starts a run of its own.
-            await run.session.steer(heard.prompt, heard.images.map(toImageContent));
+            try {
+              await run.session.steer(heard.prompt, images);
+            } catch (error) {
+              run.journal?.withdraw(request.deliveryId);
+              durablePiRoom.settleJoined(request.deliveryId);
+              throw error;
+            }
             conversations.updateRoomHandoff(child.conversationId, {
               state: "running",
               doing: `Joined the sender's running request ${liveHandoff.childId}`,
             });
             const outcome = await liveHandoff.settled;
+            // A shutdown leaves it joined; its redelivery reads the resumed turn's journal.
+            if (run.journal !== undefined && shutdown.signal.aborted) throw new PiTurnPausedError();
             if (
               outcome.unconsumed.includes(heard.prompt) ||
               run.session.getSteeringMessages().includes(heard.prompt)
             ) {
               // The run ended before reading it: this message starts its own handoff.
+              run.journal?.withdraw(request.deliveryId);
+              durablePiRoom.settleJoined(request.deliveryId);
               conversations.updateRoomHandoff(child.conversationId, { state: "pending", doing: undefined });
               return undefined;
             }
@@ -4431,8 +4491,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               },
               result,
             );
+            if (run.journal !== undefined) durablePiRoom.settleJoined(request.deliveryId, result);
             return result;
           })().catch((error: unknown) => {
+            if (error instanceof PiTurnPausedError) throw error;
             // Joining is an optimization: any failure here leaves the message its own handoff.
             console.error("Room handoff burst join failed", error);
             return undefined;
@@ -4467,8 +4529,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               fingerprint,
               true,
             );
-            // A steered follow-up would escape the journal; the durable room queues it instead.
-            if (lane === "discord_presence" && !durable)
+            if (lane === "discord_presence")
               burst = roomBursts.open(parentId, {
                 actorId: request.trigger.actorId,
                 identity: burstIdentity,

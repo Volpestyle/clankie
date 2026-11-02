@@ -38,7 +38,8 @@ Each delivery has a private journal beneath `captain/durable-pi-room/`, beside
 its native Pi session. Admission records the session path and leaf. Recovery
 opens the same native tree and branches at that saved leaf; the interrupted
 branch remains evidence. Deliveries on the selected room are serialized, rather
-than steered into an unjournaled concurrent turn. The prompt is pinned; completed
+than steered into an unjournaled concurrent turn (since amended: a steer is now
+journaled; see below). The prompt is pinned; completed
 model responses and tool results are returned from the journal. An interrupted
 model request uses its saved context and fresh provider credentials. Credentials
 are never saved in the journal.
@@ -132,6 +133,12 @@ checks:
 - the restart keeps the room handoff open, and nothing resumes until the body redelivers;
 - a graceful stop (SIGTERM) pauses the handoff rather than failing it, and its journaled shell outcome is never rerun.
 
+[`durable-pi-room-steer.integration.test.ts`](../../apps/clankie/test/durable-pi-room-steer.integration.test.ts)
+kills the turn with a follow-up steered into it. One case kills it before Pi read the
+follow-up and the other after. In both, the resumed turn's one new model request
+carries the follow-up exactly once, after the same tool results, and the redelivered
+follow-up settles `absorbed` with no model call of its own.
+
 [`durable-pi-room-delivery.integration.test.ts`](../../apps/discord-bridge/test/durable-pi-room-delivery.integration.test.ts)
 carries the same kill through the bridge. The bridge's real SQLite inbox, text
 ingress and presence session submit an owner DM. The service is killed mid-shell and
@@ -151,12 +158,9 @@ the room's guards, and native routing. An owner audience with a live Claude or C
 head therefore answers in a native child, and the journal does not apply there. The
 journal now wraps only the handoff's Pi dispatch, the fallback when no native head
 takes the turn. The earlier refusal of seat-routed and linked-main requests becomes
-their normal routes. Three differences from other rooms remain, each stated where
+their normal routes. Two differences from other rooms remain, each stated where
 it lives in `captain.ts`:
 
-- The room opens no steering burst (ADR 0118), because a steered follow-up would
-  escape the turn's journal. A follow-up waits as its own handoff until steering is
-  journaled.
 - It uses no room loop (ADR 0291), because a loop keeps one warm session across
   turns and the journal holds one turn.
 - A restart leaves its handoff `running` while that delivery's journal is unsettled,
@@ -168,6 +172,25 @@ able to reply, and at boot no body has connected. The turn resumes when its body
 redelivers the same request from the bridge's durable inbox, which the bridge does
 on its own. The resume still re-evaluates current grants, and a changed grant fails
 it closed against the journal.
+
+### Steering is journaled (2026-11-02)
+
+The room steers like every other room (ADR 0118): the same sender's follow-up under
+the same grant joins the running turn. Before Pi sees it, the follow-up is recorded
+twice, durably. Its own directory gets a link to the turn it joined, and the turn's
+journal gets the steer, with the last journaled step it arrived after. A resumed turn
+queues each steer again once that step is served. Pi delivers steering after the
+current assistant turn's tool calls and before the next model request, so the
+resumed turn hears the follow-up at the same point, once.
+
+A follow-up's own answer is its parent's. When the bridge redelivers it after a
+restart, it reads the parent's journal. If a journaled model request carried the
+follow-up, it settles `absorbed` with the parent's reply, or failed if the parent
+failed. If the parent ended without reading it, the follow-up becomes its own
+handoff, exactly as in a running room. A parent that has not resumed yet is resumed
+from its own saved request, with every guard and its journal's grant checked again.
+The store keeps a joined follow-up's handoff open across the restart, as it does for
+its parent.
 
 Before enabling more lanes:
 
@@ -181,8 +204,7 @@ Before enabling more lanes:
    unavailable providers. Keep the original request and uncertain intents until
    reconciled. Recovery happens on the body's redelivery; a failed recovery
    settles once and does not create an unbounded automatic retry loop.
-4. Journal steering, so the room's follow-ups join its running turn as in other
-   rooms. Then extend the same admission/step/outcome contract to linked-main service execution, owner DMs, voice handoffs, operator turns, hosted encrypted ingress,
+4. Extend the same admission/step/outcome contract to linked-main service execution, owner DMs, voice handoffs, operator turns, hosted encrypted ingress,
    watches, scheduled wakes and background service lanes. Persist queued inputs,
    preserve source/audience ceilings, and define explicit cancellation separately
    from a service pause. Native seats remain excluded.

@@ -728,7 +728,8 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
         const liveRun = normalized.liveRun;
         const stopLive = liveRun
           ? lane.session.subscribe((event) => {
-              if (event.type === "agent_start") liveRun.started(lane.session, lane.capture);
+              if (event.type === "agent_start")
+                liveRun.started(lane.session, lane.capture, normalized.journal);
             })
           : undefined;
         let completed = false;
