@@ -6,6 +6,7 @@ import {
   keepAwakeEnabled,
   parsePositiveInt,
   resolveDiscordActiveBody,
+  defaultSettingsPath,
   serviceInLoadout,
   SettingsStore,
 } from "@clankie/settings";
@@ -570,6 +571,9 @@ const TUNNEL: ManagedService = {
 /** Set to 1 by the launcher when keep-awake is on (the default on a self-hosted Mac); macOS only. */
 export const KEEP_AWAKE_ENV = "CLANKIE_KEEP_AWAKE";
 
+/** The names and values each env got from settings, so later projections can refresh them (#370). */
+const projectedEnvironment = new WeakMap<NodeJS.ProcessEnv, Map<string, string>>();
+
 /**
  * Every child fills its own env from settings. The launcher consumes only the
  * active-body switches, whether a bot app exists, and the activity tunnel, so
@@ -577,23 +581,44 @@ export const KEEP_AWAKE_ENV = "CLANKIE_KEEP_AWAKE";
  * Config commands read the store directly; projecting first would falsely
  * report stored values as env overrides. The console calls this again before
  * it restarts anything, since `/discord` may have set up the bot since launch.
+ *
+ * A name this function set itself follows settings on every call: changed,
+ * or removed when settings no longer give it. A value the owner exported in
+ * their own shell, or changed since, always wins (#370).
  */
 export async function applyLauncherEnvironment(env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  const stored = await new SettingsStore().load();
-  const configured = discordSettingsToEnvironment(stored.discord);
+  const stored = await new SettingsStore(defaultSettingsPath(env)).load();
+  const configured: Record<string, string | undefined> = {
+    ...discordSettingsToEnvironment(stored.discord),
+    // The owner's always-on choice (on by default for a self-hosted Mac) decides
+    // whether the launcher runs `caffeinate`.
+    [KEEP_AWAKE_ENV]: keepAwakeEnabled(stored) ? "1" : undefined,
+  };
+  let projected = projectedEnvironment.get(env);
+  if (projected === undefined) projectedEnvironment.set(env, (projected = new Map()));
   for (const name of [
     "DISCORD_ACTIVE_BODY",
     "DISCORD_APPLICATION_ID",
     "DISCORD_USER_SESSION_ENABLED",
     "CLANKIE_ACTIVITY_TUNNEL_NAME",
     "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
-  ] as const) {
+    KEEP_AWAKE_ENV,
+  ]) {
+    const current = env[name] ?? "";
+    const ours = projected.has(name) && projected.get(name) === current;
+    if (current.length > 0 && !ours) {
+      projected.delete(name);
+      continue;
+    }
     const value = configured[name];
-    if ((env[name]?.length ?? 0) === 0 && value !== undefined) env[name] = value;
+    if (value === undefined || value.length === 0) {
+      if (ours) delete env[name];
+      projected.delete(name);
+    } else {
+      env[name] = value;
+      projected.set(name, value);
+    }
   }
-  // The owner's always-on choice (on by default for a self-hosted Mac) decides
-  // whether the launcher runs `caffeinate`.
-  if ((env[KEEP_AWAKE_ENV]?.length ?? 0) === 0 && keepAwakeEnabled(stored)) env[KEEP_AWAKE_ENV] = "1";
 }
 
 /**

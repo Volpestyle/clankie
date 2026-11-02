@@ -18,7 +18,9 @@ import {
   type ServiceCommandOptions,
   type ServiceId,
 } from "../bin/service-supervisor.ts";
+import { SettingsStore } from "@clankie/settings";
 import {
+  applyLauncherEnvironment,
   clankieStopGraceMs,
   inspectServices,
   managedService,
@@ -1584,4 +1586,73 @@ it("snapshots processes before concurrent health probes start", async () => {
   });
   expect(scans).toBe(1);
   expect(services.map((service) => service.state)).toEqual(["healthy", "healthy"]);
+});
+
+describe("launcher environment (#370)", () => {
+  it("restarts the bridge with a changed Discord app ID, keeping what the owner exported", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-launcher-env-"));
+    tempDirs.push(root);
+    await mkdir(join(root, "clankie"), { recursive: true });
+    const settingsFile = join(root, "settings.json");
+    const settings = new SettingsStore(settingsFile);
+    const setApp = (applicationId: string | undefined) =>
+      settings.update((current) => {
+        const discord = { ...current.discord };
+        if (applicationId === undefined) delete discord.applicationId;
+        else discord.applicationId = applicationId;
+        return { ...current, discord };
+      });
+    // The console's own env: no Discord app exported by the owner.
+    const env: NodeJS.ProcessEnv = { XDG_STATE_HOME: root, CLANKIE_SETTINGS_FILE: settingsFile };
+    const spawned: NodeJS.ProcessEnv[] = [];
+    const spawnImpl = ((_command: string, _args: readonly string[], options: { env: NodeJS.ProcessEnv }) => {
+      spawned.push(options.env);
+      return runningChild(9_300 + spawned.length);
+    }) as unknown as typeof spawn;
+    // Down until this start spawns it, then up: so each start launches a fresh child.
+    const startBridge = (before = spawned.length) =>
+      startService(
+        {
+          ...managedService("discord-bridge"),
+          probe: async () =>
+            spawned.length > before
+              ? { state: "healthy", detail: "fixture" }
+              : { state: "unreachable", detail: "fixture" },
+        },
+        // Never the machine's own processes: a live bridge would be adopted, not spawned.
+        {
+          repoRoot: "/repo",
+          env,
+          spawnImpl,
+          processIsAliveImpl: () => true,
+          listProcessCommandsImpl: noProcesses,
+        },
+      );
+
+    await setApp("1100000000000000001");
+    await applyLauncherEnvironment(env);
+    await startBridge();
+    expect(spawned.at(-1)?.DISCORD_APPLICATION_ID).toBe("1100000000000000001");
+
+    // The owner sets up another bot app while the console runs; its next projection follows.
+    await setApp("1100000000000000002");
+    await applyLauncherEnvironment(env);
+    expect(env.DISCORD_APPLICATION_ID).toBe("1100000000000000002");
+    await rm(serviceStatePath("discord-bridge", env), { force: true });
+    await startBridge();
+    expect(spawned.at(-1)?.DISCORD_APPLICATION_ID).toBe("1100000000000000002");
+
+    // Removed from settings, the projected value goes too.
+    await setApp(undefined);
+    await applyLauncherEnvironment(env);
+    expect(env.DISCORD_APPLICATION_ID).toBeUndefined();
+
+    // A value the owner exported in their shell always wins, before and after a settings change.
+    const shell: NodeJS.ProcessEnv = { ...env, DISCORD_APPLICATION_ID: "1100000000000000009" };
+    await setApp("1100000000000000003");
+    await applyLauncherEnvironment(shell);
+    await setApp("1100000000000000004");
+    await applyLauncherEnvironment(shell);
+    expect(shell.DISCORD_APPLICATION_ID).toBe("1100000000000000009");
+  });
 });
