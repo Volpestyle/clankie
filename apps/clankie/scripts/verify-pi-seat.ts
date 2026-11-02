@@ -12,7 +12,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
-import { join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import { SettingsStore } from "@clankie/settings";
@@ -23,7 +23,6 @@ import { createPreparedNativeHost } from "../src/captain/prepared-native-host.ts
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { readHerdrSeatTranscript, type HerdrAgentSession } from "../src/captain/herdr-transcript.ts";
 import { supportedPiOnPath } from "../src/captain/pi-native-capability.ts";
-import { ownerPath } from "../src/integrate-environment.ts";
 import { createClankieApp } from "../src/app.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { LocalFleetLink } from "../src/local-fleet-link.ts";
@@ -410,4 +409,18 @@ try {
   await rm(root, { recursive: true, force: true });
   for (const key of Object.keys(process.env)) delete process.env[key];
   Object.assign(process.env, previous);
+}
+
+/** The owner's PATH without this checkout's `node_modules/.bin` folders or pnpm's node-gyp shim. */
+function ownerPath(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  const injected = new Set<string>();
+  for (const start of [import.meta.dirname, process.cwd()])
+    for (let directory = resolve(start); ; directory = dirname(directory)) {
+      injected.add(join(directory, "node_modules", ".bin"));
+      if (dirname(directory) === directory) break;
+    }
+  const strip = (entry: string) =>
+    injected.has(resolve(entry)) || /[\\/]pnpm[\\/]dist[\\/]node-gyp-bin$/u.test(entry);
+  return [...new Set(path.split(delimiter).filter((entry) => entry !== "" && !strip(entry)))].join(delimiter);
 }

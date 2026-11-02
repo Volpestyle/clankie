@@ -177,8 +177,7 @@ original. Only the owner, or an operator the owner explicitly authorized, change
 When the project names a reviewer
 ([ADR 0287](../../../docs/adr/0287-a-standing-reviewer-gates-every-landing.md)),
 landing waits until the reviewer approves your exact patch: `clankie review
-status` exits 1 while held, and in Clankie's own repo `pnpm check:landing` exits
-3 after green checks. Your catalog has `submit_for_review`, `review_candidate`
+status` exits 1 while held. Your catalog has `submit_for_review`, `review_candidate`
 and `review_verdict`.
 
 - **Author.** Commit, then call `submit_for_review` with the `checkout` (the
@@ -188,20 +187,13 @@ and `review_verdict`.
   catalog? Run `clankie review submit --checkout DIR --summary TEXT --issue KEY`
   in your own pane instead. The service routes the patch to the reviewer; you do
   not message anyone. After CHANGES, fix, commit and submit again with the same
-  `issue`, so the new candidate supersedes the old. After APPROVE, rerun the
-  gate (`pnpm check:landing --revalidate` in Clankie's repo) and push on exit 0. A rebase that changes the
-  patch needs a new review.
+  `issue`, so the new candidate supersedes the old. After APPROVE, land
+  by the project's own path. A rebase that changes the patch needs a new review.
 - **Reviewer.** Read the patch with `review_candidate`, then decide with
   `review_verdict`, binding it to the candidate's `patchId`. Review adversarially:
   look for what could break, not for reasons to agree. CHANGES lists each concrete
   required change. Also post the verdict on the issue. You cannot review your own
   patch, and a verdict for another patch is refused.
-
-Integrate also requires review of its exact composed patch. Its private HOME,
-settings and `CI=1` do not waive review: the owning service supplies the verdict
-without sharing credentials and checks it again before push. A missing verdict
-holds the batch, including a reused gate. Only external CI without owner settings
-may skip an unavailable service.
 
 Never waive review yourself. Ask your lead, who can waive one exact patch with a
 recorded reason.

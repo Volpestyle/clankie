@@ -81,7 +81,7 @@ interface SeatResolver {
 type ObservedSeat = { seatId: string; status: string; paneId?: string };
 
 export interface FleetResourceRuntime {
-  /** Internal service-owned scheduling entrypoint for the integration queue. */
+  /** Service-owned scheduling entrypoint for heavy work the service runs itself. */
   readonly governor: FleetResourceGovernor;
   readonly simulators: ReturnType<typeof createSimulatorManager>;
   bindSeats(resolver: SeatResolver): void;

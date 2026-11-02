@@ -29,10 +29,8 @@ for new work, in this order:
 
 Do not add unit tests by default. Existing ones are not mass-deleted; pruning is
 a separate reviewed effort. Choose checks for the changed claim and risk, reuse
-valid evidence for unchanged inputs, and record what actually ran. Whoever lands
-a change directly on `main` runs the root `pnpm check:landing` once before pushing
-([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md)); a pull
-request leaves that gate to CI when it is marked ready
+valid evidence for unchanged inputs, and record what actually ran. Every change lands
+through a pull request, and its full checks run in CI when it is marked ready
 ([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)), so the
 same checks never run twice. The full `pnpm check` runs for releases and on
 request.

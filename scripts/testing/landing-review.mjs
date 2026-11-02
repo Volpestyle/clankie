@@ -10,7 +10,7 @@ import { join } from "node:path";
  *
  * Returns `{ state: "landable" | "held" | "skipped" | "unavailable", checkout, ... }`;
  * `checkout` is the root the author names to submit_for_review (VUH-2662).
- * An unavailable verdict holds locally and in integrate. Only external CI
+ * An unavailable verdict holds the landing. Only external CI
  * with no owner settings may skip an unavailable service.
  */
 export function landingReview(root, base) {
@@ -38,7 +38,7 @@ function reviewState(root, base) {
     .join("\n")
     .trim()
     .slice(-500);
-  if (!process.env.CLANKIE_INTEGRATE && process.env.CI && !ownerSettingsPresent())
+  if (process.env.CI && !ownerSettingsPresent())
     return { state: "skipped", reason: "external CI has no owner settings", detail };
   return { state: "unavailable", reason: "review status is unavailable", detail };
 }

@@ -45,13 +45,13 @@ import {
 import { FLEET_AUTO_TIDY, FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
 import { FLEET_LEAD_RESTART_PATH, LeadRestartStatusSchema, type LeadRestartStatus } from "@clankie/protocol";
 import { FLEET_SEAT_RESTARTS_PATH, SeatRestartStatusSchema, type SeatRestartStatus } from "@clankie/protocol";
-import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
+import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/deploy-holds";
 import { z } from "zod";
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH]]",
-  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--remote-gates on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
@@ -293,7 +293,6 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
-    `remote gates: ${fleet.remoteGates ?? "off"} — ${fleet.remoteGates === "on" ? "integrate gates may run on a linked machine's fleet workspace while this Mac is saturated" : "integrate gates run on this machine"}`,
     `worker sandbox: ${fleet.workerSandbox ?? "off"} — ${fleet.workerSandbox === "on" ? "new hires run under an OS profile that denies reading the owner's protected credentials" : "hired workers can read what the owner's user can"}`,
     `seat host: ${fleet.seatHost ?? "auto"} — ${fleet.seatHost === "desktop" ? "new hires start in the Herdr desktop app's terminals" : "new hires start in Herdr panes"}`,
     `seat restarts: ${fleet.seatRestarts ?? "on"} — ${fleet.seatRestarts === "off" ? "hired seats keep their sessions until someone restarts them" : "idle hired seats restart fresh with a handoff brief at 450K context tokens"}`,
@@ -622,9 +621,6 @@ async function parseSet(
     } else if (flag === "--peer-messages" && change.peerMessages === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--peer-messages must be on or off.");
       change.peerMessages = value;
-    } else if (flag === "--remote-gates" && change.remoteGates === undefined) {
-      if (value !== "on" && value !== "off") throw new Error("--remote-gates must be on or off.");
-      change.remoteGates = value;
     } else if (flag === "--worker-sandbox" && change.workerSandbox === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--worker-sandbox must be on or off.");
       change.workerSandbox = value;

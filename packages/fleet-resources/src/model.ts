@@ -232,8 +232,6 @@ export interface HeavyRunOptions extends ResourceWaitOptions {
   seatId?: string;
   holderId?: string;
   server?: boolean;
-  /** Internal integration service purpose, never inferred from worker labels. */
-  mergeGate?: string;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   input?: string;
@@ -241,7 +239,6 @@ export interface HeavyRunOptions extends ResourceWaitOptions {
   stderr?: Writable;
 }
 export interface ResourceSnapshot {
-  mergeGate?: { id: string; batchId: string; state: "queued" | "running" };
   schemaVersion: 1;
   policy: FleetResourcePolicy;
   capacity: {

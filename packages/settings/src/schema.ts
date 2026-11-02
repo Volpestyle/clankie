@@ -457,11 +457,6 @@ export const FleetSettingsSchema = z
     /** Proven native workers may message their own fleet unless the owner turns this off. */
     peerMessages: z.enum(["on", "off"]).default("on"),
     /**
-     * Integrate gates may run on a linked machine's fleet-owned workspace while this
-     * one is saturated (VUH-2066). Off until the owner or lead turns it on.
-     */
-    remoteGates: z.enum(["on", "off"]).default("off"),
-    /**
      * Hired workers run under an OS profile that denies reading the owner's protected
      * credentials (VUH-2592). Off until the owner or lead turns it on.
      */
@@ -1068,6 +1063,13 @@ export function dropRetiredSettings(parsed: unknown): unknown {
     const { provider, ...rest } = email as Record<string, unknown>;
     if (provider === "clankie") delete rest["fromAddress"];
     settings["email"] = rest;
+  }
+  const fleet = settings["fleet"];
+  if (fleet !== null && typeof fleet === "object" && !Array.isArray(fleet)) {
+    // Remote gates went with the retired integrate queue.
+    const rest = { ...(fleet as Record<string, unknown>) };
+    delete rest["remoteGates"];
+    settings["fleet"] = rest;
   }
   const linearWebhook = settings["linearWebhook"];
   if (linearWebhook !== null && typeof linearWebhook === "object" && !Array.isArray(linearWebhook)) {

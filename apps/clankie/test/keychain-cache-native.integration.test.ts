@@ -17,7 +17,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { inspectInstall } from "../../tui/src/install-doctor.ts";
 import { formatDoctorSummary } from "../../tui/src/command/doctor.ts";
-import { runIntegrationCommand } from "../../tui/src/command/integrate.ts";
+import { runDeployHoldsCommand } from "../../tui/src/command/deploy-holds.ts";
 
 const execute = promisify(execFile);
 // Manual native boundary proof only; never operates on the owner's login keychain.
@@ -188,7 +188,7 @@ it.skipIf(process.platform !== "darwin" || process.env.CLANKIE_KEYCHAIN_TESTS !=
       const cliCommands: typeof commands = [];
       const cliStarted = performance.now();
       await expect(
-        runIntegrationCommand(["status", randomUUID()], {
+        runDeployHoldsCommand(["holds"], {
           env: {},
           operatorCredentialStore: new KeychainCredentialStore({
             service: `${service}-cold`,

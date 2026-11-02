@@ -1,19 +1,13 @@
-import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { updateCommit } from "../../tui/bin/pinned-runtime.ts";
-import type { RuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
-import { DeployHolds } from "../src/deploy-holds.ts";
-import { INTEGRATION_UPDATE_MAX_FAILURES, integrationSafeUpdates } from "../src/integration-update.ts";
 
 // Real Git throughout: a scratch bare origin and a clone that is behind it.
 const roots: string[] = [];
-const closers: (() => void)[] = [];
 afterEach(() => {
-  closers.splice(0).forEach((close) => close());
   roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
 const git = (cwd: string, ...args: string[]) =>
@@ -139,96 +133,4 @@ it("accepts a synchronous runner that throws before the fetch", async () => {
   const f = fixture();
   const sync = (_command: string, args: readonly string[], cwd: string) => git(cwd, ...args);
   expect(await updateCommit(f.checkout, f.next, f.base, sync)).toMatchObject({ newCommit: f.next });
-});
-
-function waiting(f: ReturnType<typeof fixture>, options: { gaveUp: string[]; errors: unknown[] }) {
-  const holds = new DeployHolds(join(f.root, "holds"));
-  const updater = {
-    runtime: { root: f.checkout, commit: f.base, instanceId: "i", pid: 1 },
-    status: () => ({ runtime: { root: f.checkout, commit: f.base, instanceId: "i", pid: 1 } }),
-    preview: async (ref: string) => ({
-      ref,
-      ...(await updateCommit(f.checkout, ref, f.base, run)),
-      commitCount: 1,
-      summary: [],
-    }),
-    request: async (ref: string) => {
-      await updateCommit(f.checkout, ref, f.base, run);
-      return { ...updater.status(), accepted: true };
-    },
-  } as unknown as RuntimeUpdater;
-  const wrapped = integrationSafeUpdates({
-    updater,
-    holds,
-    path: join(f.root, "updates", "integration-wait.json"),
-    intervalMs: 1_000_000,
-    onError: (error) => options.errors.push(error),
-    onGaveUp: (message) => options.gaveUp.push(message),
-  });
-  closers.push(() => wrapped.close());
-  const authority = { guard: async () => {}, current: () => true };
-  return { holds, wrapped, authority };
-}
-
-it("refuses an unresolvable ref at request time without a durable waiting intent", async () => {
-  const f = fixture();
-  const w = waiting(f, { gaveUp: [], errors: [] });
-  const batch = randomUUID();
-  await w.holds.acquire({
-    id: batch,
-    holder: "Integration batch",
-    reason: "gate",
-    minutes: 60,
-    integrationBatchId: batch,
-  });
-  await expect(w.wrapped.request("2f1add276", w.authority)).rejects.toThrow(/could not be resolved now/);
-  expect(w.wrapped.status().pending).toBeUndefined();
-  expect(existsSync(join(f.root, "updates", "integration-wait.json"))).toBe(false);
-  // A resolvable short SHA waits normally.
-  const queued = await w.wrapped.request(f.next.slice(0, 9), w.authority);
-  expect(queued.waitingForIntegration?.ref).toBe(f.next.slice(0, 9));
-});
-
-it("gives up after bounded fetch failures, releases the integrate fence and tells the lead", async () => {
-  const f = fixture();
-  const gaveUp: string[] = [];
-  const errors: unknown[] = [];
-  const w = waiting(f, { gaveUp, errors });
-  const batch = randomUUID();
-  await w.holds.acquire({
-    id: batch,
-    holder: "Integration batch",
-    reason: "gate",
-    minutes: 60,
-    integrationBatchId: batch,
-  });
-  await w.wrapped.request("feature", w.authority); // resolves while origin is reachable
-  expect(w.wrapped.status().pending).toBeDefined();
-  // The dispatcher's fence refuses new batches while the update is pending.
-  const fenced = w.holds.integration(
-    randomUUID(),
-    () => w.wrapped.status().pending !== undefined,
-    async () => "ran",
-  );
-  const early = await Promise.race([
-    fenced,
-    new Promise((resolve) => setTimeout(() => resolve("blocked"), 600)),
-  ]);
-  expect(early).toBe("blocked");
-  await w.holds.release(batch, "fixture", "gate ended");
-  renameSync(f.origin, `${f.origin}.gone`); // every later fetch fails, like the 15 s loop in VUH-2794
-  for (let attempt = 1; attempt <= INTEGRATION_UPDATE_MAX_FAILURES; attempt++) {
-    expect(w.wrapped.status().pending).toBeDefined();
-    await w.wrapped.check();
-  }
-  expect(errors).toHaveLength(INTEGRATION_UPDATE_MAX_FAILURES - 1);
-  expect(w.wrapped.status().pending).toBeUndefined();
-  expect(w.wrapped.status().waitingForIntegration).toBeUndefined();
-  expect(gaveUp).toHaveLength(1);
-  expect(gaveUp[0]).toContain("feature");
-  expect(gaveUp[0]).toContain(String(INTEGRATION_UPDATE_MAX_FAILURES));
-  // The fenced batch is admitted now that nothing is pending.
-  expect(await fenced).toBe("ran");
-  await w.wrapped.check();
-  expect(gaveUp).toHaveLength(1);
 });

@@ -2774,7 +2774,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       await refreshFleets();
       return namedLocal.some((entry) => entry.id === fleet);
     },
-    ...(deps.commitHandoffs ? { commitHandoffs: deps.commitHandoffs } : {}),
     reclaimCaches,
     prune: (repository, path, guard) => pruneWorktree(repository, path, guard),
     pruneMany: (repository, paths, guard) => pruneWorktrees(repository, paths, guard),

@@ -82,8 +82,8 @@ it; none takes precedence over another.
   There, brief each worker to rebase its branch onto `origin/main` once, right
   before merging, instead of merging `main` in repeatedly; to push with
   `--force-with-lease` to its own branch only; and to stop and tell you if the
-  rebase conflicts in files it didn't touch. Use no landing queue: not
-  `clankie integrate`, not GitHub's merge queue
+  rebase conflicts in files it didn't touch. Use no landing queue, not
+  GitHub's merge queue
   ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 - **Keep workers off the same files.** Don't put two workers on the same files at
   once. Sequence them, or give the shared file one owner, and route a conflict a

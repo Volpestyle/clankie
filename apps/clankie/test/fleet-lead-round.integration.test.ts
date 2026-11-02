@@ -1144,7 +1144,7 @@ it("a new deploy hold wakes an unchanged round naming its holder, age and time l
   ]);
   expect(held[0]?.content).toContain(`"deployHold":"${id}"`);
   expect(held[0]?.content).toContain("Saga w4:p1: release gate (held 1m, 30m left)");
-  expect(held[0]?.content).toContain(`clankie integrate release ${id} --actor NAME --reason TEXT`);
+  expect(held[0]?.content).toContain(`clankie update release ${id} --actor NAME --reason TEXT`);
   await f.finish(held[0]!.id);
   await f.finish(otherHeld[0]!.id, f.other);
 });

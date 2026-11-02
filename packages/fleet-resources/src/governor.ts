@@ -332,7 +332,6 @@ export function createResourceGovernor(
     return seen;
   }
   async function reconcile(state: ResourceState, seen: Seen, leaseDirectory = directory): Promise<void> {
-    if (leaseDirectory === directory) pruneGates(state);
     if (!state.leases.some((lease) => lease.kind === "heavy") && state.queue.length === 0) return;
     const previousIds = new Set(state.leases.map((lease) => lease.id));
     // This state and its exact recorded PIDs belong to the held OS lock; the
@@ -401,7 +400,6 @@ export function createResourceGovernor(
       }
     }
     state.leases = retained;
-    if (leaseDirectory === directory) pruneGates(state);
     pruneLeftoverMarkers(leaseDirectory, retained);
     for (const id of orphaned)
       if (previousIds.has(id) && !retained.some((lease) => lease.id === id)) orphaned.delete(id);
@@ -446,11 +444,8 @@ export function createResourceGovernor(
       ? await observeSimulatorUsage()
       : new Map();
     const sampledPressure = await pressure.sample(state.policy);
-    const activeGates = gates(state);
-    const gate = activeGates.find((entry) => entry.state === "running") ?? activeGates[0];
     return {
       schemaVersion: 1,
-      ...(gate ? { mergeGate: { id: gate.id, batchId: gate.batchId, state: gate.state } } : {}),
       policy: state.policy,
       capacity: {
         heavySlots: resourceCapacity(state.policy),
@@ -654,46 +649,6 @@ export function createResourceGovernor(
     );
     await rename(next, arbiterPath);
   }
-  // Sidecars keep the strict version-1 journal readable by older clients.
-  // A marker has authority only while its exact token is queued or leased.
-  const gatesDirectory = join(directory, "merge-gates");
-  function gateFiles() {
-    try {
-      return readdirSync(gatesDirectory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw error;
-    }
-  }
-  function pruneGates(state: ResourceState) {
-    const live = new Set([...state.queue, ...state.leases].map((row) => row.id));
-    for (const name of gateFiles()) if (!live.has(name)) rmSync(join(gatesDirectory, name), { force: true });
-  }
-  function gates(state: ResourceState) {
-    return gateFiles().flatMap((name) => {
-      let bytes: string;
-      try {
-        bytes = readFileSync(join(gatesDirectory, name), "utf8");
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-        throw error;
-      }
-      const marker = JSON.parse(bytes) as {
-        id: string;
-        token: string;
-        batchId: string;
-      };
-      const lease = state.leases.find(
-        (row) => row.kind === "heavy" && row.id === marker.id && row.token === marker.token,
-      );
-      const ticket = state.queue.find(
-        (row) => row.kind === "heavy" && row.id === marker.id && row.token === marker.token,
-      );
-      return lease || ticket
-        ? [{ ...marker, state: lease ? ("running" as const) : ("queued" as const) }]
-        : [];
-    });
-  }
   function heavyHead(state: ResourceState) {
     return state.queue.find((entry) => entry.kind === "heavy");
   }
@@ -850,7 +805,6 @@ export function createResourceGovernor(
       holderId?: string;
       executable: string;
       lane: HeavyJobLane;
-      mergeGate?: string;
       freesDisk?: boolean;
     },
   ): Promise<HeavyLease> {
@@ -874,14 +828,6 @@ export function createResourceGovernor(
       async (state) => {
         await reconcile(state, seen, store.directory);
         if (state.queue.length >= 512) throw new Error("Fleet resource queue is full");
-        if (options.mergeGate) {
-          if (options.lane !== "full" || !/^[a-f0-9-]{36}$/u.test(options.mergeGate))
-            throw new Error("Invalid integration gate identity");
-          mkdirSync(gatesDirectory, { recursive: true, mode: 0o700 });
-          writeFileSync(join(gatesDirectory, id), JSON.stringify({ id, token, batchId: options.mergeGate }), {
-            mode: 0o600,
-          });
-        }
         state.queue.push({
           id,
           token,
@@ -1061,15 +1007,13 @@ export function createResourceGovernor(
     let exitCode: number | undefined;
     let child: ReturnType<typeof spawn> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const lane = options.mergeGate ? "full" : options.server ? "server" : heavyJobLane(command, args);
+    const lane = options.server ? "server" : heavyJobLane(command, args);
     const store = laneStore(lane);
     try {
       const parentLease = await inherited(options.holderId);
       if (signal.aborted) throw abort();
       // A server must not borrow a bounded parent permit; it needs the CPU
       // supervisor and its own lifetime in the independent lane.
-      if (parentLease && options.mergeGate)
-        throw new Error("A nested worker cannot promote its permit to a merge gate");
       if (parentLease && (lane !== "server" || parentLease.lane === "server")) {
         child = spawn(
           command,

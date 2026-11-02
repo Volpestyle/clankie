@@ -13,7 +13,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { ProcessHealthSnapshotSchema, type ProcessHealthSnapshot } from "@clankie/protocol";
 import { ClankieSettingsSchema } from "@clankie/settings";
-import type { DeployHold } from "@clankie/protocol/integrate";
+import type { DeployHold } from "@clankie/protocol/deploy-holds";
 import { DeployHolds } from "../src/deploy-holds.ts";
 import { RuntimeCanaryPolicySchema } from "../src/runtime-canary.ts";
 import { writePrivateJson } from "../../tui/bin/update-files.ts";

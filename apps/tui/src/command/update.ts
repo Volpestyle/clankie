@@ -1,7 +1,7 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
-import { HoldOverrideSchema } from "@clankie/protocol/integrate";
+import { HoldOverrideSchema } from "@clankie/protocol/deploy-holds";
 import { HOST_SETTINGS_PATH, HostSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 import {
@@ -12,7 +12,7 @@ import {
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export const UPDATE_USAGE =
-  "Usage: clankie update [now] [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status|cancel [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.\nA source checkout batches updates that follow main: while the body is busy and the service has run under two hours (CLANKIE_UPDATE_BATCH_MINUTES), the request is deferred and the newest main applies once the body is idle or the batch is due. `now` applies at once; `cancel` drops a deferred batch. An explicit --ref or a hold override always applies at once.";
+  "Usage: clankie update [now] [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status|cancel [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\n       clankie update holds | hold --holder NAME --reason TEXT --minutes 1-60 | release UUID --actor NAME --reason TEXT\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.\nA source checkout batches updates that follow main: while the body is busy and the service has run under two hours (CLANKIE_UPDATE_BATCH_MINUTES), the request is deferred and the newest main applies once the body is idle or the batch is due. `now` applies at once; `cancel` drops a deferred batch. An explicit --ref or a hold override always applies at once.";
 
 export function parseUpdateArgs(args: readonly string[]) {
   args = args.filter((arg) => arg !== "--json");

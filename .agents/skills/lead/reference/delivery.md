@@ -22,7 +22,7 @@ reviewer instead of relaying packets by hand
 hire a reviewer seat, ideally from a different harness or model family than the
 authors, and run `clankie project settings PROJECT --reviewer-role reviewer`.
 Authors then `submit_for_review` and the reviewer decides with `review_verdict`;
-the service routes the patch and the landing gate holds (exit 3) until the
+the service routes the patch and `clankie review status` holds until the
 reviewer approves that exact patch. A verdict notice to you asks for no action.
 Keep a reviewer seat live while the setting is on, or landings wait. `waive_review`
 lands one exact patch without review. It is rare, needs a reason, and is recorded
@@ -48,38 +48,26 @@ keep what is missing in a focused follow-up.
 ## Landing
 
 Brief workers to land by the workspace's own landing rules (for Clankie's own
-repositories, the repository's agent instructions and ADR 0240). Require the
-checked HEAD, fixed base, gate exit status and evidence path in the worker's
-report, then the pushed SHA; a clean-main zero-test run does not verify an
-earlier landing. Where those rules let the lead accept a gate whose only
-failures are unchanged timing-sensitive cases, that is a lead acceptance
-decision labelled as such, never a green full gate; failures in changed code or
-affected consumers still block, and assertions, timeouts and product defaults
-are never weakened to pass.
+repositories, the repository's agent instructions). Require the checked HEAD,
+check results and evidence path in the worker's report, then the pull request
+or pushed SHA; a clean-main zero-test run does not verify an earlier landing.
+Failures in changed code or affected consumers block, and assertions, timeouts
+and product defaults are never weakened to pass.
 
-In Clankie's own repositories a pull request lands by rebasing onto
-`origin/main` once, right before it merges, never by merging `main` in over and
-over. The worker pushes with `--force-with-lease` to its own branch only, and
-flags a rebase conflict in files it didn't touch instead of resolving another
-worker's code. Pull requests there use no queue: not `clankie integrate`, not
-GitHub's merge queue
+In Clankie's own repositories every change lands through a pull request, one
+worker per task, never two on the same files. A ready pull request merges once
+its checks and real-app run are green
+([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+The worker rebases onto `origin/main` once, right before it merges, never by
+merging `main` in over and over, pushes with `--force-with-lease` to its own
+branch only, and flags a rebase conflict in files it didn't touch instead of
+resolving another worker's code. There is no landing queue: not GitHub's merge
+queue
 ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 
-The optional `clankie integrate` queue composes and gates a batch; its batching,
-cancel, revert and deploy-hold commands are in
-[the CLI reference](../../../../docs/cli.md#integrate). It cherry-picks only the
-listed commits and refuses a request missing an unlanded commit beneath them; run
-the corrected command the refusal prints. Read the receipt before
-claiming delivery: a passing gate is not a confirmed push, and a partial batch
-can land core while the app is still pending. Each repo's `reviewChecks` in
-`clankie integrate status UUID` records the parent's exact-patch verdict after
-the gate and before push, including unavailable-verdict errors. Check those
-receipts even when an app gate has no review line. Reconcile an uncertain send
-through origin first. Never switch a worktree while its gate runs, accept a pass
-for another HEAD, gate against live shared state, or force push a rollback. A
-deploy hold keeps `clankie update` from replacing the running service for a live
-test and never holds `main`; release one that has outlived its purpose, yours or
-a worker's, with a recorded reason.
+A deploy hold (`clankie update holds|hold|release`) keeps `clankie update` from
+replacing the running service for a live test and never holds `main`; release
+one that has outlived its purpose, yours or a worker's, with a recorded reason.
 
 ## Work repositories
 

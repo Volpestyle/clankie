@@ -11,7 +11,7 @@ This directory and the module READMEs hold the technical references.
 | Reference                                                | Canonical scope                                                             |
 | -------------------------------------------------------- | --------------------------------------------------------------------------- |
 | [CLI](cli.md)                                            | Headless commands, flags, output, and remote-access sign-in                 |
-| [Integration](integration.md)                            | Approved commit batches, isolated gates, landing evidence and deploy holds  |
+| [Deploy holds](deploy-holds.md)                          | Timed holds that keep runtime updates off the running service               |
 | [Console](../apps/tui/README.md)                         | Terminal interaction, workspaces, and launcher behavior                     |
 | [Distribution](distribution.md)                          | Installed layout, runtime ownership, release build and verification         |
 | [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, pressure admission and simulator ownership            |

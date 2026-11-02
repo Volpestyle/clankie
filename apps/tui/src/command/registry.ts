@@ -44,12 +44,6 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
-    nouns: ["integrate"],
-    lines: [
-      "  integrate SHA... [--app SHA]... [--push] | status [UUID] | push UUID | revert UUID | holds | hold | release  Compose, isolate the full gate, and land approved commits (JSON)",
-    ],
-  },
-  {
     nouns: ["share"],
     lines: [
       "  share [list | request JSON]  Control Activity shares on the current connection (owner/device, JSON)",
@@ -762,6 +756,6 @@ export function commandHelp(): string {
     "credential store is shared — what /auth writes is what this CLI's services read.",
     "Local LLM servers are not launcher-owned; start them yourself.",
     "",
-    "Full reference: docs/cli.md (at `clankie doctor`'s repoRoot on every install).",
+    "Each command's usage: clankie <command> --help.",
   ].join("\n");
 }

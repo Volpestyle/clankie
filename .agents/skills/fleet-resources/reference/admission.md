@@ -89,11 +89,6 @@ naming its ticket, owner seat, holder and PID. Pressure or capacity waits stay
 quiet. Read `clankie fleet resources` and coordinate with the named owner; the
 observer never requeues work or edits the registry.
 
-`clankie integrate` gates share one service-owned full permit, admitted in FIFO
-order alongside ordinary builds; `mergeGate` in resource status identifies the
-batch. Sharing requires the updated service arbiter and clients; do not bypass an
-older installation's wait with another registry or launch route.
-
 ## Disk
 
 Free disk is sampled on the working-directory and OS-account home volumes.

@@ -5,6 +5,5 @@ export const releaseOnlyTests = [
   "apps/clankie/test/runtime-canary.integration.test.ts", // Real process/deadline cases.
   "apps/clankie/test/native-process-transport.integration.test.ts", // Native stdio waits.
   "apps/clankie/test/local-fleet-admission-cancellation.integration.test.ts", // Admission timing.
-  "apps/clankie/test/integrate.integration.test.ts", // Nested installs/gates, >300 s observed.
   "apps/clankie/test/fleet-lead-round.integration.test.ts", // Periodic inspection timing.
 ];

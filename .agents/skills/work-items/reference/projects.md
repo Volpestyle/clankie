@@ -47,8 +47,8 @@ authority. Reconcile uncertain status-update writes before doing anything else.
 `clankie project settings PROJECT --reviewer-role ROLE|--reviewer-seat SEAT|--reviewer none`
 names the project's standing landing reviewer
 ([ADR 0287](../../../../docs/adr/0287-a-standing-reviewer-gates-every-landing.md)).
-While one is set, `pnpm check:landing` exits 3 until the reviewer approves the
-exact patch. Prefer a role, because seats retire. `clankie review list|show`
+While one is set, `clankie review status` holds each landing until the
+reviewer approves its exact patch. Prefer a role, because seats retire. `clankie review list|show`
 reads the candidates and verdicts; they are part of the project's review record,
 and an issue still gets its own verdict comment.
 
