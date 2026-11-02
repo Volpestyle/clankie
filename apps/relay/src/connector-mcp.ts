@@ -53,6 +53,8 @@ const READ_LINES_DEFAULT = 80;
 const READ_LINES_MAX = 400;
 const MESSAGE_MAX = 16_000;
 const START_PROMPT_MAX = 8_000;
+/** A hire's name for its job, as the service takes it (start_agent name). */
+const START_NAME_MAX = 48;
 const NOTES_PAGE = 20;
 const INBOX_PAGE = 50;
 const REPORTS_PAGE = 20;
@@ -375,6 +377,13 @@ function connectorServer(
               items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,64}$" },
               description:
                 "The owner's own MCP servers, by their name in the harness config, that this job needs; a hire otherwise starts only its worker tools and what its checkout declares. Screen work on the owner's Mac runs in background windows through a Codex computer-use seat: harness codex with [\"node_repl\"].",
+            },
+            name: {
+              type: "string",
+              minLength: 1,
+              maxLength: START_NAME_MAX,
+              description:
+                'A few words saying what the job is, such as "Worker names" or "Rivals fixes". The agent shows as its project and this ("clankie · Worker names") in the owner\'s app and Herdr; leave it out and the prompt\'s first line names it. No issue keys, paths or agent-app names.',
             },
             prompt: {
               type: "string",
@@ -892,6 +901,12 @@ function connectorServer(
         const prompt = optionalString(args.prompt);
         if (prompt !== undefined && prompt.length > START_PROMPT_MAX)
           return failure(`prompt is longer than ${START_PROMPT_MAX} characters.`);
+        const name = optionalString(args.name);
+        if (
+          (args.name !== undefined && name === undefined) ||
+          (name !== undefined && name.length > START_NAME_MAX)
+        )
+          return failure(`name is a few words, at most ${START_NAME_MAX} characters.`);
         const account = optionalString(args.account);
         if (
           (args.account !== undefined && account === undefined) ||
@@ -921,6 +936,7 @@ function connectorServer(
           ...(harness === undefined ? {} : { harness }),
           ...(account === undefined ? {} : { account }),
           ...(mcpServers === undefined ? {} : { mcpServers: mcpServers as string[] }),
+          ...(name === undefined ? {} : { name }),
           ...(prompt === undefined ? {} : { prompt }),
         });
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).

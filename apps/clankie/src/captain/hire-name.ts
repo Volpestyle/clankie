@@ -59,19 +59,40 @@ export function adoptedName(personaId: string, handle?: string): string {
   return hireDisplayName(name[0]!.toLocaleUpperCase() + name.slice(1));
 }
 
+/** Task words a name or tab can show: no issue keys, harness names, paths or separators. */
+function shortTask(value: string): string {
+  return value
+    .replaceAll(/\b[a-z]{2,10}[-_]\d+\b/giu, "")
+    .replaceAll(/\b(?:claude(?: code)?|codex)\b/giu, "")
+    .replaceAll(/(?:[a-z]:)?[\\/]\S*/giu, "")
+    .replaceAll(/[\p{Cc}|·]+/gu, " ")
+    .replaceAll(/\s+/gu, " ")
+    .replace(/^[\s:–—-]+|[\s:–—-]+$/gu, "")
+    .trim();
+}
+
+/**
+ * A connected app's hire is called after its project and its job ("clankie · Worker names"), so
+ * the owner's app tells its workers apart; Clankie's own hires keep the person names he gives
+ * them. Words a display name can't carry drop out, and with no job left it is the project alone.
+ */
+export function connectedHireName(project: string, job: string | undefined): string {
+  const words = shortTask((job ?? "").replaceAll(/discord|clyde/giu, ""));
+  const task = Array.from(words).slice(0, 48).join("").trim();
+  if (task.length === 0) return project;
+  const name = Array.from(`${project} · ${task}`).slice(0, 80).join("");
+  return hireDisplayName(name) === name ? name : project;
+}
+
 /** A manual Herdr label, independent of the harness's changing OSC title. */
 export function hirePaneLabel(name: string, taskTitle?: string, role?: string): string {
-  const shortTask = (value: string) =>
-    value
-      .replaceAll(/\b[a-z]{2,10}[-_]\d+\b/giu, "")
-      .replaceAll(/\b(?:claude(?: code)?|codex)\b/giu, "")
-      .replaceAll(/(?:[a-z]:)?[\\/]\S*/giu, "")
-      .replaceAll(/[\p{Cc}|·]+/gu, " ")
-      .replaceAll(/\s+/gu, " ")
-      .replace(/^[\s:–—-]+|[\s:–—-]+$/gu, "")
-      .trim();
-  const task = shortTask(taskTitle ?? "") || shortTask(role ?? "") || "Work";
-  return `${hireDisplayName(name)} · ${Array.from(task).slice(0, 60).join("")}`;
+  const shown = hireDisplayName(name);
+  const task = shortTask(taskTitle ?? "") || shortTask(role ?? "");
+  // A name that already says its job ("clankie · Worker names") needs no second one.
+  if (shown.includes(" · ") && (task.length === 0 || shown.endsWith(` · ${task}`))) return shown;
+  return `${shown} · ${Array.from(task || "Work")
+    .slice(0, 60)
+    .join("")}`;
 }
 
 /**

@@ -13,6 +13,9 @@ it; none takes precedence over another.
   ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
   Screen work goes to a Codex computer-use seat: `harness: "codex"` with
   `mcpServers: ["node_repl"]`, briefed to stay in background windows.
+  Give each hire a `name`, a few words saying its job ("Worker names"): the
+  owner sees it as its project and that ("clankie · Worker names") in their app
+  and Herdr. Left out, the brief's first line names it.
   Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.

@@ -817,6 +817,8 @@ describe("fleet routing", () => {
         seat: expect.objectContaining({
           harness: "codex",
           mcpServers: ["node_repl"],
+          // Named after its project and its job, so the owner's app tells its workers apart.
+          title: "kh2 · fix the netcode desync",
           workingDirectory: "C:\\code\\kh2",
           fleet: "pc",
           projectId: "kh2",
@@ -863,10 +865,18 @@ describe("fleet routing", () => {
         schemaVersion: 1,
         machine: "pc",
         workingDirectory: "C:\\code\\kh2",
+        name: "Rollback netcode",
         prompt: "add rollback netcode",
       }),
     ).toMatchObject({ status: "started" });
-    expect(hires[5]?.seat).toMatchObject({ freshIntent: fresh });
+    // The app's name for the job wins; the tab still shows the brief's first line.
+    expect(hires[5]?.seat).toMatchObject({
+      freshIntent: fresh,
+      title: "kh2 · Rollback netcode",
+      taskTitle: "add rollback netcode",
+    });
+    // With no name and no brief it is the project alone.
+    expect(hires[1]?.seat).toMatchObject({ title: "kh2" });
     fresh = undefined;
     // With nobody to lead it, nothing starts.
     leading = false;

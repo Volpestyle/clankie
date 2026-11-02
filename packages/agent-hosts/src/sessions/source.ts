@@ -136,6 +136,8 @@ export interface SessionStartRequest {
   readonly account?: string;
   /** The owner's own MCP servers this hire needs, by harness config name (node_repl for Codex computer use). */
   readonly mcpServers?: readonly string[];
+  /** A few words naming the job; the agent is called after its project and this. */
+  readonly name?: string;
   /** The first thing the new agent is asked. */
   readonly prompt?: string;
 }

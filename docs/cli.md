@@ -2061,7 +2061,12 @@ the start is refused and nothing else is tried. It also takes optional
 `mcpServers`, the owner's own MCP servers by harness config name that the job
 needs, as the captain's hire tool takes them; screen work on the owner's Mac
 goes to a Codex computer-use seat, `harness: "codex"` with
-`mcpServers: ["node_repl"]`, which works in background windows. `fleet_capacity` reads what
+`mcpServers: ["node_repl"]`, which works in background windows. An optional
+`name`, a few words saying the job (at most 48 characters), names the agent
+after its project and that, such as `clankie · Worker names`, in the owner's
+app and Herdr; left out, the prompt's first line names it, and with neither it
+is the project alone. Clankie's own hires keep the person names he gives them.
+`fleet_capacity` reads what
 the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):
 each metered account's plan, usage, remaining limit and reset, heavy-work

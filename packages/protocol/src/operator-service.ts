@@ -862,6 +862,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
         .min(1)
         .max(32)
         .optional(),
+      /**
+       * A few words naming the job, such as "Worker names". The agent is called after its
+       * project and this ("clankie · Worker names"); absent, the brief's first line names it.
+       * A display name only: no routing, session or authority.
+       */
+      name: z.string().trim().min(1).max(48).optional(),
       /** The first thing the agent is asked; information from the caller, delivered as its brief. */
       prompt: z.string().trim().min(1).max(8_000).optional(),
     })
