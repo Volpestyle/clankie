@@ -5,6 +5,8 @@ import {
   type FleetResourceGovernor,
   type ResourceSnapshot,
 } from "@clankie/fleet-resources";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, isAbsolute, join, resolve } from "node:path";
 import type { Writable } from "./io.ts";
 import { seatIdentity } from "./seat-identity.ts";
 
@@ -33,12 +35,21 @@ export async function runHeavyCommand(
   }
   if (args[separator] !== "--" || !args[separator + 1])
     throw new Error("Usage: clankie heavy [--server] [--seat LABEL] [--holder ID] -- <command> [args...]");
+  const command = args[separator + 1]!;
+  const problem = commandProblem(command, env, process.cwd());
+  if (problem !== undefined) {
+    // Checked before asking for a slot: a missing command never waits or looks like a governor fault (#380).
+    (options.stderr ?? process.stderr).write(
+      `clankie heavy: ${problem === "missing" ? "command not found" : "cannot run command (not executable)"}: ${command}\n`,
+    );
+    return problem === "missing" ? 127 : 126;
+  }
   const governor = options.governor ?? createResourceGovernor();
   let waiting = false;
   const shownAlerts = new Set<string>();
-  const lane = server ? "server" : heavyJobLane(args[separator + 1]!, args.slice(separator + 2));
+  const lane = server ? "server" : heavyJobLane(command, args.slice(separator + 2));
   try {
-    return await governor.runHeavy(args[separator + 1]!, args.slice(separator + 2), {
+    return await governor.runHeavy(command, args.slice(separator + 2), {
       ...(seatId === undefined ? {} : { seatId }),
       ...(holderId === undefined ? {} : { holderId }),
       ...(server ? { server: true } : {}),
@@ -82,4 +93,35 @@ function waitReason(snapshot: ResourceSnapshot, arbiter: boolean): string {
   // The service decides; this process's own pressure reading is not the verdict.
   if (arbiter) return full ? "slots" : "service";
   return snapshot.pressure.reason ?? (full ? "slots" : "busy");
+}
+
+/**
+ * Whether the command can be started as the runner will start it: a path is
+ * taken relative to the working directory, a bare name is looked up on PATH.
+ * Windows resolution (PATHEXT) is left to the runner.
+ */
+function commandProblem(
+  command: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): "missing" | "denied" | undefined {
+  if (process.platform === "win32") return undefined;
+  const candidates = command.includes("/")
+    ? [isAbsolute(command) ? command : resolve(cwd, command)]
+    : (env.PATH ?? "")
+        .split(delimiter)
+        .filter(Boolean)
+        .map((directory) => join(directory, command));
+  let found = false;
+  for (const candidate of candidates) {
+    try {
+      if (!statSync(candidate, { throwIfNoEntry: false })?.isFile()) continue;
+      found = true;
+      accessSync(candidate, constants.X_OK);
+      return undefined;
+    } catch {
+      // Unreadable, or present but not executable; a later PATH entry may still be.
+    }
+  }
+  return found ? "denied" : "missing";
 }

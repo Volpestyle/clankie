@@ -6,6 +6,7 @@ import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import {
   FileCredentialStore,
@@ -29,6 +30,7 @@ import { doctorCommand } from "../src/command/doctor.ts";
 import { formatDoctorReport } from "../src/doctor-report.ts";
 import { ResourceStore } from "../../../packages/fleet-resources/src/store.ts";
 import { longHeldJobMs } from "../../../packages/fleet-resources/src/parallelism.ts";
+import { resourceNativeHelperPath, resourcePython } from "../../../packages/fleet-resources/src/process.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
@@ -423,6 +425,90 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       await f.close();
     }
   }, 20_000);
+
+  it("names a missing or non-executable command at once, even with every slot held (#380)", async () => {
+    const f = await fixture();
+    const release = join(f.directory, "release-holder");
+    let holder: Promise<number> | undefined;
+    try {
+      await runFleetCommand(
+        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
+        f.options,
+      );
+      // Hold the only full slot: a CLI that asked for one would wait here.
+      holder = f.governor.runHeavy(process.execPath, [
+        "-e",
+        `setInterval(()=>{if(require('node:fs').existsSync(${JSON.stringify(release)}))process.exit(0)},50)`,
+      ]);
+      await eventually(
+        () => f.governor.snapshot(),
+        (snapshot) => snapshot.capacity.used === 1,
+      );
+      const notExecutable = join(f.directory, "not-executable.sh");
+      await writeFile(notExecutable, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+      for (const [command, code, message] of [
+        ["./does-not-exist", 127, "clankie heavy: command not found: ./does-not-exist"],
+        ["does-not-exist-anywhere", 127, "clankie heavy: command not found: does-not-exist-anywhere"],
+        [notExecutable, 126, `clankie heavy: cannot run command (not executable): ${notExecutable}`],
+      ] as const) {
+        const run = await f.headless(["heavy", "--", command, "--flag"]);
+        expect(await run.done, run.output.join("")).toBe(code);
+        expect(run.output.join("")).toContain(message);
+        expect(run.output.join("")).not.toContain("native boundary unavailable");
+      }
+      const snapshot = await f.governor.snapshot();
+      expect(snapshot.capacity.used).toBe(1);
+      expect(snapshot.queue).toEqual([]);
+      const state = await new ResourceStore(join(f.directory, "registry")).read();
+      expect(state.leases.filter((lease) => lease.kind === "heavy")).toHaveLength(1);
+    } finally {
+      await writeFile(release, "");
+      await holder;
+      await f.close();
+    }
+  }, 30_000);
+
+  it("the native runner reports a command it cannot start as that, frees the slot, and keeps the boundary message for real faults (#380)", async () => {
+    const f = await fixture();
+    try {
+      await runFleetCommand(
+        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
+        f.options,
+      );
+      // Past the CLI's check (a command removed after it, or another caller): the runner itself.
+      const missing = join(f.directory, "gone");
+      const stderr = new PassThrough();
+      const written: string[] = [];
+      stderr.on("data", (piece) => written.push(String(piece)));
+      expect(await f.governor.runHeavy(missing, [], { stderr })).toBe(127);
+      expect(written.join("")).toContain(`clankie heavy: command not found: ${missing}`);
+      const notExecutable = join(f.directory, "plain.txt");
+      await writeFile(notExecutable, "text", { mode: 0o644 });
+      written.length = 0;
+      expect(await f.governor.runHeavy(notExecutable, [], { stderr })).toBe(126);
+      expect(written.join("")).toContain(`clankie heavy: cannot run command: ${notExecutable}`);
+      expect(written.join("")).not.toContain("native boundary unavailable");
+      const snapshot = await eventually(
+        () => f.governor.snapshot(),
+        (value) => value.capacity.used === 0,
+      );
+      expect(snapshot.queue).toEqual([]);
+      expect((await new ResourceStore(join(f.directory, "registry")).read()).leases).toEqual([]);
+      // A genuine governor fault (no admitted lease, no control pipes) keeps its own message.
+      const fault = spawn(
+        resourcePython,
+        ["-I", resourceNativeHelperPath(), "run", join(f.directory, "registry"), "no-lease", "no-token"],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      );
+      const faultOutput: string[] = [];
+      fault.stderr!.on("data", (piece) => faultOutput.push(String(piece)));
+      const [faultCode] = await once(fault, "close");
+      expect(faultCode).toBe(1);
+      expect(faultOutput.join("")).toContain("Fleet resource native boundary unavailable");
+    } finally {
+      await f.close();
+    }
+  }, 30_000);
 
   it("passes Ctrl-C through the actual heavy CLI to the owned native command", async () => {
     const f = await fixture();

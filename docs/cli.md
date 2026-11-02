@@ -4486,6 +4486,12 @@ test suites, builds and entire owned runtime lifetimes inside the wrapper, and
 serialize multi-package compilers with `--workspace-concurrency=1`. Native local
 hire briefs include this contract automatically. Nested verified commands reuse
 the same permit; surviving descendants retain it after a wrapper exits.
+A command that can't start fails at once, before any slot is requested:
+`clankie heavy: command not found: X` exits 127 and a file that isn't
+executable exits 126. A bare name is looked up on `PATH` and a path is taken
+from the current directory. The runner reports the same if the command
+disappears after that check. `Fleet resource native boundary unavailable` is
+kept for faults in the governor itself.
 
 `heavy` sizes each command itself. A focused check — Vitest naming up to eight
 test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
