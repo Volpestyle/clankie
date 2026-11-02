@@ -45,6 +45,8 @@ paths:
   /v1/fleet/leads:
     get:
       tags: [Operator]
+      operationId: getFleetLeads
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       summary: Read Clankie and connected app lead activity
       description: Owner operator or owner Take Control device, through the relay like the fleet roster. Sorted by id, with no ranking or authority. Connector devices cannot read this route. Clankie is active when selected as lead or after model activity within ten minutes; connector devices are active when seen within fifteen minutes. Revoked and expired registrations are omitted.
       responses:

@@ -75,7 +75,7 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
   cleanup.push(async () => {
     await new Promise<void>((resolve, reject) => {
       server.close((error) => (error ? reject(error) : resolve()));
-      server.closeAllConnections();
+      if ("closeAllConnections" in server) server.closeAllConnections();
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -114,14 +114,24 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
     env: { CLANKIE_OPERATOR_TOKEN: "owner" },
   });
   expect(cli.leads).toEqual(initial.leads);
-  for (const args of [["fleet", "leads"], ["fleet", "leads", "--json"]]) {
+  for (const args of [
+    ["fleet", "leads"],
+    ["fleet", "leads", "--json"],
+  ]) {
     let output = "";
     const code = await runHeadlessCaptainCommand(args, {
-      repoRoot: f.root, host: baseUrl, env: { CLANKIE_OPERATOR_TOKEN: "owner" },
-      stdout: { write: (chunk) => { output += chunk; } },
+      repoRoot: f.root,
+      host: baseUrl,
+      env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+      stdout: {
+        write: (chunk) => {
+          output += chunk;
+        },
+      },
     });
     expect(code).toBe(0);
-    if (args.includes("--json")) expect(FleetLeadsSnapshotSchema.parse(JSON.parse(output)).leads).toEqual(initial.leads);
+    if (args.includes("--json"))
+      expect(FleetLeadsSnapshotSchema.parse(JSON.parse(output)).leads).toEqual(initial.leads);
     else expect(output).toContain("recent\tClaude\tactive");
   }
 
