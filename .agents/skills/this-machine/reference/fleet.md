@@ -148,8 +148,9 @@ Each harness's prerequisites, probes and limits are in
 ## Worker execution locations
 
 `clankie runtime list` shows execution policy. The operator sets extra locations
-with `clankie runtime workspaces ID --repo /checkout --dir /scratch` (each call
-replaces that runtime's extras) and capacity with `clankie runtime capacity ID
+with `clankie runtime workspaces ID --repo /checkout --dir /scratch`, which adds to
+that runtime's grants and prints the resulting list (`--remove` drops named ones,
+`--replace` sets the whole list, `--clear` empties it), and capacity with `clankie runtime capacity ID
 N|--clear`. A repository approval covers its registered worktrees; a directory
 entry is exact, never a prefix. Use the approved checkout as `workingDirectory`; a
 hire cannot grant itself another location.

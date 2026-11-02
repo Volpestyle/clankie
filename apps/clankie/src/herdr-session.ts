@@ -234,6 +234,8 @@ export const ExecutionConnectSchema = z.union([
       action: z.literal("workspaces"),
       id: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
       workspaces: ExecutionWorkspacesSchema,
+      /** replace (the default, for existing clients) sets the whole list; add and remove keep the rest (#375). */
+      mode: z.enum(["replace", "add", "remove"]).optional(),
     })
     .strict(),
 ]);
@@ -478,13 +480,61 @@ export class ExecutionConnections {
       const target = (await this.options.settings.load()).execution.connections.find(
         (entry) => entry.id === input.id,
       );
-      const workspaces =
-        target?.ssh === undefined
-          ? await resolveExecutionWorkspaces(input.workspaces)
-          : remoteExecutionWorkspaces(input.workspaces, target.ssh.shell);
+      const shell = target?.ssh?.shell;
+      const mode = input.mode ?? "replace";
+      // A removal names a grant as stored or as written; its path may no longer exist.
+      const requested =
+        mode === "remove"
+          ? await Promise.all(
+              input.workspaces.map(async (entry) => ({
+                entry,
+                resolved:
+                  shell === undefined
+                    ? // allow-swallowed-rejection -- a vanished path is matched as written instead.
+                      (await resolveExecutionWorkspaces([entry]).catch(() => []))[0]
+                    : undefined,
+              })),
+            )
+          : [];
+      const given =
+        mode === "remove"
+          ? []
+          : shell === undefined
+            ? await resolveExecutionWorkspaces(input.workspaces)
+            : remoteExecutionWorkspaces(input.workspaces, shell);
+      const same = (granted: { kind: string; path: string }, wanted: { kind: string; path: string }) =>
+        granted.kind === wanted.kind &&
+        (shell === undefined
+          ? granted.path === wanted.path
+          : sameRemoteDirectory(granted.path, wanted.path, shell));
+      let workspaces: z.infer<typeof ExecutionWorkspacesSchema> = given;
       await this.options.settings.update((current) => {
         if (input.id !== "default" && !current.execution.connections.some((entry) => entry.id === input.id))
           throw new Error("Unknown runtime connection");
+        const existing =
+          (input.id === "default"
+            ? current.execution.workspaces
+            : current.execution.connections.find((entry) => entry.id === input.id)?.workspaces) ?? [];
+        if (mode === "add") {
+          workspaces = [...existing, ...given.filter((entry) => !existing.some((kept) => same(kept, entry)))];
+          if (workspaces.length > 32) throw new Error("A runtime approves at most 32 workspaces");
+        } else if (mode === "remove") {
+          const gone = requested.filter(
+            ({ entry, resolved }) =>
+              !existing.some((kept) => same(kept, entry) || (resolved !== undefined && same(kept, resolved))),
+          );
+          if (gone.length)
+            throw new Error(
+              `Not an approved workspace on ${input.id}: ${gone.map(({ entry }) => entry.path).join(", ")}`,
+            );
+          workspaces = existing.filter(
+            (kept) =>
+              !requested.some(
+                ({ entry, resolved }) =>
+                  same(kept, entry) || (resolved !== undefined && same(kept, resolved)),
+              ),
+          );
+        }
         return {
           ...current,
           execution: {

@@ -291,11 +291,11 @@ async function connectionDetail(
         );
     } else if (action === "workspaces") {
       const kind = await flow.readSelect({
-        message: "Replace approved workspaces",
+        message: "Add an approved workspace (other grants stay)",
         options: [
           { value: "--repo", label: "Repository…" },
           { value: "--dir", label: "Directory…" },
-          { value: "--clear", label: "Clear grants" },
+          { value: "--clear", label: "Clear all grants" },
         ],
         allowBack: true,
       });
@@ -313,7 +313,7 @@ async function connectionDetail(
       await attempt(
         flow,
         () => services.runtime(["workspaces", id, kind, ...(path === undefined ? [] : [path.trim()])]),
-        "Workspace grants saved.",
+        kind === "--clear" ? "Workspace grants cleared." : "Workspace added; other grants kept.",
       );
     }
   }

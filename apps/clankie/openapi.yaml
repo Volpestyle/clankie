@@ -1922,7 +1922,7 @@ paths:
       tags: [Operator]
       operationId: connectRuntime
       summary: Connect a Herdr runtime or configure owner execution policy
-      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. action=workspaces replaces additional repository/directory approvals for a named or default runtime; it never starts or stops workers. action=capacity sets one runtime limit; Unset limits default to 16; null clears a limit to unlimited; zero pauses new admission.
+      description: Resolves an explicit session or socket and pins that endpoint to the ID. Reconnection cannot retarget an existing ID. action=workspaces changes additional repository/directory approvals for a named or default runtime. mode=add keeps existing grants, mode=remove drops the named ones (refusing any not granted), and mode=replace (the default when mode is omitted) sets the whole list. It returns the resulting list and never starts or stops workers. action=capacity sets one runtime limit; Unset limits default to 16; null clears a limit to unlimited; zero pauses new admission.
       security: [{ operatorBearer: [] }]
       requestBody:
         required: true
@@ -1934,7 +1934,7 @@ paths:
               oneOf:
                 - required: [id]
                   anyOf: [{ required: [session] }, { required: [socketPath] }]
-                  not: { required: [action] }
+                  not: { anyOf: [{ required: [action] }, { required: [mode] }] }
                 - required: [id, action, workspaces]
                   properties: { action: { const: workspaces } }
                   not:
@@ -1955,6 +1955,7 @@ paths:
                       anyOf:
                         [
                           { required: [workspaces] },
+                          { required: [mode] },
                           { required: [session] },
                           { required: [socketPath] },
                           { required: [kind] },
@@ -1969,6 +1970,13 @@ paths:
                     description: "default is reserved except for workspace and capacity configuration",
                   }
                 action: { type: string, enum: [workspaces, capacity] }
+                mode:
+                  {
+                    type: string,
+                    enum: [add, remove, replace],
+                    default: replace,
+                    description: "action=workspaces only: add keeps existing grants, remove drops the named ones, replace sets the whole list",
+                  }
                 workspaces:
                   type: array
                   maxItems: 32

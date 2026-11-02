@@ -544,3 +544,107 @@ it("returns incomplete native Codex preparation as a conflict and preserves the 
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+it("adding a workspace keeps the other approvals; only --replace and --clear drop them (#375)", async () => {
+  const root = realpathSync(await mkdtemp("/tmp/clankie-workspace-add-"));
+  const [one, two, three] = ["one", "two", "three"].map((name) => join(root, name));
+  for (const directory of [one, two, three]) await mkdir(directory!);
+  const settings = new SettingsStore(join(root, "settings.json"));
+  await settings.update((current) => ({
+    ...current,
+    machines: [{ id: "pc", ssh: "fixture.invalid", shell: "powershell", aliases: [] }],
+    execution: {
+      connections: [
+        {
+          id: "pc",
+          machine: "pc",
+          kind: "herdr",
+          session: "default",
+          ssh: { host: "fixture.invalid", shell: "powershell" },
+          enabled: true,
+          capabilities: ["code"],
+        },
+      ],
+    },
+  }));
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    fleetRun: () => async () => JSON.stringify({ result: { snapshot: { workspaces: [] } } }),
+  });
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    runtimes,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  const cli = {
+    host: "http://localhost",
+    env: { CLANKIE_OPERATOR_TOKEN: "owner" },
+    fetchImpl: (async (url, init) => app.app.request(new Request(String(url), init))) as typeof fetch,
+  };
+  const dir = (path: string) => ({ kind: "directory", path });
+  const stored = async (id: string) => {
+    const execution = (await settings.load()).execution;
+    return id === "default"
+      ? execution.workspaces
+      : execution.connections.find((entry) => entry.id === id)?.workspaces;
+  };
+  try {
+    // Local: each call prints the list it left, and adding never drops a grant.
+    expect(await runRuntimeCommand(["workspaces", "default", "--dir", one!, "--dir", two!], cli)).toEqual({
+      id: "default",
+      workspaces: [dir(one!), dir(two!)],
+    });
+    expect(await runRuntimeCommand(["workspaces", "default", "--dir", three!], cli)).toEqual({
+      id: "default",
+      workspaces: [dir(one!), dir(two!), dir(three!)],
+    });
+    await runRuntimeCommand(["workspaces", "default", "--dir", one!], cli);
+    expect(await stored("default")).toEqual([dir(one!), dir(two!), dir(three!)]);
+    expect(await runRuntimeCommand(["workspaces", "default", "--remove", "--dir", two!], cli)).toEqual({
+      id: "default",
+      workspaces: [dir(one!), dir(three!)],
+    });
+    await expect(
+      runRuntimeCommand(["workspaces", "default", "--remove", "--dir", two!], cli),
+    ).rejects.toThrow(/Not an approved workspace/u);
+    // A removed folder that no longer exists is still matched as written.
+    await rm(three!, { recursive: true });
+    await runRuntimeCommand(["workspaces", "default", "--remove", "--dir", three!], cli);
+    expect(await stored("default")).toEqual([dir(one!)]);
+    await runRuntimeCommand(["workspaces", "default", "--dir", two!], cli);
+    expect(await runRuntimeCommand(["workspaces", "default", "--replace", "--dir", two!], cli)).toEqual({
+      id: "default",
+      workspaces: [dir(two!)],
+    });
+    await runRuntimeCommand(["workspaces", "default", "--clear"], cli);
+    expect(await stored("default")).toEqual([]);
+    await expect(runRuntimeCommand(["workspaces", "default", "--replace"], cli)).rejects.toThrow(
+      /--replace/u,
+    );
+
+    // A Windows fleet: exact remote paths, matched without case or separator style.
+    await runRuntimeCommand(["workspaces", "pc", "--dir", "C:\\src\\One"], cli);
+    await runRuntimeCommand(["workspaces", "pc", "--dir", "C:\\src\\Two"], cli);
+    await runRuntimeCommand(["workspaces", "pc", "--dir", "c:/src/one/"], cli);
+    expect(await stored("pc")).toEqual([dir("C:\\src\\One"), dir("C:\\src\\Two")]);
+    expect(await runtimes.remoteWorkspace("pc", "C:\\src\\One")).toBe(true);
+    expect(await runRuntimeCommand(["workspaces", "pc", "--remove", "--dir", "c:/src/one/"], cli)).toEqual({
+      id: "pc",
+      workspaces: [dir("C:\\src\\Two")],
+    });
+    expect(await runtimes.remoteWorkspace("pc", "C:\\src\\One")).toBe(false);
+
+    // An existing API client that sends no mode still replaces.
+    const response = await app.app.request("/v1/runtime-connections", {
+      method: "POST",
+      headers: { authorization: "Bearer owner", "content-type": "application/json" },
+      body: JSON.stringify({ action: "workspaces", id: "pc", workspaces: [dir("D:\\games")] }),
+    });
+    expect(response.status).toBe(200);
+    expect(await stored("pc")).toEqual([dir("D:\\games")]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
