@@ -99,6 +99,7 @@ import {
   type WorkProjectFence,
 } from "./work-write-target.ts";
 import { deliveryFingerprint } from "./captain/delivery-fence.ts";
+import { trackerStatusesFor, withLiveHolders, type IssueHolder } from "./work-item-holders.ts";
 import {
   assertAdmitted,
   CONNECTED_APP_ACTOR_PREFIX,
@@ -366,6 +367,11 @@ export interface WorkItemsServiceOptions {
   readonly clock?: () => Date;
   /** The check every outward tracker write passes (ADR 0302); absent, writes are not checked. */
   readonly posting?: Pick<TrackerPostingGate, "admit"> & Partial<Pick<TrackerPostingGate, "watching">>;
+  /**
+   * The live seats holding issues now (#318). Reads then say `in_progress` only for a
+   * held issue. Absent, or failing, reads keep the tracker's own status.
+   */
+  readonly liveHolders?: () => readonly IssueHolder[] | Promise<readonly IssueHolder[]>;
 }
 
 export type WorkResult =
@@ -2597,6 +2603,47 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       /** With `posting`: where it was let through to; it goes only while unchanged. */
       destination?: string,
     ): Promise<WorkResult> {
+      if (options.liveHolders === undefined || (request.action !== "list" && request.action !== "show"))
+        return handleTracker(request, local, posting, destination);
+      let holders: readonly IssueHolder[];
+      try {
+        holders = await options.liveHolders();
+      } catch {
+        // allow-swallowed-rejection -- without a live census the read keeps the tracker's status.
+        return handleTracker(request, local, posting, destination);
+      }
+      if (request.action === "show") {
+        const result = await handleTracker(request, local, posting, destination);
+        return "item" in result && "repo" in result
+          ? { ...result, item: withLiveHolders(result.repo.id, result.item, holders) }
+          : result;
+      }
+      // Filter on the live status: read the tracker statuses it can come from, then filter.
+      const wanted = request.status;
+      const result = await handleTracker(
+        wanted === undefined ? request : { ...request, status: trackerStatusesFor(wanted) },
+        local,
+        posting,
+        destination,
+      );
+      if (!("items" in result) || !("repo" in result)) return result;
+      const items = result.items.map((item) => withLiveHolders(result.repo.id, item, holders));
+      return {
+        ...result,
+        items: (wanted === undefined ? items : items.filter((item) => wanted.includes(item.status))).slice(
+          0,
+          request.limit ?? 250,
+        ),
+      };
+    },
+  };
+  async function handleTracker(
+    request: WorkRequest,
+    local: boolean,
+    posting?: typeof TRACKER_POSTING_ADMITTED,
+    destination?: string,
+  ): Promise<WorkResult> {
+    {
       if (request.action === "repos") {
         const repos = [
           ...((await projectReader?.repos()) ?? []),
@@ -2863,8 +2910,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           }
         }
       }
-    },
-  };
+    }
+  }
 }
 
 export type WorkItemsService = ReturnType<typeof createWorkItemsService>;

@@ -7302,7 +7302,13 @@ clankie metrics --issue VUH-1608 --since 2026-10-04T00:00:00Z --until 2026-10-05
 clankie metrics --issues --worker Noor
 ```
 
-The JSON `report` contains `issues`, `workers`, `sessions`, `summary`, `window`, and explicit `coverage`:
+The JSON `report` contains `issues`, `workers`, `sessions`, `summary`, `window`, and explicit `coverage`.
+`summary.current.inProgressCount` is the number of distinct issues live agents in
+scope hold now through `clankie work-on --repo --issue`, beside `liveSeats`; it
+never reads the tracker's own In Progress state (#318). It is `null` while live
+membership is unknown.
+
+Its fields:
 
 - `reportedTokens` sums provider-reported native worker responses, including
   cached input. Codex response IDs and Claude message IDs are deduplicated;
@@ -9929,7 +9935,12 @@ existing Work item, or run `clankie work-on clear` to remove the assignment.
 Repo IDs come from `clankie work repos`. The authenticated `state_work` dispatch
 resolves the caller's pane in its source Herdr session; devices cannot submit it.
 Assignments persist across service restarts and follow the same native session
-between panes. They do not change tracker status or ownership. The fleet also
+between panes. They do not write tracker status or ownership, but they are what
+"in progress" means (#318): work reads (`clankie work list`, `list_issues`, the
+app's views) and `clankie metrics --issues` count an open issue as `in_progress`
+only while a live agent (not done, stopped or gone) holds it this way. Its
+`heldBy` names those agents. An issue the tracker calls in progress with no live
+holder reads `todo`, with `trackerStatus` keeping the tracker's own word. The fleet also
 projects local Codex goals from its native goal store and Clankie's conversation
 goals. Native goal state remains separate from turn activity.
 

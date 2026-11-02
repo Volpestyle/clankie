@@ -953,6 +953,12 @@ const workItems = createWorkItemsService({
   mcpHost,
   githubToken: () => githubConnectionToken(operatorCredentialStore),
   posting: trackerPosting,
+  // The captain starts below; until then a read keeps the tracker's own status.
+  liveHolders: () => {
+    const holders = captain.issueHolders?.();
+    if (holders === undefined) throw new Error("Live issue holders are unavailable");
+    return holders;
+  },
 });
 trackerPosting.bind({
   execute: trackerPostingExecutor({ mcpHost, workItems }),
