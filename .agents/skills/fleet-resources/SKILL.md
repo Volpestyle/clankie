@@ -67,7 +67,11 @@ permit. This repo's `pnpm typecheck` already does
 
 `--seat LABEL` labels the seat in status and `--holder ID` identifies its native
 child; neither grants authority. Arguments after `--` belong to the child, and
-the wrapper preserves its exit status and forwards interruption. Nested
+the wrapper preserves its exit status and forwards interruption. A command
+that can't start (`command not found: X`, exit 127; not executable, exit 126)
+fails at once without waiting for a slot: fix the command or install the
+dependency. Only `native boundary unavailable` means the governor itself
+failed. Nested
 commands with the same holder in the same verified process group reuse the
 permit.
 

@@ -1033,9 +1033,21 @@ def heavy_runner(directory, lease_id, token):
             budget = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(budget)
             reader = budget.cpu_reader()
-        child = subprocess.Popen([request["command"], *request["args"]], env=environment,
-                                 cwd=request.get("cwd"),
-                                 stdin=subprocess.PIPE if "input" in request else None)
+        try:
+            child = subprocess.Popen([request["command"], *request["args"]], env=environment,
+                                     cwd=request.get("cwd"),
+                                     stdin=subprocess.PIPE if "input" in request else None)
+        except OSError as error:
+            # The command itself could not start: say so, never a governor fault (#380).
+            # Shell convention: 127 not found, 126 found but not runnable.
+            if request.get("cwd") is not None and not os.path.isdir(request["cwd"]):
+                print("clankie heavy: working directory not found: " + request["cwd"], file=sys.stderr)
+                return 127
+            missing = isinstance(error, FileNotFoundError)
+            print("clankie heavy: " + ("command not found: " if missing else "cannot run command: ") +
+                  request["command"] + ("" if missing else " (" + (error.strerror or type(error).__name__) + ")"),
+                  file=sys.stderr)
+            return 127 if missing else 126
         if "input" in request:
             child.stdin.write(request["input"].encode("utf-8"))
             child.stdin.close()
