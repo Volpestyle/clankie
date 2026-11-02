@@ -354,9 +354,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
+          EVENT: ${{ github.event.action }} (payload draft ${{ github.event.pull_request.draft }})
         run: |
           draft=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .draft)
-          echo "draft now: $draft"
+          echo "event: $EVENT; draft now: $draft"
           echo "ready=$([ "$draft" = false ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
 
   real-run:
