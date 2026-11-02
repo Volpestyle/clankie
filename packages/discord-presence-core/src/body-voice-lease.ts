@@ -148,17 +148,30 @@ export class VoiceBodyLease {
     if (active !== undefined && !active.started) await this.confirmedLeave(stayId);
   }
 
-  /** Called with the exact core stay ID captured by the gateway's confirmed-leave path. */
-  public async confirmedLeave(stayId: string): Promise<void> {
+  /**
+   * Called with the exact core stay ID captured by the gateway's confirmed-leave
+   * path, and the sanitized leave code when the body has one, so the service
+   * can tell a drop from a requested leave (#371).
+   */
+  public async confirmedLeave(stayId: string, reason?: string): Promise<void> {
     const active = this.active.get(stayId);
     if (active === undefined) return;
     clearTimeout(active.timer);
     active.lost = true;
-    const result = await this.rpc({
-      action: "finish",
+    const finish = {
+      action: "finish" as const,
       stay: active.admission.stay,
       incarnation: active.incarnation,
-    });
+    };
+    let result: BodyLeaseResult;
+    try {
+      result = await this.rpc(reason === undefined ? finish : { ...finish, reason });
+    } catch (error) {
+      if (reason === undefined) throw error;
+      // A service released before `reason` refuses the unknown key. Finish is
+      // idempotent there, so the bare request settles the same stay.
+      result = await this.rpc(finish);
+    }
     if (result.outcome !== "released") throw new VoiceBodyLeaseDenied(result);
     this.active.delete(stayId);
   }

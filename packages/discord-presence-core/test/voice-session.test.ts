@@ -800,6 +800,31 @@ describe("lifecycle", () => {
     expect(harness.vox.subscriptions).toHaveLength(1);
   });
 
+  it("reports capturing only while the transport is up and someone can be heard (#371)", async () => {
+    const harness = buildHarness();
+    harness.vox.autoReady = false;
+    expect(harness.session.capturing()).toBe(false);
+    const joining = harness.session.join({ guildId: GUILD, channelId: CHANNEL });
+    await flush();
+    // Joining is not hearing: no transport yet and nobody consented.
+    expect(harness.session.capturing()).toBe(false);
+    const connectionId = at(harness.vox.joins, -1).connectionId;
+    harness.vox.emit({ type: "transport_state", role: "voice", connectionId, status: "ready" });
+    harness.vox.emit({
+      type: "dave_state",
+      role: "voice",
+      connectionId,
+      status: "ready",
+      protocolVersion: 1,
+    });
+    await joining;
+    expect(harness.session.capturing()).toBe(false);
+    await harness.consent(OWNER);
+    expect(harness.session.capturing()).toBe(true);
+    await harness.session.leave();
+    expect(harness.session.capturing()).toBe(false);
+  });
+
   it("fails the join when the listener cannot open, and leaves cleanly", async () => {
     const harness = buildHarness();
     harness.ports.failTranscriptionOpens = 1;

@@ -107,7 +107,16 @@ export type BodyVoiceStay = z.infer<typeof BodyVoiceStaySchema>;
 export const BodyVoiceLeaseRequestSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("claim"), stay: BodyVoiceStaySchema, ticket: z.uuid().optional() }),
   z.strictObject({ action: z.literal("heartbeat"), stay: BodyVoiceStaySchema, incarnation }),
-  z.strictObject({ action: z.literal("finish"), stay: BodyVoiceStaySchema, incarnation }),
+  z.strictObject({
+    action: z.literal("finish"),
+    stay: BodyVoiceStaySchema,
+    incarnation,
+    /** The body's sanitized leave code, so the service can tell a drop from a requested leave (#371). */
+    reason: z
+      .string()
+      .regex(/^[a-z0-9_]{1,64}$/u)
+      .optional(),
+  }),
 ]);
 export type BodyVoiceLeaseRequest = z.infer<typeof BodyVoiceLeaseRequestSchema>;
 

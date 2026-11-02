@@ -11,6 +11,8 @@ import {
 export interface VoicePresenceSessionPort {
   status(): { readonly active: boolean; readonly guildId?: string; readonly channelId?: string };
   canHear(userId: string): boolean;
+  /** Receiving voice now, with at least one person who can be heard (#371). */
+  capturing(): boolean;
   join(input: JoinDiscordVoiceInput): Promise<unknown>;
   leave(): Promise<void>;
 }
@@ -84,6 +86,7 @@ export async function executeVoicePresenceIntent(
       action: "joined",
       channelId,
       actorCanBeHeard: session.canHear(input.principal.userId),
+      capturing: session.capturing(),
       transcriptLoggingEnabled: config.transcriptLoggingEnabled,
     };
   }
@@ -114,6 +117,7 @@ export async function executeVoicePresenceIntent(
     action: "joined",
     channelId,
     actorCanBeHeard: session.canHear(input.principal.userId),
+    capturing: session.capturing(),
     transcriptLoggingEnabled: config.transcriptLoggingEnabled,
   };
 }

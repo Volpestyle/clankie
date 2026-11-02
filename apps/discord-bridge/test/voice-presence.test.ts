@@ -11,6 +11,7 @@ class FakeVoiceSession implements VoicePresenceSessionPort {
   public readonly joins: JoinDiscordVoiceInput[] = [];
   public readonly heardUserIds = new Set<string>();
   public leaves = 0;
+  public capturingNow = false;
   public state: { active: boolean; guildId?: string; channelId?: string } = { active: false };
 
   public status() {
@@ -19,6 +20,10 @@ class FakeVoiceSession implements VoicePresenceSessionPort {
 
   public canHear(userId: string): boolean {
     return this.heardUserIds.has(userId);
+  }
+
+  public capturing(): boolean {
+    return this.capturingNow;
   }
 
   public join(input: JoinDiscordVoiceInput): Promise<void> {
@@ -65,10 +70,12 @@ describe("captain voice presence execution", () => {
     });
     expect(session.joins).toEqual([]);
 
+    // Consent permits hearing them, but nothing is arriving yet (#371).
     await expect(executeVoicePresenceIntent(config(session), input("join"))).resolves.toEqual({
       action: "joined",
       channelId: "voice-1",
       actorCanBeHeard: true,
+      capturing: false,
       transcriptLoggingEnabled: true,
     });
     expect(session.joins).toEqual([

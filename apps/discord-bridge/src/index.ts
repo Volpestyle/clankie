@@ -451,7 +451,7 @@ const voiceGateway =
         onLeaveConfirmed: async ({ guildId, channelId }) => {
           const left = pendingLeaseLeft;
           if (left?.guildId === guildId && left.channelId === channelId && left.stayId !== undefined) {
-            await voiceBodyLease.confirmedLeave(left.stayId);
+            await voiceBodyLease.confirmedLeave(left.stayId, left.reason);
             if (pendingLeaseLeft === left) pendingLeaseLeft = undefined;
           }
           await recordReceipt("discord.voice.left", {
@@ -1462,6 +1462,7 @@ async function executeCaptainVoicePresence(
           : {
               status: () => voiceSession.status(),
               canHear: (userId) => voiceSession.canHear(userId),
+              capturing: () => voiceSession.capturing(),
               join: (joinInput) => {
                 if (bodyAdmission === undefined) throw new Error("Voice body admission missing");
                 return voiceGateway.join(target.guild, { ...joinInput, bodyLease: bodyAdmission });

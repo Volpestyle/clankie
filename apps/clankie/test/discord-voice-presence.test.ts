@@ -17,6 +17,7 @@ describe("createDiscordVoicePresenceClient", () => {
             action: "joined",
             channelId: "voice-1",
             actorCanBeHeard: true,
+            capturing: false,
             transcriptLoggingEnabled: true,
           }),
         );
@@ -28,6 +29,7 @@ describe("createDiscordVoicePresenceClient", () => {
       action: "joined",
       channelId: "voice-1",
       actorCanBeHeard: true,
+      capturing: false,
       transcriptLoggingEnabled: true,
     });
     expect(calls).toEqual([

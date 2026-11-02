@@ -222,6 +222,39 @@ it("voice RPC binds the registered physical session and exact stay generation", 
   ).toBe(200);
 });
 
+it("tells the joining conversation about a drop, but not about a requested leave (#371)", async () => {
+  const notices: [string, string][] = [];
+  const { post, session } = await fixture({
+    recordConversationNotice: (conversationId, text) => notices.push([conversationId, text]) > 0,
+  });
+  const leave = async (reason: string) => {
+    const stay = {
+      stayId: randomUUID(),
+      generation: 1,
+      target: {
+        guildId: "guild",
+        channelId: "room",
+        actorId: "actor",
+        presenceSessionId: session.record.sessionId,
+        transportKind: "bot",
+      },
+    };
+    const claim = await (await post("/v1/discord/voice-lease", { action: "claim", stay })).json();
+    expect(claim).toMatchObject({ outcome: "acquired" });
+    const finish = { action: "finish", stay, incarnation: claim.incarnation, reason };
+    expect((await post("/v1/discord/voice-lease", finish)).status).toBe(200);
+    // A retried finish of the same stay records nothing new.
+    expect((await post("/v1/discord/voice-lease", finish)).status).toBe(200);
+  };
+  await leave("owner_voice_leave");
+  expect(notices).toEqual([]);
+  await leave("discord_gateway_left");
+  expect(notices).toHaveLength(1);
+  expect(notices[0]?.[0]).toBe("room:discord_voice:guild:room");
+  expect(notices[0]?.[1]).toMatch(/dropped from Discord voice channel room \(discord_gateway_left\)/u);
+  expect(notices[0]?.[1]).toContain("check voice presence before saying you can hear anyone");
+});
+
 it("rechecks actual presence after suspended captain grant validation before queue wake", async () => {
   vi.useFakeTimers();
   let release!: (allowed: boolean) => void;

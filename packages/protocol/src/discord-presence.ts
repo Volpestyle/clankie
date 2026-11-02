@@ -544,8 +544,17 @@ export const DiscordVoicePresenceResultSchema = z.discriminatedUnion("action", [
     .object({
       action: z.literal("joined"),
       channelId: z.string().min(1),
-      /** Whether the authenticated speaker can be heard under the room's current consent policy. */
+      /**
+       * Whether the room's consent policy permits hearing the authenticated
+       * speaker. A policy answer, not proof that anything is being received.
+       */
       actorCanBeHeard: z.boolean(),
+      /**
+       * Whether he is receiving voice now: the voice transport is up and at
+       * least one person in the channel can be heard. Absent from a body
+       * released before it (#371).
+       */
+      capturing: z.boolean().optional(),
       /** Whether exact consented speech is retained in the private local development log. */
       transcriptLoggingEnabled: z.boolean(),
     })

@@ -325,8 +325,15 @@ export class BodyVoiceStays {
       : renewed;
   }
 
-  /** Only the authenticated body's observed gateway-leave callback invokes this, never a caller boolean. */
-  public finish(stay: BodyVoiceStay, incarnation: string): BodyLeaseResult {
+  /**
+   * Only the authenticated body's observed gateway-leave callback invokes this, never a caller boolean.
+   * `onFinished` hears the conversation that joined, once, when this call records the stay's end.
+   */
+  public finish(
+    stay: BodyVoiceStay,
+    incarnation: string,
+    onFinished?: (conversationId: string) => void,
+  ): BodyLeaseResult {
     if (this.unavailable) return refused("store_unavailable");
     const record = this.state.stays[stay.stayId];
     if (record === undefined || !sameStay(record.stay, stay) || record.reference.token !== incarnation)
@@ -343,6 +350,7 @@ export class BodyVoiceStays {
     // Persist the observed termination before freeing any registry ownership.
     record.finished = true;
     this.save();
+    onFinished?.(record.reference.conversationId);
     // On restart only this exact persisted stay's gateway termination can reconcile the rotated claim.
     if (current.token === record.reference.token) this.store.finish(current, record.operationId, "settled");
     // Every persisted stay must terminate, including all pins lost from process memory on restart.
