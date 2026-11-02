@@ -7,7 +7,7 @@ import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./del
 import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-questions.ts";
 import { openCodexSocket } from "./codex-app-server.ts";
 import { channelBody } from "./claude-worker-seat.ts";
-import type { ExternalCodexControl } from "./external-codex-control.ts";
+import { codexSocketControl, type ExternalCodexControl } from "./external-codex-control.ts";
 import type { HarnessSeatAdapter, SeatControl, SeatEvent } from "@clankie/agent-hosts";
 import { basename } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -111,7 +111,7 @@ export function createFleetSeatControl(
     };
   };
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
-    const fleet = splitFleetQualified(agent.paneId)?.fleet;
+    const fleet = codexFleet(agent.paneId);
     const available = fleet === undefined ? adapters : remoteAdapters?.(fleet);
     const adapter =
       available?.get(agent.agent) ?? available?.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
@@ -134,8 +134,7 @@ export function createFleetSeatControl(
       return control.ref.harness === "codex" ? guardedCodexQuestions(control, questionFence) : control;
     // A service restart loses the launch adapter's heap, not the native worker.
     // Reconnect only to its observed dedicated socket, never an account daemon.
-    if (agent.agent !== "codex" || splitFleetQualified(agent.paneId) || !runner.paneProcesses)
-      return undefined;
+    if (agent.agent !== "codex" || codexFleet(agent.paneId) || !runner.paneProcesses) return undefined;
     const sessionId = nativeSessionId(agent);
     if (!sessionId) return undefined;
     const processes = await runner.paneProcesses(agent.paneId);
@@ -181,7 +180,7 @@ export function createFleetSeatControl(
         state === "live" ? ["steer", "queue"] : state === "next-turn-only" ? ["queue"] : [];
       result.nextTurnOnly = state === "next-turn-only";
     } else if (agent.agent === "codex") {
-      const fleet = splitFleetQualified(agent.paneId)?.fleet;
+      const fleet = codexFleet(agent.paneId);
       if (fleet !== undefined) {
         if (agent.session.kind === "id" && remoteCodexQueue && !result.deliveryModes.includes("queue"))
           result.deliveryModes.push("queue");
@@ -191,7 +190,10 @@ export function createFleetSeatControl(
           !result.deliveryModes.includes("steer")
         )
           result.deliveryModes.push("steer");
-      } else if (runner.paneProcesses && runner.openFiles && runner.codexQueue) {
+      } else if (
+        runner.paneProcesses &&
+        ((runner.openFiles && runner.codexQueue) || agent.paneId.startsWith(`${HERDR_CORE_FLEET}/`))
+      ) {
         const process = codexProcess(await runner.paneProcesses(agent.paneId).catch(() => []));
         // The roster already has the exact native session (including rollout
         // paths). Do not rediscover it with a process-wide lsof for every seat.
@@ -205,7 +207,7 @@ export function createFleetSeatControl(
               : undefined;
         const files =
           process && (!displayOnly || expected === undefined)
-            ? await runner.openFiles(process.pid).catch(() => "")
+            ? ((await runner.openFiles?.(process.pid).catch(() => "")) ?? "")
             : "";
         const session = resolveCodexSessionId(process ? [process] : [], files, expected) ?? expected;
         if (session && (expected === undefined || session === expected)) {
@@ -272,7 +274,7 @@ export function createFleetSeatControl(
     authorized?: (() => Promise<boolean>) & CurrentCheck,
     delivery?: "steer" | "queue",
   ): Promise<FleetSeatDelivery | undefined> => {
-    const remote = splitFleetQualified(agent.paneId)?.fleet;
+    const remote = codexFleet(agent.paneId);
     if (remote !== undefined) {
       // That machine's Herdr reports the session; its own Codex queues the message.
       if (remoteCodexQueue === undefined || agent.session?.kind !== "id") return undefined;
@@ -312,8 +314,10 @@ export function createFleetSeatControl(
           : { outcome: "unconfirmed", detail: String(error) };
       }
     }
+    const desktop = agent.paneId.startsWith(`${HERDR_CORE_FLEET}/`);
     const { paneProcesses, openFiles, codexQueue } = runner;
-    if (paneProcesses === undefined || openFiles === undefined || codexQueue === undefined) return undefined;
+    if (paneProcesses === undefined || (!desktop && (openFiles === undefined || codexQueue === undefined)))
+      return undefined;
     let sessionId = agent.session?.kind === "id" ? agent.session.value : undefined;
     let home: string | undefined;
     // Until argv is observed, the pane might point at a different server.
@@ -323,7 +327,7 @@ export function createFleetSeatControl(
       const process = codexProcess(processes);
       if (process !== undefined) {
         endpoint = codexControlEndpoint(process);
-        const files = await openFiles(process.pid);
+        const files = (await openFiles?.(process.pid)) ?? "";
         const resolved = resolveCodexSessionId(processes, files, sessionId);
         if (sessionId !== undefined && resolved !== undefined && sessionId !== resolved)
           return {
@@ -340,6 +344,30 @@ export function createFleetSeatControl(
     if (authorized && !(await authorized())) return refused();
     begin();
     try {
+      if (desktop) {
+        // The desktop fleet is on this machine. Reattach to its observed dedicated
+        // server after losing the launch adapter's heap; never route it through SSH.
+        if (typeof endpoint !== "string")
+          return { outcome: "undelivered", detail: "Desktop Codex socket is unavailable; nothing was sent." };
+        const selectedEndpoint = endpoint;
+        const check = withCurrent(async () => {
+          if (authorized && !(await authorized())) return false;
+          const fresh = await runner.resolveTerminal(agent.terminalId);
+          const observed = codexProcess(await paneProcesses(agent.paneId));
+          return (
+            fresh?.paneId === agent.paneId &&
+            nativeSessionId(fresh) === sessionId &&
+            codexControlEndpoint(observed) === selectedEndpoint
+          );
+        }, currentOf(authorized));
+        const connect = () => openCodexSocket(`ws+unix://${selectedEndpoint.slice(7)}:/`);
+        if (delivery !== "queue") {
+          const steered = await codexSocketControl(connect)(sessionId, text, undefined, undefined, check);
+          if (steered !== undefined) return steered;
+          if (delivery === "steer") return modeUnavailable("steer");
+        }
+        return await codexSocketControl(connect, 5000, "queue")(sessionId, text, undefined, undefined, check);
+      }
       const native =
         delivery === "queue" || endpoint === null
           ? undefined
@@ -353,8 +381,8 @@ export function createFleetSeatControl(
         return { outcome: "undelivered", detail: "Codex endpoint could not be observed; no queue was sent." };
       const queuedResult =
         endpoint === undefined && authorized === undefined
-          ? await codexQueue(sessionId, text, home)
-          : await codexQueue(sessionId, text, home, endpoint, authorized);
+          ? await codexQueue!(sessionId, text, home)
+          : await codexQueue!(sessionId, text, home, endpoint, authorized);
       if (typeof queuedResult === "object") return queuedResult;
       if (queuedResult) return queued();
       return {
@@ -1411,4 +1439,10 @@ function refused(): FleetSeatDelivery {
     deliveryStage: "rejected",
     detail: "Peer authority or native binding changed before dispatch; nothing was sent.",
   };
+}
+
+/** Desktop terminals are local despite their fleet-qualified identity. */
+function codexFleet(paneId: string): string | undefined {
+  const fleet = splitFleetQualified(paneId)?.fleet;
+  return fleet === HERDR_CORE_FLEET ? undefined : fleet;
 }
