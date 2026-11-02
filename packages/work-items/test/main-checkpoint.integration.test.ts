@@ -20,7 +20,7 @@ it("resolves the actual first main merge across a parallel main commit and holds
     runUrl: f.runUrl,
     failingJobs: ["landing", "checkpoint", "mac"],
   });
-  for (const link of ["sha", "url", "comment"] as const) {
+  for (const link of ["sha-jobs", "url", "comment"] as const) {
     f.link(link);
     expect(await f.check()).toBeUndefined();
   }
@@ -107,5 +107,56 @@ it("caches rate-limited reads as unknown, then retries when the cache expires", 
   expect(f.requests).toHaveLength(reads);
   f.advance();
   f.mode("green");
+  expect(await f.check()).toBeUndefined();
+});
+
+it.each(["sha", "sha-comment", "sha-partial"] as const)(
+  "keeps red held when %s evidence does not account for all failing jobs",
+  async (link) => {
+    const f = await fixture();
+    f.link(link);
+    expect(await f.check()).toMatchObject({ reason: "main_red", runUrl: f.runUrl });
+  },
+);
+it.each(["red-descendant", "green-descendant-red-own"])(
+  "uses the merge's own red result despite %s and a bug for the descendant",
+  async (mode) => {
+    const f = await fixture();
+    f.mode(mode);
+    f.link("descendant-url");
+    expect(await f.check()).toMatchObject({ reason: "main_red", runUrl: f.runUrl });
+  },
+);
+it("keeps the merge's own completed green result when a later checkpoint is red", async () => {
+  const f = await fixture();
+  f.mode("red-descendant-green-own");
+  expect(await f.check()).toBeUndefined();
+});
+it("does not substitute a green descendant for a running own checkpoint", async () => {
+  const f = await fixture();
+  f.mode("green-descendant-running-own");
+  expect(await f.check()).toMatchObject({ reason: "main_pending", runUrl: f.runUrl });
+});
+it("does not substitute a descendant when the merge's run is absent", async () => {
+  const f = await fixture();
+  f.mode("missing-own");
+  expect(await f.check()).toMatchObject({ reason: "main_unknown" });
+});
+it("requires the descendant's bug when a cancelled own run uses red descendant coverage", async () => {
+  const f = await fixture();
+  f.mode("red-descendant-cancelled-own");
+  f.link("url");
+  expect(await f.check()).toMatchObject({ reason: "main_red", runUrl: f.runUrl.replace("280", "281") });
+  f.link("sha-jobs");
+  expect(await f.check()).toMatchObject({ reason: "main_red" });
+  f.link("descendant-url");
+  expect(await f.check()).toBeUndefined();
+});
+
+it("uses the newest finished descendant after cancellation even when a newer run is running", async () => {
+  const f = await fixture();
+  f.mode("running-descendant-red-finished-cancelled-own");
+  expect(await f.check()).toMatchObject({ reason: "main_red", runUrl: f.runUrl.replace("280", "281") });
+  f.link("descendant-url");
   expect(await f.check()).toBeUndefined();
 });

@@ -105,13 +105,17 @@ comparison for test failures. Building that offer is a follow-up.
 Merging and continuing work keep the policy above. Retiring a merged job's
 worker or marking its issue Done requires positive post-merge evidence: the
 `landing`, `checkpoint` and `mac` jobs all completed successfully, or an issue
-in that repository names the failing run URL or merge SHA. Issue state does not
+or comment in that repository names the failing run URL, or that run’s SHA
+together with all failing job names (#297). A SHA mentioned only as a base does
+not account for a failure. Issue state does not
 matter; the filed bug carries the follow-up. This does not require fixing main
 before other changes can proceed.
 
 The merge is the first commit on main's first-parent history containing the
-worker's landed HEAD. A completed green push run on any descendant main commit
-also covers it: cancel-in-progress can prevent the merge's own run finishing.
+worker's landed HEAD. Its own checkpoint is authoritative, even when a newer
+descendant finishes. Only a cancelled own run permits using the newest
+finished, non-cancelled descendant checkpoint; a red descendant needs evidence for that
+descendant’s run, not the original merge.
 Cancelled runs do not count as results. Running, missing or unreachable evidence
 holds close-out; PR checks and unrelated jobs cannot supply main's proof.
 

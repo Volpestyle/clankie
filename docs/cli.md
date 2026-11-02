@@ -8555,8 +8555,10 @@ conversation MCP API (`/v1/mcp?conversationId=ID`). Use a bare local
 pane or a fleet-qualified remote address. Only the current owning lead can
 retire its hire; the native output and nonempty saved report are kept first.
 For merged GitHub work, `landing`, `checkpoint` and `mac` must complete green on
-the first main commit containing its landed HEAD or a descendant, or a repository
-issue must name the red run URL or merge SHA. Cancelled runs supply no result.
+the first main commit containing its landed HEAD, or a repository issue or
+comment must name the red run URL, or that run’s SHA together with all failing
+job names. Only a cancelled own run permits descendant coverage. Cancelled runs
+supply no result.
 `main_red`, `main_pending` and `main_unknown` hold close-out and report the commit,
 run URL and failing jobs when available. File and link a red-run bug before
 retrying. This applies to automatic tidy, connector `close_agent`, and lead Done
