@@ -10,6 +10,7 @@ import {
   KeyPressSchema,
   LEAD_WAKE_TEXT_MAX,
   LeadWakeNameSchema,
+  WorkerNotifySchema,
   LeadWakeResultSchema,
   SeatImageResultSchema,
 } from "./connector.ts";
@@ -833,6 +834,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      notify: WorkerNotifySchema.optional(),
+      /** Relay-authenticated hiring app; callers cannot stamp themselves. */
+      appDeviceId: z.string().min(1).max(256).optional(),
       machine: z.string().trim().min(1).max(200).optional(),
       workingDirectory: z.string().trim().min(1).max(OPERATOR_SEAT_DIRECTORY_MAX).optional(),
       harness: z.enum(START_AGENT_HARNESSES).optional(),
@@ -909,6 +913,16 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("worker_reports"),
       schemaVersion: z.literal(1),
       conversationId: OperatorConversationIdSchema,
+      agent: z.string().min(1).max(512).optional(),
+      newest: z.boolean().optional(),
+      ref: z
+        .string()
+        .min(1)
+        .max(128)
+        .regex(/^[A-Za-z0-9._:-]+$/u)
+        .optional(),
+      waitSeconds: z.number().min(0).max(45).optional(),
+      appDeviceId: z.string().min(1).max(256).optional(),
       limit: z.number().int().min(1).max(100).optional(),
       deliveryIds: z.array(z.string().uuid()).min(1).max(100).optional(),
     })
@@ -1602,6 +1616,9 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      notify: WorkerNotifySchema.optional(),
+      /** Relay-authenticated hiring app; callers cannot stamp themselves. */
+      appDeviceId: z.string().min(1).max(256).optional(),
       /** `places` lists where it can start; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
       status: z.enum(["places", "started", "refused"]),
       places: z.array(StartAgentPlaceSchema).max(256),

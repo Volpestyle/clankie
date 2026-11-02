@@ -2147,6 +2147,20 @@ forgets one, and `wake send LEAD TEXT` hands the lead a job as you, exiting 1
 unless its webhook took it. Connected apps send one with the connector's
 `wake_lead` tool; the lead answers on the notes board.
 
+Connected hires may opt into that webhook with `start_agent`'s
+`notify: {lead: "duet", ref: "thread-id"}`. Worker reports and settled watches
+send `kind: "worker_report"`, containing only service-owned ids and event facts,
+never worker text. The first event sends immediately; later events batch over
+120 seconds per lead. Read the durable report with `read_reports`, using its
+`thread` and `agent` or hire `ref`. Connected reads include only the authenticated
+app's hires, newest first by default. `waitSeconds` (0–45) waits without polling
+for a matching unread report, returning empty at the deadline; a positive wait
+requires `agent` or `ref`. Keep your thread's ids/ref: OAuth identifies the app,
+whose threads share a device. Claude Code routine fire starts a fresh session
+and cannot resume the hiring Duet thread; the bounded read can wait in that
+thread itself. Anthropic routine fire webhooks
+receive `anthropic-version: 2026-10-21`.
+
 ```bash
 printf '%s\n%s\n' "$WEBHOOK_URL" "$WEBHOOK_KEY" | clankie connector wake set grok
 clankie connector wake send grok "Reply on the notes board with one line."

@@ -79,7 +79,11 @@ export interface ConversationAuthority {
    * Host-verified connector start (ADR 0301): the owner-granted place, not the leading
    * conversation, decides the project. Set only by the service's own start_agent.
    */
-  readonly connectorPlace?: { readonly projectId: string; readonly deviceId?: string };
+  readonly connectorPlace?: {
+    readonly projectId: string;
+    readonly deviceId?: string;
+    readonly notify?: import("@clankie/protocol/connector").WorkerNotify;
+  };
   readonly owner: ConversationOwner;
   readonly current: () => boolean;
   readonly authorize: () => Promise<boolean>;
@@ -108,6 +112,9 @@ export function captureConversationAuthority(
       ? {
           connectorPlace: Object.freeze({
             projectId: source.connectorPlace.projectId,
+            ...(source.connectorPlace.notify === undefined
+              ? {}
+              : { notify: Object.freeze({ ...source.connectorPlace.notify }) }),
             ...(source.connectorPlace.deviceId === undefined
               ? {}
               : { deviceId: source.connectorPlace.deviceId }),

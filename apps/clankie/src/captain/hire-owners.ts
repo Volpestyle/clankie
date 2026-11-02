@@ -1,3 +1,4 @@
+import { WorkerNotifySchema } from "@clankie/protocol/connector";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -16,7 +17,13 @@ import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-
 /** Who asked for a hire (ADR 0321). Absent on a hire Clankie chose himself, and on older records. */
 const HireStarterSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("owner") }).strict(),
-  z.object({ kind: z.literal("app"), deviceId: z.string().min(1).max(256) }).strict(),
+  z
+    .object({
+      kind: z.literal("app"),
+      deviceId: z.string().min(1).max(256),
+      notify: WorkerNotifySchema.optional(),
+    })
+    .strict(),
 ]);
 export type HireStarter = z.infer<typeof HireStarterSchema>;
 const RecordSchema = z

@@ -755,10 +755,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         });
       }
     }
-    if (parsed.success && parsed.data.op === "close_seat" && parsed.data.appDeviceId !== undefined) {
-      // A connected app closing an agent arrives only through the relay's captain bearer,
-      // stamped with the connector device it authenticated. The service then closes only an
-      // idle hire that Clankie or an app started, and names the app in its log.
+    if (
+      parsed.success &&
+      (parsed.data.op === "close_seat" ||
+        parsed.data.op === "start_agent" ||
+        parsed.data.op === "worker_reports") &&
+      parsed.data.appDeviceId !== undefined
+    ) {
+      // The hiring/closing app arrives only through the relay's captain bearer,
+      // stamped with the active connector device it authenticated.
       const deviceId = parsed.data.appDeviceId;
       const relay = captain !== undefined && captain !== "unavailable" && captain.steerSourceLane === "api";
       const record = ctx.devices.get(deviceId);
@@ -1059,7 +1064,13 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         }
       }
       try {
-        return context.json(await ctx.dependencies.captain.serveOperatorConversation(parsed.data, owner));
+        return context.json(
+          await ctx.dependencies.captain.serveOperatorConversation(
+            parsed.data,
+            owner,
+            parsed.data.op === "worker_reports" ? context.req.raw.signal : undefined,
+          ),
+        );
       } catch (error) {
         if (error instanceof Error && error.message === "goal_owner_required")
           return context.json({ error: "goal_owner_required" }, 403);
@@ -1351,11 +1362,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         await ctx.dependencies.captain.serveOperatorConversation(
           parsed.data,
           roleAuthority,
-          parsed.data.op === "tail" ? context.req.raw.signal : undefined,
+          parsed.data.op === "tail" || parsed.data.op === "worker_reports"
+            ? context.req.raw.signal
+            : undefined,
         ),
       );
     } catch (error) {
-      if (parsed.data.op === "tail" && context.req.raw.signal.aborted)
+      if (
+        (parsed.data.op === "tail" || parsed.data.op === "worker_reports") &&
+        context.req.raw.signal.aborted
+      )
         return new Response(null, { status: 499 });
       if (error instanceof Error && error.message === "goal_owner_required")
         return context.json({ error: "goal_owner_required" }, 403);

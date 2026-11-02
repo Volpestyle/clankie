@@ -128,6 +128,7 @@ export interface SessionPlace {
 }
 
 export interface SessionStartRequest {
+  readonly notify?: import("@clankie/protocol/connector").WorkerNotify;
   readonly machine?: string;
   readonly workingDirectory?: string;
   readonly harness?: "claude" | "codex";

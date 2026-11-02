@@ -301,6 +301,7 @@ export class ConversationStore {
   public reportBoundary?: (conversationId: string, text: string, at: string) => void;
   /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
   public onInboundReportChange?: () => void;
+  private readonly inboundReportListeners = new Set<() => void>();
   /**
    * How long a routine worker report may wait for this conversation's next
    * round, or undefined to deliver it now (VUH-2274). The host answers from the
@@ -2182,7 +2183,7 @@ export class ConversationStore {
   /** Retained reports survive event trimming, restart and a vanished worker pane. */
   public inboundReports(
     conversationId?: string,
-    options: { includeRead?: boolean; acceptedAfterMs?: number } = {},
+    options: Parameters<typeof inboundReports>[2] = {},
   ): InboundReport[] {
     return inboundReports(this, conversationId, options);
   }
@@ -2204,9 +2205,63 @@ export class ConversationStore {
   /** Offering full, bounded payloads does not mark them read. */
   public readInboundReports(
     conversationId: string,
-    options: { limit?: number | undefined; deliveryIds?: readonly string[] | undefined } = {},
+    options: Parameters<typeof readInboundReports>[2] = {},
   ): WorkerReportPage {
     return readInboundReports(this, conversationId, options);
+  }
+
+  /** Wait without polling; durable admission wakes only matching unread report queries. */
+  public waitForInboundReports(
+    conversationId: string,
+    options: Parameters<ConversationStore["readInboundReports"]>[1],
+    waitSeconds: number,
+    signal?: AbortSignal,
+  ): Promise<WorkerReportPage> {
+    const stop =
+      signal === undefined ? this.tailShutdown.signal : AbortSignal.any([signal, this.tailShutdown.signal]);
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.inboundReportListeners.delete(changed);
+        stop.removeEventListener("abort", aborted);
+      };
+      const aborted = () => {
+        cleanup();
+        reject(stop.reason);
+      };
+      let checking = false;
+      const changed = () => {
+        if (checking) return;
+        checking = true;
+        try {
+          const page = this.readInboundReports(conversationId, options);
+          if (page.items.length) {
+            cleanup();
+            resolve(page);
+          }
+        } catch (error) {
+          cleanup();
+          reject(error);
+        } finally {
+          checking = false;
+        }
+      };
+      const timer = setTimeout(
+        () => {
+          cleanup();
+          try {
+            resolve(this.readInboundReports(conversationId, options));
+          } catch (error) {
+            reject(error);
+          }
+        },
+        Math.max(0, Math.min(45, waitSeconds)) * 1000,
+      );
+      this.inboundReportListeners.add(changed);
+      stop.addEventListener("abort", aborted, { once: true });
+      if (stop.aborted) aborted();
+      else changed();
+    });
   }
 
   /** An authenticated recipient explicitly acknowledges only reports it was offered. */

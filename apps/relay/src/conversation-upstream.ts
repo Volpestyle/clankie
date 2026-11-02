@@ -200,7 +200,9 @@ export function createDeviceConversationDispatch(options: {
 export const START_AGENT_DISPATCH_MS = 120_000;
 
 function dispatchSignal(signal?: AbortSignal, op?: string): AbortSignal {
-  const deadline = AbortSignal.timeout(op === "start_agent" ? START_AGENT_DISPATCH_MS : 30_000);
+  const deadline = AbortSignal.timeout(
+    op === "start_agent" ? START_AGENT_DISPATCH_MS : op === "worker_reports" ? 55_000 : 30_000,
+  );
   return signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
 }
 

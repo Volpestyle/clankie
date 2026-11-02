@@ -875,7 +875,7 @@ describe("Claude connector MCP endpoint", () => {
     });
     // Listing asks the service for places only: no machine, no directory, nothing to start.
     expect(relay.seen.filter((request) => request.op === "start_agent").slice(startsBefore)).toEqual([
-      { op: "start_agent", schemaVersion: 1 },
+      { op: "start_agent", schemaVersion: 1, appDeviceId: connectorDevice.deviceId },
     ]);
     const started = JSON.parse(
       textOf(
@@ -897,6 +897,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
       op: "start_agent",
       schemaVersion: 1,
+      appDeviceId: connectorDevice.deviceId,
       machine: "volpe@pc1",
       workingDirectory: "C:\\code\\kh2",
       harness: "codex",
@@ -915,6 +916,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
       op: "start_agent",
       schemaVersion: 1,
+      appDeviceId: connectorDevice.deviceId,
       machine: "volpe@pc1",
       workingDirectory: "C:\\code\\kh2",
       harness: "claude",
@@ -943,6 +945,7 @@ describe("Claude connector MCP endpoint", () => {
     expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
       op: "start_agent",
       schemaVersion: 1,
+      appDeviceId: connectorDevice.deviceId,
       machine: "volpe@pc1",
       workingDirectory: "C:\\code\\kh2",
       harness: "codex",

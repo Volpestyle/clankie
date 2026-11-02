@@ -26,6 +26,25 @@ it; none takes precedence over another.
   receipt when recorded, pane when observed, age and owner recovery commands.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
   place before retrying; a lost answer can leave an agent running.
+- **Hear your workers' reports.** Store a wake webhook once with
+  `clankie connector wake set duet` (or your lead's name); Claude Code routine
+  triggers need their API fire URL and key. Include
+  `notify: {lead: "duet", ref: "your-thread-id"}` in `start_agent`. The reference
+  is 1–128 letters, digits, dots, underscores, colons or dashes. Keep the returned
+  agent id with your thread. Reports and settled watches send kind `worker_report`
+  immediately, with subsequent events batched at the end of a 120-second window
+  per lead. Wake text contains only agent/ref/event/time and a read hint, never
+  worker text. Read `read_reports` with `thread` from `read_inbox`, your `agent`,
+  and `newest: true`; acknowledge only the returned `ackDeliveryIds` after acting.
+  Reads include only your app's hires, newest first by default. Your app's threads
+  share a device, so keep your own agent ids or `ref`. To wait cheaply in the
+  hiring thread, call `read_reports` with its `thread`, your `agent` or `ref`,
+  and `waitSeconds: 45`. It returns when a matching unread report arrives, or
+  empty at the deadline; reading never acknowledges it. A Claude Code routine
+  fire starts a fresh session and cannot resume the hiring Duet thread; use
+  this bounded wait when that thread needs the answer directly.
+  Wakes are best effort: the durable inbox remains readable after a failed fire.
+  A successful fire proves webhook acceptance, not that your thread read it.
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and

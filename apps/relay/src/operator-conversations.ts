@@ -743,10 +743,15 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
-    // A connected app closing an agent is named too; the service then closes only an idle
-    // hire that Clankie or an app started. Other devices close as the owner, unstamped.
-    if (serviceRequest.op === "close_seat" && serviceRequest.appDeviceId !== undefined) {
-      writeJson(response, 400, { error: "close_seat_app_is_stamped" });
+    // Name the authenticated hiring/closing app; it cannot choose its own device stamp.
+    // Other devices use their own owner authority, unstamped.
+    if (
+      (serviceRequest.op === "close_seat" ||
+        serviceRequest.op === "start_agent" ||
+        serviceRequest.op === "worker_reports") &&
+      serviceRequest.appDeviceId !== undefined
+    ) {
+      writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
       return true;
     }
     if (serviceRequest.op === "issue_write") {
@@ -880,7 +885,12 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "lead_wake")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
-    if (serviceRequest.op === "close_seat" && currentAuthorization.device.scope === "connector")
+    if (
+      (serviceRequest.op === "close_seat" ||
+        serviceRequest.op === "start_agent" ||
+        serviceRequest.op === "worker_reports") &&
+      currentAuthorization.device.scope === "connector"
+    )
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.
@@ -1047,7 +1057,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             )
           : serviceRequest.op === "tail"
             ? readTail(tails, serviceRequest, abort.signal)
-            : serviceRequest.op === "send" || serviceRequest.op === "presence"
+            : serviceRequest.op === "send" ||
+                serviceRequest.op === "presence" ||
+                serviceRequest.op === "worker_reports"
               ? options.dispatch(serviceRequest, abort.signal)
               : options.dispatch(serviceRequest);
       const result =
