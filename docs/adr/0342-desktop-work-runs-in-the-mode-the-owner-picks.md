@@ -131,6 +131,18 @@ manager's own approval prompt is the owner's consent; Clankie stores nothing.
 In `vm` mode the vault is the only way, because the guest starts with no
 sign-ins and should not get the owner's whole password manager.
 
+**A connected app's own browser, desktop or vault comes first.** James's
+rule: a connected lead such as Grok Bot or Muse may already give its agents a
+sandboxed browser or desktop and its own sign-in prompts, and Clankie should
+not build a second one beside it. So a connected app may declare, when it
+connects, which of `browser`, `desktop` and `credentials` it supplies. When the
+lead behind a hire declares one, Clankie leaves that part to the lead: the
+hire's brief says to use the lead's tool, `request_credential` is not offered,
+and the desktop mode is not consulted for that part. What the lead does not
+supply falls back to Clankie's own modes and vault. `clankie doctor` names
+which app supplies what on each machine. A connected app never gets a stored
+secret from Clankie's vault; the two vaults stay separate.
+
 ## Consequences
 
 - The screen takeover of 2026-11-01 has nowhere to happen by default: a new
@@ -147,6 +159,8 @@ sign-ins and should not get the owner's whole password manager.
 - The vault card is a new place a secret is typed. It inherits the doorway's
   encryption and the broker's Keychain storage, and adds an exact-origin check
   that the old "type it into chat" path never had.
+- Connected apps that already solve this keep solving it; Clankie's modes and
+  vault are the fallback for owners whose lead has neither.
 - What this ADR does not do: no hosted desktop (ADR 0300), no shared desktop
   between owners, no automatic account creation (ADR 0127 still holds), and no
   driving the owner's foreground windows in any mode.
