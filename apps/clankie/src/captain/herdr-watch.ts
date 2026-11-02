@@ -2196,6 +2196,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const [status, reason, stopped] = await Promise.all([
           control.status().catch(() => undefined),
           control.statusReason?.().catch(() => undefined),
+          // allow-swallowed-rejection -- an unreadable stop reason leaves the seat's own status shown.
           control.stopped?.().catch(() => undefined),
         ]);
         // Its runtime ended; the view left in the pane can still look busy.
@@ -2425,6 +2426,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   /** Why a hire's own runtime ended under its still-open pane; undefined while it runs. */
   public async stoppedReason(agent: HerdrAgentSnapshot): Promise<string | undefined> {
+    // allow-swallowed-rejection -- an unreadable stop reason only omits the read note; the pane is still read.
     return (await this.seatControl.attach(agent))?.stopped?.().catch(() => undefined);
   }
 
