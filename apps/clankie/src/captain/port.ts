@@ -185,6 +185,8 @@ export interface CaptainPort {
     /** Say who started each agent (ADR 0321). */
     includeStarters?: boolean;
   }): Promise<import("@clankie/protocol/fleet-roster").FleetRosterSnapshot>;
+  /** Issues live seats hold now (#318): what work reads call in progress. */
+  issueHolders?(): readonly import("../work-item-holders.ts").IssueHolder[];
   /** Paired devices' own names, so a hire a connected app asked for can say which (ADR 0321). */
   setDeviceNames?(lookup: (deviceId: string) => string | undefined): void;
   fleetRosterAction?(
