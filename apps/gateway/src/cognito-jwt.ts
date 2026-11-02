@@ -10,7 +10,7 @@ const AccessClaimsSchema = z
   .object({
     client_id: z.string().min(1).max(128),
     exp: z.number().int().positive(),
-    iat: z.number().int().positive().optional(),
+    iat: z.number().int().positive(),
     iss: z.string().min(1).max(512),
     nbf: z.number().int().positive().optional(),
     sub: z.string().min(1).max(2_048),
@@ -39,6 +39,12 @@ interface CognitoAccessPrincipal {
   readonly groups?: readonly string[];
 }
 
+export class CognitoRevocationUnavailableError extends Error {
+  constructor() {
+    super("Cognito access token revocation check unavailable");
+  }
+}
+
 export type CognitoAccessTokenVerifier = (token: string) => Promise<CognitoAccessPrincipal>;
 
 export function createCognitoAccessTokenVerifier(input: {
@@ -48,6 +54,8 @@ export function createCognitoAccessTokenVerifier(input: {
   readonly clock?: () => number;
   /** Web authorization must observe provider revocation, not just a JWT signature. */
   readonly checkRevocation?: boolean;
+  /** Exact-token status cache; web authorization defaults to no cache. Capped at 30 seconds. */
+  readonly revocationCacheMs?: number;
 }): CognitoAccessTokenVerifier {
   const issuer = requireIssuer(input.issuer);
   if (input.checkRevocation && !/^cognito-idp\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$/u.test(issuer.hostname)) {
@@ -57,6 +65,11 @@ export function createCognitoAccessTokenVerifier(input: {
   if (!/^[A-Za-z0-9_+]{1,128}$/u.test(clientId)) throw new Error("Cognito client id is invalid");
   const fetchImpl = input.fetchImpl ?? fetch;
   const clock = input.clock ?? Date.now;
+  const revocationCacheMs = input.revocationCacheMs ?? 0;
+  if (!Number.isFinite(revocationCacheMs) || revocationCacheMs < 0 || revocationCacheMs > 30_000) {
+    throw new Error("Cognito revocation cache must be between 0 and 30000 ms");
+  }
+  const statuses = new Map<string, { until: number; result: Promise<void> }>();
   const jwksUrl = new URL(`${issuer.pathname.replace(/\/$/u, "")}/.well-known/jwks.json`, issuer.origin);
   let cached: { readonly fetchedAt: number; readonly keys: ReadonlyMap<string, KeyObject> } | undefined;
   let loading: Promise<ReadonlyMap<string, KeyObject>> | undefined;
@@ -99,7 +112,10 @@ export function createCognitoAccessTokenVerifier(input: {
       throw new Error("Cognito access token names another issuer or client");
     }
     const nowSeconds = Math.floor(clock() / 1_000);
-    if (claims.exp <= nowSeconds - CLOCK_SKEW_SECONDS) throw new Error("Cognito access token expired");
+    if (claims.exp <= claims.iat || claims.exp - claims.iat > 3600) {
+      throw new Error("Cognito access token lifetime must be at most 3600 seconds");
+    }
+    if (claims.exp <= nowSeconds) throw new Error("Cognito access token expired");
     if (claims.nbf !== undefined && claims.nbf > nowSeconds + CLOCK_SKEW_SECONDS) {
       throw new Error("Cognito access token is not active yet");
     }
@@ -125,30 +141,62 @@ export function createCognitoAccessTokenVerifier(input: {
       ) {
         throw new Error("Cognito access token cannot be checked for revocation");
       }
-      // GetUser authorizes with the access token itself (no IAM credentials).
-      // Do not cache successes: a previously issued JWT must fail after revoke.
-      // Never expose Cognito response bodies or tokens in errors/logs.
-      try {
-        const response = await fetchImpl(new URL("/", issuer.origin), {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-amz-json-1.1",
-            "x-amz-target": "AWSCognitoIdentityProviderService.GetUser",
-          },
-          body: JSON.stringify({ AccessToken: token }),
-          redirect: "error",
-          signal: AbortSignal.timeout(5_000),
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error("refused");
-        const user = z
-          .object({ UserAttributes: z.array(z.object({ Name: z.string(), Value: z.string() })).max(100) })
-          .parse(await response.json());
-        const subjects = user.UserAttributes.filter((attribute) => attribute.Name === "sub");
-        if (subjects.length !== 1 || subjects[0]?.Value !== claims.sub) throw new Error("mismatched subject");
-      } catch {
-        throw new Error("Cognito access token revocation check failed");
+      // GetUser observes Cognito revocation without IAM credentials. Key by the
+      // exact signed token, never origin_jti: tokens in a family can expire at
+      // different times. Hash keys so the cache does not retain raw bearers.
+      const key = createHash("sha256").update(token).digest("hex");
+      const now = clock();
+      for (const [key, status] of statuses) {
+        if (status.until <= now) statuses.delete(key);
       }
+      let status = statuses.get(key);
+      if (status === undefined) {
+        const result = (async () => {
+          let response: Response;
+          try {
+            response = await fetchImpl(new URL("/", issuer.origin), {
+              method: "POST",
+              headers: {
+                "content-type": "application/x-amz-json-1.1",
+                "x-amz-target": "AWSCognitoIdentityProviderService.GetUser",
+              },
+              body: JSON.stringify({ AccessToken: token }),
+              redirect: "error",
+              signal: AbortSignal.timeout(5_000),
+              cache: "no-store",
+            });
+          } catch {
+            throw new CognitoRevocationUnavailableError();
+          }
+          // Only a provider authentication refusal establishes invalidity.
+          // Throttling, outages and malformed responses are unavailability.
+          if (!response.ok) {
+            const error = await response.json().catch(() => undefined);
+            const type = z.object({ __type: z.string() }).safeParse(error);
+            if (
+              response.status === 400 &&
+              type.success &&
+              type.data.__type.split("#").at(-1) === "NotAuthorizedException"
+            ) {
+              throw new Error("Cognito access token revocation check failed");
+            }
+            throw new CognitoRevocationUnavailableError();
+          }
+          const user = z
+            .object({ UserAttributes: z.array(z.object({ Name: z.string(), Value: z.string() })).max(100) })
+            .safeParse(await response.json().catch(() => undefined));
+          if (!user.success) throw new CognitoRevocationUnavailableError();
+          const subjects = user.data.UserAttributes.filter((attribute) => attribute.Name === "sub");
+          if (subjects.length !== 1 || subjects[0]?.Value !== claims.sub) {
+            throw new Error("Cognito access token revocation check failed");
+          }
+        })();
+        status = { until: Math.min(now + revocationCacheMs, claims.exp * 1000), result };
+        // Bound memory as well as cache age. Eviction only causes a fresh check.
+        if (statuses.size >= 10_000) statuses.delete(statuses.keys().next().value!);
+        statuses.set(key, status);
+      }
+      await status.result;
     }
     // Groups are for the fleet's operator dashboard; everyone else ignores them.
     const groups = z.array(z.string().min(1).max(128)).max(100).safeParse(claims["cognito:groups"]);
