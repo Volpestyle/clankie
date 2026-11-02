@@ -152,6 +152,61 @@ nativeIt(
 );
 
 nativeIt(
+  "hiring again at that place settles the original by itself and names the fresh intent new work takes",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "rehire-place");
+      expect(await f.hire(directory)).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      const [, original] = f.receipt();
+      expect(original).toMatchObject({ remoteLaunchCommitted: true, remoteCommandUnsent: true });
+
+      // No operator step: the next hire there reads the PC's census and settles the original.
+      const again = await f.hire(directory);
+      expect(again).toMatchObject({ outcome: "failed", reason: "not_ready" });
+      const detail = again.outcome === "failed" ? (again.detail ?? "") : "";
+      expect(detail).toContain(`Original hire ${original.messageId} is settled`);
+      const next = /freshIntent (\{.*?\})/u.exec(detail)?.[1];
+      expect(JSON.parse(next!)).toMatchObject({ afterReceiptId: original.messageId, id: expect.any(String) });
+      expect(
+        new DeliveryFence(join(f.home, "watches.json.hire-receipts.json")).settlement(original.messageId),
+      ).toMatchObject({ journal: "launch-committed-command-unsent" });
+      // Only the first hire's create ran; the settling hire launched nothing.
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      f.store.close();
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "hiring again where the create landed late leaves the original fenced, unsettled",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "late-rehire");
+      expect(await f.hire(directory)).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      const [, original] = f.receipt();
+      await f.herdrCli(["workspace", "create", "--cwd", directory, "--label", "late", "--no-focus"]);
+      const again = await f.hire(directory);
+      expect(again).toMatchObject({ outcome: "failed" });
+      expect(again.outcome === "failed" ? again.reason : undefined).not.toBe("not_ready");
+      expect(
+        new DeliveryFence(join(f.home, "watches.json.hire-receipts.json")).settlement(original.messageId),
+      ).toBeUndefined();
+      expect(f.creates).toHaveLength(1);
+    } finally {
+      f.store.close();
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
   "a create that landed late leaves a pane in the folder, so the original stays fenced",
   async () => {
     const f = await fixture(PC_SILENT);

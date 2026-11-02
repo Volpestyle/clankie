@@ -3221,13 +3221,26 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await this.retireGoneLocalHires(baseReceiptKey, async () => {
         if (authority !== undefined) await assertConversationAuthority(authority);
       });
+    // On another machine, an earlier hire whose only effect was an unanswered workspace
+    // create launched nothing: its host's census settles it as not launched (#326).
+    else if (!fresh && input.fleet !== undefined)
+      await this.retireUnsentRemoteHires(baseReceiptKey, async () => {
+        if (authority !== undefined) await assertConversationAuthority(authority);
+      });
     const settled = this.hireReceipts.settled(receiptKey);
-    if (settled)
+    if (settled) {
+      // A settled place on another machine takes new work only as a fresh intent (#100).
+      const next = input.fleet === undefined ? undefined : this.hireReceipts.nextFreshIntent(baseReceiptKey);
       return {
         outcome: "failed",
         reason: "not_ready",
-        detail: `Original hire ${settled.messageId} is settled. Its receipt is retained; this original intent cannot dispatch again.`,
+        detail: `Original hire ${settled.messageId} is settled. Its receipt is retained; this original intent cannot dispatch again.${
+          next === undefined
+            ? ""
+            : ` New work here goes as freshIntent {"id":"${next.id}","afterReceiptId":"${next.afterReceiptId}"} with its own brief.`
+        }`,
       };
+    }
     if (fresh && this.hireReceipts.completed(receiptKey))
       return {
         outcome: "failed",
@@ -3962,6 +3975,43 @@ export class HerdrWatchStore implements HerdrWatchPort {
           ...(settled.allocationId === undefined
             ? {}
             : { allocationId: settled.allocationId, allocation: settled.detail }),
+        });
+    }
+  }
+
+  /**
+   * Settles each earlier hire at this place on another machine whose launch was committed
+   * but whose only effect was an unanswered workspace create (#326, amending ADR 0331).
+   * No harness command left this service, so the host's authenticated census decides,
+   * exactly as the operator's `not-launched` does: a pane in the hire's directory (a
+   * create that landed late) keeps it fenced. Never closes, sends or relaunches anything.
+   */
+  private async retireUnsentRemoteHires(baseKey: string, guard: () => Promise<void>): Promise<void> {
+    let unsent: readonly (readonly [string, UncertainReceipt])[];
+    try {
+      unsent = this.hireReceipts
+        .entries()
+        .filter(
+          ([key, receipt]) =>
+            (receipt.hireBaseKey ?? key) === baseKey &&
+            !receipt.freshHire &&
+            receipt.remoteLaunchCommitted === true &&
+            receipt.remoteCommandUnsent === true &&
+            receipt.paneId === undefined &&
+            receipt.sessionId === undefined &&
+            receipt.occupantId === undefined &&
+            !receipt.recoveryRequested &&
+            !this.activeHires.has(key),
+        );
+    } catch {
+      return;
+    }
+    for (const [key, receipt] of unsent) {
+      const settled = await this.settleNativeHireReceipt(receipt.messageId, guard, "not-launched");
+      if (settled.state === "settled-not-launched")
+        console.warn("Settled a remote hire whose workspace create never answered", {
+          receiptId: receipt.messageId,
+          place: key,
         });
     }
   }
