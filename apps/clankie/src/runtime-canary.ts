@@ -18,7 +18,7 @@ import {
   runtimeIdentityMismatch,
   type RuntimeHealthSample,
 } from "./runtime-health-sample.ts";
-import { DeployHoldSchema, RUNTIME_CANARY_HOLDER, type DeployHold } from "@clankie/protocol/integrate";
+import { DeployHoldSchema, RUNTIME_CANARY_HOLDER, type DeployHold } from "@clankie/protocol/deploy-holds";
 
 export const RuntimeCanaryPolicySchema = z
   .strictObject({
@@ -553,7 +553,7 @@ export class RuntimeCanary {
   }
 
   private commands(result: RuntimeUpdateResult): string {
-    return `No automatic rollback. Inspect: clankie update status. Release after review: clankie integrate release ${result.id} --actor Clankie --reason "reviewed runtime health". Roll back as owner: clankie update --ref ${runtimeRollbackRef(result)} --override-holds --reason "rollback failed canary ${result.id}".`;
+    return `No automatic rollback. Inspect: clankie update status. Release after review: clankie update release ${result.id} --actor Clankie --reason "reviewed runtime health". Roll back as owner: clankie update --ref ${runtimeRollbackRef(result)} --override-holds --reason "rollback failed canary ${result.id}".`;
   }
 
   private async tick(): Promise<void> {

@@ -37,7 +37,6 @@ const FleetPolicySchema = z
     notes: z.string().max(4000).optional(),
     tools: z.enum(["connected", "off"]).optional(),
     peerMessages: z.enum(["on", "off"]).optional(),
-    remoteGates: z.enum(["on", "off"]).optional(),
     workerSandbox: z.enum(["on", "off"]).optional(),
     seatHost: z.enum(["auto", "desktop", "herdr"]).optional(),
     leadRestarts: z.enum(["on", "off"]).optional(),

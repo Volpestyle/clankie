@@ -48,6 +48,7 @@ const HandoffSchema = z
     head: z.string(),
     commits: z.array(z.string()),
     /** parked: clean unlanded commits preserved on a local keep/ branch at close (VUH-2802). */
+    // merge_queue receipts came from the retired integrate queue; older history still holds them.
     kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop", "parked"]),
     reference: z.string(),
   })
@@ -193,10 +194,6 @@ export class PaneTidy {
   readonly keeps: PaneKeeps;
   private readonly ports: {
     runner: HerdrWatchRunner;
-    commitHandoffs?(
-      path: string,
-      commits: readonly string[],
-    ): Promise<{ commit: string; requestId: string }[]>;
     reclaimCaches?(
       repository: string,
       path: string | undefined,
@@ -710,11 +707,6 @@ export class PaneTidy {
         });
         const covered = new Set<string>();
         const proof: Handoff[] = [];
-        for (const item of (await this.ports.commitHandoffs?.(work.path, commits).catch(() => [])) ?? []) {
-          if (!commits.includes(item.commit)) continue;
-          covered.add(item.commit);
-          proof.push(receipt("merge_queue", item.requestId, [item.commit]));
-        }
         if (!automatic && covered.size < commits.length) {
           // Remote-tracking refs alone can be stale or locally manufactured. Verify the
           // advertised pushed heads/tags without fetching or mutating the worker's refs.

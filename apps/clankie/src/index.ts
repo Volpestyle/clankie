@@ -58,9 +58,7 @@ import { createRuntimeUpdater } from "../../tui/bin/runtime-updater.ts";
 import { rotateServiceLogs, withServiceLock } from "../../tui/bin/service-supervisor.ts";
 import { RuntimeCanary, RUNTIME_CANARY_HOLDER } from "./runtime-canary.ts";
 import { createRuntimeHealthSampler } from "./runtime-health-sample.ts";
-import { IntegrationQueue, integrationSources } from "./integrate.ts";
 import { FleetProgressObserver } from "./fleet-progress.ts";
-import { gitBundle, placeRemoteGate } from "./integrate-remote.ts";
 import { DeployHolds } from "./deploy-holds.ts";
 import { ViewStore } from "./views.ts";
 import { deployHoldPresence } from "./deploy-hold-presence.ts";
@@ -274,7 +272,6 @@ import { relayExtension } from "./relay-extension.ts";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
-import { integrationSafeUpdates } from "./integration-update.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import {
@@ -891,8 +888,9 @@ const machineJoins = new MachineJoins({
   changed: () => runtimes.machines.invalidate(),
 });
 runtimes.machines.setJoinedProvider(machineJoins);
-const integrationDirectory = join(stateRoot, "integration");
-const deployHolds = new DeployHolds(integrationDirectory, (hold) =>
+// Deploy holds keep the directory the retired integrate queue shared, so existing holds survive.
+const deployHoldDirectory = join(stateRoot, "integration");
+const deployHolds = new DeployHolds(deployHoldDirectory, (hold) =>
   deployHoldPresence(hold, async (fleetId) => {
     if (fleetId !== "default") {
       const fleet = (await runtimes.fleets()).find((f) => f.id === fleetId);
@@ -918,37 +916,6 @@ const stopDeployHoldExpiry = deployHolds.watch(
       receipt.reason,
     ),
   (error) => logger.warn({ event: "deploy_hold.expiry_failed", error }, "Deploy hold expiry sweep failed"),
-);
-const integration = existsSync(join(repoRoot, ".git"))
-  ? new IntegrationQueue({
-      review: async (directory, patchId) => {
-        if (!captain.reviews) throw Error("Review service is unavailable; landing held");
-        return captain.reviews.landing(directory, patchId);
-      },
-      directory: integrationDirectory,
-      holds: deployHolds,
-      deployPending: () => runtimeUpdater?.status().pending !== undefined,
-      notify: (text) => captain.notifyRuntimeHealthAlert(text),
-      governor: () => fleetResources.governor,
-      ...(await integrationSources(repoRoot)),
-      // A saturated Mac may gate on a linked machine's fleet workspace (VUH-2066).
-      placeGate: async (batch, signal) =>
-        placeRemoteGate({
-          batch,
-          ...(signal ? { signal } : {}),
-          settings: await settingsStore.load(),
-          local: fleetResources.status(),
-          fleets: await runtimes.fleets(),
-          stream: (fleet) => runtimes.fleetStream(fleet),
-          bundle: gitBundle,
-        }),
-    })
-  : undefined;
-const stopIntegrationReclamation = integration?.watchReclamation((error) =>
-  logger.warn(
-    { event: "integration.reclamation_unavailable", error },
-    "Integration worktree reclamation skipped",
-  ),
 );
 // Registered remote fleets as of this start (ADR 0184); `clankie restart captain` rereads them.
 const herdrFleets = await runtimes.fleets();
@@ -1318,29 +1285,10 @@ const updateBatchIdle = bodyIdleCheck({
     return working;
   },
 });
-const integrationUpdates =
-  checkoutRuntime && installedUpdater !== undefined
-    ? integrationSafeUpdates({
-        updater: installedUpdater,
-        holds: deployHolds,
-        path: join(process.env.HOME || homedir(), ".clankie", "updates", "integration-wait.json"),
-        onGaveUp: (message) =>
-          void captain
-            .notifyRuntimeHealthAlert(message)
-            .catch((error: unknown) =>
-              logger.warn(
-                { event: "runtime.update.integration_wait", error },
-                "Lead alert was not delivered",
-              ),
-            ),
-        onError: (error) =>
-          logger.warn({ event: "runtime.update.integration_wait", error }, "Runtime update is waiting"),
-      })
-    : undefined;
 const updateBatching =
-  integrationUpdates !== undefined
+  checkoutRuntime && installedUpdater !== undefined
     ? batchRuntimeUpdates({
-        updater: integrationUpdates,
+        updater: installedUpdater,
         path: join(process.env.HOME || homedir(), ".clankie", "updates", "deferred.json"),
         intervalMs:
           parsePositiveInt(process.env.CLANKIE_UPDATE_BATCH_MINUTES, DEFAULT_UPDATE_BATCH_MS / 60_000) *
@@ -1348,9 +1296,8 @@ const updateBatching =
         bootedAt: Date.now() - process.uptime() * 1_000,
         idle: async () => await updateBatchIdle().catch(() => false),
         apply: (ref, authority) =>
-          deployHolds.landing(`runtime-batch:${ref}`, [], () => integrationUpdates.request(ref, authority), {
+          deployHolds.landing(`runtime-batch:${ref}`, [], () => installedUpdater.request(ref, authority), {
             guard: authority.guard,
-            queueIntegration: true,
           }),
         logger,
       })
@@ -1364,7 +1311,6 @@ const scheduledUpdates =
           request: (ref, authority) =>
             deployHolds.landing(`runtime-schedule:${ref}`, [], () => runtimeUpdater.request(ref, authority), {
               guard: authority.guard,
-              queueIntegration: runtimeUpdater.queuesIntegrationWait === true,
             }),
         },
         enabled: scheduledUpdateEnabled,
@@ -1555,17 +1501,11 @@ const captain = createCaptain(
                 `runtime-tool:${ref}`,
                 [],
                 () => runtimeUpdater.request(ref, authority, options),
-                { guard: authority.guard, queueIntegration: runtimeUpdater.queuesIntegrationWait === true },
+                { guard: authority.guard },
               ),
           },
         }),
     deployHolds: () => deployHolds.list(),
-    ...(integration
-      ? {
-          commitHandoffs: (path: string, commits: readonly string[]) =>
-            integration.commitHandoffs(path, commits),
-        }
-      : {}),
     roomObservations,
     conversationRouteAuthorized: (owner) => clankieRef?.conversationBodyRouteAuthorized(owner) ?? false,
     workItems,
@@ -2189,11 +2129,9 @@ operatorCredentialStore.observeHealth?.((health) => {
 });
 
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
-integration?.resume();
 const fleetProgress = new FleetProgressObserver({
   path: join(stateRoot, "fleet-progress-incidents.json"),
   sources: [
-    ...(integration ? [{ prefix: "integration", read: () => integration.progress() }] : []),
     { prefix: "heavy", read: async () => fleetResources.progress() },
     { prefix: "lead", read: () => captain.leadProgress() },
   ],
@@ -2600,7 +2538,6 @@ const clankie = await createClankieApp({
   trackerPosting,
   workerMcp,
   deployHolds,
-  ...(integration === undefined ? {} : { integration }),
   captain,
   fleetLinks,
   inspectFleetHarnesses: async (id: string) => {
@@ -2848,7 +2785,6 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
-  integration?.close();
   // Fence new admissions immediately; retain rejection until the existing drain chain awaits it.
   const admissionsClosed = nativeFixtureAdmissions.close().then(
     () => ({ ok: true as const }),
@@ -2864,7 +2800,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   playAbort.abort(signal);
   hostPower.stop();
   stopDeployHoldExpiry();
-  stopIntegrationReclamation?.();
   void fleetResources
     .close()
     .catch(() =>
@@ -2882,7 +2817,6 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
     localFleetServer === undefined ? undefined : drainHttpServer(localFleetServer);
   scheduledUpdates?.close();
   updateBatching?.close();
-  integrationUpdates?.close();
   clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
   harnessLogins.close();

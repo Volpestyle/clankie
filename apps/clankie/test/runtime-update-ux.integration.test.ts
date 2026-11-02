@@ -11,6 +11,7 @@ import { Hono } from "hono";
 import { afterEach, expect, it } from "vitest";
 import { createBearerAuthenticator } from "../src/app/http-auth.ts";
 import { DeployHolds } from "../src/deploy-holds.ts";
+import { createDeployHoldRoutes } from "../src/deploy-hold-routes.ts";
 import { RuntimeCanary } from "../src/runtime-canary.ts";
 import { createRuntimeHealthSampler } from "../src/runtime-health-sample.ts";
 import { createRuntimeUpdateRoutes } from "../src/runtime-update-routes.ts";
@@ -128,6 +129,18 @@ async function fixture() {
       },
     }),
   );
+  app.route(
+    "/",
+    createDeployHoldRoutes({
+      holds,
+      authorize: async (request) =>
+        granted && (await authenticate(request))
+          ? async () => {
+              if (!granted || !(await authenticate(request))) throw Error("operator_revoked");
+            }
+          : undefined,
+    }),
+  );
   const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }) as Server;
   await new Promise<void>((resolve) => server.once("listening", resolve));
   cleanup.push(async () => {
@@ -224,6 +237,35 @@ it("bulk override requires a reason, authenticates the actual owner and audits e
     "(403)",
   );
   expect((await f.audit()).events).toHaveLength(7);
+});
+
+it("update hold, holds and release place, list and end a timed hold through the owner route", async () => {
+  const f = await fixture();
+  const run = async (args: string[]) => {
+    const stdout = new PassThrough();
+    let text = "";
+    stdout.on("data", (chunk) => (text += String(chunk)));
+    const code = await runUpdateCli(args, { ...f.options, stdout, isTTY: false });
+    return { code, body: JSON.parse(text) as Record<string, unknown> };
+  };
+  await expect(run(["hold", "--holder", "Bram", "--reason", "live test"])).rejects.toThrow("--minutes");
+  const id = randomUUID();
+  const placed = await run(["hold", "--id", id, "--holder", "Bram", "--reason", "live test", "--minutes", "30"]);
+  expect(placed.code).toBe(0);
+  const hold = (await f.holds.list()).find((entry) => entry.id === id)!;
+  expect(hold).toMatchObject({ holder: "Bram", reason: "live test" });
+  expect(Date.parse(hold.expiresAt!) - Date.parse(hold.createdAt)).toBe(30 * 60_000);
+  const listed = await run(["holds"]);
+  expect(listed.code).toBe(0);
+  expect((listed.body.holds as { id: string }[]).map((entry) => entry.id)).toContain(id);
+  const released = await run(["release", id, "--actor", "Clankie (lead)", "--reason", "test finished"]);
+  expect(released.code).toBe(0);
+  expect(released.body.receipts).toMatchObject([
+    { action: "release", actor: "Clankie (lead)", reason: "test finished", hold: { id } },
+  ]);
+  expect((await f.holds.list()).some((entry) => entry.id === id)).toBe(false);
+  f.revoke();
+  await expect(run(["holds"])).rejects.toThrow();
 });
 
 it("piped and explicit JSON report a busy update as unsuccessful without changing its structured result", async () => {

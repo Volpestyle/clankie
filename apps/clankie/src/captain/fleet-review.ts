@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConversationQuestionResult, OperatorFleetSeat } from "@clankie/protocol";
-import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
+import { describeDeployHold, type DeployHold } from "@clankie/protocol/deploy-holds";
 import type { AutoTidyHeld } from "./auto-tidy.ts";
 
 /** Stable evidence for periodic rounds; observation clocks and report reads are not fresh work. */
@@ -95,7 +95,7 @@ export function fleetReviewContext(
     const row = `> ${JSON.stringify({
       deployHold: hold.id,
       summary: describeDeployHold(hold, now).slice(0, 400),
-      release: `clankie integrate release ${hold.id} --actor NAME --reason TEXT`,
+      release: `clankie update release ${hold.id} --actor NAME --reason TEXT`,
     })}`;
     if (row.length + 1 > remaining - 160) break;
     lines.push(row);

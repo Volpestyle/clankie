@@ -3,7 +3,6 @@ import { runEvidenceStorageMenu } from "./evidence-storage-menu.ts";
 import { HOST_SETTINGS_WORDING } from "@clankie/protocol/owner-settings";
 import type { CaptainRouteFetcher } from "./session/operator-conversations.ts";
 import { runCheckoutsCommand } from "./command/checkouts.ts";
-import { runIntegrationCommand } from "./command/integrate.ts";
 import { runDesktopCommand } from "./command/desktop.ts";
 import { runWorkerToolRefreshCommand, runWorkerToolRestartCommand } from "./command/harness.ts";
 import { runClaudeAccountsCommand } from "./command/claude-accounts.ts";
@@ -605,54 +604,6 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
         shell.insertCommandResult(
           "/routines",
           result.ok ? formatRoutinesStatus(result.status) : result.error,
-          result.ok ? "success" : "error",
-        );
-      },
-    },
-    {
-      name: "integrate",
-      aliases: [],
-      description: "Show the landing queue and its last result",
-      argumentHint: "[status [UUID]]",
-      takesArgument: true,
-      availableInSideConversation: true,
-      async run(argument, shell): Promise<void> {
-        const args = splitQuotedArguments(argument);
-        if (args.length && args[0] !== "status")
-          throw Error("Use /integrate status [UUID]; submit with clankie integrate <sha> --push --no-wait");
-        const result = await runIntegrationCommand(args.length ? args : ["status"]);
-        const queue = result.queue;
-        const describe = (batch: import("@clankie/protocol/integrate").IntegrationBatch) => {
-          const progress = batch.progress;
-          const isolation = progress?.isolationChain.length
-            ? ` · isolation ${progress.isolationChain.map((attempt) => `${attempt.memberCount} (${attempt.batchId.slice(0, 8)} ${attempt.state})`).join(" → ")}`
-            : "";
-          const eta =
-            progress && progress.estimateBasis !== "finished"
-              ? progress.estimatedRemainingMs === null
-                ? " · ETA unknown"
-                : ` · ETA ~${Math.max(1, Math.ceil(progress.estimatedRemainingMs / 60_000))}m (recent gates)`
-              : "";
-          const revalidated = batch.repos.flatMap((repo) =>
-            (repo.revalidations ?? [])
-              .filter((r) => r.covered)
-              .map(
-                (r) => ` · ${repo.name} revalidated over ${r.incoming.map((c) => c.slice(0, 9)).join(", ")}`,
-              ),
-          );
-          return `${batch.id} · ${batch.state} · ${(batch.members ?? [batch.request]).map((m) => `${m.id}: ${[...m.core, ...(m.app ?? [])].join(", ")}`).join("; ")}${batch.error ? ` · ${batch.error}` : ""}${batch.cancelled ? ` · cancelled by ${batch.cancelled.actor}: ${batch.cancelled.reason}` : ""}${batch.regateReason ? ` · gating again: ${batch.regateReason}` : ""}${revalidated.join("")}${isolation}${eta}`;
-        };
-        shell.insertCommandResult(
-          "/integrate",
-          queue
-            ? [
-                ...queue.running.map((b) => `Running: ${describe(b)}`),
-                ...queue.waiting.map((b) => `Waiting: ${describe(b)}`),
-                ...(queue.lastResult ? [`Last result: ${describe(queue.lastResult)}`] : []),
-                ...queue.interrupted.map((b) => `Interrupted: ${describe(b)}`),
-                ...(!queue.running.length && !queue.waiting.length ? ["Queue idle."] : []),
-              ].join("\n")
-            : JSON.stringify(result, null, 2),
           result.ok ? "success" : "error",
         );
       },

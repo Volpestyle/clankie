@@ -9,7 +9,6 @@ import {
   CaptainSeatStatusRequestSchema,
   CaptainSeatStartResultSchema,
 } from "../../../packages/protocol/src/captain-seat.ts";
-import { SHIPPING_PATH, ShippingSnapshotSchema } from "../../../packages/protocol/src/integrate.ts";
 import {
   FLEET_ROSTER_PATH,
   FLEET_ROSTER_RETIRE_PATH,
@@ -233,7 +232,6 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: HUDDLE_CLOSE_PATH },
   { method: "GET", path: VIEWS_PATH },
   { method: "POST", path: VIEWS_PATH },
-  { method: "GET", path: SHIPPING_PATH },
   { method: "GET", path: FLEET_ROSTER_PATH },
   { method: "GET", path: FLEET_LEADS_PATH },
   { method: "POST", path: FLEET_ROSTER_RETIRE_PATH },
@@ -352,7 +350,6 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   [HUDDLES_PATH]: { methods: ["GET", "POST"], update: StartHuddleSchema, snapshot: HuddlesResponseSchema },
   [HUDDLE_CLOSE_PATH]: { methods: ["POST"], update: CloseHuddleSchema, snapshot: HuddleSchema },
   [VIEWS_PATH]: { methods: ["GET", "POST"], update: ViewRequestSchema, snapshot: ViewsResponseSchema },
-  [SHIPPING_PATH]: { methods: ["GET"], snapshot: ShippingSnapshotSchema },
   [FLEET_LEADS_PATH]: { methods: ["GET"], snapshot: FleetLeadsSnapshotSchema },
   [FLEET_ROSTER_PATH]: { methods: ["GET"], snapshot: FleetRosterSnapshotSchema },
   [FLEET_ROSTER_RETIRE_PATH]: {

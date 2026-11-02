@@ -621,32 +621,13 @@ paths:
           {
             description: Activity unavailable or possibly dispatched private control with typed uncertain outcome,
           }
-  /v1/integrate:
+  /v1/deploy-holds:
     post:
       tags: [Operator]
-      operationId: integrate
-      summary: Compose, gate and land an ordered approved commit batch
+      operationId: deployHolds
+      summary: List, place or release deploy holds
       description: |
-        Source-checkout service only. Run returns a durable request receipt immediately; poll status.
-        Compatible requests waiting during a gate share batches of at most three. Conflicting members
-        roll back; failed shared gates retry members individually, alternating with waiting work.
-        Waiting and active isolating requests can be cancelled before landing; a gate containing a
-        withdrawn input cannot land, even if green. Status exposes progress.queuePosition,
-        progress.isolationChain and a conditional progress.estimatedCompletionAt based on recent
-        completed gates (null without measurements). Status without
-        an id returns running batches, waiting requests, the last result and interrupted work.
-        Independent clones and detached core/app sibling worktrees install real packages
-        and run pnpm check with private home, state, credentials and caches. Only the
-        recorded zero-exit exact HEAD may land. Core pushes first; app failure retains
-        partial core-landed/app-pending evidence. Revert selects a passed batch via restore
-        and creates a new commit restoring its tree. No force push or automatic push retry.
-        Each active attempt automatically holds runtime updates until its safe point, bounded at 60 minutes.
-        Updates wait on these holds even past a deferred dueAt; update status names each integrationBatchId.
-        Waiting and accepted deploys fence new attempts. Interrupted newly accepted requests recover once
-        with the same approved commits and a lead notice. Recovery checks remote main before pushing
-        and records an already-present candidate without another send. Historical requests without
-        recovery metadata and second interruptions require review.
-        Deploy holds protect the running service from runtime updates and never gate landing.
+        Deploy holds protect the running service from runtime updates and never gate merging.
         A hold names its minutes (1-60) and lifts on its own at expiresAt with an expire receipt;
         the runtime canary's own holds end with their canary. Releases and expiries return
         receipts naming the holder, actor and reason. Only the authenticated operator can invoke this route.
@@ -659,52 +640,9 @@ paths:
               oneOf:
                 - type: object
                   additionalProperties: false
-                  required: [action, id]
-                  properties:
-                    action: { const: run }
-                    id: { type: string, format: uuid }
-                    core:
-                      type: array
-                      maxItems: 100
-                      items: { type: string, pattern: "^[a-f0-9]{7,64}$" }
-                      default: []
-                    app:
-                      type: array
-                      maxItems: 100
-                      items: { type: string, pattern: "^[a-f0-9]{7,64}$" }
-                    restore:
-                      {
-                        type: string,
-                        format: uuid,
-                        description: Passed batch whose tree to restore; mutually exclusive with core/app commits,
-                      }
-                    push: { type: boolean, default: false }
-                - type: object
-                  additionalProperties: false
                   required: [action]
                   properties:
-                    action: { const: status }
-                    id: { type: string, format: uuid }
-                - type: object
-                  additionalProperties: false
-                  required: [action, id]
-                  properties:
-                    action: { const: push }
-                    id: { type: string, format: uuid }
-                - type: object
-                  additionalProperties: false
-                  required: [action, id, actor, reason]
-                  description: Withdraws a request still waiting for its gate; a running or finished one is refused (409)
-                  properties:
-                    action: { const: cancel }
-                    id: { type: string, format: uuid }
-                    actor: { type: string, minLength: 1, maxLength: 512 }
-                    reason: { type: string, minLength: 1, maxLength: 512 }
-                - type: object
-                  additionalProperties: false
-                  required: [action]
-                  properties:
-                    action: { const: holds }
+                    action: { const: list }
                 - type: object
                   additionalProperties: false
                   required: [action, id, holder, reason, minutes]
@@ -736,7 +674,7 @@ paths:
                     reason: { type: string, minLength: 1, maxLength: 512 }
       responses:
         "200":
-          description: Durable request receipt, queue or holds; inspect ok and batch.state for failures/partial landing
+          description: Current holds, with receipts for a list or release
           content:
             application/json:
               schema:
@@ -753,166 +691,10 @@ paths:
                       description: The release this call made,
                       or the latest release/override/expire receipts for holds,
                     }
-                  queue:
-                    type: object
-                    required: [running, waiting, interrupted]
-                    properties:
-                      running:
-                        {
-                          type: array,
-                          items: { type: object },
-                          description: Active integration batches with state and member requests,
-                        }
-                      waiting:
-                        {
-                          type: array,
-                          items: { type: object },
-                          description: "Queued request receipts in scheduled batch order, including isolated retries",
-                        }
-                      lastResult:
-                        { type: object, description: Most recently completed batch and its evidence }
-                      interrupted:
-                        {
-                          type: array,
-                          items: { type: object },
-                          description: Active records without a current process owner,
-                        }
-                  batch:
-                    type: object
-                    required: [schemaVersion, id, state, evidence, repos, createdAt, updatedAt, request]
-                    properties:
-                      schemaVersion: { const: 1 }
-                      id: { type: string, format: uuid }
-                      state:
-                        {
-                          type: string,
-                          enum:
-                            [
-                              queued,
-                              composing,
-                              conflict,
-                              installing,
-                              gating,
-                              isolating,
-                              failed,
-                              passed,
-                              held,
-                              pushing,
-                              pushed,
-                              partial,
-                              interrupted,
-                              cancelled,
-                            ],
-                        }
-                      evidence: { type: string, description: Durable local record.json path }
-                      error: { type: string }
-                      createdAt: { type: string, format: date-time }
-                      updatedAt: { type: string, format: date-time }
-                      request: { type: object }
-                      batchId:
-                        {
-                          type: string,
-                          format: uuid,
-                          description: Shared attestation for this request receipt,
-                        }
-                      attempts: { type: array, items: { type: string, format: uuid } }
-                      members:
-                        {
-                          type: array,
-                          items: { type: object },
-                          description: Original requests included in this shared attempt,
-                        }
-                      excluded:
-                        {
-                          type: array,
-                          items: { type: object },
-                          description: Conflicting or failed members rolled back before gating,
-                        }
-                      regateReason:
-                        {
-                          type: string,
-                          description: "Why the queue gates these requests again: main moved somewhere the held attempt's gate checked",
-                        }
-                      isolation:
-                        type: object
-                        required: [rootBatchId]
-                        properties:
-                          rootBatchId:
-                            {
-                              type: string,
-                              format: uuid,
-                              description: Failed shared attempt that scheduled the individual retry,
-                            }
-                      progress:
-                        type: object
-                        required:
-                          [
-                            queuePosition,
-                            estimatedRemainingMs,
-                            estimatedCompletionAt,
-                            estimateBasis,
-                            isolationChain,
-                          ]
-                        properties:
-                          queuePosition:
-                            {
-                              type: [integer, "null"],
-                              minimum: 0,
-                              description: "Scheduled batches ahead, zero for running, null if finished or unknown",
-                            }
-                          estimatedRemainingMs: { type: [number, "null"], minimum: 0 }
-                          estimatedCompletionAt:
-                            {
-                              type: [string, "null"],
-                              format: date-time,
-                              description: "Conditional completion estimate from recently completed gates, null without measurements",
-                            }
-                          estimateBasis: { type: string, enum: [recent-completions, unknown, finished] }
-                          isolationChain:
-                            type: array
-                            items:
-                              type: object
-                              required: [batchId, memberCount, state]
-                              properties:
-                                batchId: { type: string, format: uuid }
-                                memberCount: { type: integer, minimum: 1 }
-                                state: { type: string }
-                                gateExitCode: { type: [integer, "null"] }
-                      cancelled:
-                        type: object
-                        description: Who withdrew this waiting or isolating request before landing, and why
-                        required: [actor, reason, at]
-                        properties:
-                          actor: { type: string }
-                          reason: { type: string }
-                          at: { type: string, format: date-time }
-                      repos:
-                        type: array
-                        items:
-                          type: object
-                          description: Source/origin/base, directory, HEAD, per-commit conflict results, install/gate exit and tested HEAD, per-repo push outcome and logs
-                          properties:
-                            revalidations:
-                              type: array
-                              description: Each move onto a newer origin/main after the gate, with the incoming commits it checked; covered means the recorded gate selection still covered the rebased HEAD, which landed without a new gate
-                              items:
-                                type: object
-                                required: [from, to, incoming, previousHead, covered, at]
-                                properties:
-                                  from: { type: string }
-                                  to: { type: string }
-                                  incoming: { type: array, items: { type: string } }
-                                  previousHead: { type: string }
-                                  head: { type: string }
-                                  covered: { type: boolean }
-                                  reason: { type: string }
-                                  exitCode: { type: [integer, "null"] }
-                                  log: { type: string }
-                                  at: { type: string, format: date-time }
         "400": { description: Malformed request }
         "403": { description: Actual operator required }
-        "409": { description: Unknown record, identity conflict, busy operation or refused landing }
-        "503": { description: Repository integration unavailable }
+        "409": { description: Unknown hold, identity conflict or busy registry }
+        "503": { description: Deploy holds unavailable }
   /v1/activity/viewer:
     post:
       tags: [Media]
@@ -3004,7 +2786,6 @@ paths:
                       notes: { type: string, maxLength: 4000 }
                       tools: { type: string, enum: [connected, off] }
                       peerMessages: { type: string, enum: [on, off] }
-                      remoteGates: { type: string, enum: [on, off] }
                       workerSandbox: { type: string, enum: [on, off] }
                       leadRestarts: { type: string, enum: [on, off] }
                       seatRestarts: { type: string, enum: [on, off] }
@@ -3049,7 +2830,6 @@ paths:
                     notes: { type: string, maxLength: 4000 }
                     tools: { type: string, enum: [connected, off] }
                     peerMessages: { type: string, enum: [on, off] }
-                    remoteGates: { type: string, enum: [on, off] }
                     workerSandbox: { type: string, enum: [on, off] }
                     leadRestarts: { type: string, enum: [on, off] }
                     seatRestarts: { type: string, enum: [on, off] }

@@ -370,11 +370,6 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result.body);
       return result.ok ? 0 : 1;
     }
-    if (command === "integrate") {
-      const result = await (await import("../src/command/integrate.ts")).runIntegrationCommand(rest, options);
-      outputJson(stdout, result);
-      return result.ok ? 0 : 1;
-    }
     if (command === "connections") {
       outputJson(
         stdout,

@@ -12,7 +12,7 @@ import {
   type DeployHold,
   type DeployHoldReceipt,
   type HoldOverride,
-} from "@clankie/protocol/integrate";
+} from "@clankie/protocol/deploy-holds";
 
 /** Atomic replacement plus fsync: a process exit cannot turn a pass into a partial JSON file. */
 export async function durableJson(path: string, value: unknown, guard?: () => Promise<void>): Promise<void> {
@@ -41,7 +41,7 @@ export async function durableJson(path: string, value: unknown, guard?: () => Pr
 }
 
 /** Another operation holds the directory lock; nothing ran. */
-class IntegrationLockBusy extends Error {}
+class HoldLockBusy extends Error {}
 
 const LockOwnerSchema = z.object({ pid: z.number().int().positive(), at: z.iso.datetime() });
 export type LockOwner = z.infer<typeof LockOwnerSchema>;
@@ -55,8 +55,8 @@ async function lockOwner(directory: string): Promise<LockOwner | undefined> {
 }
 
 const busy = (directory: string, owner?: LockOwner) =>
-  new IntegrationLockBusy(
-    `Integration operation busy; retained lock: ${directory}${owner ? ` (pid ${owner.pid} since ${owner.at})` : ""}`,
+  new HoldLockBusy(
+    `Deploy hold registry busy; retained lock: ${directory}${owner ? ` (pid ${owner.pid} since ${owner.at})` : ""}`,
   );
 
 /**
@@ -122,7 +122,7 @@ export async function withDirectoryLock<T>(
         previous = { owner: await reclaim(directory) };
         break;
       } catch (error) {
-        if (!(error instanceof IntegrationLockBusy) || !options.waitForLiveOwner) throw error;
+        if (!(error instanceof HoldLockBusy) || !options.waitForLiveOwner) throw error;
         const owner = await lockOwner(directory);
         // Wait only on a proven live writer. Unknown/permission observations do
         // not authorize takeover, and dead owners retain the existing recovery rules.
@@ -140,7 +140,7 @@ export async function withDirectoryLock<T>(
         } catch (cause) {
           if ((cause as NodeJS.ErrnoException).code === "ESRCH")
             throw Error(
-              `Integration queue owner exited; retained stale lock: ${directory} (pid ${owner.pid} since ${owner.at})`,
+              `Deploy hold registry owner exited; retained stale lock: ${directory} (pid ${owner.pid} since ${owner.at})`,
             );
           throw error;
         }
@@ -171,10 +171,9 @@ export class DeployHeldError extends Error {
 /**
  * Deploy holds keep the running service from being replaced while someone relies on it.
  * Every hold but the runtime canary's lifts on its own within DEPLOY_HOLD_MAX_MINUTES, leaving
- * a receipt; landing on main never waits for one (ADR 0240, VUH-2049).
+ * a receipt; merging to main never waits for one (VUH-2049).
  */
 export class DeployHolds {
-  private deployRequests = 0;
   readonly directory: string;
   private readonly presence: ((hold: DeployHold) => Promise<DeployHold["presence"]>) | undefined;
   private readonly now: () => number;
@@ -247,7 +246,7 @@ export class DeployHolds {
   }
   /** An operator hold names its minutes; without them a hold gets the ceiling, except the canary's. */
   async acquire(
-    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat" | "integrationBatchId"> & {
+    input: Pick<DeployHold, "id" | "holder" | "reason" | "pane" | "seat"> & {
       minutes?: number;
     },
     guard?: () => Promise<void>,
@@ -269,7 +268,6 @@ export class DeployHolds {
           existing &&
           (existing.holder !== input.holder ||
             existing.reason !== input.reason ||
-            existing.integrationBatchId !== input.integrationBatchId ||
             existing.pane !== input.pane ||
             existing.seat !== input.seat)
         )
@@ -287,7 +285,6 @@ export class DeployHolds {
             ...(input.pane === undefined ? {} : { pane: input.pane }),
             ...(input.seat === undefined ? {} : { seat: input.seat }),
             presence: "unknown",
-            ...(input.integrationBatchId ? { integrationBatchId: input.integrationBatchId } : {}),
           });
         }
         await durableJson(this.path, registry);
@@ -296,47 +293,6 @@ export class DeployHolds {
       undefined,
       { waitForLiveOwner: true },
     );
-  }
-  /** Fence admission against a waiting or already accepted deploy, under the same registry lock. */
-  async integration<T>(
-    id: string,
-    deployPending: () => boolean,
-    work: () => Promise<T>,
-    guard: () => Promise<void> = async () => {},
-  ): Promise<T> {
-    const holder = `Integration batch ${id}`;
-    const reason = "Integration compose, gate and push in flight";
-    for (;;) {
-      await guard();
-      if (!this.deployRequests && !deployPending()) {
-        try {
-          await this.acquire(
-            { id, holder, reason, minutes: DEPLOY_HOLD_MAX_MINUTES, integrationBatchId: id },
-            async () => {
-              if (this.deployRequests || deployPending()) throw Error("integration_deploy_pending");
-            },
-          );
-          break;
-        } catch (error) {
-          if (!(error instanceof Error) || error.message !== "integration_deploy_pending") throw error;
-        }
-      }
-      await delay(250);
-    }
-    try {
-      await guard();
-      return await work();
-    } finally {
-      // An expired or explicitly released hold needs no second receipt.
-      if ((await this.list()).some((hold) => hold.id === id))
-        await this.release(id, "Clankie", "Integration attempt reached its safe point", {
-          holder,
-          reason,
-        }).catch((error: unknown) => {
-          if (!String(error).includes(`Hold ${id} already ended`))
-            console.warn("Integration hold release deferred to expiry", error);
-        });
-    }
   }
   /** Anyone's hold, by its holder, the lead or the owner; the receipt names holder, actor and reason. */
   async release(
@@ -396,7 +352,7 @@ export class DeployHolds {
         return lapsed;
       });
     } catch (error) {
-      if (error instanceof IntegrationLockBusy) return [];
+      if (error instanceof HoldLockBusy) return [];
       throw error;
     }
   }
@@ -426,27 +382,10 @@ export class DeployHolds {
     work: (overriddenHolds: DeployHold[]) => Promise<T>,
     admission?: {
       overrideAll?: { actor: string; reason: string };
-      queueIntegration?: boolean;
       guard: () => Promise<void>;
     },
   ): Promise<T> {
-    this.deployRequests++;
-    try {
-      for (;;) {
-        try {
-          return await this.admit(operation, overrides, work, admission);
-        } catch (error) {
-          // Ordinary and canary holds retain their explicit refusal/override contract.
-          // Release the registry lock while the batch finishes; status remains readable.
-          if (!(error instanceof DeployHeldError) || !error.holds.every((hold) => hold.integrationBatchId))
-            throw error;
-          await admission?.guard();
-          await delay(250);
-        }
-      }
-    } finally {
-      this.deployRequests--;
-    }
+    return this.admit(operation, overrides, work, admission);
   }
   private async admit<T>(
     operation: string,
@@ -454,7 +393,6 @@ export class DeployHolds {
     work: (overriddenHolds: DeployHold[]) => Promise<T>,
     admission?: {
       overrideAll?: { actor: string; reason: string };
-      queueIntegration?: boolean;
       guard: () => Promise<void>;
     },
   ): Promise<T> {
@@ -474,9 +412,7 @@ export class DeployHolds {
           overrides.some((o) => !registry.holds.some((h) => h.id === o.holdId))
         )
           throw Error("Override must name each existing hold exactly once");
-        const blocked = registry.holds.filter(
-          (h) => !ids.has(h.id) && !(admission?.queueIntegration && h.integrationBatchId),
-        );
+        const blocked = registry.holds.filter((h) => !ids.has(h.id));
         if (blocked.length) {
           if (lapsed.length) await durableJson(this.path, registry);
           throw new DeployHeldError(blocked, this.now());

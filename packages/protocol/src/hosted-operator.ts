@@ -1,6 +1,5 @@
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
-import { SHIPPING_PATH } from "./integrate.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
@@ -178,7 +177,6 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       USAGE_SETTINGS_PATH,
       HUDDLES_PATH,
       VIEWS_PATH,
-      SHIPPING_PATH,
       FLEET_ROSTER_PATH,
       FLEET_LEADS_PATH,
       ROUTINES_PATH,

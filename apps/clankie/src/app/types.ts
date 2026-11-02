@@ -2,7 +2,6 @@ import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { InstalledGameExtensions } from "../game-extension-projection.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
 import type { FleetHealthMetrics } from "../fleet-health-metrics.ts";
-import type { IntegrationQueue } from "../integrate.ts";
 import type { DeployHolds } from "../deploy-holds.ts";
 import type {
   DiscordPresenceRuntimePort,
@@ -136,7 +135,6 @@ export interface ClankieAppDependencies {
   remoteFleetResources?: import("../machine-fleet-resources.ts").RemoteFleetResourceHost;
   /** The owner's view specs (VUH-2035). */
   views?: import("../views.ts").ViewStore;
-  integration?: IntegrationQueue;
   deployHolds?: DeployHolds;
   runtimeUpdater?: import("../../../tui/bin/runtime-updater.ts").RuntimeUpdater;
   scheduledReleaseCutover?: Parameters<

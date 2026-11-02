@@ -18,7 +18,7 @@ export interface RoutineRunnerDeps {
   /** A note in the target conversation; false when nothing accepted it. */
   readonly notify: (conversationId: string, text: string) => Promise<boolean>;
   /**
-   * The service's own fleet governor, as the merge gate uses it: the machine's
+   * The service's own fleet governor: the machine's
    * shared registry in a real service, the fixture's in a test service (#193).
    */
   readonly governor: () => FleetResourceGovernor | undefined;

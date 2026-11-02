@@ -4,7 +4,7 @@ import { z } from "zod";
 import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-updater.ts";
-import { HoldOverrideSchema } from "@clankie/protocol/integrate";
+import { HoldOverrideSchema } from "@clankie/protocol/deploy-holds";
 import {
   SCHEDULED_RELEASE_CUTOVER_PATH,
   ScheduledReleaseCutoverRequestSchema,
@@ -398,7 +398,6 @@ export function createRuntimeUpdateRoutes(options: {
             deploy,
             {
               guard,
-              queueIntegration: options.updater.queuesIntegrationWait === true,
               ...(parsed.data.overrideHolds
                 ? { overrideAll: { actor: actor!, reason: parsed.data.reason! } }
                 : {}),
@@ -407,11 +406,7 @@ export function createRuntimeUpdateRoutes(options: {
         : await deploy();
       return context.json(
         result,
-        result.accepted || result.deferred !== undefined || result.waitingForIntegration !== undefined
-          ? 202
-          : result.upToDate
-            ? 200
-            : 409,
+        result.accepted || result.deferred !== undefined ? 202 : result.upToDate ? 200 : 409,
       );
     } catch (error) {
       return context.json(

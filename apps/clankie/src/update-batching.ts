@@ -174,7 +174,6 @@ export function batchRuntimeUpdates(options: UpdateBatchingOptions): RuntimeUpda
   timer.unref();
 
   return {
-    ...(updater.queuesIntegrationWait ? { queuesIntegrationWait: true } : {}),
     runtime: updater.runtime,
     status,
     ...(updater.preview === undefined ? {} : { preview: updater.preview }),

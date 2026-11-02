@@ -1,6 +1,5 @@
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema, type FleetLead } from "@clankie/protocol/fleet-leads";
 import { isDeviceRunExpired } from "../devices.ts";
-import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
 import type {
   IssueWriteResult,
   KeyPressResult,
@@ -137,19 +136,6 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       ctx.dependencies.captain.requestOwnerAsk(conversationId, draft, publicationId, {
         exactPublication: true,
       }),
-  });
-  ctx.app.get(SHIPPING_PATH, async (context) => {
-    context.header("cache-control", "no-store");
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-    if (!operator || operator === "unavailable") {
-      const device = await ctx.authenticateDevice(context.req.raw);
-      if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
-        return context.json({ error: "forbidden" }, 403);
-      const record = ctx.devices.get(device.deviceId);
-      if (!ownerDeviceRecord(record)) return context.json({ error: "forbidden" }, 403);
-    }
-    if (!ctx.dependencies.integration) return context.json({ error: "integration_unavailable" }, 503);
-    return context.json(ShippingSnapshotSchema.parse(await ctx.dependencies.integration.shipping()));
   });
   for (const path of [
     FLEET_LEADS_PATH,

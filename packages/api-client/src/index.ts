@@ -50,12 +50,12 @@ import {
   type ActivitySharingResponse,
 } from "@clankie/protocol/activity-sharing";
 import {
-  INTEGRATE_PATH,
-  IntegrationRequestSchema,
-  IntegrationResponseSchema,
-  type IntegrationRequest,
-  type IntegrationResponse,
-} from "@clankie/protocol/integrate";
+  DEPLOY_HOLDS_PATH,
+  DeployHoldRequestSchema,
+  DeployHoldResponseSchema,
+  type DeployHoldRequest,
+  type DeployHoldResponse,
+} from "@clankie/protocol/deploy-holds";
 import {
   ISSUE_METRICS_PATH,
   IssueMetricsQuerySchema,
@@ -495,13 +495,13 @@ export class ClankieApiClient {
     );
   }
 
-  public async integrate(input: IntegrationRequest): Promise<IntegrationResponse> {
+  public async deployHolds(input: DeployHoldRequest): Promise<DeployHoldResponse> {
     return parseProtocolResponse(
-      IntegrationResponseSchema,
-      await this.request(INTEGRATE_PATH, {
+      DeployHoldResponseSchema,
+      await this.request(DEPLOY_HOLDS_PATH, {
         method: "POST",
         headers: this.operatorHeaders(),
-        body: JSON.stringify(IntegrationRequestSchema.parse(input)),
+        body: JSON.stringify(DeployHoldRequestSchema.parse(input)),
         signal: AbortSignal.timeout(30_000),
         redirect: "error",
       }),

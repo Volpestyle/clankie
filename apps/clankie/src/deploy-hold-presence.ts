@@ -1,4 +1,4 @@
-import type { DeployHold } from "@clankie/protocol/integrate";
+import type { DeployHold } from "@clankie/protocol/deploy-holds";
 import { parseHerdrTerminalCatalog } from "./captain/herdr-census.ts";
 
 /** A failed census is unknown, never proof that a pane disappeared. */

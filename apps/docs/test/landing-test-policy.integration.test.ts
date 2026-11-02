@@ -17,7 +17,6 @@ it("keeps release proofs in manual tests while landing preserves its cheap guard
   const controls = [
     "apps/clankie/test/fleet-refresh.integration.test.ts",
     "apps/clankie/test/runtime-canary-policy.integration.test.ts",
-    "apps/clankie/test/integrate-remote.integration.test.ts",
   ];
   const excluded = [
     "packages/play/test/free-play-corpus.test.ts",
@@ -66,12 +65,6 @@ it("keeps release proofs in manual tests while landing preserves its cheap guard
     const landing = await list(true);
     expect(manual.map((row) => row.file).sort()).toEqual([...releaseOnlyTests, ...controls].sort());
     expect(landing.map((row) => row.file).sort()).toEqual([...controls].sort());
-    expect(manual.find((row) => row.file.endsWith("/integrate.integration.test.ts"))?.projectName).toBe(
-      "serial-integration",
-    );
-    expect(
-      landing.find((row) => row.file.endsWith("/integrate-remote.integration.test.ts"))?.projectName,
-    ).toBe("serial-integration");
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }

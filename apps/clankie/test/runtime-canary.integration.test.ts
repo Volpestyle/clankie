@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
-import type { DeployHold } from "@clankie/protocol/integrate";
+import type { DeployHold } from "@clankie/protocol/deploy-holds";
 import { DeployHolds, durableJson } from "../src/deploy-holds.ts";
 import {
   runtimeCanaryDecisionMs,
@@ -903,7 +903,7 @@ it("keeps a real slow quiet candidate held and offers exact release and previous
   const notices = await alerts(f.root);
   expect(notices).toHaveLength(1);
   expect(notices[0]).toMatchObject({ conversationId: "lead-canary-proof" });
-  expect(notices[0]!.text).toContain(`clankie integrate release ${f.id}`);
+  expect(notices[0]!.text).toContain(`clankie update release ${f.id}`);
   expect(notices[0]!.text).toContain(`clankie update --ref ${"a".repeat(40)} --override-holds --reason`);
   expect(notices[0]!.text).toContain("budget 40ms");
   await recordEvidence("quiet-slow-regression", { failed, alerts: notices });

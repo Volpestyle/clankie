@@ -21,7 +21,7 @@ import { FleetPrepareRequestSchema } from "@clankie/protocol";
 import { WORKER_ACCOUNTS_PATH } from "@clankie/protocol/worker-accounts";
 import { SupportGrantStore } from "../support-access.ts";
 import { SUPPORT_DEVICE_GRANTS } from "@clankie/protocol/support-access";
-import { createIntegrationRoutes } from "../integrate-routes.ts";
+import { createDeployHoldRoutes } from "../deploy-hold-routes.ts";
 import { absentPresenceState } from "../ports/presence.ts";
 import { absentStreamWatch } from "../ports/world.ts";
 import {
@@ -595,8 +595,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route(
     "/",
-    createIntegrationRoutes({
-      queue: dependencies.integration,
+    createDeployHoldRoutes({
       holds: dependencies.deployHolds,
       authorize: async (request) => {
         const identity = await authenticateOperator(request, dependencies);

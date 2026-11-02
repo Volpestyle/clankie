@@ -2,12 +2,13 @@ import { createInterface } from "node:readline/promises";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { outputJson, type Writable } from "./io.ts";
 import { parseUpdateArgs, runUpdateCommand, UPDATE_USAGE } from "./update.ts";
+import { runDeployHoldsCommand } from "./deploy-holds.ts";
 import {
   runtimeRollbackRef,
   type RuntimeCanaryResult,
   type RuntimeUpdateResult,
 } from "../../bin/runtime-update.ts";
-import { describeDeployHold, type DeployHold } from "@clankie/protocol/integrate";
+import { describeDeployHold, type DeployHold } from "@clankie/protocol/deploy-holds";
 
 type Hold = DeployHold & { candidate?: string; canary?: RuntimeCanaryResult };
 type CpuComparison = {
@@ -36,7 +37,6 @@ interface View {
   needsReconciliation?: boolean;
   appliesTo?: string;
   deferred?: import("../../bin/runtime-updater.ts").DeferredRuntimeUpdate;
-  waitingForIntegration?: { id: string; ref: string };
   cancelled?: boolean;
 }
 // oxlint-disable-next-line no-control-regex -- terminal output must strip every C0/C1 control
@@ -154,7 +154,7 @@ function updateNextStep(view: View): string[] {
     const canary = view.canary ?? latest.canary;
     if (canary?.state === "failed")
       return [
-        `Canary failed; further deploys remain held until reviewed. Release: clankie integrate release ${latest.id} --actor Clankie --reason "reviewed runtime health"`,
+        `Canary failed; further deploys remain held until reviewed. Release: clankie update release ${latest.id} --actor Clankie --reason "reviewed runtime health"`,
         `Rollback as owner: clankie update --ref ${runtimeRollbackRef(latest)} --override-holds --reason "rollback failed canary ${latest.id}"`,
       ];
     if (!canary || (canary.state === "passed" && canary.holdReleased === true))
@@ -231,14 +231,7 @@ export function formatUpdateOutput(input: unknown): string {
     }
   }
   const groups = new Map<string, Hold[]>();
-  const integrations = (view.holds ?? []).filter((hold) => hold.integrationBatchId);
-  if (integrations.length)
-    lines.push(
-      `Deploy waiting for integration batches: ${integrations.map((hold) => clean(hold.integrationBatchId!)).join(", ")}. The update continues when their bounded holds end.`,
-    );
-  for (const hold of integrations) lines.push(`  ${clean(describeDeployHold(hold))}`);
   for (const hold of view.holds ?? []) {
-    if (hold.integrationBatchId) continue;
     const cause =
       hold.canary?.error ??
       (hold.canary?.state === "pending" ? "canary-pending" : `${hold.holder}: ${hold.reason}`);
@@ -262,10 +255,6 @@ export function formatUpdateOutput(input: unknown): string {
       "Each hold gets its own audited override. Verified canary holds are released after the admitted canary passes; independent holds require an explicit release.",
     );
   }
-  if (view.waitingForIntegration)
-    lines.push(
-      `Update ${clean(view.waitingForIntegration.id)} for ${clean(view.waitingForIntegration.ref)} is queued until integration reaches a safe point. Read clankie update status; clankie update cancel drops it.`,
-    );
   if (view.deferred)
     lines.push(
       `Batched: ${view.deferred.requests} update request${view.deferred.requests === 1 ? "" : "s"} since ${clean(view.deferred.firstRequestedAt)}. The newest main applies once the body is idle, or at ${clean(view.deferred.dueAt)}. clankie update now applies it at once; clankie update cancel drops it.`,
@@ -277,7 +266,7 @@ export function formatUpdateOutput(input: unknown): string {
     lines.push(
       "Update accepted. Finish this turn, then run clankie update status to check health and canary.",
     );
-  if (view.accepted === false && view.blockedReason && !view.deferred && !view.waitingForIntegration)
+  if (view.accepted === false && view.blockedReason && !view.deferred)
     lines.push(
       view.blockedReason === "runtime-maintenance-busy"
         ? "No update was scheduled: runtime retention maintenance is busy. Let maintenance finish, then retry."
@@ -308,6 +297,11 @@ export async function runUpdateCli(
     args.includes("--json") ||
     !(options.isTTY ?? (stdout as NodeJS.WriteStream).isTTY);
   const rest = args.filter((a) => a !== "--json");
+  if (["holds", "hold", "release"].includes(rest[0] ?? "")) {
+    const result = await runDeployHoldsCommand(rest, options);
+    outputJson(stdout, result);
+    return result.ok ? 0 : 1;
+  }
   if (json || rest[0] === "canary") {
     const result = await runUpdateCommand(rest, options);
     if (json) outputJson(stdout, result);
@@ -315,7 +309,7 @@ export async function runUpdateCli(
     const view = result as View;
     return view.error ||
       view.phase === "canary-failed" ||
-      (view.accepted === false && !view.upToDate && !view.deferred && !view.waitingForIntegration)
+      (view.accepted === false && !view.upToDate && !view.deferred)
       ? 1
       : 0;
   }
@@ -329,7 +323,7 @@ export async function runUpdateCli(
   if (status) return preview.error || preview.phase === "canary-failed" ? 1 : 0;
   if (preview.error || preview.needsReconciliation) return 1;
   let updateArgs = rest;
-  const manualHolds = preview.holds?.filter((hold) => !hold.integrationBatchId) ?? [];
+  const manualHolds = preview.holds ?? [];
   if (manualHolds.length && !rest.includes("--override-holds") && !rest.includes("--override-hold")) {
     const input = options.input ?? process.stdin;
     if (!(input as NodeJS.ReadStream).isTTY) return 1;
@@ -352,8 +346,5 @@ export async function runUpdateCli(
   }
   const result = (await runUpdateCommand(updateArgs, options)) as View;
   stdout.write(`${formatUpdateOutput(result)}\n`);
-  return result.error ||
-    (result.accepted === false && !result.upToDate && !result.deferred && !result.waitingForIntegration)
-    ? 1
-    : 0;
+  return result.error || (result.accepted === false && !result.upToDate && !result.deferred) ? 1 : 0;
 }
