@@ -15,7 +15,12 @@ draw();
 process.stdin.setRawMode?.(true);
 process.stdin.resume();
 process.stdin.on("data", (data) => {
-  for (const [, button] of data.toString("latin1").matchAll(/\x1b\[<(\d+);\d+;\d+[Mm]/gu)) {
+  // SGR mouse reports: ESC [ < button ; column ; row M.
+  for (const report of data
+    .toString("latin1")
+    .split(`${String.fromCharCode(27)}[<`)
+    .slice(1)) {
+    const button = /^(\d+);\d+;\d+[Mm]/u.exec(report)?.[1];
     if (button === "64") offset = Math.min(total - 1, offset + 3);
     else if (button === "65") offset = Math.max(0, offset - 3);
     else continue;
