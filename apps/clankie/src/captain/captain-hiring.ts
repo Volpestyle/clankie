@@ -58,6 +58,10 @@ export interface HiringContext {
   readonly conversations: ConversationStore;
   readonly seatByPersona: Map<string, string>;
   readonly desktop: DesktopExpressions;
+  readonly recordHire: (
+    seat: OperatorFleetSeat,
+    source: ReturnType<typeof captureConversationAuthority>,
+  ) => void;
   readonly recordLeadVisit: (seatId: string, kind: "message" | "close", text?: string) => void;
   readonly noteFleetRoom: (record: FleetRoomRecord) => void;
   readonly leadParty: (conversationId: string) => FleetRoomParty;
@@ -91,6 +95,7 @@ export function createHiring(ctx: HiringContext) {
     seatByPersona,
     desktop,
     recordLeadVisit,
+    recordHire,
     noteFleetRoom,
     leadParty,
     workerParty,
@@ -415,8 +420,13 @@ export function createHiring(ctx: HiringContext) {
     // A watch probes project settings immediately. Finish our own role write
     // before publishing the hire, so it cannot revoke the admitted controller.
     herdrWatches.trackSeat(adopted.seatId);
-    if (resume === undefined) desktop.recordHire();
+    if (resume === undefined) {
+      desktop.recordHire();
+      recordHire(adopted, captured);
+    }
     if (
+      captured.connectorPlace === undefined &&
+      captured.ownerHire === undefined &&
       brief &&
       result.deliveryStage !== "stored" &&
       (result.control?.mode === "adapter" || result.control?.mode === "channel")

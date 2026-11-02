@@ -102,6 +102,7 @@ export interface CreateOperatorServiceContext {
     includeCheckouts?: boolean;
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
   /** Who started each agent in a fleet read (ADR 0321). */
+  readonly observeConnectorLead?: (input: import("./fleet-lead-activity.ts").LeadActivityObservation) => void;
   readonly seatStarters?: (
     snapshot: import("@clankie/protocol").OperatorFleetSnapshot,
   ) => (
@@ -1037,6 +1038,7 @@ export function createOperatorService(
           // Keep the hiring app and optional report wake reference with the seat (ADR 0343).
           connectorPlace: {
             projectId: chosen.projectId,
+            ...(request.channel === undefined ? {} : { channel: request.channel }),
             ...(request.notify === undefined ? {} : { notify: request.notify }),
             ...(request.appDeviceId !== undefined
               ? { deviceId: request.appDeviceId }
@@ -1753,7 +1755,36 @@ export function createOperatorService(
             return result;
           });
       }
-      return await serve(request, authority, readSignal);
+      // Capture the exact occupant before a successful close removes it from the census.
+      let target: { seatId: string; occupantId: string } | undefined;
+      if ((request.op === "send" || request.op === "close_seat") && request.appDeviceId !== undefined) {
+        const { snapshot } = await ctx.fleetSnapshot();
+        const conversation =
+          request.op === "send" ? ctx.conversations.conversation(request.turn.conversationId) : undefined;
+        const seat = snapshot.seats.find((seat) =>
+          request.op === "close_seat"
+            ? seat.seatId === request.seatId
+            : conversation?.scope.kind === "persona" && seat.personaId === conversation.scope.personaId,
+        );
+        if (seat) target = { seatId: seat.seatId, occupantId: seat.occupantId };
+      }
+      const result = await serve(request, authority, readSignal);
+      if (
+        target &&
+        (request.op === "send" || request.op === "close_seat") &&
+        request.appDeviceId !== undefined &&
+        ((result.op === "send" && result.result.status === "accepted") ||
+          (result.op === "close_seat" && result.closed))
+      ) {
+        const at = new Date().toISOString();
+        ctx.observeConnectorLead?.({
+          deviceId: request.appDeviceId,
+          channel: request.channel,
+          at,
+          touch: { ...target, kind: request.op === "send" ? "message" : "close", at },
+        });
+      }
+      return result;
     } catch (error) {
       if (!ctx.shutdown.signal.aborted) throw error;
       // The shutdown's own abort is how a parked tail ends. Anything else may be

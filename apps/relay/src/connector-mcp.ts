@@ -795,9 +795,21 @@ function connectorServer(
       },
     ],
   };
+  for (const tool of catalog.tools) {
+    if (["start_agent", "message_agent", "answer_prompt", "press_keys", "close_agent"].includes(tool.name))
+      Object.assign(tool.inputSchema.properties, {
+        channel: {
+          type: "string",
+          minLength: 1,
+          maxLength: 64,
+          description:
+            "The name of your own chat, channel or thread group, as the owner knows it (e.g. 'claukie'), so the owner can tell your channels apart; leave it out if you have none. Grants nothing and is never shown to the worker.",
+        },
+      });
+  }
   const tools = catalog.tools;
   server.setRequestHandler(ListToolsRequestSchema, () => catalog);
-  const sessions = connectorSessions(options.operator, bearer);
+
   const notes = async (request: OperatorConversationServiceRequest): Promise<AppNotesResult> => {
     const result = await options.operator.dispatch(request, bearer);
     if (result.op !== "app_notes") throw new Error(`Unexpected ${result.op} result for app_notes`);
@@ -817,6 +829,17 @@ function connectorServer(
                 : " Use only the fields in this tool’s input schema."),
           );
       }
+      const channel =
+        args.channel === undefined
+          ? undefined
+          : requiredString(
+              typeof args.channel === "string" ? args.channel.trim() : args.channel,
+              "channel",
+              64,
+            );
+      if (channel !== undefined && channel.length === 0)
+        return failure("channel is 1–64 characters after trimming.");
+      const sessions = connectorSessions(options.operator, bearer, channel);
       const gate = await detectionGate(options, device);
       if (typeof gate === "string") return failure(gate);
       const herdrBlocked = (id: string) => !gate.herdr && id.startsWith("herdr:");
@@ -1355,8 +1378,23 @@ function unknownArguments(value: unknown, schema: unknown, path = ""): string[] 
 }
 
 /** The session sources this connector reaches, bound to its own bearer. */
-function connectorSessions(operator: ConnectorOperatorPort, bearer: string): SessionSources {
-  const dispatch = (request: OperatorConversationServiceRequest) => operator.dispatch(request, bearer);
+function connectorSessions(
+  operator: ConnectorOperatorPort,
+  bearer: string,
+  channel?: string,
+): SessionSources {
+  const dispatch = (request: OperatorConversationServiceRequest) =>
+    operator.dispatch(
+      channel !== undefined &&
+        (request.op === "start_agent" ||
+          request.op === "send" ||
+          request.op === "prompt_answer" ||
+          request.op === "key_press" ||
+          request.op === "close_seat")
+        ? { ...request, channel }
+        : request,
+      bearer,
+    );
   return new SessionSources([
     createHerdrSessionSource(
       {

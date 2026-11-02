@@ -481,6 +481,9 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("send"),
       schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
+      /** Relay-authenticated connector attribution; display only. */
+      appDeviceId: z.string().min(1).max(256).optional(),
       turn: SubmitOperatorConversationTurnSchema,
     })
     .strict(),
@@ -614,6 +617,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("prompt_answer"),
       schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
       terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
       /** Text the app saw on the prompt, such as the option it picks; it must still be showing. */
       expect: z.string().trim().min(1).max(PROMPT_ANSWER_EXPECT_MAX),
@@ -631,6 +635,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("key_press"),
       schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
       terminalId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX),
       keys: z.array(KeyPressSchema).min(1).max(KEY_PRESS_MAX),
       /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
@@ -843,6 +848,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
       /** Read an accepted start; never launches or replays a brief. */
       startId: z.string().uuid().optional(),
       notify: WorkerNotifySchema.optional(),
@@ -971,6 +977,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .object({
       op: z.literal("close_seat"),
       schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
       seatId: OperatorConversationEventRefSchema,
       /** Why the worker's unlanded commits or uncommitted files may be left behind. */
       unlandedReason: z.string().trim().min(1).max(512).optional(),

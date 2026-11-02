@@ -188,9 +188,54 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
               ...(state.lastActiveAt === undefined ? {} : { lastActiveAt: state.lastActiveAt }),
             },
           ];
+          const channels = context.req.query("includeChannels") === "true";
+          const details = channels
+            ? await ctx.dependencies.captain.fleetLeadDetails?.(now.getTime())
+            : undefined;
+          if (channels) {
+            leads[0]!.hires = (details?.hires ?? [])
+              .filter((hire) => hire.startedBy.kind === "clankie")
+              .map(({ seatId, occupantId }) => ({ seatId, occupantId }));
+            leads[0]!.touches =
+              details?.activity.find((entry) => entry.deviceId === undefined)?.touches ?? [];
+          }
           for (const record of ctx.devices.values()) {
             if (record.scope !== "connector" || record.status !== "active" || isDeviceRunExpired(record, now))
               continue;
+            if (channels) {
+              const activity = (details?.activity ?? []).filter(
+                (entry) => entry.deviceId === record.deviceId,
+              );
+              const hires = (details?.hires ?? []).filter(
+                (hire) => hire.startedBy.kind === "app" && hire.startedBy.deviceId === record.deviceId,
+              );
+              const names = new Set<string | undefined>([
+                ...activity.map((entry) => entry.channel),
+                ...hires.map((hire) => (hire.startedBy.kind === "app" ? hire.startedBy.channel : undefined)),
+              ]);
+              // Older devices have only the existing device-level activity fact.
+              if (names.size === 0 && recent(record.lastSeenAt, 24 * 60 * 60_000)) names.add(undefined);
+              for (const channel of names) {
+                const observed = activity.find((entry) => entry.channel === channel);
+                const lastActiveAt =
+                  observed?.lastActiveAt ??
+                  (channel === undefined && activity.length === 0 ? record.lastSeenAt : undefined);
+                leads.push({
+                  id: channel === undefined ? record.deviceId : `${record.deviceId}:${channel}`,
+                  appId: record.deviceId,
+                  kind: "app",
+                  name: record.name,
+                  ...(channel === undefined ? {} : { channel }),
+                  active: recent(lastActiveAt, 15 * 60_000),
+                  ...(lastActiveAt === undefined ? {} : { lastActiveAt }),
+                  hires: hires
+                    .filter((hire) => hire.startedBy.kind === "app" && hire.startedBy.channel === channel)
+                    .map(({ seatId, occupantId }) => ({ seatId, occupantId })),
+                  touches: observed?.touches ?? [],
+                });
+              }
+              continue;
+            }
             leads.push({
               id: record.deviceId,
               kind: "app",
@@ -713,6 +758,31 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return reply({ outcome: "unavailable", message: "The note board can’t be reached here." });
       }
     }
+    if (
+      parsed.success &&
+      (parsed.data.op === "send" ||
+        parsed.data.op === "start_agent" ||
+        parsed.data.op === "close_seat" ||
+        parsed.data.op === "prompt_answer" ||
+        parsed.data.op === "key_press") &&
+      parsed.data.appDeviceId !== undefined
+    ) {
+      const record = ctx.devices.get(parsed.data.appDeviceId);
+      if (
+        !captain ||
+        captain === "unavailable" ||
+        captain.steerSourceLane !== "api" ||
+        record?.status !== "active" ||
+        record.scope !== "connector" ||
+        isDeviceRunExpired(record, ctx.clock())
+      )
+        return context.json({ error: "app_author_required" }, 403);
+      ctx.dependencies.captain.observeConnectorLead?.({
+        deviceId: record.deviceId,
+        channel: parsed.data.channel,
+        at: ctx.clock().toISOString(),
+      });
+    }
     if (parsed.success && parsed.data.op === "prompt_answer") {
       // Answering a prompt in an agent's pane (ADR 0303). Like a note, it reaches the
       // service only through the relay's captain bearer, which stamps the connector
@@ -741,16 +811,25 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           message: "Answering prompts isn't available on this Clankie.",
         });
       try {
-        return reply(
-          await ctx.dependencies.captain.answerPrompt({
-            app: named.name,
-            // Rechecked before the first key: a revoked app or a switch turned off presses nothing.
-            current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
-            terminalId: request.terminalId,
-            expect: request.expect,
-            steps: request.steps,
-          }),
-        );
+        const target = await ctx.dependencies.captain.fleetLeadTarget?.(request.terminalId);
+        const result = await ctx.dependencies.captain.answerPrompt({
+          app: named.name,
+          // Rechecked before the first key: a revoked app or a switch turned off presses nothing.
+          current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
+          terminalId: request.terminalId,
+          expect: request.expect,
+          steps: request.steps,
+        });
+        if (target && result.outcome === "answered") {
+          const at = ctx.clock().toISOString();
+          ctx.dependencies.captain.observeConnectorLead?.({
+            deviceId: named.deviceId,
+            channel: request.channel,
+            at,
+            touch: { ...target, kind: "answer", at },
+          });
+        }
+        return reply(result);
       } catch (error) {
         logger.warn({ error }, "Prompt answer failed");
         return reply({
@@ -781,15 +860,24 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (!ctx.dependencies.captain.pressKeys)
         return reply({ outcome: "unavailable", message: "Pressing keys isn't available on this Clankie." });
       try {
-        return reply(
-          await ctx.dependencies.captain.pressKeys({
-            app: named.name,
-            // Rechecked before every key: a revoked app or a switch turned off presses nothing more.
-            current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
-            terminalId: request.terminalId,
-            keys: request.keys,
-          }),
-        );
+        const target = await ctx.dependencies.captain.fleetLeadTarget?.(request.terminalId);
+        const result = await ctx.dependencies.captain.pressKeys({
+          app: named.name,
+          // Rechecked before every key: a revoked app or a switch turned off presses nothing more.
+          current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
+          terminalId: request.terminalId,
+          keys: request.keys,
+        });
+        if (target && result.outcome === "pressed") {
+          const at = ctx.clock().toISOString();
+          ctx.dependencies.captain.observeConnectorLead?.({
+            deviceId: named.deviceId,
+            channel: request.channel,
+            at,
+            touch: { ...target, kind: "answer", at },
+          });
+        }
+        return reply(result);
       } catch (error) {
         logger.warn({ error }, "Key press failed");
         return reply({

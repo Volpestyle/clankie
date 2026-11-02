@@ -4,6 +4,7 @@ For an app that leads through Clankie's connector (Claude Duet, Grok, Claude
 Code, Codex and others), beside [lead](../SKILL.md). Every connected lead follows
 it; none takes precedence over another.
 
+- Pass `channel` with your owner-known chat or channel name on `start_agent` and `message_agent` (also `answer_prompt`, `press_keys`, and `close_agent`); omit it if you have none. It is trimmed, 1–64 characters, grants nothing, and is never shown to the worker.
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
   their machines go to a Clankie worker with `start_agent`. Read

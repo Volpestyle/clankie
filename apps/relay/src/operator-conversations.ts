@@ -749,7 +749,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // Name the authenticated hiring/closing app; it cannot choose its own device stamp.
     // Other devices use their own owner authority, unstamped.
     if (
-      (serviceRequest.op === "close_seat" ||
+      (serviceRequest.op === "send" ||
+        serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
         serviceRequest.op === "worker_reports") &&
       serviceRequest.appDeviceId !== undefined
@@ -889,7 +890,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "lead_wake")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (
-      (serviceRequest.op === "close_seat" ||
+      (serviceRequest.op === "send" ||
+        serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
         serviceRequest.op === "worker_reports") &&
       currentAuthorization.device.scope === "connector"

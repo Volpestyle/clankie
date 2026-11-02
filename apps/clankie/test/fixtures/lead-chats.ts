@@ -39,6 +39,8 @@ export async function leadChatFixture(
     localUnavailable?: () => boolean;
     nativeStatus?: () => string;
     nativeSourceProof?: boolean;
+    extraAgents?: () => HerdrAgentSnapshot[];
+    closePane?: HerdrWatchRunner["closePane"];
     /** Runs before the complete local Herdr inventory answers; it may hold or fail that answer. */
     inventory?: () => Promise<void>;
     leadRestartCheckMs?: number;
@@ -119,13 +121,29 @@ export async function leadChatFixture(
   };
   const herdrResponse = (args: readonly string[]) => {
     wire.agent_status = options.nativeStatus?.() ?? "idle";
+    const wires = [
+      wire,
+      ...(options.extraAgents?.() ?? []).map((agent) => ({
+        pane_id: agent.paneId,
+        terminal_id: agent.terminalId,
+        agent: agent.agent,
+        agent_status: agent.status,
+        title: agent.title,
+        agent_session: agent.session,
+        cwd: agent.workingDirectory,
+      })),
+    ];
     let result: unknown;
-    if (args[0] === "agent" && args[1] === "list") result = { agents: [wire] };
-    else if (args[0] === "agent" && args[1] === "get") result = { agent: wire };
-    else if (args[0] === "pane" && args[1] === "list") result = { panes: [wire] };
+    if (args[0] === "agent" && args[1] === "list") result = { agents: wires };
+    else if (args[0] === "agent" && args[1] === "get")
+      result = {
+        agent:
+          wires.find((entry) => args.includes(entry.terminal_id) || args.includes(entry.pane_id)) ?? wire,
+      };
+    else if (args[0] === "pane" && args[1] === "list") result = { panes: wires };
     else if (args[0] === "workspace" && args[1] === "list") result = { workspaces: [] };
     else if (args[0] === "api" && args[1] === "snapshot")
-      result = { snapshot: { workspaces: [], tabs: [], panes: [wire], agents: [wire] } };
+      result = { snapshot: { workspaces: [], tabs: [], panes: wires, agents: wires } };
     else throw new Error(`Unexpected Herdr command: ${args.join(" ")}`);
     return JSON.stringify({ result });
   };
@@ -139,14 +157,23 @@ export async function leadChatFixture(
       : {
           list: async () => {
             await options.inventory?.();
-            return [head];
+            return [head, ...(options.extraAgents?.() ?? [])];
           },
         }),
-    get: async () => {
+    ...(options.closePane === undefined ? {} : { closePane: options.closePane }),
+    get: async (id) => {
       if (options.paneReadFails?.()) throw new Error("Herdr pane read unavailable");
-      return head;
+      return (
+        (options.extraAgents?.() ?? []).find((agent) => agent.paneId === id || agent.terminalId === id) ??
+        head
+      );
     },
-    resolveTerminal: async (id) => (id === head.terminalId ? head : Promise.reject(new Error("gone"))),
+    resolveTerminal: async (id) =>
+      id === head.terminalId
+        ? head
+        : options.extraAgents === undefined
+          ? Promise.reject(new Error("gone"))
+          : options.extraAgents().find((agent) => agent.terminalId === id),
     wait: async () => head,
   };
   // Setup's roster check needs only the local lead; the case's own calls meet the slow
