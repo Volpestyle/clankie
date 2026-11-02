@@ -55,6 +55,7 @@
     "./evidence-credentials": "./src/evidence-credentials.ts",
     "./huddles": "./src/huddles.ts",
     "./routines": "./src/routines.ts",
+    "./fleet-leads": "./src/fleet-leads.ts",
     "./fleet-roster": "./src/fleet-roster.ts",
     "./fleet-resources": "./src/fleet-resources.ts",
     "./skin-drafts": "./src/skin-drafts.ts",

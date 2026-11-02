@@ -427,3 +427,13 @@ The wire response includes `reason` only for `stop_task` requests with
 An old service/relay may reject that request field with HTTP 400 before Stop
 dispatch. Retry that schema refusal once without the field; never repeat a
 Stop after another failure or a lost response.
+
+## Which leads are active
+
+`clankie fleet leads [--json]` reads the owner-only `GET /v1/fleet/leads`.
+Clankie is active when `connector lead` selects him or his model ran in the
+last ten minutes. Each active connector device is an app lead, active for
+fifteen minutes after last seen; revoked or expired devices are omitted.
+The list is sorted by id and grants no authority. Match app hires'
+`startedBy.name` to registered lead names; repeated names share that display
+group, while the read retains one row per device.

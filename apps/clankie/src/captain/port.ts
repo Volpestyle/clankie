@@ -436,6 +436,8 @@ export interface CaptainPort {
    * captain already appends (VUH-1115). Counters and execution identity only —
    * no transcript, tool arguments, or credentials.
    */
+  /** Existing lead setting and most recent service model turn, for owner fleet reads. */
+  fleetLeadState?(): Promise<{ lead: "clankie" | "apps"; lastActiveAt?: string }>;
   readTurnMetrics(query: {
     readonly limit?: number;
     readonly runId?: string;

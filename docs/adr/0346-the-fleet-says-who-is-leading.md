@@ -1,0 +1,21 @@
+# ADR 0346: The fleet says who is leading
+
+Status: Proposed, 2026-11-02, from James's ask for a hoodie per active lead in the app's World. Builds on 0304 and 0321.
+
+## Context
+
+Several leads drive the same fleet: Clankie's own captain, and connected apps such as Claude Duet and Grok through the connector. The roster says who started each agent (0321), but nothing says which leads are around right now. The app's World wants to draw each active lead, and only active ones: Clankie's figure only while his own agent is actually leading.
+
+## Decision
+
+- A leads read. GET /v1/fleet/leads (owner app read, through the relay like the roster) answers { schemaVersion: 1, observedAt, leads }. Each lead is { id, kind: "clankie" | "app", name, active, lastActiveAt? }. No lead outranks another; sorted by id.
+- Clankie is one lead, id clankie. Active while the lead setting is clankie (0304) and his service is up, or while his captain ran a model turn in the last ten minutes. His last activity comes from the current process's turn observation and existing durable settled-turn metrics.
+- Each connected app is one lead per active connector device: id is the device id, name the name it registered with, lastActiveAt its last seen time; active when seen in the last fifteen minutes. Revoked or expired devices are not listed. Device registration has no session expiry field: expired automation runs are excluded, while an expired bearer alone does not revoke a refreshable registration.
+- Hires join their lead by name: an app's hires carry startedBy { kind: "app", name }, and the app matches that name. Two apps under one name read as one lead.
+
+## Consequences
+
+- The read states facts the host already keeps; it adds no new durable state and grants nothing.
+- A quiet app becomes inactive within fifteen minutes; a webhook-woken one shows while it works. Inactive registrations remain in the read with active false.
+- Connector traffic already records device.seen at most once a minute through the relay's /v1/devices/self check; no activity-write change is needed.
+- The connector's list_agents is unchanged.

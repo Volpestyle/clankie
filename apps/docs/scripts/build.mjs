@@ -387,6 +387,15 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/fleet/leads",
+      {
+        access:
+          "Encrypted owner-paired device bearer with terminalControl (Take Control); no visitors, support or connectors",
+        purpose:
+          "Read Clankie and connected app leads, sorted by id, with active state and last observed activity; no ranking or authority implied.",
+      },
+    ],
+    [
       "GET /v1/fleet/roster",
       {
         access:

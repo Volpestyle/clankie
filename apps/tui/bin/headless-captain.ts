@@ -503,6 +503,18 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest[0] === "leads") {
+        const snapshot = await (
+          await import("../src/command/fleet-leads.ts")
+        ).runFleetLeadsCommand(rest.slice(1), options);
+        if (rest.includes("--json")) outputJson(stdout, snapshot);
+        else
+          for (const lead of snapshot.leads)
+            stdout.write(
+              `${lead.id}\t${lead.name}\t${lead.active ? "active" : "inactive"}${lead.lastActiveAt === undefined ? "" : `\t${lead.lastActiveAt}`}\n`,
+            );
+        return 0;
+      }
       if (rest[0] === "roster") {
         outputJson(
           stdout,
