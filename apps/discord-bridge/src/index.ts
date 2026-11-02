@@ -810,6 +810,7 @@ async function handleDiscordMessage(message: Message, recovering = false): Promi
       authorIsBot,
       mentionsBot: client.user !== null && (await mentionsDiscordBot(message, client.user.id)),
       body: message.content,
+      authorName: message.member?.nickname ?? message.author.globalName ?? message.author.username,
       room:
         message.guild === null
           ? { peerName: (message.author.globalName ?? message.author.username).slice(0, 100) }

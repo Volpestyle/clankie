@@ -289,6 +289,16 @@ function isSupportedMediaType(value: string): value is DiscordPresenceAttachment
   return (DISCORD_PRESENCE_ATTACHMENT_MEDIA_TYPES as readonly string[]).includes(value);
 }
 
+/** A gateway display name fit for a title, or nothing: trimmed, bounded, no control characters. */
+export function actorNameField(name: string | undefined): { actorName?: string } {
+  const clean = name
+    ?.replace(/\p{Cc}/gu, "")
+    .trim()
+    .slice(0, 100)
+    .trim();
+  return clean ? { actorName: clean } : {};
+}
+
 export interface DiscordInboundMessage {
   readonly observationSessionId?: string;
   readonly id: string;
@@ -298,6 +308,8 @@ export interface DiscordInboundMessage {
   readonly authorIsBot: boolean;
   readonly mentionsBot: boolean;
   readonly body: string;
+  /** The author's display name (nickname, global name or username): titles only (#367). */
+  readonly authorName?: string;
   /** Gateway display metadata, never a route or authority source. */
   readonly room?: DiscordPresenceChannelTurnRequest["room"];
   /** Images posted with this message, already policy-filtered by {@link selectInboundImageAttachments}. */
@@ -614,6 +626,7 @@ export class DiscordTextIngress {
         channelId: message.channelId,
         messageId: message.id,
         actorId: message.authorId,
+        ...actorNameField(message.authorName),
         // Optional in the schema: an image-only message has no body at all,
         // and an empty string is not a body.
         ...(body.length === 0 ? {} : { body }),

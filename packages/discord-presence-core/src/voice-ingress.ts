@@ -4,6 +4,7 @@ import {
   type DiscordPresenceChannelTurnRequest,
   type DiscordTransportKind,
 } from "@clankie/protocol";
+import { actorNameField } from "./text-ingress.ts";
 
 export interface DiscordVoiceCaptainPort {
   getHealth(): Promise<{ readonly profileHash: string }>;
@@ -17,6 +18,8 @@ export interface DiscordVoiceTurn {
   readonly guildId: string;
   readonly channelId: string;
   readonly userId: string;
+  /** The speaker's display name from the room roster: titles only (#367). */
+  readonly userName?: string;
   readonly transcript: string;
   /** Gateway display metadata, never a route or authority source. */
   readonly room?: DiscordPresenceChannelTurnRequest["room"];
@@ -92,6 +95,7 @@ export class DiscordVoiceIngress implements VoiceHandoffPort {
         guildId: turn.guildId,
         channelId: turn.channelId,
         actorId: turn.userId,
+        ...actorNameField(turn.userName),
         body:
           turn.roomContext === undefined
             ? transcript

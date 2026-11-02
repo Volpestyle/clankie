@@ -549,6 +549,7 @@ gatewayUnsubscribes.push(
           authorIsBot,
           mentionsBot: message.mentionsSelf,
           body: message.content,
+          ...(message.authorDisplayName === undefined ? {} : { authorName: message.authorDisplayName }),
           ...(message.guildId === undefined && message.authorDisplayName !== undefined
             ? { room: { peerName: message.authorDisplayName.slice(0, 100) } }
             : {}),
