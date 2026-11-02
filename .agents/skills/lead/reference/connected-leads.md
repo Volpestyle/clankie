@@ -34,6 +34,8 @@ it; none takes precedence over another.
   lifetime; after a restart, inspect `list_agents` before a new hire.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
+  A blocking hire whose pane never appeared settles itself once it is five
+  minutes old and nothing runs in its directory; start again after that.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
   place before retrying; a lost answer can leave an agent running.
 - **Answer blocked workers first.** Workers label each report `kind`: `blocked`

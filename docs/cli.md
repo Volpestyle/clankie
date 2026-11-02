@@ -1112,6 +1112,11 @@ through `release-allocation`'s checks, so the place takes a new hire. The result
 names it in `allocationId`, and its `detail` says whether it was released or why
 the place is still held, such as another worker in that directory. Settling the
 receipt again retries that release; `release-allocation` remains available.
+Clankie applies the same settlement himself before a new hire at that place
+(ADR 0331): to a hire whose recorded pane is gone or holds no harness, and to
+one that never recorded a pane once it is five minutes old (#251). A project
+allocation that never recorded a pane is then released through
+`release-allocation`'s census once it too is five minutes old.
 Failed starts expose the original native `receiptId` to
 the hiring lead. Older failures that omitted it can be recovered by the operator
 with `clankie hire-receipt settle ALLOCATION_UUID abandoned`: the service resolves
