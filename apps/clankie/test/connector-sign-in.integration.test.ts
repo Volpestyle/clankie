@@ -240,22 +240,6 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
         (await fetch(`${host.baseUrl}${path}`, { method, headers: bearer })).status,
       ).toBeGreaterThanOrEqual(401);
 
-    // Invalid MACs and a valid token under the wrong registered client do not revoke.
-    const { client_id: otherClient } = (await (
-      await register(host.baseUrl, ["https://grok.example/oauth/callback"], "Grok")
-    ).json()) as { client_id: string };
-    for (const form of [
-      { client_id: clientId, refresh_token: `${tokens.refresh_token}x` },
-      { client_id: otherClient, refresh_token: tokens.refresh_token },
-      { client_id: clientId, refresh_token: "not-a-refresh-token" },
-    ]) {
-      expect(await (await token(host.baseUrl, { grant_type: "refresh_token", ...form })).json()).toEqual({
-        error: "invalid_grant",
-      });
-    }
-    expect(notices).toEqual([]);
-    expect(invalidated).toEqual([]);
-
     // Refresh works, survives replay, then the newer token rotates again.
     host.advance(60_000);
     const refreshed = await token(host.baseUrl, {
@@ -275,6 +259,30 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(afterRestart.status).toBe(200);
     const latest = (await afterRestart.json()) as { access_token: string; refresh_token: string };
     expect(latest.refresh_token).not.toBe(rotated.refresh_token);
+
+    // Even stale tokens with an invalid MAC or the wrong client do not revoke.
+    const { client_id: otherClient } = (await (
+      await register(host.baseUrl, ["https://grok.example/oauth/callback"], "Grok")
+    ).json()) as { client_id: string };
+    for (const form of [
+      { client_id: clientId, refresh_token: `${tokens.refresh_token}x` },
+      { client_id: otherClient, refresh_token: tokens.refresh_token },
+      { client_id: clientId, refresh_token: "not-a-refresh-token" },
+    ]) {
+      expect(await (await token(host.baseUrl, { grant_type: "refresh_token", ...form })).json()).toEqual({
+        error: "invalid_grant",
+      });
+    }
+    expect(notices).toEqual([]);
+    expect(invalidated).toEqual([]);
+
+    expect(
+      (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${latest.access_token}` },
+        })
+      ).status,
+    ).toBe(200);
 
     // The same immediately superseded token, even within 30s, ends the whole device.
     // The random access-token nonce is not stored, so no retry grace is offered.
