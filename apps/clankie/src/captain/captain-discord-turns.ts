@@ -366,7 +366,6 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       conversationId,
       () => {
         const outbox = ctx.seatOutbox(conversationId);
-        if (normalized.journal !== undefined) return undefined;
         if (normalized.handoffConversationId !== undefined) {
           // Host-selected Pi room work bypasses the operator inbox without changing
           // its existing social or machine grant. Native admission uses the child path.

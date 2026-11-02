@@ -5,7 +5,7 @@ import { RoomLoops } from "./room-loops.ts";
 import { ParticipantRoomSessions } from "./participant-room-sessions.ts";
 import { participantRoomDirectory } from "./participant-room-profile.ts";
 import { createDurableSessions } from "./durable-sessions.ts";
-import { DurablePiRoom, PiTurnPausedError } from "./pi-turn-journal.ts";
+import { DurablePiRoom, PiTurnPausedError, type PiTurnJournal } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import { type FleetProjectionDiagnostics } from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
@@ -2358,6 +2358,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
     deps.inboundReportMigrationReady,
+    (deliveryId) => durablePiRoom.unsettled(deliveryId),
   );
   conversations.nativeMessageHost = {
     inspect: (seatId) => herdrWatches.nativeTaskObservation(seatId),
@@ -4340,58 +4341,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               ]);
         return { discord, plan, owner, sender, key, access, mainConversation, participant };
       };
-      if (durablePiRoom.accepts(request) && participantPolicy(await readAuthoritySettings()) === undefined) {
-        try {
-          const admitted = await resolveGrant();
-          // Prototype never takes over a native seat or a linked main conversation.
-          if (admitted.mainConversation || seatOutbox(parentId).routesToSeat(request.trigger.body ?? ""))
-            throw new Error("durable_pi_room_requires_service_lane");
-          return await durablePiRoom.run(request, admitted.key, async (journal) => {
-            const guard = async () => {
-              shutdown.signal.throwIfAborted();
-              if ((await resolveGrant()).key !== admitted.key)
-                throw new Error("durable_pi_room_authority_changed");
-            };
-            await guard();
-            const heard = await roomTurns.normalize(request, deps, {
-              ...(admitted.sender === undefined ? {} : { sender: admitted.sender }),
-              systemTools: admitted.plan.systemTools,
-              carriesHistory: false,
-            });
-            const normalized: NormalizedDiscordTurn = {
-              ...heard,
-              durable: false,
-              access: admitted.access,
-              readAuthoritySettings,
-              journal,
-            };
-            const result = await roomTurns.dispatchDiscordTurn(
-              normalized,
-              request.deliveryId,
-              false,
-              {
-                baseSessionKey: roomTurns.sessionKey(request),
-                deliveryId: request.deliveryId,
-                targetId,
-                actorId: heard.actorId,
-                ...(heard.guildId === undefined ? {} : { guildId: heard.guildId }),
-                channelId: heard.channelId,
-                messageId: heard.messageId,
-                transportKind: request.identity.transportKind,
-              },
-              admitted.plan.systemTools,
-              guard,
-              "message",
-              true,
-            );
-            if (shutdown.signal.aborted) throw new PiTurnPausedError();
-            return result;
-          });
-        } catch (error) {
-          if (shutdown.signal.aborted) throw new PiTurnPausedError();
-          throw error;
-        }
-      }
+      // ADR 0284: the opt-in room takes the normal handoff, and only its Pi dispatch is journaled.
+      // Participant rooms keep their native character path, as before.
+      const durable =
+        durablePiRoom.accepts(request) && participantPolicy(await readAuthoritySettings()) === undefined;
       // Even a saved private reply must pass today's audience/identity checks.
       if (prior?.result !== undefined) {
         await resolveGrant();
@@ -4407,7 +4360,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const joinKey = `${parentId}\n${request.deliveryId}`;
       let joining = roomBurstJoins.get(joinKey);
       const liveHandoff =
-        lane === "discord_presence" && prior === undefined && joining === undefined
+        lane === "discord_presence" && !durable && prior === undefined && joining === undefined
           ? roomBursts.latest(parentId, request.trigger.actorId, burstIdentity)
           : undefined;
       if (joining !== undefined || liveHandoff !== undefined) {
@@ -4509,7 +4462,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               fingerprint,
               true,
             );
-            if (lane === "discord_presence")
+            // A steered follow-up would escape the journal; the durable room queues it instead.
+            if (lane === "discord_presence" && !durable)
               burst = roomBursts.open(parentId, {
                 actorId: request.trigger.actorId,
                 identity: burstIdentity,
@@ -4519,7 +4473,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
           async (release) => {
             const child = admittedChild!;
-            if (child.roomHandoff?.state !== "pending") {
+            // After a restart, only an unsettled journal may continue its own running handoff.
+            if (child.roomHandoff?.state !== "pending" && !(durable && durablePiRoom.resumable(request))) {
               burst?.close();
               return {
                 state: "failed",
@@ -4697,7 +4652,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 }
                 // ADR 0291: a social text room answers in its durable loop for this exact grant.
                 // Machine turns keep their own sessions; in a mixed room they stay one-shot (ADR 0251).
+                // Loops keep one warm session across turns; the journal holds one turn, so the durable room has none.
                 const loopKey =
+                  !durable &&
                   (lane === "discord_presence" || participant !== undefined) &&
                   plan.kind === "social" &&
                   (participant !== undefined ||
@@ -4943,7 +4900,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       host: "pi",
                       doing: "Working in Pi under the original room grant; native Codex is owner-only",
                     });
-                  const dispatch = async (): Promise<CaptainChannelTurnResult> => {
+                  const dispatch = async (journal?: PiTurnJournal): Promise<CaptainChannelTurnResult> => {
                     // A turn that waited for its loop is admitted only under the grant it
                     // queued with; that loop's history and tools belong to that grant.
                     if (loopKey !== undefined && (await resolveGrant()).key !== key)
@@ -4951,6 +4908,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     return roomTurns.dispatchDiscordTurn(
                       {
                         ...normalized,
+                        ...(journal === undefined ? {} : { journal }),
                         access: loopKey === undefined ? access : roomLoops.access(loopKey, access),
                         prompt: `${
                           access.privateContext
@@ -4967,9 +4925,21 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                       preferPi,
                     );
                   };
-                  const outcome = await (loopKey === undefined
-                    ? dispatch()
-                    : roomLoops.serialize(loopKey, dispatch));
+                  const outcome = await (loopKey !== undefined
+                    ? roomLoops.serialize(loopKey, () => dispatch())
+                    : durable
+                      ? durablePiRoom
+                          .run(request, key, async (journal) => {
+                            const result = await dispatch(journal);
+                            // A shutdown pauses the turn unsettled, for the next process to resume.
+                            if (shutdown.signal.aborted) throw new PiTurnPausedError();
+                            return result;
+                          })
+                          .catch((error: unknown) => {
+                            if (shutdown.signal.aborted) throw new PiTurnPausedError();
+                            throw error;
+                          })
+                      : dispatch());
                   await guard();
                   return outcome;
                 } finally {
@@ -5002,6 +4972,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               );
               return result;
             } catch (error) {
+              // Leave a paused durable handoff running; its journal resumes it.
+              if (error instanceof PiTurnPausedError) throw error;
               const mainDispatch =
                 child.roomHandoff?.mainConversationId !== undefined ||
                 conversations.conversation(child.conversationId)?.roomHandoff?.mainConversationId !==
@@ -5034,6 +5006,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         )
         .catch((error: unknown) => {
           burst?.close();
+          if (error instanceof PiTurnPausedError) throw error;
           if (error instanceof Error && error.message === "room_handoff_queue_full")
             return {
               state: "settled",

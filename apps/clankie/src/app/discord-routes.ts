@@ -983,18 +983,6 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
     return record;
   }
 
-  // Only explicitly admitted prototype work can restart. Re-evaluate room grants
-  // inside submitDiscordTurn; a saved request is never saved authority.
-  try {
-    for (const receipt of ctx.discordTurnReceipts.recoverable(ctx.clock())) {
-      const request = receipt.recoveryRequest!;
-      if (ctx.dependencies.captain.canResumeDiscordTurn?.(request))
-        startRecoverableTurn(request, receipt.fingerprint, receipt.lane);
-    }
-  } catch (error) {
-    logger.error({ error: String(error) }, "Durable Pi room recovery unavailable");
-  }
-
   /** One Discord text/voice message becomes one captain turn. Discord family only. */
   ctx.app.post("/v1/captain/channel-turns", async (context) => {
     const body = await readJson(context.req.raw);
@@ -1030,6 +1018,9 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       ctx.dependencies.captain.canResumeDiscordTurn?.(request) &&
       ctx.discordTurnReceipts.abandoned(receipt, ctx.clock())
     )
+      // Only explicitly admitted durable work resumes, and only when its body
+      // redelivers it: the room's guards need that body live to reply.
+      // submitDiscordTurn re-evaluates room grants; a saved request is never saved authority.
       record = startRecoverableTurn(request, fingerprint, expectedLane);
     if (record === undefined && receipt !== undefined) {
       // Begun by a service process that has since exited without settling it.

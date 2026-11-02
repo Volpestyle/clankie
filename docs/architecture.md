@@ -179,11 +179,14 @@ blanket retry override or automatic reconciliation from another session's transc
 channel result reports `responded`; unknown failures stay `uncertain`.
 
 A host-selected prototype can recover one Pi text room after restart
-([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). It retains the
+([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). The room takes
+the normal handoff, and the journal wraps only its Pi dispatch. It retains the
 admitted request, session leaf and model/tool steps, replays completed results,
-and reports interrupted mutations as possibly run. Other lanes retain their
-existing interruption behavior. The real-dependency proof ends at the public
-HTTP reply result; the Discord-mouth hop remains unproven.
+and reports interrupted mutations as possibly run. Its handoff stays open across the
+restart and resumes when the bridge redelivers the same message. That room opens no
+steering burst or room loop yet. Other lanes retain their existing interruption
+behavior. Tests prove the hop through the real bridge to a loopback Discord REST;
+Discord itself remains unproven.
 
 The service normalizes each admitted message — untrusted body
 fenced and labelled, images resolved to bytes at the last hop, channel context

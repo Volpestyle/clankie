@@ -10,6 +10,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "node:util";
 import { expect } from "vitest";
 import { CaptainChannelTurnResultSchema, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
+import { DiscordPresenceSession } from "@clankie/discord-presence-core";
+import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { SettingsStore } from "@clankie/settings";
 
 // ADR 0284's prototype lane as a child process (#368): the real service, Pi,
@@ -216,6 +218,26 @@ setTimeout(() => {}, 300000);
     },
     contextMessages: [],
   };
+  /** A live bot body, as the bridge opens on each start; room guards need it to reply. */
+  const presence = async () => {
+    const session = new DiscordPresenceSession({
+      sessionId: `discord:bot:fixture:${randomUUID()}`,
+      characterId: "clankie",
+      credentialRef: "discord_bot",
+      transportKind: "bot",
+      emit: async (event) => {
+        const response = await fetch(`${url}/v1/discord/presence-session-events`, {
+          method: "POST",
+          headers: { authorization, "content-type": "application/json" },
+          body: JSON.stringify(event),
+        });
+        if (!response.ok) throw new Error(`presence ${response.status}: ${await response.text()}`);
+        return ((await response.json()) as { session: DiscordPresenceSessionRecord }).session;
+      },
+    });
+    await session.start();
+    await session.gatewayReady();
+  };
   const post = (value: DiscordPresenceChannelTurnRequest = request) =>
     fetch(`${url}/v1/captain/channel-turns`, {
       method: "POST",
@@ -242,7 +264,10 @@ setTimeout(() => {}, 300000);
         ),
         "utf8",
       ),
-    ) as { steps: { kind: string; replay?: string; input: { name?: string }; output?: unknown }[] };
+    ) as {
+      result?: unknown;
+      steps: { kind: string; replay?: string; input: { name?: string }; output?: unknown }[];
+    };
   const effects = async () => (await readFile(effect, "utf8").catch(() => "")).split("\n").filter(Boolean);
   const memories = async () => {
     const directory = join(root, "state/memory/captain-episodes");
@@ -252,16 +277,37 @@ setTimeout(() => {}, 300000);
       .filter(Boolean)
       .filter((line) => (JSON.parse(line) as { summary?: string }).summary === requestId);
   };
+  /** The room handoff records the service keeps for this delivery, as the room's handoff view reads them. */
+  const handoffs = async () => {
+    const directory = join(root, "state/captain/conversations");
+    const entries = (await readdir(directory).catch(() => [] as string[])).filter((name) =>
+      name.startsWith("handoff-"),
+    );
+    return (
+      await Promise.all(
+        entries.map(
+          async (name) =>
+            JSON.parse(await readFile(join(directory, name, "meta.json"), "utf8")) as {
+              roomHandoff: { deliveryId: string; state: string; host?: string; result?: string };
+            },
+        ),
+      )
+    )
+      .map((meta) => meta.roomHandoff)
+      .filter((handoff) => handoff.deliveryId === requestId);
+  };
   /** Admits the turn, waits until the shell effect is in flight, then SIGKILLs the service and its tool. */
-  const killMidShell = async () => {
+  const killMidShell = async (signal: NodeJS.Signals = "SIGKILL") => {
     await start();
+    await presence();
     expect((await post()).status).toBe(202);
     await until(async () => ((await effects()).length === 1 ? true : undefined));
     const before = await journal();
     expect(before.steps.find((step) => step.input.name === "memory")?.output).toBeDefined();
     expect(before.steps.find((step) => step.input.name === "bash")).toMatchObject({ replay: "never" });
     expect(before.steps.find((step) => step.input.name === "bash")?.output).toBeUndefined();
-    await stop("SIGKILL");
+    expect(await handoffs()).toMatchObject([{ state: "running", host: "pi" }]);
+    await stop(signal);
     await stopTool();
   };
   return {
@@ -274,6 +320,7 @@ setTimeout(() => {}, 300000);
     model,
     until,
     start,
+    presence,
     stop,
     stopTool,
     post,
@@ -281,6 +328,7 @@ setTimeout(() => {}, 300000);
     journal,
     effects,
     memories,
+    handoffs,
     killMidShell,
   };
 }

@@ -335,7 +335,11 @@ export class PiTurnJournal {
   }
 }
 
-/** One opt-in room, serialized deliveries. No steering can escape a turn's journal. */
+/**
+ * One opt-in room, serialized deliveries. Its turns run through the normal room
+ * handoff; the journal covers only their Pi dispatch, and the room opens no
+ * steering burst, so no steering can escape a turn's journal.
+ */
 export class DurablePiRoom {
   private tail: Promise<unknown> = Promise.resolve();
   private readonly running = new Map<string, Promise<CaptainChannelTurnResult>>();
@@ -352,6 +356,31 @@ export class DurablePiRoom {
       `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}` === this.target
     );
   }
+  /** This delivery's Pi dispatch began in an earlier process and never settled. */
+  resumable(request: DiscordPresenceChannelTurnRequest): boolean {
+    if (!this.accepts(request)) return false;
+    const record = this.read(request.deliveryId);
+    return record !== undefined && record.fingerprint === digest(request) && record.result === undefined;
+  }
+  /** Whether a delivery's journal exists without a result, before its request is known. */
+  unsettled(deliveryId: string): boolean {
+    if (this.target === undefined) return false;
+    const record = this.read(deliveryId);
+    return record !== undefined && record.result === undefined;
+  }
+  /** An unreadable journal resumes nothing; the turn's own recovery reports it. */
+  private read(deliveryId: string): JournalRecord | undefined {
+    try {
+      return RecordSchema.parse(
+        JSON.parse(readFileSync(join(this.root, digest(deliveryId), "turn.json"), "utf8")),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+  private path(request: DiscordPresenceChannelTurnRequest): string {
+    return join(this.root, digest(request.deliveryId), "turn.json");
+  }
   run(
     request: DiscordPresenceChannelTurnRequest,
     grant: string,
@@ -364,11 +393,7 @@ export class DurablePiRoom {
       // allow-swallowed-rejection -- its original caller owns the failure; later deliveries must still run.
       .catch(() => undefined)
       .then(async () => {
-        const journal = new PiTurnJournal(
-          join(this.root, digest(request.deliveryId), "turn.json"),
-          request,
-          grant,
-        );
+        const journal = new PiTurnJournal(this.path(request), request, grant);
         if (journal.record.result !== undefined) return journal.record.result;
         const result = await execute(journal);
         journal.settle(result);
