@@ -139,13 +139,18 @@ export class InboundSeatReceipts {
     // Answer by the admission deadline, inside the worker bridge's own request
     // budget, so a slow route returns its sealed not_sent instead of timing out
     // uncertain (VUH-2244). The late original reconciles that tombstone before
-    // acceptance and can never land after this answer.
+    // acceptance and can never land after this answer. Node wakes timers on
+    // libuv's loop clock, which can run up to a millisecond ahead of now(); a
+    // wake before the deadline would still see the original live and answer
+    // uncertain, so it waits out the remainder first (#365).
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<FleetSeatMessageReceipt>((resolve) => {
-      timer = setTimeout(
-        () => resolve(this.lookup(paneId, delivery, fingerprint)),
-        Math.max(0, attempt.stamp.deadlineAt - this.now()),
-      );
+      const answer = () => {
+        const remaining = attempt.stamp.deadlineAt - this.now();
+        if (remaining > 0 && !this.abandoned(attempt)) timer = setTimeout(answer, remaining);
+        else resolve(this.lookup(paneId, delivery, fingerprint));
+      };
+      timer = setTimeout(answer, Math.max(0, attempt.stamp.deadlineAt - this.now()));
     });
     original.catch(() => undefined);
     try {

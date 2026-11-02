@@ -195,3 +195,48 @@ it("answers a stalled worker report not_sent by its deadline, fences the late or
   expect(resent.deliveryId).not.toBe(refused.deliveryId);
   expect(conversations.inboundAcceptance(resent.deliveryId)?.text).toBe("Final report");
 }, 30_000);
+
+// #365: the deadline answer is a timer, and Node fires timers from libuv's
+// monotonic loop clock, which can wake up to a millisecond before Date.now()
+// reaches the deadline. A timer that wakes while the receiver still sees the
+// original as live must still answer not_sent, never uncertain. Real clock,
+// real fence and store; only the routes stall. Each attempt gets a fresh
+// receiver so its lookup stays fast enough not to hide an early wake.
+it("answers every stalled report not_sent on the real clock, even when its deadline timer wakes early (#365)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-report-deadline-real-"));
+  const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  let release!: () => void;
+  const stall = new Promise<void>((resolve) => (release = resolve));
+  cleanup.push(async () => {
+    release();
+    await conversations.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const pane = "w15:p8";
+  const binding = "d".repeat(64);
+  const lates: Promise<FleetSeatMessageReceipt>[] = [];
+  const answers: FleetSeatMessageReceipt[] = [];
+  for (let i = 0; i < 300; i++) {
+    const receiver = new InboundSeatReceipts(join(root, `inbound-${String(i)}.json`), conversations, {
+      deadlineMs: 2,
+    });
+    const delivery = { id: crypto.randomUUID(), binding };
+    const text = `report ${String(i)}`;
+    let lateAccept!: (receipt: FleetSeatMessageReceipt) => void;
+    lates.push(new Promise((resolve) => (lateAccept = resolve)));
+    answers.push(
+      await receiver.trackAttempt(pane, delivery, text, async () => {
+        await stall;
+        const accepted = receiver.accept(pane, delivery, text, text);
+        lateAccept(accepted);
+        return accepted;
+      }),
+    );
+  }
+  expect(answers.filter((answer) => answer.definitive !== "not_sent")).toEqual([]);
+  // Every late original reconciles its sealed refusal and never lands.
+  release();
+  for (const late of await Promise.all(lates))
+    expect(late).toMatchObject({ received: false, definitive: "not_sent" });
+  for (const answer of answers) expect(conversations.inboundAcceptance(answer.deliveryId!)).toBeUndefined();
+}, 30_000);
