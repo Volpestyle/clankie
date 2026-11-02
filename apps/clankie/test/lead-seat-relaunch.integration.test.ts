@@ -878,7 +878,10 @@ it("starts a connected app's agent in a granted place after Clankie's own agent 
   const started = await start();
   expect(started).toMatchObject({ op: "start_agent", status: "refused" });
   expect(JSON.stringify(started)).not.toContain("original agent has changed");
-  expect(started).toMatchObject({ detail: expect.stringContaining("isn't installed or signed in") });
+  // The service's stated refusal reaches the app as-is.
+  expect(started).toMatchObject({
+    detail: expect.stringContaining("No structured harness adapter is available"),
+  });
   expect(spawn).toHaveBeenCalledOnce();
 });
 
