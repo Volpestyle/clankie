@@ -73,6 +73,7 @@ Pick the first that fits:
    pass only when your lead says the owner asked for that page in this task.
    When the stock Herdr app or another workspace ships its own browser
    commands, use them the same way.
+
 2. **Your own headless browser tools** when the workspace has no browser pane.
 3. **A desktop** for native apps only, in the machine's desktop mode
    ([ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)):
