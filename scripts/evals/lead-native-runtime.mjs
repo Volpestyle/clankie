@@ -338,6 +338,8 @@ function createNativeRuntime({ container, allocation, ownerAttachment, sharedAdm
     // The ordinary runner resolves transcript files in the host owner account.
     // Eval native adapter protocol events and in-container Herdr reads own this lane.
     transcript: async () => undefined,
+    // The allocated checkout is mounted at its /eval path; panes report that path.
+    nativeWorkingDirectory: (cwd) => (cwd === hostCwd ? containerCwd : cwd),
     async createTab(input) {
       if (input.cwd !== hostCwd || input.fleet !== undefined) throw Error("Unallocated Herdr workspace");
       return baseRunner.createTab({ ...input, cwd: containerCwd, env: environment });
@@ -518,6 +520,7 @@ function createNativeRuntime({ container, allocation, ownerAttachment, sharedAdm
   };
   const adapter = createCodexSeatAdapter({
     server,
+    nativeCwd: (cwd) => (cwd === hostCwd ? containerCwd : cwd),
     nativePolicy: policy,
     herdr,
     trackerOverrides: async () => [],

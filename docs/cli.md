@@ -5073,6 +5073,9 @@ seat; it never replays an uncertain send. Already-running older bridges keep the
 loaded code until a native plugin refresh or fresh hire. New Codex hires explicitly select their
 prepared checkout with `--cd`; startup refuses a different or missing pane cwd,
 and briefed hires also verify the native thread cwd before sending the brief.
+Where the native agent runs in a namespace that mounts the checkout elsewhere
+(the native eval container's `/eval/...`), the runner names that path and the
+checks compare against it.
 
 `--closure` and `--machine-setup` both default to `lead`:
 

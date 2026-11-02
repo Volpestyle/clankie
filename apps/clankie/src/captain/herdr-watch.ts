@@ -335,6 +335,11 @@ export interface HerdrWatchRunner {
   closePane?(target: string, guard?: () => Promise<void>): Promise<void>;
   /** Change the manual label of an owned newly allocated pane, never its OSC title. */
   renamePane?(target: string, label: string): Promise<void>;
+  /**
+   * Where a host checkout is mounted in this runner's native namespace, when that differs
+   * (an eval container). Pane cwds this runner reports are native paths.
+   */
+  nativeWorkingDirectory?(cwd: string): string;
   /** Open a tab in a working directory; resolves with its root pane id. */
   createTab?(options: {
     readonly cwd: string;
@@ -4666,7 +4671,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(sessionId === undefined ? {} : { sessionId }),
       });
     }
-    if (input.harness === "codex" && agent.workingDirectory !== input.workingDirectory)
+    if (input.harness === "codex" && agent.workingDirectory !== this.nativeCheckout(input.workingDirectory))
       throw new Error("The seat cwd does not match the prepared checkout; startup is unconfirmed");
     const allocation = this.projectAllocations.get(input);
     if (allocation) {
@@ -5355,7 +5360,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
             const matches = (current: HerdrAgentSnapshot) =>
               current.paneId === paneId &&
               current.agent === ref.harness &&
-              (ref.harness !== "codex" || current.workingDirectory === input.workingDirectory) &&
+              (ref.harness !== "codex" ||
+                current.workingDirectory === this.nativeCheckout(input.workingDirectory)) &&
               current.status !== "offline" &&
               current.status !== "unknown" &&
               nativeSessionId(current) === ref.sessionId;
@@ -5695,7 +5701,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const args = [
         ...skillLaunch.args,
         // Bare Codex hires use its shared daemon: the terminal cwd does not select the thread cwd.
-        ...(input.harness === "codex" ? ["--cd", input.workingDirectory] : []),
+        ...(input.harness === "codex" ? ["--cd", this.nativeCheckout(input.workingDirectory)] : []),
         ...(input.harness === "codex" && remote === undefined ? fleetSeatCodexStartArgs() : []),
         ...modelArgs,
         ...effortArgs,
@@ -5802,6 +5808,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * writes one on launch, so the gap is a race, not an absence. Waiting through
    * it is what keeps a good hire from being torn down as a failure.
    */
+  /** A host checkout's path as this runner's panes and native threads see it (#402). */
+  private nativeCheckout(workingDirectory: string): string {
+    return this.runner.nativeWorkingDirectory?.(workingDirectory) ?? workingDirectory;
+  }
+
   private async agentWithSession(paneId: string, waitMs: number): Promise<HerdrAgentSnapshot> {
     const deadline = Date.now() + waitMs;
     let agent = await this.runner.get(paneId);
