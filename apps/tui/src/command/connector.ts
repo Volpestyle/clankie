@@ -39,6 +39,8 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // Connected connectors are devices: `clankie devices revoke ID` ends one.
 // `clankie connector prompts` lists which apps may answer prompts and press
 // keys in agent panes, and turns one on or off by its name or device id (ADR 0303, ADR 0323).
+// An app that is on answers only the agents it hired; `prompts pane APP AGENT on|off`
+// grants or withdraws one more exact agent for it.
 // `clankie connector detect` turns Herdr session discovery on or off, and
 // `clankie connector serve` turns the connector on or off per app (ADR 0312).
 // `clankie connector lead` says who leads Clankie's lead threads, and hands
@@ -49,7 +51,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // leads and how each one was woken (#179).
 
 const CONNECTOR_USAGE =
-  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json] | clankie connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json] | clankie connector notes [SINCE] [--json]";
+  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP | pane APP AGENT on|off] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json] | clankie connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json] | clankie connector notes [SINCE] [--json]";
 const TIMEOUT_MS = 10_000;
 
 export interface ConnectorCliCommandOptions {
@@ -138,6 +140,20 @@ function parse(args: readonly string[]) {
     positional.length === 3
   )
     return { json, subcommand: "prompts" as const, allowed: positional[1] === "on", app: positional[2]! };
+  if (
+    positional[0] === "prompts" &&
+    positional[1] === "pane" &&
+    positional.length === 5 &&
+    (positional[4] === "on" || positional[4] === "off")
+  )
+    return {
+      json,
+      subcommand: "prompts" as const,
+      allowed: positional[4] === "on",
+      app: positional[2]!,
+      // The agent id list_agents shows the app (`herdr:ID`) or the bare terminal id.
+      terminalId: positional[3]!.replace(/^herdr:/u, ""),
+    };
   if (positional[0] === "lead" && positional.length === 1) return { json, subcommand: "lead" as const };
   if (
     positional[0] === "lead" &&
@@ -203,8 +219,11 @@ function formatServed(status: ConnectorDetectionResponse): string {
 function formatPromptAnswers(status: ConnectorPromptAnswersResponse): string {
   if (status.apps.length === 0) return "No apps are connected.";
   return [
-    ...status.apps.map((app) => `${app.name}: ${app.allowed ? "on" : "off"}  (${app.deviceId})`),
-    "An app that is on may answer menus and permission prompts open in your agents' panes, and press keys there (arrows, esc, ctrl+c).",
+    ...status.apps.flatMap((app) => [
+      `${app.name}: ${app.allowed ? "on" : "off"}  (${app.deviceId})`,
+      ...(app.panes ?? []).map((pane) => `  also answers agent ${pane} (your grant)`),
+    ]),
+    "An app that is on may answer menus and permission prompts open in the agents it hired, and press keys there (arrows, esc, ctrl+c). Risky prompts stay yours. `clankie connector prompts pane APP AGENT on` lets it answer one more agent.",
   ].join("\n");
 }
 
@@ -520,7 +539,11 @@ export async function runConnectorCommand(
         if (named.length > 1) throw new ConnectorCommandError("ambiguous_app");
         status = await read(
           await operatorRequest(CONNECTOR_PROMPT_ANSWERS_PATH, "POST", request, ConnectorCommandError, {
-            jsonBody: { deviceId: named[0]!.deviceId, allowed: parsed.allowed },
+            jsonBody: {
+              deviceId: named[0]!.deviceId,
+              allowed: parsed.allowed,
+              ...("terminalId" in parsed ? { terminalId: parsed.terminalId } : {}),
+            },
             contentType: "application/json",
           }),
         );

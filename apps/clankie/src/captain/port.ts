@@ -411,6 +411,10 @@ export interface CaptainPort {
    */
   answerPrompt?(input: {
     readonly app: string;
+    /** The calling app's connector device: it answers only its own hires. */
+    readonly deviceId: string;
+    /** The owner's grant for this app on one exact agent id, beyond its own hires. */
+    readonly paneGranted: (terminalId: string) => boolean;
     readonly current: () => boolean;
     readonly terminalId: string;
     readonly expect: string;
@@ -422,6 +426,10 @@ export interface CaptainPort {
    */
   pressKeys?(input: {
     readonly app: string;
+    /** The calling app's connector device: it answers only its own hires. */
+    readonly deviceId: string;
+    /** The owner's grant for this app on one exact agent id, beyond its own hires. */
+    readonly paneGranted: (terminalId: string) => boolean;
     readonly current: () => boolean;
     readonly terminalId: string;
     readonly keys: readonly string[];

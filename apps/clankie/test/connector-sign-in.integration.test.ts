@@ -762,6 +762,42 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     ["term-rex", { status: "blocked", screen: "Run the migration?\n❯ 1. Yes\n  2. No" }],
     ["term-zed", { status: "blocked", screen: "Pick a theme\n❯ 1. Dark\n  2. Light" }],
     ["term-ada", { status: "blocked", screen: "Delete the branch?\n❯ 1. Yes\n  2. No" }],
+    // The owner's own session and Grok's hire, each on an ordinary menu.
+    ["term-own", { status: "blocked", screen: "Pick a port\n❯ 1. 3000\n  2. 8080" }],
+    ["term-grok", { status: "blocked", screen: "Pick a port\n❯ 1. 3000\n  2. 8080" }],
+    // Claude's hires on screens that stay the owner's, and two ordinary permission prompts.
+    ["term-ask", { status: "blocked", screen: permission }],
+    ["term-enter", { status: "blocked", screen: permission }],
+    [
+      "term-rm",
+      {
+        status: "blocked",
+        screen: permission.replace("git push origin main", "rm -rf build/").replace("git push", "rm"),
+      },
+    ],
+    [
+      "term-force",
+      {
+        status: "blocked",
+        screen: permission.replace("git push origin main", "git push --force origin main"),
+      },
+    ],
+    [
+      "term-mode",
+      {
+        status: "blocked",
+        screen: [
+          "WARNING: Claude Code running in Bypass Permissions mode",
+          "In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.",
+          "❯ 1. No, exit",
+          "  2. Yes, I accept",
+        ].join("\n"),
+      },
+    ],
+    [
+      "term-key",
+      { status: "blocked", screen: "The deploy needs a key.\nPaste your API key to continue:\n> " },
+    ],
   ]);
   const paneOf = (id: string) => panes.get(id)!.paneId ?? `p-${id}`;
   const sent: string[][] = [];
@@ -814,7 +850,10 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     ["pc-a", connection("pc-a")],
     ["pc-b", connection("pc-b")],
   ]);
+  // Which app hired each pane, as Clankie's hire record says for the exact occupant.
+  const hiredBy = new Map<string, string>();
   const answerPrompt = createPromptAnswerer({
+    appHire: (agent, deviceId) => hiredBy.get(agent.terminalId) === deviceId,
     paneAddress: async (terminalId) => (panes.has(terminalId) ? `pc/${terminalId}` : undefined),
     runner: routeHerdrFleets(
       {} as HerdrWatchRunner,
@@ -895,6 +934,11 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     };
     const claude = await signIn("Claude", CALLBACK);
     const grok = await signIn("Grok", "https://grok.example/oauth/callback");
+    // Claude hired every pane but Pip, which Grok hired.
+    for (const id of panes.keys()) hiredBy.set(`pc/${id}`, claude.deviceId);
+    // The owner's own session, and a hire Grok asked for, are not Claude's.
+    hiredBy.delete("pc/term-own");
+    hiredBy.set("pc/term-grok", grok.deviceId);
     const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
       (result.content as Array<{ text: string }>)[0]!.text;
     const answer = (client: Client, agent: string, expected: string, steps: unknown[]) =>
@@ -1022,13 +1066,84 @@ it("an app answers an agent's prompt only once the owner turns it on, only while
     expect((await direct(host.operatorToken, { ...prompt, appDeviceId: claude.deviceId })).status).toBe(403);
     expect((await direct(captainToken, prompt)).status).toBe(403);
 
+    // An app answers only the agents it hired: never the owner's own session or
+    // another app's hire, until the owner grants it that one agent. (Rex's answer
+    // turned Claude off; the owner turns it back on.)
+    expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
+    const own = await answer(claude.client, "herdr:term-own", "Pick a port", [{ text: "1" }]);
+    expect(own.isError).toBe(true);
+    expect(textOf(own)).toContain("isn't one this app hired");
+    expect(textOf(await answer(claude.client, "herdr:term-grok", "Pick a port", [{ text: "2" }]))).toContain(
+      "isn't one this app hired",
+    );
+    expect(sent).toHaveLength(8);
+    expect(await owner.run(["prompts", "pane", "Claude", "herdr:term-own", "on"])).toBe(0);
+    expect(owner.output().stdout).toContain("also answers agent term-own (your grant)");
+    const granted = await answer(claude.client, "herdr:term-own", "Pick a port", [{ text: "1" }]);
+    expect(granted.isError).toBeFalsy();
+    // Ada's answer moved the PC to its new endpoint.
+    expect(sent.at(-1)).toEqual(["text", "pc-b", "p-term-own", "1"]);
+    const grantNotes = board.readAppNotes({ limit: 20 });
+    expect(grantNotes.outcome === "ready" && grantNotes.notes.at(-1)?.text).toBe(
+      'Answered a prompt in term-own (on the owner\'s grant for this agent): typed "1".',
+    );
+    // The grant is that one agent: Grok's hire stays Grok's, and withdrawing it ends it.
+    expect(textOf(await answer(claude.client, "herdr:term-grok", "Pick a port", [{ text: "2" }]))).toContain(
+      "isn't one this app hired",
+    );
+    expect(await owner.run(["prompts", "pane", "Claude", "term-own", "off"])).toBe(0);
+    panes.set("term-own", { status: "blocked", screen: "Pick a host\n❯ 1. local\n  2. pc" });
+    expect(textOf(await answer(claude.client, "herdr:term-own", "Pick a host", [{ text: "1" }]))).toContain(
+      "isn't one this app hired",
+    );
+    expect(sent).toHaveLength(9);
+
+    // Risky screens stay the owner's, even on the app's own hires.
+    const refusedFor = async (agent: string, expected: string, steps: unknown[], reason: string) => {
+      const result = await answer(claude.client, agent, expected, steps);
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain(reason);
+      expect(textOf(result)).toContain("The owner must answer this one");
+    };
+    // An option that approves more than this prompt, picked by number or walked to.
+    await refusedFor("herdr:term-ask", "Do you want to proceed?", [{ text: "2" }], "approves more than");
+    await refusedFor(
+      "herdr:term-ask",
+      "Do you want to proceed?",
+      [{ key: "down" }, { key: "enter" }],
+      "pick an option by its number",
+    );
+    await refusedFor(
+      "herdr:term-rm",
+      "Do you want to proceed?",
+      [{ text: "1" }],
+      "deletes files recursively",
+    );
+    await refusedFor("herdr:term-force", "Do you want to proceed?", [{ text: "1" }], "force-pushes");
+    await refusedFor("herdr:term-mode", "Bypass Permissions", [{ text: "2" }], "permission mode");
+    await refusedFor("herdr:term-key", "API key", [{ text: "sk-test" }], "password, token, key or sign-in");
+    expect(sent).toHaveLength(9);
+    // The same ordinary permission prompt is still answered: Yes by its number, or
+    // enter with the pointer on Yes.
+    expect(
+      (await answer(claude.client, "herdr:term-ask", "Do you want to proceed?", [{ text: "1" }])).isError,
+    ).toBeFalsy();
+    expect(
+      (await answer(claude.client, "herdr:term-enter", "Do you want to proceed?", [{ key: "enter" }]))
+        .isError,
+    ).toBeFalsy();
+    expect(sent.slice(9)).toEqual([
+      ["text", "pc-b", "p-term-ask", "1"],
+      ["keys", "pc-b", "p-term-enter", "enter"],
+    ]);
+
     // Turning it off, or revoking the app, stops it at once.
     expect(await owner.run(["prompts", "off", claude.deviceId])).toBe(0);
     panes.set("term-bram", { status: "blocked", screen: permission });
     expect(textOf(await answer(claude.client, "herdr:term-bram", "1. Yes", [{ text: "1" }]))).toContain(
       "hasn't turned on",
     );
-    expect(sent).toHaveLength(8);
+    expect(sent).toHaveLength(11);
   } finally {
     await Promise.all(clients.map((client) => client.close()));
     relay.closeAllConnections();
@@ -1045,11 +1160,24 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
   // Bram works on a linked PC and Ivy sits in a picker there; Pip's question went to the
   // owner; Kai's terminal moves mid-press. Dot is a hire in the desktop app, which takes
   // named keys only.
-  const panes = new Map<string, { status: string; paneId?: string }>([
-    ["term-bram", { status: "working" }],
-    ["term-ivy", { status: "idle" }],
+  const permission = [
+    "Bash command",
+    "  npm test",
+    "Do you want to proceed?",
+    "❯ 1. Yes",
+    "  2. Yes, and don't ask again for npm test commands",
+    "  3. No, and tell Claude what to do differently (esc)",
+  ].join("\n");
+  const panes = new Map<string, { status: string; paneId?: string; screen?: string }>([
+    ["term-bram", { status: "working", screen: "⏺ Running tests…\n> " }],
+    ["term-ivy", { status: "idle", screen: "Select model\n❯ 1. Opus\n  2. Sonnet\n  3. Haiku" }],
     ["term-pip", { status: "blocked" }],
     ["term-kai", { status: "working" }],
+    // The owner's own session.
+    ["term-own", { status: "idle", screen: "> " }],
+    ["term-yn", { status: "blocked", screen: "Overwrite README.md? (y/n)" }],
+    ["term-perm", { status: "blocked", screen: permission }],
+    ["term-rm", { status: "blocked", screen: permission.replace("npm test", "rm -rf ~/src") }],
   ]);
   const paneOf = (id: string) => panes.get(id)!.paneId ?? `p-${id}`;
   const sent: string[][] = [];
@@ -1060,7 +1188,10 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
         ? undefined
         : { paneId: paneOf(id), terminalId: id, name: id, agent: "claude", status: pane.status, title: id };
     },
-    readPane: async () => "",
+    readPane: async (paneId: string) =>
+      [...panes.keys()].find((id) => paneOf(id) === paneId) === undefined
+        ? ""
+        : (panes.get([...panes.keys()].find((id) => paneOf(id) === paneId)!)!.screen ?? ""),
     sendKeys: async (paneId: string, keys: readonly string[]) => {
       sent.push(["pc", paneId, ...keys]);
       if (paneId === "p-term-kai") panes.set("term-kai", { status: "working", paneId: "p-term-kai-2" });
@@ -1075,7 +1206,10 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     readPane: async () => "Allow this edit?\n❯ 1. Yes\n  2. No",
     sendKeys: async (paneId: string, keys: readonly string[]) => void sent.push(["desktop", paneId, ...keys]),
   } as unknown as HerdrWatchRunner;
+  // Which app hired each terminal, as Clankie's hire record says for the exact occupant.
+  const hiredBy = new Map<string, string>();
   const deps = {
+    appHire: (agent: { terminalId: string }, deviceId: string) => hiredBy.get(agent.terminalId) === deviceId,
     paneAddress: async (terminalId: string) =>
       terminalId === "dot" ? "herdr-core/t4" : panes.has(terminalId) ? `pc/${terminalId}` : undefined,
     runner: routeHerdrFleets(
@@ -1152,10 +1286,18 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
         }) as unknown as Transport,
       );
       clients.push(client);
-      return { client, accessToken };
+      const self = (await (
+        await fetch(`${host.baseUrl}/v1/devices/self`, {
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      ).json()) as { deviceId: string };
+      return { client, accessToken, deviceId: self.deviceId };
     };
     const claude = await signIn("Claude", CALLBACK);
     const grok = await signIn("Grok", "https://grok.example/oauth/callback");
+    // Claude hired every terminal but the owner's own.
+    for (const id of panes.keys()) if (id !== "term-own") hiredBy.set(`pc/${id}`, claude.deviceId);
+    hiredBy.set("herdr-core/t4", claude.deviceId);
     const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
       (result.content as Array<{ text: string }>)[0]!.text;
     const press = (client: Client, agent: string, keys: unknown[]) =>
@@ -1173,16 +1315,13 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     const stop = await press(claude.client, "herdr:term-bram", ["ctrl+c"]);
     expect(stop.isError).toBeFalsy();
     expect(JSON.parse(textOf(stop))).toMatchObject({ agent: "herdr:term-bram", status: "pressed" });
-    expect(
-      (await press(claude.client, "herdr:term-ivy", ["down", "down", "shift+tab", "enter"])).isError,
-    ).toBeFalsy();
+    expect((await press(claude.client, "herdr:term-ivy", ["down", "down", "enter"])).isError).toBeFalsy();
     // So does a hire in the desktop app, through its own core.
     expect((await press(claude.client, "herdr:dot", ["esc"])).isError).toBeFalsy();
     expect(sent).toEqual([
       ["pc", "p-term-bram", "ctrl+c"],
       ["pc", "p-term-ivy", "down"],
       ["pc", "p-term-ivy", "down"],
-      ["pc", "p-term-ivy", "shift+tab"],
       ["pc", "p-term-ivy", "enter"],
       ["desktop", "t4", "esc"],
     ]);
@@ -1202,15 +1341,49 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     // A terminal that moves mid-press stops the rest.
     const kai = await press(claude.client, "herdr:term-kai", ["esc", "esc"]);
     expect(textOf(kai)).toContain("Stopped after 1 of 2 keys");
-    expect(sent).toHaveLength(7);
+    expect(sent).toHaveLength(6);
+
+    // Only the app's own hires: the owner's own session is refused.
+    expect(textOf(await press(claude.client, "herdr:term-own", ["esc"]))).toContain(
+      "isn't one this app hired",
+    );
+    // shift+tab never goes, and letters and digits type nothing outside a menu.
+    const refusal = async (agent: string, keys: string[], reason: string) => {
+      const result = await press(claude.client, agent, keys);
+      expect(result.isError).toBe(true);
+      expect(textOf(result)).toContain(reason);
+    };
+    await refusal("herdr:term-bram", ["shift+tab"], "shift+tab");
+    await refusal("herdr:term-ivy", ["shift+tab"], "shift+tab");
+    await refusal("herdr:term-bram", ["r", "m", "space"], "a letter is only pressed at a menu");
+    await refusal("herdr:term-bram", ["7"], "a digit is only pressed to pick a menu option");
+    // On a permission menu that offers "don't ask again", only a safe option by number.
+    await refusal("herdr:term-perm", ["2"], "approves more than this one prompt");
+    await refusal("herdr:term-perm", ["down", "enter"], "pick an option by its number");
+    await refusal("herdr:term-perm", ["a"], "pick by number");
+    // A risky screen takes no key at all.
+    await refusal("herdr:term-rm", ["1"], "deletes files recursively");
+    expect(sent).toHaveLength(6);
+    // Menus and yes/no prompts still take their keys.
+    expect((await press(claude.client, "herdr:term-ivy", ["2"])).isError).toBeFalsy();
+    expect((await press(claude.client, "herdr:term-yn", ["y"])).isError).toBeFalsy();
+    expect((await press(claude.client, "herdr:term-perm", ["1"])).isError).toBeFalsy();
+    expect(sent.slice(6)).toEqual([
+      ["pc", "p-term-ivy", "2"],
+      ["pc", "p-term-yn", "y"],
+      ["pc", "p-term-perm", "1"],
+    ]);
 
     // Each press is on the note board, signed by the app.
     const notes = board.readAppNotes({ limit: 20 });
     expect(notes.outcome === "ready" && notes.notes.map((note) => note.text)).toEqual([
       "Pressed keys in term-bram: ctrl+c.",
-      "Pressed keys in term-ivy: down, down, shift+tab, enter.",
+      "Pressed keys in term-ivy: down, down, enter.",
       "Pressed keys in dot: esc.",
       "Pressed part of 2 keys in term-kai: esc; stopped because the agent's terminal went away.",
+      "Pressed keys in term-ivy: 2.",
+      "Pressed keys in term-yn: y.",
+      "Pressed keys in term-perm: 1.",
     ]);
 
     // The relay stamps the app; a caller-named one is refused.
@@ -1230,7 +1403,7 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     // Turning it off stops it at once.
     expect(await owner.run(["prompts", "off", "Claude"])).toBe(0);
     expect(textOf(await press(claude.client, "herdr:term-bram", ["esc"]))).toContain("hasn't turned on");
-    expect(sent).toHaveLength(7);
+    expect(sent).toHaveLength(9);
   } finally {
     await Promise.all(clients.map((client) => client.close()));
     relay.closeAllConnections();

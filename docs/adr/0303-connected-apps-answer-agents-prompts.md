@@ -66,3 +66,25 @@ send-keys` and types with `herdr pane send-text` on the pane's own machine,
   later call rather than reach the new endpoint). The reply and the note on the
   board say which steps went in, so `expect` should be text that stays on
   screen until the answer is in, such as the question.
+
+## Amended 2026-11-02
+
+The service now enforces the limits the tool description only asked for:
+
+- **Only the app's own hires.** An app answers only an agent it hired itself:
+  the exact pane, seat and native session recorded with that app as the hire's
+  starter. Any other agent is refused unless James grants that app that one
+  agent with `clankie connector prompts pane APP AGENT on`; grants are listed
+  under the app in `clankie connector prompts`, and each answer made under one is
+  marked so on the note board.
+- **Risky screens stay James's.** Before every step the service reads the open
+  prompt and refuses permission-mode switches, options that approve more than
+  this one prompt ("don't ask again", "always allow", "for this session"),
+  recursive deletes, force pushes, and password, token, key, sign-in or payment
+  prompts. The other options of an ordinary permission menu can still be picked
+  by number. The rules live in one reviewable list in
+  `apps/clankie/src/captain/prompt-answer-guard.ts`.
+- **The switch is read once.** The per-app switch file is loaded when the
+  service starts and changes only through James's own route and CLI.
+
+The first consequence above no longer holds: "always allow" choices are refused.

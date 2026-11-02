@@ -402,6 +402,9 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         deviceId: record.deviceId,
         name: record.name,
         allowed: ctx.promptAnswers.allowed(record.deviceId),
+        ...(ctx.promptAnswers.panes(record.deviceId).length === 0
+          ? {}
+          : { panes: ctx.promptAnswers.panes(record.deviceId).slice(0, 256) }),
       })),
   });
 
@@ -422,15 +425,30 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     // Only a connected app; turning one off works even after it was revoked.
     if (parsed.data.allowed && (record?.status !== "active" || record.scope !== "connector"))
       return context.json({ error: "not_found" }, 404);
-    ctx.promptAnswers.set(parsed.data.deviceId, parsed.data.allowed);
-    logger.info(
-      {
-        event: "connector.prompt_answers.changed",
-        deviceId: parsed.data.deviceId,
-        allowed: parsed.data.allowed,
-      },
-      "connector prompt answers changed",
-    );
+    if (parsed.data.terminalId === undefined) {
+      ctx.promptAnswers.set(parsed.data.deviceId, parsed.data.allowed);
+      logger.info(
+        {
+          event: "connector.prompt_answers.changed",
+          deviceId: parsed.data.deviceId,
+          allowed: parsed.data.allowed,
+        },
+        "connector prompt answers changed",
+      );
+    } else {
+      // One exact agent beyond the app's own hires, granted only here, by the owner.
+      if (!ctx.promptAnswers.setPane(parsed.data.deviceId, parsed.data.terminalId, parsed.data.allowed))
+        return context.json({ error: "too_many_grants" }, 409);
+      logger.info(
+        {
+          event: "connector.prompt_answers.pane_changed",
+          deviceId: parsed.data.deviceId,
+          terminalId: parsed.data.terminalId,
+          allowed: parsed.data.allowed,
+        },
+        "connector prompt answers pane grant changed",
+      );
+    }
     return context.json(promptAnswerApps());
   });
 

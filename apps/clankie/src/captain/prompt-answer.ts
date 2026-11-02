@@ -1,7 +1,8 @@
 import { WATCH_REFUSAL } from "../watch.ts";
 import { createHash } from "node:crypto";
 import type { KeyPressResult, PromptAnswerResult, PromptAnswerStep } from "@clankie/protocol/connector";
-import type { HerdrBoundPane, HerdrWatchRunner } from "./herdr-watch.ts";
+import type { HerdrAgentSnapshot, HerdrBoundPane, HerdrWatchRunner } from "./herdr-watch.ts";
+import { refuseStep } from "./prompt-answer-guard.ts";
 
 /** Screens already answered, so one prompt is never answered twice (ADR 0303). */
 const ANSWERED_MAX = 512;
@@ -16,12 +17,43 @@ export interface PromptAnswerDeps {
   readonly record: (app: string, text: string) => unknown;
   /** Watch (ADR 0308): no key reaches a pane while Clankie only watches. */
   readonly watching?: () => Promise<boolean>;
+  /**
+   * Whether this exact native occupant (pane, seat and session) is a hire the app with
+   * this device id asked for. An app answers only its own hires unless the owner granted
+   * it the pane; anything that can't be matched exactly is refused.
+   */
+  readonly appHire: (agent: HerdrAgentSnapshot, deviceId: string) => boolean;
 }
 
-export interface PromptAnswerInput {
+/** Who the call is for, as the route named it from the relay's stamp. */
+interface AppCaller {
   readonly app: string;
+  /** The calling app's connector device. */
+  readonly deviceId: string;
+  /** The owner's grant for this app on one exact agent id, beyond its own hires. */
+  readonly paneGranted: (terminalId: string) => boolean;
   readonly current: () => boolean;
   readonly terminalId: string;
+}
+
+const NOT_YOURS =
+  "That agent isn't one this app hired, so its prompts are the owner's to answer. The owner can let this app answer that one agent at the Mac with: clankie connector prompts pane APP AGENT on";
+const RISKY = (why: string) => `Refused because ${why}. The owner must answer this one at the Mac.`;
+
+/**
+ * Whether the app may act on this pane now: its own hire, or a pane the owner granted
+ * it. Matched on the pane as Herdr reports it now, before every step.
+ */
+function scopeOf(
+  deps: Pick<PromptAnswerDeps, "appHire">,
+  input: AppCaller,
+  now: HerdrAgentSnapshot,
+): "hire" | "grant" | undefined {
+  if (deps.appHire(now, input.deviceId)) return "hire";
+  return input.paneGranted(now.terminalId) || input.paneGranted(input.terminalId) ? "grant" : undefined;
+}
+
+export interface PromptAnswerInput extends AppCaller {
   readonly expect: string;
   readonly steps: readonly PromptAnswerStep[];
 }
@@ -48,6 +80,10 @@ type Check =
  * wait on input in that same pane, the text the app expects must still be on the
  * screen, no owner ask may hold the question and the owner must not have turned
  * answering off; a screen is answered only once.
+ *
+ * Amended: the pane must be a hire this app asked for, or one the owner granted it, and
+ * the step must pass the screen guard (prompt-answer-guard.ts), checked on the screen
+ * read just before that step.
  */
 export function createPromptAnswerer(deps: PromptAnswerDeps) {
   const answered: string[] = [];
@@ -66,7 +102,8 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
       return unavailable("That agent's pane isn't there now. List the agents again.");
     const pane = bound;
     const label = pane.pane.name ?? pane.pane.terminalId;
-    const check = async (): Promise<Check> => {
+    let granted = false;
+    const check = async (step: PromptAnswerStep): Promise<Check> => {
       const now = await pane.resolve();
       if (now === undefined || now.agent === "" || now.paneId !== pane.pane.paneId)
         return {
@@ -75,6 +112,10 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
           why: "the agent's pane went away",
           message: "That agent's pane isn't there now. List the agents again.",
         };
+      const scope = scopeOf(deps, input, now);
+      if (scope === undefined)
+        return { ok: false, outcome: "refused", why: "the agent isn't this app's hire", message: NOT_YOURS };
+      if (scope === "grant") granted = true;
       if (now.status !== "blocked")
         return {
           ok: false,
@@ -107,8 +148,11 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
         };
       if ((await deps.watching?.()) === true)
         return { ok: false, outcome: "refused", why: "Clankie is only watching", message: WATCH_REFUSAL };
+      const risky = refuseStep(screen, step);
+      if (risky !== undefined) return { ok: false, outcome: "refused", why: risky, message: RISKY(risky) };
       return { ok: true, screen };
     };
+    const grantNote = () => (granted ? " (on the owner's grant for this agent)" : "");
     let sent = 0;
     const note = (text: string) =>
       Promise.resolve()
@@ -118,7 +162,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
     const bounded = (text: string) => (text.length > 900 ? `${text.slice(0, 899)}…` : text);
     const stopped = async (why: string): Promise<PromptAnswerResult> => {
       const part = describe(input.steps.slice(0, sent));
-      await note(`Answered part of a prompt in ${label}: ${part}; stopped because ${why}.`);
+      await note(`Answered part of a prompt in ${label}${grantNote()}: ${part}; stopped because ${why}.`);
       return {
         outcome: "uncertain",
         message: `${bounded(`Stopped after ${sent} of ${input.steps.length} steps sent to ${label} (${part})`)}: ${why}. Read its screen before doing anything else.`,
@@ -128,7 +172,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
       return unavailable(
         "Text can't be typed into that agent's terminal from here; only named keys can be pressed.",
       );
-    const first = await check();
+    const first = await check(input.steps[0]!);
     if (!first.ok) return { outcome: first.outcome, message: first.message };
     const key = createHash("sha256").update(pane.pane.paneId).update("\0").update(first.screen).digest("hex");
     if (answered.includes(key))
@@ -141,7 +185,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
     try {
       for (const step of input.steps) {
         if (sent > 0) {
-          const again = await check();
+          const again = await check(step);
           if (!again.ok) return stopped(again.why);
         }
         // Nothing awaits between this and the send, so a revocation can't slip in.
@@ -166,7 +210,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
             "The answer may or may not have reached the agent. Read its screen before doing anything else.",
         };
       await note(
-        `Answered part of a prompt in ${label}: ${describe(input.steps.slice(0, sent))}; stopped because Clankie lost the pane or its machine.`,
+        `Answered part of a prompt in ${label}${grantNote()}: ${describe(input.steps.slice(0, sent))}; stopped because Clankie lost the pane or its machine.`,
       );
       return {
         outcome: "uncertain",
@@ -174,7 +218,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
           "Only part of the answer may have reached the agent. Read its screen before doing anything else.",
       };
     }
-    await note(`Answered a prompt in ${label}: ${describe(input.steps)}.`);
+    await note(`Answered a prompt in ${label}${grantNote()}: ${describe(input.steps)}.`);
     return {
       outcome: "answered",
       message: `${bounded(`Sent to ${label}: ${describe(input.steps)}`)}. Read its screen to see what it does next.`,
@@ -182,10 +226,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
   };
 }
 
-export interface KeyPressInput {
-  readonly app: string;
-  readonly current: () => boolean;
-  readonly terminalId: string;
+export interface KeyPressInput extends AppCaller {
   readonly keys: readonly string[];
 }
 
@@ -195,6 +236,11 @@ export interface KeyPressInput {
  * pane and its machine connection are bound once. Before every key the agent must still
  * be in that same pane, no owner ask may hold its question, Clankie must not be only
  * watching and the owner must not have turned prompts and keys off for the app.
+ *
+ * Amended: the terminal must be a hire this app asked for, or one the owner granted it,
+ * and each key must pass the screen guard (prompt-answer-guard.ts) on the screen read
+ * just before it: no shift+tab, no letters or digits outside a menu, nothing on a
+ * risky screen.
  */
 export function createKeyPresser(deps: PromptAnswerDeps) {
   return async function pressKeys(input: KeyPressInput): Promise<KeyPressResult> {
@@ -212,7 +258,10 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
       return unavailable("That agent's terminal isn't there now. List the agents again.");
     const pane = bound;
     const label = pane.pane.name ?? pane.pane.terminalId;
-    const refusal = async (): Promise<{ why: string; message: string; gone?: true } | undefined> => {
+    let granted = false;
+    const refusal = async (
+      key: string,
+    ): Promise<{ why: string; message: string; gone?: true } | undefined> => {
       const now = await pane.resolve();
       if (now === undefined || now.agent === "" || now.paneId !== pane.pane.paneId)
         return {
@@ -220,6 +269,9 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
           message: "That agent's terminal isn't there now. List the agents again.",
           gone: true,
         };
+      const scope = scopeOf(deps, input, now);
+      if (scope === undefined) return { why: "the agent isn't this app's hire", message: NOT_YOURS };
+      if (scope === "grant") granted = true;
       if (deps.ownerAskPending(now.terminalId))
         return {
           why: "its question went to the owner",
@@ -227,8 +279,10 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
         };
       if ((await deps.watching?.()) === true)
         return { why: "Clankie is only watching", message: WATCH_REFUSAL };
-      return undefined;
+      const risky = refuseStep(await pane.readScreen(), { key });
+      return risky === undefined ? undefined : { why: risky, message: RISKY(risky) };
     };
+    const grantNote = () => (granted ? " (on the owner's grant for this agent)" : "");
     const note = (text: string) =>
       Promise.resolve()
         .then(() => deps.record(input.app, text))
@@ -238,7 +292,9 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
     let sent = 0;
     const stopped = async (why: string): Promise<KeyPressResult> => {
       const part = input.keys.slice(0, sent).join(", ");
-      await note(`Pressed part of ${input.keys.length} keys in ${label}: ${part}; stopped because ${why}.`);
+      await note(
+        `Pressed part of ${input.keys.length} keys in ${label}${grantNote()}: ${part}; stopped because ${why}.`,
+      );
       return {
         outcome: "uncertain",
         message:
@@ -250,7 +306,7 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
     };
     try {
       for (const key of input.keys) {
-        const refused = await refusal();
+        const refused = await refusal(key);
         if (refused !== undefined) {
           if (sent > 0) return stopped(refused.why);
           return refused.gone
@@ -271,7 +327,7 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
     } catch {
       if (sent > 0)
         await note(
-          `Pressed part of ${input.keys.length} keys in ${label}: ${input.keys.slice(0, sent).join(", ")}; stopped because Clankie lost the terminal or its machine.`,
+          `Pressed part of ${input.keys.length} keys in ${label}${grantNote()}: ${input.keys.slice(0, sent).join(", ")}; stopped because Clankie lost the terminal or its machine.`,
         );
       // A send can fail after it reached the terminal, so a failed send never proves nothing arrived.
       return {
@@ -280,7 +336,7 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
           "The keys may or may not have reached the agent. Read its screen before doing anything else.",
       };
     }
-    await note(`Pressed keys in ${label}: ${input.keys.join(", ")}.`);
+    await note(`Pressed keys in ${label}${grantNote()}: ${input.keys.join(", ")}.`);
     return {
       outcome: "pressed",
       message:
