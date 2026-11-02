@@ -44,6 +44,8 @@ const gateway = createPublicGateway({
         authenticateAccountToken: createCognitoAccessTokenVerifier({
           issuer: accountConfig.account.issuer,
           clientId: accountConfig.account.clientId,
+          checkRevocation: true,
+          revocationCacheMs: 30_000,
         }),
       }),
   ...(push === undefined ? {} : { push: { registrations: push.registrations, sender: push.sender } }),
