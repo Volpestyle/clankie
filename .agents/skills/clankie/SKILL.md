@@ -75,7 +75,17 @@ a pull request that is CI's job when the pull request is marked ready; on a
 change you land straight on the main branch it is the project's local landing
 gate, run once before you push. While you iterate, run only the tests for what
 you changed. Don't run the whole suite or the full typecheck as a habit
-([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)). Publish raw captures through `clankie evidence push` as
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
+
+On a pull request in Clankie's own repositories, keep your branch on its base
+while you work and don't merge `main` into it. Right before merging, rebase onto
+a freshly fetched `origin/main` once and push with `git push --force-with-lease`
+to your own branch only. Resolve conflicts in your own files; if the rebase
+conflicts in files you didn't touch, run `git rebase --abort` and tell your lead
+which files, rather than resolving another worker's code
+([ADR 0345](../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+
+Publish raw captures through `clankie evidence push` as
 [work-items](../work-items/SKILL.md) rule 3 describes, and cite the printed
 `clankie://evidence` links.
 

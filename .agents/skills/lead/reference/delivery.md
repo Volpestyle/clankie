@@ -57,6 +57,14 @@ decision labelled as such, never a green full gate; failures in changed code or
 affected consumers still block, and assertions, timeouts and product defaults
 are never weakened to pass.
 
+In Clankie's own repositories a pull request lands by rebasing onto
+`origin/main` once, right before it merges, never by merging `main` in over and
+over. The worker pushes with `--force-with-lease` to its own branch only, and
+flags a rebase conflict in files it didn't touch instead of resolving another
+worker's code. Pull requests there use no queue: not `clankie integrate`, not
+GitHub's merge queue
+([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+
 The optional `clankie integrate` queue composes and gates a batch; its batching,
 cancel, revert and deploy-hold commands are in
 [the CLI reference](../../../../docs/cli.md#integrate). It cherry-picks only the

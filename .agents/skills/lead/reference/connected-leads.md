@@ -58,6 +58,15 @@ it; none takes precedence over another.
   are green, and a local review by any model is advisory, with its findings
   filed as follow-up issues
   ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+  There, brief each worker to rebase its branch onto `origin/main` once, right
+  before merging, instead of merging `main` in repeatedly; to push with
+  `--force-with-lease` to its own branch only; and to stop and tell you if the
+  rebase conflicts in files it didn't touch. Use no landing queue: not
+  `clankie integrate`, not GitHub's merge queue
+  ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+- **Keep workers off the same files.** Don't put two workers on the same files at
+  once. Sequence them, or give the shared file one owner, and route a conflict a
+  worker flags in someone else's files to whoever owns them.
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.
