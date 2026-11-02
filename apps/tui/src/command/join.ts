@@ -155,8 +155,12 @@ export async function runJoinCommand(
       return 0;
     }
     if (action === "leave") {
-      await leaveJoinedMachine(credential, store, fetcher);
-      stdout.write('{"ok":true,"left":true}\n');
+      const { homeNotified } = await leaveJoinedMachine(credential, store, fetcher);
+      if (credential && !homeNotified)
+        stderr.write(
+          "Left locally. The home was not told; remove this machine at the home when reachable.\n",
+        );
+      stdout.write(JSON.stringify({ ok: true, left: true, homeNotified }) + "\n");
       return 0;
     }
     if (action === "start") {

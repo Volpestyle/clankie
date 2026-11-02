@@ -300,11 +300,17 @@ export class MachineJoins {
       ticket.approving = false;
     }
   }
-  challenge(raw: unknown) {
+  async challenge(raw: unknown) {
     const id = JoinedId.parse(raw);
-    if (!this.has(id)) throw Error("revoked");
+    // Removed machines still need a fresh challenge for an authenticated refusal,
+    // but only ids the home holds a key for may take one from the shared pool.
+    if (!this.has(id) && !(await this.options.secrets.get(credentialName(id)))) throw Error("revoked");
+    const mine: string[] = [];
     for (const [key, value] of this.challenges)
       if (value.expiresAt <= this.now()) this.challenges.delete(key);
+      else if (value.machineId === id) mine.push(key);
+    // One machine id never holds more than a few open challenges; its oldest give way.
+    while (mine.length >= 8) this.challenges.delete(mine.shift()!);
     if (this.challenges.size >= 512) throw Error("join_capacity");
     const challenge = randomBytes(32).toString("base64url");
     this.challenges.set(challenge, { machineId: id, expiresAt: this.now() + 60_000 });
@@ -313,17 +319,15 @@ export class MachineJoins {
   async exchange(raw: unknown, op: "poll" | "leave") {
     const envelope = MachineJoinEnvelopeSchema.parse(raw);
     const record = this.registrations.get(envelope.machineId);
-    if (!record) throw Error("revoked");
-    const secret = await this.options.secrets.get(credentialName(record.id));
-    if (!secret || secret.type !== "api" || hash(secret.key) !== record.tokenHash)
+    const secret = await this.options.secrets.get(credentialName(envelope.machineId));
+    if (!secret || secret.type !== "api" || (record && hash(secret.key) !== record.tokenHash))
       throw Error("join_secret_unavailable");
-    if (!this.has(record.id)) throw Error("revoked");
     const payload = MachineJoinPayloadSchema.parse(
       JSON.parse(
         openGatewayValue(
           machineJoinKey(secret.key),
           envelope.sealedRequest,
-          machineJoinExchangeAad("request", record.id, envelope.requestId, envelope.challenge),
+          machineJoinExchangeAad("request", envelope.machineId, envelope.requestId, envelope.challenge),
         ),
       ),
     );
@@ -331,21 +335,23 @@ export class MachineJoins {
     if (
       (payload.op !== op && !(op === "poll" && payload.op === "seat")) ||
       !challenge ||
-      challenge.machineId !== record.id ||
+      challenge.machineId !== envelope.machineId ||
       challenge.expiresAt <= this.now()
     )
       throw Error("invalid_machine_request");
     this.challenges.delete(envelope.challenge); // Consume before any dispatch; a replay cannot execute again.
-    const authorize = this.workersAuthority(record);
-    const result =
-      payload.op === "seat"
+    const dispatch = async () => {
+      // The broker key authenticates envelopes; only a live registration authorizes work.
+      if (!record || !this.has(envelope.machineId)) return { error: "revoked" as const };
+      const authorize = this.workersAuthority(record);
+      return payload.op === "seat"
         ? await (async (): Promise<JoinedSeatResponse> => {
             try {
               await authorize();
               if (!this.seatHandler) throw Error("joined_seats_unavailable");
               return await this.seatHandler(
                 {
-                  machineId: record.id,
+                  machineId: envelope.machineId,
                   platform: record.platform,
                   directories: record.directories,
                   authorize,
@@ -365,11 +371,21 @@ export class MachineJoins {
         : payload.op === "poll"
           ? await this.poll(secret.key, { results: payload.results })
           : await this.leave(secret.key);
+    };
+    let result;
+    try {
+      result = await dispatch();
+      if (payload.op !== "leave" && !this.has(envelope.machineId)) result = { error: "revoked" as const };
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "revoked" || this.has(envelope.machineId))
+        throw error;
+      result = { error: "revoked" as const };
+    }
     return {
       sealedResponse: sealGatewayValue(
         machineJoinKey(payload.responseSecret),
         JSON.stringify(result),
-        machineJoinExchangeAad("response", record.id, envelope.requestId, envelope.challenge),
+        machineJoinExchangeAad("response", envelope.machineId, envelope.requestId, envelope.challenge),
       ),
     };
   }
@@ -436,11 +452,11 @@ export class MachineJoins {
       throw error;
     }
     this.seen.delete(id);
-    for (const [challenge, value] of this.challenges)
-      if (value.machineId === id) this.challenges.delete(challenge);
     for (const work of this.work.values())
       if (work.machineId === id) work.settle({ id: work.request.id, ok: false, error: "revoked" });
-    await this.options.secrets.delete(credentialName(id));
+    // Retain the broker key solely to open future requests and seal a revoked reply.
+    // Registration removal is durable and authenticate()/workersAuthority() refuse it,
+    // including after restart. No work can be authorized by this key alone.
   }
   async inventory(): Promise<Machine[]> {
     const settings = await this.options.settings.load();

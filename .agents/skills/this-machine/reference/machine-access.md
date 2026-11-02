@@ -73,7 +73,13 @@ surface; never record it in evidence. Keep the join command running; it
 reconnects by itself after a home restart or network loss. Revocation ends it;
 a home that never returns leaves it retrying after one stderr notice. `join resume` restores approval;
 `join status` is local registration status, not a live connection assertion.
-`join leave` or `machines remove join-UUID` revokes it durably. At `shell` or
+Only a home-authenticated sealed revocation erases the local lease; an outer
+403/"revoked" is an outage and keeps the credential while retrying.
+`join leave` stops local dispatch and clears the credential first, even offline,
+then tries to notify the home. Its `homeNotified` result and stderr notice say
+when the home was not told; remove the machine there when reachable. Running
+channels check for local removal every 250 ms.
+`machines remove join-UUID` revokes home access durably. At `shell` or
 `screen`, `joined_machine_shell` runs your own command there (owner console,
 owner-started turns only; autonomous turns are refused;
 it starts in an approved folder; 30 s; 8192 characters; the first line is its exit;

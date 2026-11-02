@@ -1,5 +1,7 @@
 import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
 import { createHash, randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,7 +61,16 @@ async function fixture() {
   machines.setJoinedProvider(joins);
   const store = new FileCredentialStore(join(root, "credentials.json"));
   // Test-only loopback relay. Production gateway ingress belongs to clankie-ops.
-  const relay = new Hono().route(
+  const carrier = { rejectPath: "", rejected: 0 };
+  const relay = new Hono();
+  relay.use("*", async (context, next) => {
+    if (carrier.rejectPath && context.req.path.endsWith(carrier.rejectPath)) {
+      carrier.rejected++;
+      return context.json({ error: "revoked" }, 403);
+    }
+    await next();
+  });
+  relay.route(
     `/h/${fixtureHost}`,
     createMachineJoinRoutes(joins, async (request) =>
       request.headers.get("authorization") === `Bearer ${owner}` ? true : "authentication_required",
@@ -114,6 +125,7 @@ async function fixture() {
     joins,
     store,
     gateway,
+    carrier,
     origin,
     post,
     approve,
@@ -246,7 +258,16 @@ test("public CLI waits for owner consent, joins through the relay, and removal r
     expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
     expect(
       (await f.post("/v1/joined-machines/challenge", { machineId: credential.lease.machineId })).status,
+    ).toBe(200);
+    // An id the home holds no key for takes nothing from the shared challenge pool.
+    expect(
+      (
+        await f.post("/v1/joined-machines/challenge", {
+          machineId: "join-00000000-0000-4000-8000-000000000000",
+        })
+      ).status,
     ).toBe(403);
+    await expect(exchangeJoinedMachine(credential, { op: "poll", results: [] })).rejects.toThrow("revoked");
     const restored = new MachineJoins({ settings: f.settings, secrets: f.secrets, directory: f.ledger });
     await expect(restored.poll(credential.lease.token, { results: [] })).rejects.toThrow("revoked");
     expect(stdout + stderr).not.toContain(credential.lease.token);
@@ -399,7 +420,8 @@ test("leave requires new owner approval and lost delivery never replays an opera
     expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
     expect(
       (await f.post("/v1/joined-machines/challenge", { machineId: credential.lease.machineId })).status,
-    ).toBe(403);
+    ).toBe(200);
+    await expect(exchangeJoinedMachine(credential, { op: "poll", results: [] })).rejects.toThrow("revoked");
     const replacement = await f.approve();
     await expect(f.machines.setAccess(replacement.lease.machineId, { accessLevel: "shell" })).rejects.toThrow(
       "Rejoin with owner approval",
@@ -449,7 +471,7 @@ test("an untrusted relay cannot read, forge, reflect or replay an authenticated 
       requests: [],
     });
     expect(await work).toMatchObject({ ok: false });
-    const challenge = f.joins.challenge(credential.lease.machineId).challenge;
+    const challenge = (await f.joins.challenge(credential.lease.machineId)).challenge;
     expect((await f.post("/v1/joined-machines/channel", { ...envelope, challenge })).status).toBe(403);
     expect(
       (
@@ -586,13 +608,226 @@ test("a joined machine reconnects after its home restarts, and revocation still 
       }),
     ).toMatchObject({ ok: true, output: "[exit 0]\nafter-restart" });
     expect(seen).toEqual({ connected: 1, disconnected: 1, reconnected: 1 });
+    // Removal must still authenticate its refusal after the home restarts again.
+    await stop();
     await restored.remove(credential.lease.machineId);
+    const removedHome = new MachineJoins({ settings: f.settings, secrets: f.secrets, directory: f.ledger });
+    await listen(removedHome, port);
+    expect(await removedHome.inventory()).toEqual([]);
+    await expect(removedHome.poll(credential.lease.token, { results: [] })).rejects.toThrow("revoked");
     expect(await running).toBe("revoked");
     await expect(readJoinedMachineCredential(f.store)).rejects.toThrow("revoked");
   } finally {
     abort.abort();
     await running;
     if (home?.listening) await stop();
+    await f.close();
+  }
+});
+
+test("outer revoked responses are outages: retain the credential, notice once, reconnect, then honor home removal", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let running: Promise<number> | undefined;
+  let stdout = "",
+    stderr = "";
+  try {
+    const credential = await f.approve("shell");
+    await saveJoinedMachineCredential(f.store, credential);
+    running = runJoinCommand(["resume"], {
+      joinCredentialStore: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      ports: { shell: createJoinedMachineShell() },
+      stdout: {
+        write: (value) => {
+          stdout += value;
+        },
+      },
+      stderr: {
+        write: (value) => {
+          stderr += value;
+        },
+      },
+    });
+    await until(() => stdout.includes("Joined "));
+    for (const path of ["/challenge", "/channel"]) {
+      const priorNotices = stderr.split("Clankie is unreachable").length - 1;
+      const priorRecoveries = stderr.split("Reconnected to Clankie").length - 1;
+      f.carrier.rejected = 0;
+      f.carrier.rejectPath = path;
+      await until(() => f.carrier.rejected >= 2);
+      expect(stderr.split("Clankie is unreachable").length - 1).toBe(priorNotices + 1);
+      // Reopen the real broker file: a forged carrier response cannot persist a refusal.
+      const reopened = new FileCredentialStore(join(f.root, "credentials.json"));
+      expect(await readJoinedMachineCredential(reopened)).toEqual(credential);
+      expect(await reopened.get("clankie-joined-machine-revoked")).toBeUndefined();
+      f.carrier.rejectPath = "";
+      await until(() => stderr.split("Reconnected to Clankie").length - 1 === priorRecoveries + 1);
+    }
+    expect(
+      await f.joins.request(credential.lease.machineId, {
+        kind: "shell",
+        directory: f.directory,
+        command: "printf still-joined",
+      }),
+    ).toMatchObject({ ok: true, output: "[exit 0]\nstill-joined" });
+    await f.machines.remove(credential.lease.machineId);
+    expect(await running).toBe(0);
+    await expect(readJoinedMachineCredential(f.store)).rejects.toThrow("revoked");
+    expect(await f.store.get("clankie-joined-machine")).toBeUndefined();
+  } finally {
+    abort.abort();
+    await running;
+    await f.close();
+  }
+});
+
+test("join leave clears local state and stops running work before an unreachable home answers", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let running: Promise<unknown> | undefined;
+  let leaving: Promise<number> | undefined;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let attemptingHome = false;
+  let stdout = "",
+    stderr = "";
+  try {
+    const credential = await f.approve("shell");
+    await saveJoinedMachineCredential(f.store, credential);
+    running = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+    });
+    await until(async () => (await f.joins.inventory())[0]?.state === "available");
+    const work = f.joins.request(
+      credential.lease.machineId,
+      {
+        kind: "shell",
+        directory: f.directory,
+        command: "touch started; (sleep 1; touch late) | cat",
+      },
+      500,
+    );
+    await until(async () => {
+      try {
+        await readFile(join(f.directory, "started"));
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    leaving = runJoinCommand(["leave", "--json"], {
+      joinCredentialStore: new FileCredentialStore(join(f.root, "credentials.json")),
+      fetchImpl: async () => {
+        attemptingHome = true;
+        await held;
+        throw Error("offline");
+      },
+      stdout: {
+        write: (value) => {
+          stdout += value;
+        },
+      },
+      stderr: {
+        write: (value) => {
+          stderr += value;
+        },
+      },
+    });
+    await until(() => attemptingHome);
+    expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
+    expect(await f.store.get("clankie-joined-machine-revoked")).toBeUndefined();
+    expect(await running).toBe("left");
+    expect(f.joins.has(credential.lease.machineId)).toBe(true);
+    release();
+    expect(await leaving).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ ok: true, left: true, homeNotified: false });
+    expect(stderr).toContain("The home was not told");
+    await work;
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    await expect(readFile(join(f.directory, "late"))).rejects.toMatchObject({ code: "ENOENT" });
+  } finally {
+    release();
+    abort.abort();
+    await leaving;
+    await running;
+    await f.close();
+  }
+});
+
+test("a separate offline leave process stops a channel during reconnect backoff", async () => {
+  const f = await fixture();
+  const abort = new AbortController();
+  let running: Promise<unknown> | undefined;
+  let disconnected = false;
+  try {
+    const credential = await f.approve("shell");
+    await saveJoinedMachineCredential(f.store, credential);
+    f.carrier.rejectPath = "/challenge";
+    running = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      retryMs: 30_000,
+      onDisconnected: () => {
+        disconnected = true;
+      },
+    });
+    await until(() => disconnected);
+    // A separate process has no access to the receiver's in-process abort controllers.
+    const child = await promisify(execFile)(process.execPath, [
+      "--import",
+      new URL("../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+      "--input-type=module",
+      "-e",
+      `import { FileCredentialStore } from ${JSON.stringify(new URL("../../../packages/credential-broker/src/index.ts", import.meta.url).href)};
+       import { runJoinCommand } from ${JSON.stringify(new URL("../../tui/src/command/join.ts", import.meta.url).href)};
+       process.exitCode = await runJoinCommand(["leave", "--json"], {
+         joinCredentialStore: new FileCredentialStore(${JSON.stringify(join(f.root, "credentials.json"))}),
+         fetchImpl: async () => { throw Error("offline"); }
+       });`,
+    ]);
+    expect(JSON.parse(child.stdout)).toEqual({ ok: true, left: true, homeNotified: false });
+    expect(child.stderr).toContain("The home was not told");
+    let stopped = false;
+    void running.then(() => {
+      stopped = true;
+    });
+    await until(() => stopped);
+    expect(await running).toBe("left");
+    expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
+    expect(f.joins.has(credential.lease.machineId)).toBe(true);
+  } finally {
+    abort.abort();
+    await running;
+    await f.close();
+  }
+});
+
+test("join leave confirms home notification after local cleanup", async () => {
+  const f = await fixture();
+  let stdout = "";
+  try {
+    const credential = await f.approve();
+    await saveJoinedMachineCredential(f.store, credential);
+    expect(
+      await runJoinCommand(["leave"], {
+        joinCredentialStore: f.store,
+        stdout: {
+          write: (value) => {
+            stdout += value;
+          },
+        },
+      }),
+    ).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({ ok: true, left: true, homeNotified: true });
+    expect(await readJoinedMachineCredential(f.store)).toBeUndefined();
+    expect(f.joins.has(credential.lease.machineId)).toBe(false);
+  } finally {
     await f.close();
   }
 });
