@@ -847,8 +847,12 @@ describe("public gateway Mac connector", () => {
       relayUrl: gateway.origin,
       reconnectMinimumMs: 5,
       reconnectMaximumMs: 20,
-      onDoorwayChange: (change) => transitions.push(change.state),
+      onDoorwayChange: (change) => {
+        transitions.push(change.state);
+        doorways.push(connector.doorway);
+      },
     });
+    const doorways: unknown[] = [];
     connectors.push(connector);
     connector.start();
     const initial = await gateway.nextConnection();
@@ -868,6 +872,13 @@ describe("public gateway Mac connector", () => {
     expect(spent[1]!.at - spent[0]!.at).toBeLessThan(60_000);
     expect(stored).toMatchObject({ refresh: "refresh-3" });
     expect(transitions).not.toContain("sign_in_required");
+    // A refused installation key says so until a proven connection clears it.
+    recovered.socket.close(1008, "installation key mismatch");
+    await vi.waitFor(() =>
+      expect(doorways).toContainEqual({ state: "connecting", refusal: "installation_key_mismatch" }),
+    );
+    await gateway.nextConnection();
+    await vi.waitFor(() => expect(connector.doorway).toEqual({ state: "connected" }));
   });
 
   it("parks on a credential no retry can fix and says the Mac needs signing in", async () => {

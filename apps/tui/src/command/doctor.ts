@@ -206,6 +206,9 @@ function doctorSummary(report: InstallDoctorReport): string {
   if (report.doorway.state === "unavailable") {
     return "Phone access has no connection — run `clankie restart`.";
   }
+  if (report.doorway.state === "connecting" && report.doorway.refusal !== undefined) {
+    return "Phone access is refused: the gateway holds a different key for this Mac; the gateway operator must reset it.";
+  }
   if (report.doorway.state === "connecting") {
     return "Phone access is still connecting — run `clankie gateway status` to check again.";
   }

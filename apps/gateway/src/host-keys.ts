@@ -23,6 +23,10 @@ export class HostKeys {
       .run(hostId, publicKey);
     return this.get(hostId) === publicKey;
   }
+  /** Operator recovery only: never reachable over the network. */
+  reset(hostId: string): boolean {
+    return Number(this.database.prepare("DELETE FROM host_keys WHERE host_id=?").run(hostId).changes) > 0;
+  }
   close(): void {
     this.database.close();
   }

@@ -1,12 +1,15 @@
 import { FileCredentialStore, ensureInstallationKey } from "../../../packages/credential-broker/src/index.ts";
 import { HostKeys } from "../src/host-keys.ts";
 import { accountHost, proveHost } from "./host-proof-fixture.ts";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS,
@@ -30,6 +33,8 @@ const hostId = "mac_james_12345678";
 const hostToken = "gateway-host-token-that-is-longer-than-thirty-two-characters";
 const openGateways: PublicGateway[] = [];
 const openSockets: WebSocket[] = [];
+
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   for (const socket of openSockets.splice(0)) socket.close();
@@ -226,6 +231,31 @@ describe("public gateway", () => {
       const restoredKey = await ensureInstallationKey(installationId, store);
       const restored = open(origin);
       expect(await proveHost(restored, id, installationId, restoredKey)).toEqual({ kind: "host_ready" });
+
+      // Only the operator's local command forgets a pin; the next proven key then pins.
+      const reset = await execFileAsync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          fileURLToPath(new URL("../src/host-keys-cli.ts", import.meta.url)),
+          "reset",
+          id,
+          "--database",
+          dbPath,
+        ],
+        { cwd: fileURLToPath(new URL("..", import.meta.url)) },
+      );
+      expect(JSON.parse(reset.stdout)).toMatchObject({
+        event: "gateway.host.key_reset",
+        hostId: id,
+        removed: true,
+      });
+      const restoredClosed = once(restored, "close");
+      const repinned = open(origin);
+      expect(await proveHost(repinned, id, installationId, differentKey)).toEqual({ kind: "host_ready" });
+      expect((await restoredClosed)[0]).toBe(1012);
+      expect(keys.get(id)).toBe(differentKey.publicKey);
     } finally {
       await gateway.close();
       openGateways.splice(openGateways.indexOf(gateway), 1);

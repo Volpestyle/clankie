@@ -42,6 +42,21 @@ with 1008, `installation proof required`. Keep that Mac updated; removing a
 broker key does not reset the gateway binding. The legacy one-parameter
 static-token route is unchanged and cannot authenticate as an account route.
 
+### Resetting an installation key
+
+A Mac that lost its broker key (a reinstall or a wiped keychain) is refused with
+`installation key mismatch` until the gateway forgets its pin; `clankie doctor`
+says so. Only the gateway operator can reset it, on the gateway host, against the
+service's database; nothing over the network unpins a key:
+
+```sh
+node dist/host-keys-cli.cjs reset HOST_ID --database "$CLANKIE_GATEWAY_HOST_KEYS_DATABASE"
+```
+
+It prints one `gateway.host.key_reset` line. The next proven connection for that
+host pins its key. Confirm with the owner that the Mac asking is really theirs
+before resetting, since whoever connects first afterwards is pinned.
+
 Account access tokens must include `iat`, have a positive lifetime (`exp - iat`)
 of at most 3600 seconds, and be unexpired. Every account-authenticated
 `/gateway/v1/hosts/connect` also checks provider authorization with Cognito

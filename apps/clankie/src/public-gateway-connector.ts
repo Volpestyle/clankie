@@ -167,6 +167,8 @@ export class PublicGatewayConnector {
   private readonly onDoorwayChange: ((change: PublicGatewayDoorwayChange) => void) | undefined;
   private readonly onHostRejected: (() => void) | undefined;
   private lastCloseCode: number | undefined;
+  /** Set while the gateway keeps refusing this installation's key; cleared on a proven connect. */
+  private keyRefusal: "installation_key_mismatch" | "installation_proof_required" | undefined;
   private readonly pairingRoutes = new Map<string, PublicGatewayPairingRouteFrame>();
   private readonly inFlight = new Map<string, AbortController>();
   private readonly streams = new Map<string, LocalStream>();
@@ -255,7 +257,7 @@ export class PublicGatewayConnector {
     }
     return this.ready && this.socket?.readyState === WebSocket.OPEN
       ? { state: "connected" }
-      : { state: "connecting" };
+      : { state: "connecting", ...(this.keyRefusal === undefined ? {} : { refusal: this.keyRefusal }) };
   }
 
   /**
@@ -427,6 +429,7 @@ export class PublicGatewayConnector {
     const connected = () => {
       if (this.socket !== socket) return;
       this.ready = true;
+      this.keyRefusal = undefined;
       this.reconnectDelayMs = this.reconnectMinimumMs;
       this.signInRequiredSince = undefined;
       for (const waiter of this.connectionWaiters) {
@@ -511,6 +514,8 @@ export class PublicGatewayConnector {
           "public gateway host connection closed",
         );
       }
+      if (closeReason === "installation key mismatch") this.keyRefusal = "installation_key_mismatch";
+      if (closeReason === "installation proof required") this.keyRefusal = "installation_proof_required";
       if (this.socket === socket) this.lastCloseCode = code;
       this.disconnected(socket);
     });

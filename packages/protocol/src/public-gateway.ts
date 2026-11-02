@@ -321,7 +321,11 @@ export const PublicGatewayDoorwayStateSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("disabled") }),
   /** Configured, but this Clankie holds no connector at all — nothing is even trying. */
   z.object({ state: z.literal("unavailable") }),
-  z.object({ state: z.literal("connecting") }),
+  z.object({
+    state: z.literal("connecting"),
+    /** The gateway refused this Mac's installation key; only its operator can reset the pin. */
+    refusal: z.enum(["installation_key_mismatch", "installation_proof_required"]).optional(),
+  }),
   z.object({ state: z.literal("connected") }),
   z.object({ state: z.literal("sign_in_required"), since: z.string().min(1) }),
 ]);
