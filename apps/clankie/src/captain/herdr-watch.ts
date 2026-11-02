@@ -5204,7 +5204,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const receipt = this.hireReceipts.pending(receiptKey)!;
         this.hireReceipts.update(receiptKey, receipt.messageId, { paneId, agentName: subject });
       }
-      authority?.onHirePane?.(paneId);
+      if (authority?.onHirePane !== undefined) {
+        // A pending receipt names the seat by the same terminal ID `started` and list_agents use;
+        // a pane ID is only a layout address.
+        const allocated = await this.runner.get(paneId).catch(() => undefined);
+        if (allocated !== undefined) authority.onHirePane(allocated.terminalId);
+      }
       const requestedModel =
         nativePrepared !== undefined
           ? nativeLaunch?.model
