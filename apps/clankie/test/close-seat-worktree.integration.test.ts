@@ -127,8 +127,9 @@ async function fixture() {
     ownerValid: async () => true,
     close: async () => true,
     untrack: () => {},
-    prune: (repository: string, path: string, guard: () => Promise<void>) =>
-      captain.pruneWorktree!(repository, path, guard),
+    // The close checks its own authority guard before this; the captain's public prune
+    // applies its settings, registered-root and landed checks.
+    prune: (repository: string, path: string) => captain.pruneWorktree!(repository, path),
     hire: async () => {
       throw Error("No hire during close");
     },
@@ -172,7 +173,9 @@ async function fixture() {
     },
   } as unknown as CreateOperatorServiceContext);
   const close = async (seatId: string) =>
-    OperatorConversationServiceResultSchema.parse(await serve({ op: "close_seat", schemaVersion: 1, seatId }));
+    OperatorConversationServiceResultSchema.parse(
+      await serve({ op: "close_seat", schemaVersion: 1, seatId }),
+    );
   return { hire, hired, close, exits };
 }
 

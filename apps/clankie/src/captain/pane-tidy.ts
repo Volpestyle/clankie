@@ -462,7 +462,8 @@ export class PaneTidy {
     try {
       const owner = this.ports.provenance(agent);
       if (owner === "owner_interactive") return { path: cwd, reason: "owner_interactive" };
-      if (owner === "unknown" && (await options.hired?.()) !== true) return { path: cwd, reason: "provenance_unknown" };
+      if (owner === "unknown" && (await options.hired?.()) !== true)
+        return { path: cwd, reason: "provenance_unknown" };
       const fleet = splitFleetQualified(agent.paneId)?.fleet;
       if (fleet && fleet !== DESKTOP_SEAT_FLEET && !(await this.ports.localFleet?.(fleet)))
         return { path: cwd, reason: "remote_worktree" };
