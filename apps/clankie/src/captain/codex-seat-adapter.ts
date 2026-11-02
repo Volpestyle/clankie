@@ -49,6 +49,16 @@ export function createCodexSeatAdapter(
      * unsubscribe. Without it the seat polls `herdr pane get` (a remote fleet).
      */
     paneGone?: (paneId: string, gone: () => void) => () => void;
+    /**
+     * The Herdr desktop app's terminals (ADR 0319), which no Herdr CLI reaches: a view
+     * there reports its agent and thread to the core runner, is watched there for its
+     * end, and has no pane header to title.
+     */
+    desktop?: {
+      owns(paneId: string): boolean;
+      report(paneId: string, report: { agent: "codex"; state: string; session: string }): Promise<void>;
+      gone(paneId: string, gone: () => void): () => void;
+    };
     trackerOverrides?: (cwd: string, env?: Readonly<Record<string, string>>) => Promise<string[]>;
     /** A local hire's MCP profile overrides (`codexWorkerMcpOverrides`). */
     workerMcpOverrides?: typeof codexWorkerMcpOverrides;
@@ -138,6 +148,22 @@ export function createCodexSeatAdapter(
       const waiters = new Set<(event: SeatEvent) => void>();
       const report = () => {
         if (!ref || closed) return;
+        if (options.desktop?.owns(view.paneId)) {
+          const update = {
+            agent: "codex" as const,
+            state: state === "offline" ? "unknown" : state,
+            session: ref.sessionId,
+          };
+          reporting = reporting
+            // allow-swallowed-rejection -- an earlier report's failure was already awaited or logged; this one still runs
+            .catch(() => undefined)
+            .then(() => options.desktop!.report(view.paneId, update));
+          // As for a Herdr pane: the first report is awaited before binding, later ones only update the view.
+          void reporting.catch((error: unknown) =>
+            console.warn("Codex desktop-app report failed:", view.paneId, String(error)),
+          );
+          return;
+        }
         const args = [
           "pane",
           "report-agent",
@@ -412,7 +438,9 @@ export function createCodexSeatAdapter(
             startView: async (args) => {
               // Monitor while waiting for owner trust as well as after startup.
               monitor?.();
-              if (options.paneGone) monitor = options.paneGone(view.paneId, () => void close());
+              if (options.desktop?.owns(view.paneId))
+                monitor = options.desktop.gone(view.paneId, () => void close());
+              else if (options.paneGone) monitor = options.paneGone(view.paneId, () => void close());
               else {
                 const poll = setInterval(() => {
                   void herdr(["pane", "get", view.paneId]).catch((error: unknown) => {
@@ -437,7 +465,7 @@ export function createCodexSeatAdapter(
                       },
                       report,
                     );
-                    if (!health || closed) return;
+                    if (!health || closed || options.desktop?.owns(view.paneId)) return;
                     // Herdr renders effective metadata titles in the actual
                     // pane header. Scope this title to our Codex occupant's
                     // source instead of typing a diagnostic into its terminal.

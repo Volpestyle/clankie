@@ -31,11 +31,12 @@ the reason. `trust_required` leaves the lead running: home-directory trust is
 session-only in Claude Code. Follow its owner workdir/trust action; never edit
 trust flags or answer a trust prompt for the owner.
 
-`clankie fleet set --seat-host desktop` starts this machine's new Claude hires
-in the Herdr desktop app's terminals (ADR 0319): one space per project
-(`clankie workers`), one tab per hire named for it, and a pipeline's hires three
-to a tab. Their seat ids read `herdr-core/t7`. `auto` (the default) and `herdr` keep hires in
-Herdr panes.
+`clankie fleet set --seat-host desktop` starts this machine's new Claude and
+Codex hires in the Herdr desktop app's terminals (ADR 0319, ADR 0341): one space
+per project (`clankie workers`), one tab per hire named for it, and a pipeline's
+hires three to a tab. Their seat ids read `herdr-core/t7`. A Codex hire there
+loses its tools when the service restarts; rehire it. `auto` (the default) and
+`herdr` keep hires in Herdr panes.
 
 Hired seats have their own default-on `seatRestarts`
 setting. `clankie fleet set --seat-restarts on|off` (also in `/fleet`) controls

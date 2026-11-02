@@ -5203,13 +5203,15 @@ keychain, the file broker and the checkouts' `.env.local`
 applies only to hires started after the change. Codex hires are confined only
 in maximum trust mode, because Codex's own sandbox can't nest inside it.
 
-`--seat-host desktop` starts this machine's new Claude hires in the Herdr
-desktop app's own terminals, in its Clankie space, instead of Herdr panes
-([ADR 0319](adr/0319-hires-run-in-the-desktop-apps-terminals.md)). A hire is
-refused while the desktop app isn't running. `herdr` keeps them in panes, and
+`--seat-host desktop` starts this machine's new Claude and Codex hires in the
+Herdr desktop app's own terminals, in its Clankie space, instead of Herdr panes
+([ADR 0319](adr/0319-hires-run-in-the-desktop-apps-terminals.md),
+[ADR 0341](adr/0341-codex-hires-run-in-the-desktop-apps-terminals.md)). A hire
+is refused while the desktop app isn't running. `herdr` keeps them in panes, and
 `auto`, the default, keeps them in panes until the desktop app's hires are
 proven. Other harnesses stay in Herdr panes for now, and hires already running
-stay where they are.
+stay where they are. A Codex hire in the desktop app keeps its tools until the
+service restarts; rehire it after that.
 
 `--closure` and `--machine-setup` both default to `lead`:
 

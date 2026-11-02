@@ -1079,23 +1079,29 @@ const projectProcessObserver = (fleet: string, pane: string) => {
   desktopProofRefusals.delete(pane);
   return localProjectProcessObserver(fleet, pane);
 };
-const localCodexSeats = new LocalCodexSeats(herdr.binding, undefined, {
-  path: join(stateRoot, "local-codex-seats.json"),
-  observeOccupant: async (pane, signal) => {
-    const observe = signal
-      ? createProjectProcessObserver({
-          binding: localFleetBinding,
-          herdrBinary: "herdr",
-          signal,
-          harnessBinary: harnessBinaries.record,
-        })
-      : localProjectProcessObserver;
-    const proof = await observe("default", pane);
-    signal?.throwIfAborted();
-    return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
+const localCodexSeats = new LocalCodexSeats(
+  herdr.binding,
+  undefined,
+  {
+    path: join(stateRoot, "local-codex-seats.json"),
+    observeOccupant: async (pane, signal) => {
+      const observe = signal
+        ? createProjectProcessObserver({
+            binding: localFleetBinding,
+            herdrBinary: "herdr",
+            signal,
+            harnessBinary: harnessBinaries.record,
+          })
+        : localProjectProcessObserver;
+      const proof = await observe("default", pane);
+      signal?.throwIfAborted();
+      return proof?.nativeSessionPending ? undefined : proof?.nativeOccupantId;
+    },
+    warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
   },
-  warn: (message) => logger.warn({ event: "local_codex_seats.unreadable" }, message),
-});
+  // A Codex hire in the desktop app's terminals (ADR 0341) is bound to the core's socket.
+  () => ({ runtime: "external", session: HERDR_CORE_FLEET, socketPath: herdrCoreSocketPath(process.env) }),
+);
 const workerRuntimeRevision = randomUUID();
 const harnessProcesses = new FleetHarnessProcesses({
   stateRoot,
@@ -1751,7 +1757,11 @@ const captain = createCaptain(
           ).query,
         builtIn: builtInTracker,
       }),
-    localCodexSocket: () => herdr.binding()?.socketPath,
+    // A view in the desktop app's terminals links back through the core's socket (ADR 0341).
+    localCodexSocket: (pane) =>
+      pane.startsWith(`${HERDR_CORE_FLEET}/`)
+        ? herdrCoreSocketPath(process.env)
+        : herdr.binding()?.socketPath,
     localCodexProcess: (pid, pane) => localCodexSeats.register(pid, pane),
     grokNative,
     primeNative,

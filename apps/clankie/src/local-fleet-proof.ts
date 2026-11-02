@@ -581,6 +581,19 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       return refuse("observation_failed");
     }
   };
+  /**
+   * Whether this desktop-app terminal is a Codex seat (ADR 0341), from Clankie's private
+   * record of it. Anything unreadable answers no, and its own seat proof decides.
+   */
+  const privateCoreSeat = async (address: string): Promise<boolean> => {
+    try {
+      const binding = await options.coreBinding!();
+      if (!binding) return false;
+      return (await options.coreSeat!(binding, address))?.agent === "codex";
+    } catch {
+      return false;
+    }
+  };
   return async (
     socket: Socket,
     pane: string,
@@ -626,11 +639,26 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     if (!["darwin", "linux"].includes(options.platform ?? process.platform))
       return refuse("unsupported_platform");
     const core = /^herdr-core\/(t[0-9a-z]+)$/u.exec(pane)?.[1];
-    if (core !== undefined)
-      return options.coreBinding === undefined || options.coreSeat === undefined
-        ? refuse("invalid_pane")
-        : coreProjectProof(socket, pane, core, signal, context, report, () => nativeReason, emit, refuse);
-    if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
+    if (core !== undefined) {
+      if (options.coreBinding === undefined || options.coreSeat === undefined) return refuse("invalid_pane");
+      // A Codex hire's tools run under the app-server Clankie started, not under the view in
+      // the terminal (ADR 0341): it is proven below as a Herdr pane's Codex seat is, the
+      // terminal's harness by its seat proof and the server by its private registration.
+      if (!(await privateCoreSeat(core))) {
+        return coreProjectProof(
+          socket,
+          pane,
+          core,
+          signal,
+          context,
+          report,
+          () => nativeReason,
+          emit,
+          refuse,
+        );
+      }
+    } else if (!/^w[\w]+:p[\w]+$/u.test(pane)) return refuse("invalid_pane");
+    const bindingOf = () => (core === undefined ? options.binding() : options.coreBinding!());
     const clientPort = socket.remotePort;
     const serverPort = socket.localPort;
     const alive = () =>
@@ -643,7 +671,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       socket.localPort === serverPort;
     if (!alive() || !clientPort || !serverPort) return refuse("closed_socket");
     try {
-      const binding = await options.binding();
+      const binding = await bindingOf();
       signal?.throwIfAborted();
       if (!binding) return refuse("missing_binding");
       // Keep the full-census phases clear of our own short-lived Herdr/helper
@@ -725,7 +753,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       )
         return refuse("private_seat_expired");
       signal?.throwIfAborted();
-      const current = await options.binding();
+      const current = await bindingOf();
       signal?.throwIfAborted();
       if (!alive()) return refuse("closed_socket");
       if (current?.socketPath !== binding.socketPath || current?.session !== binding.session)
