@@ -291,7 +291,9 @@ the cached room MCP bank has social authority without generic operator body
 access. Worker ownership uses the persisted hire proof and changes when another
 conversation admits `message_seat`. Explicit ownership wins. Unadopted reports
 use the actual census parent/launcher's current native occupant and attached
-conversation or existing native channel. With no eligible parent or a removed
+conversation or existing native channel. With no eligible parent, the one
+top-level lead chat scoped to the reporter's exact workspace and machine receives
+it, and its first message adopts the agent; with none (or several), or a removed
 adopted conversation, the default chat receives a tagged fallback reason; the
 roster and doctor name the parent pane lacking a bridge. Parent discovery grants
 no tools, and missing original room authority remains a refusal. Existing inbound

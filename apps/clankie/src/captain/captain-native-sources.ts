@@ -188,6 +188,30 @@ export function createNativeSources(ctx: NativeSourcesContext) {
     return source;
   }
 
+  /**
+   * The single top-level workspace lead chat whose scope is this seat's exact working
+   * directory on its machine. Local and named local fleets are this machine (no
+   * machineId); a linked fleet's id is its machine. None or several match: undefined.
+   */
+  function workspaceLeadConversation(
+    seat: Awaited<ReturnType<typeof observeFleet>>["seats"][number],
+  ): string | undefined {
+    const workspaceId = seat.workingDirectory;
+    if (workspaceId === undefined) return undefined;
+    const machineId =
+      seat.fleet === undefined || ctx.namedLocal.some((fleet) => fleet.id === seat.fleet)
+        ? undefined
+        : seat.fleet;
+    const leads = conversations
+      .listConversations({
+        kind: "workspace",
+        workspaceId,
+        ...(machineId === undefined ? {} : { machineId }),
+      })
+      .filter((conversation) => conversation.parentConversationId === undefined);
+    return leads.length === 1 ? leads[0]!.conversationId : undefined;
+  }
+
   /** Shared report/roster projection. Only receiveFleetSeatMessage admits it. */
   async function workerReportRoute(
     agent: HerdrAgentSnapshot,
@@ -226,12 +250,15 @@ export function createNativeSources(ctx: NativeSourcesContext) {
         ? undefined
         : (fleet.seats.find((seat) => seat.paneId === pane) ??
           (fleet.head?.paneId === pane ? fleet.head : undefined));
+    // Unadopted reports go to the one lead chat scoped to this agent's exact workspace
+    // and machine, as Auto rounds match project leads (#346); the default chat otherwise.
+    const workspaceLead = workspaceLeadConversation(child);
     const fallback = (reason: NonNullable<WorkerReportRouting["reason"]>) => ({
-      owner: { conversationId: defaultId },
+      owner: { conversationId: workspaceLead ?? defaultId },
       diagnostic: {
         source: "unadopted" as const,
         reason,
-        conversationId: defaultId,
+        conversationId: workspaceLead ?? defaultId,
         ...(pane === undefined ? {} : { leadPaneId: pane }),
         ...(parent === undefined ? {} : { leadSeatId: parent.seatId }),
       },

@@ -1,6 +1,6 @@
 import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
@@ -1088,6 +1088,59 @@ it.each(["no_parent", "parent_unavailable", "parent_unlinked"] as const)(
     await settle(f.service, event!);
   },
 );
+
+it("an unhired agent's report reaches the lead chat for its exact workspace, whose first message adopts it (#346)", async () => {
+  const f = await fixture({ parent: false });
+  const workspace = join(f.root, "project");
+  mkdirSync(join(workspace, "nested"), { recursive: true });
+  f.rows[0]!.cwd = workspace;
+  const lead = await conversation(f.service, { kind: "workspace", workspaceId: workspace });
+  // Another folder's lead and a nested folder's lead never take the report.
+  await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+  await conversation(f.service, { kind: "workspace", workspaceId: join(workspace, "nested") });
+  const leadPoll = await poll(f.service, lead);
+  const receipt = await delivery(f.service);
+  expect(await report(f.service, "Hand-opened agent report", receipt)).toMatchObject({ received: true });
+  const route = { source: "unadopted" as const, reason: "no_parent" as const, conversationId: lead };
+  await diagnostic(f.service, f.root, receipt.id, route);
+  const [event] = await leadPoll.events();
+  expect(event).toMatchObject({ conversationId: lead, kind: "message" });
+  expect(JSON.stringify(event)).toContain("routed to this chat by its workspace");
+  expect((await roster(f.service)).find((seat) => seat.seatId === "term_aaa")).toMatchObject({
+    workerReportRouting: route,
+  });
+  await settle(f.service, event!);
+
+  await hook(f.service, f.rows[0]!);
+  await adopt(f.service, lead, "term_aaa");
+  const adopted = await poll(f.service, lead);
+  const next = await delivery(f.service);
+  expect(await report(f.service, "Report after the lead's first message", next)).toMatchObject({
+    received: true,
+  });
+  const [after] = await adopted.events();
+  expect(after).toMatchObject({ conversationId: lead, kind: "message" });
+  await diagnostic(f.service, f.root, next.id, { source: "adoption", conversationId: lead });
+  await settle(f.service, after!);
+});
+
+it("two lead chats for one workspace leave an unhired agent's report in the default chat", async () => {
+  const f = await fixture({ parent: false });
+  f.rows[0]!.cwd = f.root;
+  await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+  await conversation(f.service, { kind: "workspace", workspaceId: f.root });
+  const global = await poll(f.service, "global-default");
+  const receipt = await delivery(f.service);
+  expect(await report(f.service, "Ambiguous workspace lead", receipt)).toMatchObject({ received: true });
+  const [event] = await global.events();
+  expect(event).toMatchObject({ conversationId: "global-default", kind: "message" });
+  await diagnostic(f.service, f.root, receipt.id, {
+    source: "unadopted",
+    reason: "no_parent",
+    conversationId: "global-default",
+  });
+  await settle(f.service, event!);
+});
 
 it("a removed explicit owner falls back with owner_removed rather than inheriting the native parent", async () => {
   const f = await fixture();

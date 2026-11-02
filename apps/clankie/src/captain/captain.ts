@@ -6420,6 +6420,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   route.diagnostic.leadPaneId === undefined
                     ? ""
                     : `; observed lead pane ${route.diagnostic.leadPaneId}`
+                }${
+                  target.conversationId === conversations.defaultGlobalConversationId()
+                    ? ""
+                    : "; routed to this chat by its workspace, and your first message to it adopts it"
                 }.\n\n${message}`
               : message;
           const starter = agent.session
