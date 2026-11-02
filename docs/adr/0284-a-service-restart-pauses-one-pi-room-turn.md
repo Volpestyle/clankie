@@ -231,6 +231,42 @@ real owner-only audience proof runs. The owner's turn in a proven owner-only roo
 is journaled; the same owner's turn in a room others can read is not. The restart
 suites above now run on owner DMs with no switch set.
 
+### Retention and compaction (2026-11-02)
+
+A journal is replay machinery, not the turn's record. When a turn settles, its
+journal keeps only:
+
+- the request, the grant and the answer;
+- whether each follow-up was heard (precomputed, so the absorbed answer survives);
+- the tool calls that are never replayed, with their outcomes. These are the effects
+  the turn could not be sure of, including any "possibly ran".
+
+It drops every model context, the exact observations that were safe to replay, the
+system prompt and the tool-registry digest. Each model step held the whole context
+again, so these made a journal grow with the square of its length. The turn's Pi
+session file stays beside it as its trail, as every other room turn's does. At
+settlement the delivery receipt also drops the request it kept for recovery: a
+settled delivery answers redelivery from its saved result.
+
+Each service start sweeps the journal root. It compacts settled journals written
+before compaction existed. It removes a settled delivery's whole directory (journal,
+follow-up link and Pi session) after `OPERATOR_CONVERSATION_RETENTION_MS` (30 days),
+the same window as the room handoffs that ran those turns. The window counts from
+the last write. It keeps:
+
+- an unsettled journal or follow-up link, however old: it is uncertain work that
+  waits for its delivery to return;
+- a settled turn that an unsettled follow-up still names as its parent;
+- unreadable state, for the recovery that refuses it.
+
+[`durable-pi-retention.integration.test.ts`](../../apps/clankie/test/durable-pi-retention.integration.test.ts)
+covers both paths with the real service restarted. The first test checks the
+compacted shape and that the receipt drops its request. It then ages the journal
+just inside and then past the window: the directory is removed only past it, and
+the redelivery still answers from the receipt without a model call. The second test
+shows that an unsettled journal twice the window's age survives and resumes.
+Durable retry and backoff for unavailable providers remain open.
+
 Before enabling more lanes:
 
 1. Obtain an approved private Discord test destination and prove the full mouth
@@ -239,8 +275,8 @@ Before enabling more lanes:
    media capture and changed/revoked room grants with real dependencies. Preserve
    corrupted/missing-state refusals. Audit connected reads individually rather
    than broadly blessing a transport.
-3. Add retention/compaction for step journals and durable retry/backoff for
-   unavailable providers. Keep the original request and uncertain intents until
+3. Add durable retry/backoff for unavailable providers (retention and
+   compaction above). Keep the original request and uncertain intents until
    reconciled. Recovery happens on the body's redelivery; a failed recovery
    settles once and does not create an unbounded automatic retry loop.
 4. Extend the same admission/step/outcome contract to linked-main service execution, mixed rooms, voice handoffs, operator turns, hosted encrypted ingress,
