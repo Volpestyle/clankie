@@ -1,18 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import {
-  mkdir,
-  mkdtemp,
-  open,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  stat,
-  statfs,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -58,22 +47,12 @@ async function fill(path: string, bytes: number) {
     await file.close();
   }
 }
-/** Free bytes once written data and freed blocks have reached the volume. */
-const free = async (path: string) => {
-  await exec("sync");
-  const volume = await statfs(path);
-  return volume.bavail * volume.bsize;
-};
-/** APFS returns freed blocks lazily; read until the free count stops rising (bounded). */
-async function settledFree(path: string) {
-  let last = await free(path);
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    const next = await free(path);
-    if (next <= last) return last;
-    last = next;
-  }
-  return last;
+/** Allocated blocks in this fixture only; unrelated APFS writers cannot change the count.
+ * du counts shared clone extents for each file, so clone identity is checked separately below.
+ */
+async function allocatedBytes(path: string) {
+  const { stdout } = await exec("du", ["-sk", path]);
+  return Number(stdout.trim().split(/\s+/u)[0]) * 1024;
 }
 function panes() {
   let reads = 0;
@@ -146,12 +125,12 @@ it.runIf(process.platform === "darwin")(
     const recording = await stat(join(local, "recording.bin"));
     const regenerable = 256 * MiB;
 
-    const before = await free(f.root);
+    const before = await allocatedBytes(f.root);
     const result = await prune.pruneTidyWorktree(f.repo, tree, f.evidence, panes().runner, async () => {});
     await sweep(f.evidence);
-    const after = await settledFree(f.root);
+    const after = await allocatedBytes(f.root);
     console.log(
-      `VUH-2932 df: free before ${before} after ${after} delta ${after - before} bytes (regenerable ${regenerable})`,
+      `VUH-2932 allocated: before ${before} after ${after} freed ${before - after} bytes (regenerable ${regenerable})`,
     );
 
     expect(result, JSON.stringify(result)).toMatchObject({ outcome: "removed", path: tree });
@@ -167,7 +146,7 @@ it.runIf(process.platform === "darwin")(
     expect([...(result.discarded ?? [])].sort()).toEqual([".turbo", "pair/clankie/node_modules", "target"]);
     expect(await readdir(join(f.evidence, ".trash"))).toEqual([]);
     // Deleting the regenerable bytes frees them; keeping the evidence costs nothing new.
-    expect(after - before).toBeGreaterThan(regenerable / 2);
+    expect(before - after).toBeGreaterThan(regenerable / 2);
   },
   120_000,
 );
@@ -185,16 +164,27 @@ it.runIf(process.platform === "darwin")(
     await mkdir(evidence, { recursive: true });
     for (const name of ["a.bin", "b.bin"])
       await exec("cp", ["-c", join(store, "package.bin"), join(evidence, name)]);
-    const before = await free(f.root);
+    const names = ["a.bin", "b.bin"];
+    const originals = await Promise.all(names.map((name) => stat(join(evidence, name))));
+    const before = await allocatedBytes(f.root);
     const result = await prune.pruneTidyWorktree(f.repo, tree, f.evidence, panes().runner, async () => {});
     await sweep(f.evidence);
-    const after = await settledFree(f.root);
-    console.log(`VUH-2932 clone df: free before ${before} after ${after} delta ${after - before} bytes`);
+    const after = await allocatedBytes(f.root);
+    console.log(`VUH-2932 clone allocated: before ${before} after ${after} delta ${after - before} bytes`);
     expect(result, JSON.stringify(result)).toMatchObject({ outcome: "removed" });
-    expect(existsSync(join(result.evidencePath!, "pair", "a.bin"))).toBe(true);
-    // A copy writes out both clones (256 MiB); a move writes nothing. The margin absorbs other
-    // writers on a shared volume, at a quarter of what a copy costs.
-    expect(after - before).toBeGreaterThan(-64 * MiB);
+    expect(existsSync(tree)).toBe(false);
+    // du alone cannot distinguish shared extents from a new full copy. Both clone files must
+    // retain their device, inode and allocated blocks: moving them preserves their APFS sharing.
+    for (const [index, name] of names.entries()) {
+      const kept = await stat(join(result.evidencePath!, "pair", name));
+      expect({ dev: kept.dev, ino: kept.ino, blocks: kept.blocks }).toEqual({
+        dev: originals[index]!.dev,
+        ino: originals[index]!.ino,
+        blocks: originals[index]!.blocks,
+      });
+    }
+    // Only small Git/evidence metadata may be allocated, never another 256 MiB of file data.
+    expect(after - before).toBeLessThan(64 * MiB);
   },
   120_000,
 );
