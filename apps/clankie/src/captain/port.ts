@@ -591,6 +591,7 @@ export interface CaptainPort {
       text: string;
       deliveryId: string;
       urgent?: boolean;
+      kind?: import("@clankie/protocol").WorkerReportKind;
     },
     authority: import("./conversation-owner.ts").ConversationAuthority,
   ): Promise<FleetSeatMessageReceipt>;
@@ -606,8 +607,11 @@ export interface CaptainPort {
     delivery?: FleetSeatMessageDelivery,
     /** Host request budget/cancellation, never worker-supplied authority. */
     request?: InboundSeatRequest,
-    /** The sender's delivery hint: urgent reports skip the lead's round (VUH-2274). */
-    options?: { readonly urgent?: boolean },
+    /**
+     * The sender's delivery hints: urgent reports skip the lead's round (VUH-2274);
+     * kind says whether it is done, blocked or an update (#317), and blocked is urgent.
+     */
+    options?: { readonly urgent?: boolean; readonly kind?: import("@clankie/protocol").WorkerReportKind },
   ): Promise<boolean | FleetSeatMessageReceipt>;
   listFleetPeerSeats(authority: PeerSeatAuthority): Promise<FleetPeerSeats | undefined>;
   /** The standing review gate (ADR 0287); absent on a host without one. */

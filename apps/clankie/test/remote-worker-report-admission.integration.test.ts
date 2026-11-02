@@ -22,12 +22,16 @@ afterEach(async () => {
 // when the Windows pane proof for its binding lookup missed the relay deadline.
 // The real worker bridge talks to the real service routes over HTTP; only the
 // relay's proof is replaced, failing with the relay's own timeout error.
+// #317: the report's kind crosses the same bridge and route into the stored receipt.
+// A service older than report kinds refuses the field before accepting anything,
+// as its strict schema did; the bridge sends the same delivery once, unlabelled.
 it.each([
-  { phase: "binding lookup", failedProof: 1 },
-  { phase: "report POST admission", failedProof: 2 },
+  { phase: "binding lookup", failedProof: 1, olderService: false },
+  { phase: "report POST admission", failedProof: 2, olderService: false },
+  { phase: "binding lookup, to a service older than report kinds,", failedProof: 1, olderService: true },
 ])(
   "delivers one remote worker report after $phase times out",
-  async ({ failedProof }) => {
+  async ({ failedProof, olderService }) => {
     const root = await mkdtemp(join(tmpdir(), "clankie-remote-report-admission-"));
     const conversations = new ConversationStore(join(root, "conversations"), async () => {});
     const receiver = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
@@ -38,9 +42,22 @@ it.each([
     const service = await createClankieApp({
       captain: createStubCaptain({
         fleetSeatMessageBinding: async (paneId) => (paneId === `pc/${pane}` ? binding : undefined),
-        receiveFleetSeatMessage: async (paneId, text, delivery) => {
+        receiveFleetSeatMessage: async (paneId, text, delivery, _request, options) => {
           accepted += 1;
-          return receiver.accept(paneId, delivery!, text, text);
+          return receiver.accept(
+            paneId,
+            delivery!,
+            text,
+            text,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            options?.urgent === true || options?.kind === "blocked",
+            undefined,
+            undefined,
+            options?.kind,
+          );
         },
         fleetSeatMessageStatus: async (paneId, id) => receiver.status(paneId, binding, id),
       }),
@@ -68,7 +85,26 @@ it.each([
         }),
       },
     });
-    const server = serve({ fetch: fleetLinkFetch(service.app.fetch), hostname: "127.0.0.1", port: 0 });
+    let refusedKinds = 0;
+    const route = fleetLinkFetch(service.app.fetch);
+    const server = serve({
+      fetch: async (request, ...rest) => {
+        if (
+          olderService &&
+          request.method === "POST" &&
+          new URL(request.url).pathname.endsWith("/messages")
+        ) {
+          const body = (await request.clone().json()) as Record<string, unknown>;
+          if ("kind" in body) {
+            refusedKinds += 1;
+            return Response.json({ error: "invalid_request", deliveryStage: "rejected" }, { status: 400 });
+          }
+        }
+        return route(request, ...rest);
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
     await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
     cleanup.push(async () => {
       service.close();
@@ -139,13 +175,21 @@ it.each([
     });
 
     const report = decodeMcpResult(
-      await call("tools/call", { name: "message_clankie", arguments: { text: "Final report from the PC" } }),
+      await call("tools/call", {
+        name: "message_clankie",
+        arguments: { text: "Final report from the PC", kind: "blocked" },
+      }),
     ) as { received: boolean; deliveryStage: string; deliveryId: string };
     expect(report).toMatchObject({ received: true, deliveryStage: "stored" });
     // Only pre-forward admission is retried, so neither timeout duplicates delivery.
     expect(proofs).toBe(3);
     expect(accepted).toBe(1);
-    expect(conversations.inboundAcceptance(report.deliveryId)?.text).toBe("Final report from the PC");
+    const stored = conversations.inboundAcceptance(report.deliveryId);
+    expect(stored?.text).toBe("Final report from the PC");
+    // A blocked report is heard at once either way; only a current service keeps its label.
+    expect(stored?.urgent).toBe(true);
+    expect(stored?.kind).toBe(olderService ? undefined : "blocked");
+    expect(refusedKinds).toBe(olderService ? 1 : 0);
   },
   30_000,
 );

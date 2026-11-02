@@ -1114,7 +1114,7 @@ export async function connectLaneUpstream(input: {
 const MESSAGE_CLANKIE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -1123,6 +1123,12 @@ const MESSAGE_CLANKIE_TOOL = {
         type: "boolean",
         description:
           "True when you are blocked, something failed, or you need a decision: he hears it at once. Leave it off for progress and finished-work reports; while he is idle he hears those with his next round of reports, within about ten minutes.",
+      },
+      kind: {
+        type: "string",
+        enum: ["done", "blocked", "update"],
+        description:
+          "done: the work is finished (outcome, PR or commit, checks, gaps). blocked: you cannot go on until your lead answers; say what you need in one line. Your lead hears it at once and answers blocked reports first. update: progress or news, no reply needed. Set it on every report.",
       },
     },
     required: ["text"],
@@ -1138,7 +1144,7 @@ const MESSAGE_CLANKIE_TOOL = {
 export function createFleetSeatBridge(
   send?: (
     text: string,
-    options?: { urgent?: boolean },
+    options?: { urgent?: boolean; kind?: "done" | "blocked" | "update" },
   ) => Promise<
     boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
   >,
@@ -1174,7 +1180,9 @@ export function createFleetSeatBridge(
       }
       if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
-      const args = request.params.arguments as { text?: unknown; urgent?: unknown } | undefined;
+      const args = request.params.arguments as
+        | { text?: unknown; urgent?: unknown; kind?: unknown }
+        | undefined;
       const text = String(args?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
       if (uncertain && !durable)
@@ -1193,6 +1201,9 @@ export function createFleetSeatBridge(
         });
       const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX), {
         urgent: args?.urgent === true,
+        ...(args?.kind === "done" || args?.kind === "blocked" || args?.kind === "update"
+          ? { kind: args.kind }
+          : {}),
       }).catch(() => {
         uncertain = true;
         return { received: false, deliveryStage: "uncertain" as const };

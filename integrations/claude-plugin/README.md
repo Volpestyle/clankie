@@ -767,6 +767,11 @@ pane.
 
 ### Connected app inbox
 
+Workers label each `message_clankie` report with `kind`: `done`, `blocked` or
+`update`. `read_reports` items carry it, `unreadReports` counts each thread's
+`blocked` reports and lists those threads first, and a `blocked` report wakes a
+connected lead at once.
+
 `read_inbox` puts `unreadReports` first and bounds each serialized page to
 24,000 characters and at most 50 held items. Pass `next` as `after` while
 `more` is true. Long held texts include a `readMore` pointer; pass its `item`

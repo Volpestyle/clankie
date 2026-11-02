@@ -269,15 +269,25 @@ export function createOperatorService(
           result: { status: ctx.lead.status() },
         };
       const page = ctx.lead.inbox(command.after, command.limit);
-      const counts = new Map<string, number>();
-      for (const report of ctx.conversations.inboundReports())
-        counts.set(report.conversationId, (counts.get(report.conversationId) ?? 0) + 1);
+      const counts = new Map<string, { count: number; blocked: number }>();
+      for (const report of ctx.conversations.inboundReports()) {
+        const thread = counts.get(report.conversationId) ?? { count: 0, blocked: 0 };
+        thread.count++;
+        if (report.kind === "blocked") thread.blocked++;
+        counts.set(report.conversationId, thread);
+      }
+      // Threads with a blocked worker come first: a lead answers those before reading results (#317).
       const unreadReports = [...counts]
         .filter(([conversationId]) => {
           const kind = ctx.conversations.conversation(conversationId)?.scope.kind;
           return kind === "global" || kind === "workspace";
         })
-        .map(([conversationId, count]) => ({ conversationId, count }))
+        .sort(([, a], [, b]) => Number(b.blocked > 0) - Number(a.blocked > 0))
+        .map(([conversationId, { count, blocked }]) => ({
+          conversationId,
+          count,
+          ...(blocked === 0 ? {} : { blocked }),
+        }))
         .slice(0, 256);
       return {
         op: "lead",

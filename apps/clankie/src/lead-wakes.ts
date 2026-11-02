@@ -1,4 +1,5 @@
 import { listLeadWakes, readLeadWake, type CredentialStore } from "@clankie/credential-broker";
+import type { WorkerReportKind } from "@clankie/protocol";
 import type { LeadWakeResult } from "@clankie/protocol/connector";
 
 // Waking a connected lead (ADR 0336). A lead that runs elsewhere, such as Grok Bot,
@@ -6,8 +7,9 @@ import type { LeadWakeResult } from "@clankie/protocol/connector";
 // credential broker with `clankie connector wake set NAME`. This sends one job there:
 // the text and who sent it, nothing else. The address, the key and the webhook's reply
 // body never come back out. The lead answers the way connected leads already do, on
-// the notes board. Worker report wakes (ADR 0343) carry only service-owned facts;
-// worker text stays in the durable inbox.
+// the notes board. Worker report wakes (ADR 0343) carry only service-owned facts and
+// the report's done/blocked/update kind (#317); worker text stays in the durable inbox.
+// A blocked report wakes the lead at once, outside the batch window.
 
 const TIMEOUT_MS = 15_000;
 /** Said to the lead with every job, so it knows where an answer is read. */
@@ -18,6 +20,8 @@ interface WorkerWakeEvent {
   readonly agent: string;
   readonly ref: string;
   readonly event: "report" | "settled";
+  /** The worker's own done/blocked/update label (#317); a fixed enum, never worker text. */
+  readonly kind?: WorkerReportKind;
   readonly at: string;
 }
 
@@ -50,10 +54,13 @@ export function createLeadWakes(options: {
         lead,
         from: "clankie",
         kind: "worker_report",
-        text: events
+        // Blocked reports lead the job, so the lead answers a waiting worker first (#317).
+        text: [...events]
+          .sort((a, b) => Number(b.kind === "blocked") - Number(a.kind === "blocked"))
           .map(
-            ({ agent, ref, event, at }) =>
-              `agent=${agent} ref=${ref} event=${event} time=${at}\nRead with read_reports {"agent":${JSON.stringify(agent)}}.`,
+            ({ agent, ref, event, kind, at }) =>
+              `agent=${agent} ref=${ref} event=${event}${kind === undefined ? "" : ` kind=${kind}`} time=${at}\n` +
+              `${kind === "blocked" ? "BLOCKED: this worker is waiting on your answer. " : ""}Read with read_reports {"agent":${JSON.stringify(agent)}}.`,
           )
           .join("\n"),
       })
@@ -80,6 +87,11 @@ export function createLeadWakes(options: {
   }
   const wakes: LeadWakes = {
     workerReport(lead, event) {
+      // A blocked worker sits idle until its lead answers: never hold it for the batch window.
+      if (event.kind === "blocked") {
+        postReports(lead, [event]);
+        return;
+      }
       const state = windows.get(lead);
       if (state) {
         // One latest fact per agent/ref/event bounds duplicate watch observations.

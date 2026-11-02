@@ -159,6 +159,7 @@ export function inboundReportSummaries(
           acceptedAt,
           state,
           ...(receipt.reportDelivery?.stage === undefined ? {} : { stage: receipt.reportDelivery.stage }),
+          ...(receipt.kind === undefined ? {} : { kind: receipt.kind }),
         }),
       );
     }
@@ -201,6 +202,7 @@ export function readInboundReports(
       acceptedAt: report.acceptedAt,
       state: report.reportDelivery.state,
       ...(report.reportDelivery.stage === undefined ? {} : { stage: report.reportDelivery.stage }),
+      ...(report.kind === undefined ? {} : { kind: report.kind }),
       text: report.text,
     };
     // Bound the whole page, including its envelope and acknowledgment IDs.

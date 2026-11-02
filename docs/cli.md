@@ -2185,9 +2185,10 @@ unless its webhook took it. Connected apps send one with the connector's
 
 Connected hires may opt into that webhook with `start_agent`'s
 `notify: {lead: "duet", ref: "thread-id"}`. Worker reports and settled watches
-send `kind: "worker_report"`, containing only service-owned ids and event facts,
-never worker text. The first event sends immediately; later events batch over
-120 seconds per lead. Read the durable report with `read_reports`, using its
+send `kind: "worker_report"`, containing only service-owned ids and event facts
+and the report's own label (`kind=done|blocked|update`), never worker text. A
+`blocked` report wakes the lead at once and is listed first; otherwise the first
+event sends immediately and later events batch over 120 seconds per lead. Read the durable report with `read_reports`, using its
 `thread` and `agent` or hire `ref`. Connected reads include only the authenticated
 app's hires, newest first by default. `waitSeconds` (0–45) waits without polling
 for a matching unread report, returning empty at the deadline; a positive wait
@@ -5909,7 +5910,8 @@ brief is staged in a private file under that machine's Clankie state and named b
 Claude's one-line startup prompt. The adapter admits the exact native session
 Claude reports, without waiting for its first turn to finish, so a report from
 inside that turn is accepted. The worker gets
-only `message_clankie` (text, a caller-chosen UUID `deliveryId` and optional `urgent`) and
+only `message_clankie` (text, a caller-chosen UUID `deliveryId`, optional `urgent` and
+optional `kind`: `done`, `blocked` or `update`) and
 `message_clankie_status` (`deliveryId`). Reports are durable in its lead chat;
 the lead reads and acknowledges them through `worker_reports` and
 `acknowledge_worker_reports`. `message_seat` with the returned `seat` and
@@ -8285,7 +8287,12 @@ An installed update affects newly loaded bridges; recovery of an existing
 stopped receiver must preserve its original harness session and delivery fences.
 
 Worker `message_clankie` reports project as `kind="message"`, framed as
-untrusted agent output, never an owner instruction. A report without
+untrusted agent output, never an owner instruction. A worker labels each report
+with `kind` (#317): `done`, `blocked` (it needs an answer before it can go on) or
+`update` (no reply needed). The label is stored with the report, said to the lead
+ahead of its text, and returned by `worker_reports`/`read_reports`; `read_inbox`
+counts each thread's `blocked` reports and lists those threads first. `blocked`
+is delivered like `urgent: true`. A report that is neither blocked nor
 `urgent: true` that is bound for an idle native lead seat waits for that seat's
 next round: the seat's next turn, any other delivery to its conversation, or at
 most ten minutes. Many reports then cost the seat one turn instead of one turn

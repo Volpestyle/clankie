@@ -437,6 +437,52 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
     } finally {
       waitSpy.mockRestore();
     }
+
+    // #317: an update joins the batch while a blocked report wakes the lead at once,
+    // naming its kind and leading the job; read_reports returns each report's kind.
+    const before = received.length;
+    expect(await worker.report("Tests pass; writing docs.", { kind: "update" })).toMatchObject({
+      received: true,
+    });
+    const blockedAt = Date.now();
+    expect(
+      await worker.report("Which lead webhook should the wake use, duet or grok?", { kind: "blocked" }),
+    ).toMatchObject({ received: true });
+    await expect
+      .poll(() => received.slice(before).find((fire) => String(fire.body.text).includes("kind=blocked")))
+      .toBeDefined();
+    console.log(`Blocked worker report → webhook: ${Date.now() - blockedAt} ms.`);
+    const blockedWake = received
+      .slice(before)
+      .find((fire) => String(fire.body.text).includes("kind=blocked"))!;
+    expect(blockedWake.body).toMatchObject({ kind: "worker_report", lead: "duet" });
+    expect(blockedWake.body.text).toContain(
+      `agent=${agent} ref=thread:proof-250 event=report kind=blocked time=`,
+    );
+    expect(blockedWake.body.text).toContain("BLOCKED: this worker is waiting on your answer.");
+    expect(blockedWake.body.text).not.toContain("kind=update");
+    expect(JSON.stringify(received)).not.toContain("duet or grok");
+    const typed = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "read_reports",
+          arguments: { thread: "global-default", agent, newest: true },
+        }),
+      ),
+    );
+    expect(typed.items.map((item: { kind?: string; text: string }) => [item.kind, item.text])).toEqual([
+      ["blocked", "Which lead webhook should the wake use, duet or grok?"],
+      ["update", "Tests pass; writing docs."],
+    ]);
+    // With the lead handed to the apps, read_inbox counts the thread's blocked report and lists it first.
+    expect((await owner(["lead", "apps"])).code).toBe(0);
+    const inbox = JSON.parse(textOf(await client.callTool({ name: "read_inbox", arguments: {} })));
+    expect(inbox.unreadReports[0]).toMatchObject({ conversationId: "global-default", blocked: 1 });
+    expect((await owner(["lead", "clankie"])).code).toBe(0);
+    // The update's own batched wake still arrives, labelled.
+    await expect
+      .poll(() => received.slice(before).some((fire) => String(fire.body.text).includes("kind=update")))
+      .toBe(true);
   } finally {
     await client?.close();
     relay.closeAllConnections();

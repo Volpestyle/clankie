@@ -163,13 +163,19 @@ export async function reportWakeCaptain(root: string, leadWakes: LeadWakes) {
     captain,
     native,
     pane,
-    report: (text: string) =>
-      captain.receiveFleetSeatMessage(pane.pane_id, text, {
-        id: randomUUID(),
-        binding: deliveryFingerprint(
-          JSON.stringify([pane.pane_id, pane.terminal_id, pane.agent, snapshot().session]),
-        ),
-      }),
+    report: (text: string, options?: Parameters<typeof captain.receiveFleetSeatMessage>[4]) =>
+      captain.receiveFleetSeatMessage(
+        pane.pane_id,
+        text,
+        {
+          id: randomUUID(),
+          binding: deliveryFingerprint(
+            JSON.stringify([pane.pane_id, pane.terminal_id, pane.agent, snapshot().session]),
+          ),
+        },
+        undefined,
+        options,
+      ),
     async close() {
       usage.mockRestore();
       await captain.close();

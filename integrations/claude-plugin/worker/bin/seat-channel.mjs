@@ -86,7 +86,7 @@ const INSTRUCTIONS =
   "(often loaded as deferred tools); search clankie_tools before concluding a tracker or account tool is unavailable. " +
   "An uncertain clankie_call may have applied: reconcile with its receiptId only, never resend name and arguments. " +
   "If no receiptId arrived, report the unresolved reply to Clankie without resending the call. " +
-  "When work he gave you finishes or is blocked, report it with message_clankie in a few lines " +
+  "When work he gave you finishes or is blocked, report it with message_clankie in a few lines, with kind done, blocked or update " +
   "(outcome; branch and commit; checks and their result; evidence path; open gaps or a decision needed), " +
   "rather than typing into his pane. " +
   "A question or decision you need from your lead goes to Clankie with message_clankie, then continue " +
@@ -98,10 +98,12 @@ const SHARED_DAEMON_NOTE =
   "so Clankie cannot verify which agent is calling and grants it none of his tools. " +
   "If you need them, tell the owner: exit and start Codex again with `codex --no-daemon` " +
   "(to keep this conversation, `codex resume <id> --no-daemon`; if Codex says the conversation is open in another app, choose fork).";
+/** A report's own label (#317); anything else is sent untyped. */
+const REPORT_KINDS = new Set(["done", "blocked", "update"]);
 const MESSAGE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
   inputSchema: {
     type: "object",
     properties: {
@@ -110,6 +112,12 @@ const MESSAGE_TOOL = {
         type: "boolean",
         description:
           "True when you are blocked, something failed, or you need a decision: he hears it at once. Leave it off for progress and finished-work reports; while he is idle he hears those with his next round of reports, within about ten minutes.",
+      },
+      kind: {
+        type: "string",
+        enum: ["done", "blocked", "update"],
+        description:
+          "done: the work is finished (outcome, PR or commit, checks, gaps). blocked: you cannot go on until your lead answers; say what you need in one line. Your lead hears it at once and answers blocked reports first. update: progress or news, no reply needed. Set it on every report.",
       },
     },
     required: ["text"],
@@ -1236,13 +1244,17 @@ export function runSeatChannel({
     })();
     return refreshReconciliation;
   }
-  async function messageClankie(text, urgent) {
+  async function messageClankie(text, urgent, kind) {
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
     await reconcileRefresh();
     const receipt =
-      retainedInbound ?? (await sendInbound(body.slice(0, TEXT_MAX), { urgent: urgent === true }));
+      retainedInbound ??
+      (await sendInbound(body.slice(0, TEXT_MAX), {
+        urgent: urgent === true,
+        ...(REPORT_KINDS.has(kind) ? { kind } : {}),
+      }));
     retainedInbound = undefined;
     return { isError: !receipt.received, text: JSON.stringify(receipt) };
   }
@@ -1396,7 +1408,11 @@ export function runSeatChannel({
         }
       }
       if (params?.name === MESSAGE_TOOL.name) {
-        const result = await messageClankie(params?.arguments?.text, params?.arguments?.urgent);
+        const result = await messageClankie(
+          params?.arguments?.text,
+          params?.arguments?.urgent,
+          params?.arguments?.kind,
+        );
         return send({
           id,
           result: { content: [{ type: "text", text: result.text }], isError: result.isError },

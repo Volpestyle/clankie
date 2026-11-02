@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DeliveryStageSchema } from "./delivery.ts";
+import { WorkerReportKindSchema } from "./worker-reports.ts";
 import { OperatorSeatMigrationSchema } from "./operator-seat-migration.ts";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
@@ -272,6 +273,8 @@ export const FleetSeatMessageSchema = z
      * next round of reports (VUH-2274).
      */
     urgent: z.boolean().optional(),
+    /** done, blocked or update (#317); blocked is heard at once like urgent. */
+    kind: WorkerReportKindSchema.optional(),
   })
   .strict();
 export type FleetSeatMessage = z.infer<typeof FleetSeatMessageSchema>;

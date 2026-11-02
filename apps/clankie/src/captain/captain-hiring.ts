@@ -36,7 +36,8 @@ import type { HerdrWatchRunner } from "./herdr-watch.ts";
  * hire tracks work in the repo's own convention the same way he does.
  */
 const WORKER_RESULT_BRIEF =
-  "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open.";
+  "End each finished turn with a report in the resolved reporting style that the lead can act on without your transcript: the outcome, links to its evidence, unresolved gaps, and any decision still open. " +
+  "Send it with message_clankie and its kind: done when the work is finished, blocked when you cannot go on until your lead answers (say what you need in one line), update when no reply is needed.";
 
 export interface HiringContext {
   readonly options: CaptainOptions;
