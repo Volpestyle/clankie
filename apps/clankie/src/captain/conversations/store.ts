@@ -287,6 +287,8 @@ function untilRoundOrAbort(round: Promise<void>, signal?: AbortSignal): Promise<
 
 export class ConversationStore {
   private readonly inboundReportMigrationReady: () => boolean;
+  /** A room handoff whose durable Pi turn (ADR 0284) the next process resumes. */
+  private readonly resumesRoomHandoff: (deliveryId: string) => boolean;
   private readonly inboundReportStores = new Map<string, InboundReportStore>();
   private readonly writtenMetadata = new Map<string, { body: string; identity: string; durable: boolean }>();
 
@@ -514,8 +516,10 @@ export class ConversationStore {
     defaultWorkingDirectory = process.cwd(),
     ownerAttachments?: OwnerAttachmentHost,
     inboundReportMigrationReady: () => boolean = () => true,
+    resumesRoomHandoff: (deliveryId: string) => boolean = () => false,
   ) {
     this.inboundReportMigrationReady = inboundReportMigrationReady;
+    this.resumesRoomHandoff = resumesRoomHandoff;
     this.root = root;
     this.journal = new ConversationJournal(root);
     this.runner = runner;
@@ -613,7 +617,10 @@ export class ConversationStore {
         this.metas.set(meta.conversationId, meta);
         if (meta.roomHandoff !== undefined) {
           meta.roomHandoff = RoomHandoffMetadataSchema.parse(meta.roomHandoff);
-          if (["pending", "running", "waiting_user"].includes(meta.roomHandoff.state)) {
+          if (
+            ["pending", "running", "waiting_user"].includes(meta.roomHandoff.state) &&
+            !(meta.roomHandoff.state === "running" && this.resumesRoomHandoff(meta.roomHandoff.deliveryId))
+          ) {
             meta.roomHandoff = {
               ...meta.roomHandoff,
               state: "failed",

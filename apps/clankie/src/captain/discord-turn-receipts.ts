@@ -65,13 +65,6 @@ export class DiscordTurnReceipts {
     return this.records.get(id);
   }
 
-  public recoverable(now: Date): Receipt[] {
-    if (this.unreadable) throw new Error("Discord delivery receipts unavailable");
-    return [...this.records.values()].filter(
-      (receipt) => receipt.recoveryRequest !== undefined && this.abandoned(receipt, now),
-    );
-  }
-
   /** Repair the content-free room projection from durable service outcomes. */
   public roomEvidence(receiptId?: string): DiscordRoomEvidence[] {
     if (this.unreadable) return [];

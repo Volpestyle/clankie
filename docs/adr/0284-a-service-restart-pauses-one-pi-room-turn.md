@@ -107,8 +107,9 @@ The manual real-dependency proof is
 It starts the real service with a generated scratch-stack preset, private ports,
 state, settings, credentials and no Discord connection. It uses a real API model,
 real file memory and a real shell effect. It kills only its own service and
-verified tool PID while the effect is in flight, then starts the service again
-without another input. It checks one persisted memory, one shell append, the
+verified tool PID while the effect is in flight, then starts the service again.
+Since the 2026-11-02 amendment below, it also registers a bot body and redelivers
+the same request, as the bridge would. It checks one persisted memory, one shell append, the
 possibly-run result, one terminal reply receipt, exact replay across repeated
 HTTP input and another restart, and a changed-input conflict. This is a manual
 product proof, not an eval or a per-commit network test. Its evidence is linked
@@ -119,15 +120,17 @@ one shell append and one saved HTTP reply each.
 The automated regression base is
 [`durable-pi-room-restart.integration.test.ts`](../../apps/clankie/test/durable-pi-room-restart.integration.test.ts)
 (2026-11-02, [#368](https://github.com/Volpestyle/clankie/issues/368)). It runs the
-same real service, Pi, journal, file memory and shell, killed with SIGKILL mid-shell
-and started again with no new input. Only the model is a scripted loopback endpoint,
+same real service, Pi, journal, file memory and shell, killed mid-shell and started
+again. A bot body registers over HTTP and redelivers the same request. Only the model is a scripted loopback endpoint,
 so it costs nothing and proves the restart contract rather than model behaviour. It
 checks:
 
 - the shell call surfaces as "possibly ran", with one effect and one memory;
 - after the restart the model is asked only for the answer, since completed steps come from the journal;
 - the same delivery replays its saved result, a changed request is refused, and a later clean restart replays it with no model call;
-- a grant changed while the service was down fails the resumed turn closed, with no model or tool step.
+- a grant changed while the service was down fails the resumed turn closed, with no model or tool step;
+- the restart keeps the room handoff open, and nothing resumes until the body redelivers;
+- a graceful stop (SIGTERM) pauses the handoff rather than failing it, and its journaled shell outcome is never rerun.
 
 [`durable-pi-room-delivery.integration.test.ts`](../../apps/discord-bridge/test/durable-pi-room-delivery.integration.test.ts)
 carries the same kill through the bridge. The bridge's real SQLite inbox, text
@@ -140,6 +143,32 @@ credential broker, and its Discord is a loopback REST fixture. It therefore prov
 service-to-bridge-to-REST hop, not Discord's API or gateway, and not a crash between
 Discord's send and its receipt.
 
+## Amendment: the room takes the normal handoff (2026-11-02, [#368](https://github.com/Volpestyle/clankie/issues/368))
+
+The opt-in room no longer runs on a separate prototype path. Its deliveries take
+the same room handoff as every other room: a handoff record the room's views read,
+the room's guards, and native routing. An owner audience with a live Claude or Codex
+head therefore answers in a native child, and the journal does not apply there. The
+journal now wraps only the handoff's Pi dispatch, the fallback when no native head
+takes the turn. The earlier refusal of seat-routed and linked-main requests becomes
+their normal routes. Three differences from other rooms remain, each stated where
+it lives in `captain.ts`:
+
+- The room opens no steering burst (ADR 0118), because a steered follow-up would
+  escape the turn's journal. A follow-up waits as its own handoff until steering is
+  journaled.
+- It uses no room loop (ADR 0291), because a loop keeps one warm session across
+  turns and the journal holds one turn.
+- A restart leaves its handoff `running` while that delivery's journal is unsettled,
+  instead of marking it interrupted. A shutdown pauses it the same way. Only the
+  same delivery may reopen that handoff.
+
+Recovery no longer starts at boot. The room's guards need its Discord body live and
+able to reply, and at boot no body has connected. The turn resumes when its body
+redelivers the same request from the bridge's durable inbox, which the bridge does
+on its own. The resume still re-evaluates current grants, and a changed grant fails
+it closed against the journal.
+
 Before enabling more lanes:
 
 1. Obtain an approved private Discord test destination and prove the full mouth
@@ -150,10 +179,10 @@ Before enabling more lanes:
    than broadly blessing a transport.
 3. Add retention/compaction for step journals and durable retry/backoff for
    unavailable providers. Keep the original request and uncertain intents until
-   reconciled. Current recovery is on service startup; a failed recovery does
-   not create an unbounded automatic retry loop.
-4. Extend the same admission/step/outcome contract to Pi room handoff children,
-   linked-main service execution, owner DMs, voice handoffs, operator turns, hosted encrypted ingress,
+   reconciled. Recovery happens on the body's redelivery; a failed recovery
+   settles once and does not create an unbounded automatic retry loop.
+4. Journal steering, so the room's follow-ups join its running turn as in other
+   rooms. Then extend the same admission/step/outcome contract to linked-main service execution, owner DMs, voice handoffs, operator turns, hosted encrypted ingress,
    watches, scheduled wakes and background service lanes. Persist queued inputs,
    preserve source/audience ceilings, and define explicit cancellation separately
    from a service pause. Native seats remain excluded.

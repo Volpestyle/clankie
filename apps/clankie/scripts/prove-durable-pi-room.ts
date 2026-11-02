@@ -11,6 +11,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createDefaultCredentialStore, FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { CaptainChannelTurnResultSchema, type DiscordPresenceChannelTurnRequest } from "@clankie/protocol";
+import { DiscordPresenceSession } from "@clankie/discord-presence-core";
+import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const root = resolve(process.argv[2] ?? join(repo, ".local/vuh-2574", `proof-${Date.now()}`));
@@ -166,6 +168,26 @@ async function stopTool() {
     /* The tool exited already. */
   }
 }
+/** A live bot body, as the bridge opens on each start; the room's guards need it to reply. */
+async function presence() {
+  const session = new DiscordPresenceSession({
+    sessionId: `discord:bot:proof:${randomUUID()}`,
+    characterId: "clankie",
+    credentialRef: "discord_bot",
+    transportKind: "bot",
+    emit: async (event) => {
+      const response = await fetch(`${url}/v1/discord/presence-session-events`, {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify(event),
+      });
+      assert(response.ok, await response.clone().text());
+      return ((await response.json()) as { session: DiscordPresenceSessionRecord }).session;
+    },
+  });
+  await session.start();
+  await session.gatewayReady();
+}
 async function post(value = request) {
   return fetch(`${url}/v1/captain/channel-turns`, {
     method: "POST",
@@ -181,6 +203,7 @@ const journalPath = join(
 );
 try {
   await start();
+  await presence();
   const admitted = await post();
   assert.equal(admitted.status, 202, await admitted.text());
   console.log("admitted through public HTTP; waiting for real memory and bash effects");
@@ -210,9 +233,12 @@ try {
   assert(Number.isSafeInteger(toolPid) && toolPid > 1);
   await stopTool();
   console.log(
-    `${killSignal} private service and stop its verified tool PID; restarting without another input`,
+    `${killSignal} private service and stop its verified tool PID; restarting, then redelivering the same request as its body would`,
   );
   await start();
+  await presence();
+  const redelivered = await post();
+  assert.equal(redelivered.status, 202, await redelivered.clone().text());
   const settled = await until(async () => {
     const response = await fetch(`${url}/v1/captain/channel-turns/${requestId}`, {
       headers: { authorization },
@@ -253,6 +279,7 @@ try {
   assert.equal(conflict.status, 409);
   await stop("SIGTERM");
   await start();
+  await presence();
   const completedReplay = await post();
   assert.deepEqual(await completedReplay.json(), settled);
   assert.equal(JSON.parse(readFileSync(journalPath, "utf8")).steps.length, stepCount);
@@ -275,7 +302,7 @@ try {
     sources,
     reply: settled,
     publicPath: "/v1/captain/channel-turns",
-    recovery: "automatic startup; no resubmission",
+    recovery: "the same request redelivered by a live body after restart",
     scope:
       "Real service, Pi, model, file memory and shell. Discord-mouth delivery unproven; no destination approved.",
     revision: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim(),
