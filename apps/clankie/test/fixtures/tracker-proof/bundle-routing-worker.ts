@@ -8,6 +8,7 @@ import { trackerEvidence } from "../../helpers/tracker-evidence.ts";
 import { SettingsStore } from "../../../../../packages/settings/src/index.ts";
 import { FileCredentialStore } from "../../../../../packages/credential-broker/src/index.ts";
 import { writeConvention, TRACKER_LEAD } from "../../../../../packages/work-items/src/index.ts";
+import { ProjectsSettingsSchema } from "../../../../../packages/protocol/src/index.ts";
 
 const root = process.argv[2]!;
 const f = await fixture(root, join(root, "tracker"), (backend) => backend);
@@ -31,13 +32,17 @@ try {
       ...current.projects,
       projects: [
         ...current.projects.projects,
-        {
-          id: "cutover",
-          name: "Cut-over",
-          trackerProjectId: project.id,
-          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: workspace }],
-          trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
-        },
+        ...ProjectsSettingsSchema.parse({
+          projects: [
+            {
+              id: "cutover",
+              name: "Cut-over",
+              trackerProjectId: project.id,
+              workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: workspace }],
+              trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+            },
+          ],
+        }).projects,
       ],
     },
   }));
