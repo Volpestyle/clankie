@@ -410,30 +410,21 @@ const JoinedSchema = z.strictObject({
 });
 
 /**
- * One opt-in room, serialized deliveries. Its turns run through the normal room
- * handoff; the journal covers only their Pi dispatch. A follow-up that steers a
- * running turn is journaled in that turn first, so no steering escapes it.
+ * Durable Pi turns for owner-only audiences (ADR 0284): one journal per delivery,
+ * serialized. The room handoff decides which turns are durable; the journal covers
+ * only their Pi dispatch. A follow-up that steers a running turn is journaled in
+ * that turn first, so no steering escapes it.
  */
-export class DurablePiRoom {
+export class DurablePiTurns {
   private tail: Promise<unknown> = Promise.resolve();
   private readonly running = new Map<string, Promise<CaptainChannelTurnResult>>();
   private readonly runningByDelivery = new Map<string, Promise<CaptainChannelTurnResult>>();
   private readonly root: string;
-  readonly target: string | undefined;
-  constructor(root: string, target: string | undefined) {
+  constructor(root: string) {
     this.root = root;
-    this.target = target;
-  }
-  accepts(request: DiscordPresenceChannelTurnRequest): boolean {
-    return (
-      this.target !== undefined &&
-      request.trigger.kind !== "voice_event" &&
-      `${request.trigger.guildId ?? "dm"}:${request.trigger.channelId}` === this.target
-    );
   }
   /** This delivery's Pi dispatch began in an earlier process and never settled. */
   resumable(request: DiscordPresenceChannelTurnRequest): boolean {
-    if (!this.accepts(request)) return false;
     const record = this.read(request.deliveryId);
     return record !== undefined && record.fingerprint === digest(request) && record.result === undefined;
   }
@@ -442,7 +433,6 @@ export class DurablePiRoom {
    * own journal has no result, or it steered a turn and was not yet answered.
    */
   unsettled(deliveryId: string): boolean {
-    if (this.target === undefined) return false;
     const record = this.read(deliveryId);
     if (record !== undefined) return record.result === undefined;
     const joined = this.joined(deliveryId);

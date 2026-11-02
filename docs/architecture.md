@@ -178,15 +178,16 @@ blanket retry override or automatic reconciliation from another session's transc
 `stored`, an explicit native acknowledgment means `consumed` (not model-read), and a completed
 channel result reports `responded`; unknown failures stay `uncertain`.
 
-A host-selected prototype can recover one Pi text room after restart
-([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). The room takes
-the normal handoff, and the journal wraps only its Pi dispatch. It retains the
+A Pi room turn for an owner-only audience survives a service restart
+([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)): the owner
+through the official bot, in a DM or a proven owner-only room. It takes the normal
+handoff, and the journal wraps only its Pi dispatch. It retains the
 admitted request, session leaf and model/tool steps, replays completed results,
 and reports interrupted mutations as possibly run. Its handoff stays open across the
 restart and resumes when the bridge redelivers the same message. A follow-up that
 steers its running turn is journaled there first, so the resumed turn hears it at the
-same point. That room uses no room loop yet. Other lanes retain their existing interruption
-behavior. Tests prove the hop through the real bridge to a loopback Discord REST;
+same point. Mixed rooms, voice, native children and linked-main execution retain
+their existing interruption behavior. Tests prove the hop through the real bridge to a loopback Discord REST;
 Discord itself remains unproven.
 
 The service normalizes each admitted message — untrusted body

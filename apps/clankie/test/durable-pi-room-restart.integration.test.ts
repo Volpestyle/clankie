@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from "vitest";
 import { cleanups, privateService } from "./fixtures/durable-pi-room-service.ts";
 
-// ADR 0284's opt-in room, the regression base for rolling it out (#368). Its
+// ADR 0284's durable Pi turns in an owner DM, the regression base for rolling them out (#368). Its
 // turns take the normal room handoff and only the Pi dispatch is journaled. A
 // bot body registers over HTTP and redelivers by hand; the bridge's own inbox
 // is proven in apps/discord-bridge/test/durable-pi-room-delivery.integration.test.ts.

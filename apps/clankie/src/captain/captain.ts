@@ -5,7 +5,7 @@ import { RoomLoops } from "./room-loops.ts";
 import { ParticipantRoomSessions } from "./participant-room-sessions.ts";
 import { participantRoomDirectory } from "./participant-room-profile.ts";
 import { createDurableSessions } from "./durable-sessions.ts";
-import { DurablePiRoom, PiTurnPausedError, type PiTurnJournal } from "./pi-turn-journal.ts";
+import { DurablePiTurns, PiTurnPausedError, type PiTurnJournal } from "./pi-turn-journal.ts";
 import { projectTrackerTool } from "./project-tracker-access.ts";
 import { type FleetProjectionDiagnostics } from "./fleet-projection-diagnostics.ts";
 import { harnessAccountIdentities, harnessAccountIdentityPath } from "./harness-account-identities.ts";
@@ -2182,7 +2182,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     buildSession,
     recoveryContext: (id) => conversations.compactionRecoveryContext(id),
   });
-  const durablePiRoom = new DurablePiRoom(join(options.stateDir, "durable-pi-room"), options.durablePiRoom);
+  const durablePiTurns = new DurablePiTurns(join(options.stateDir, "durable-pi-room"));
   const roomLoops = new RoomLoops(options.roomLoop);
   /** Linked-channel request ids by native event id, so a covered request names the reply that answered it. */
   const linkedOwnerDeliveries = new Map<string, string>();
@@ -2360,7 +2360,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     workingDirectory,
     ownerAttachmentHost(),
     deps.inboundReportMigrationReady,
-    (deliveryId) => durablePiRoom.unsettled(deliveryId),
+    (deliveryId) => durablePiTurns.unsettled(deliveryId),
   );
   conversations.nativeMessageHost = {
     inspect: (seatId) => herdrWatches.nativeTaskObservation(seatId),
@@ -4147,7 +4147,17 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ? { schemaVersion: 1 as const, state: "not_projected" as const }
         : { schemaVersion: 1 as const, state: "accepted" as const, ...accepted };
     },
-    canResumeDiscordTurn: (request) => durablePiRoom.accepts(request),
+    // Owner text through the official bot may become a durable turn; whether it is
+    // depends on the audience its room grant proves when it runs (ADR 0284).
+    retainsDiscordTurn: (request) => {
+      if (request.trigger.kind === "voice_event" || request.identity.transportKind !== "bot") return false;
+      const { settings: discord } = resolveDiscordSettings(
+        settingsStore.readSync().discord,
+        options.discordEnvironment,
+      );
+      return discord.ownerUserId === request.trigger.actorId;
+    },
+    canResumeDiscordTurn: (request) => durablePiTurns.unsettled(request.deliveryId),
     async submitDiscordTurn(
       request: DiscordPresenceChannelTurnRequest,
       authority?: { readonly verifiedOwner: boolean; readonly sourceCurrent?: () => boolean },
@@ -4346,14 +4356,14 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               ]);
         return { discord, plan, owner, sender, key, access, mainConversation, participant };
       };
-      // ADR 0284: the opt-in room takes the normal handoff, and only its Pi dispatch is journaled.
-      // Participant rooms keep their native character path, as before.
-      const durable =
-        durablePiRoom.accepts(request) && participantPolicy(await readAuthoritySettings()) === undefined;
+      // ADR 0284: a durable turn takes the normal handoff, and only its Pi dispatch is
+      // journaled; the run below decides durability from the grant it resolves.
       // A follow-up that steered a journaled turn before a restart is answered by
       // that turn's journal, never run again on its own unless the turn never read it.
       const steered =
-        durable && prior?.result === undefined ? durablePiRoom.parentOf(request.deliveryId) : undefined;
+        lane === "discord_presence" && prior?.result === undefined
+          ? durablePiTurns.parentOf(request.deliveryId)
+          : undefined;
       if (steered !== undefined) {
         await resolveGrant();
         const childId = roomHandoffConversationId(parentId, request.deliveryId);
@@ -4363,10 +4373,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         // parent's own redelivery.
         const parentResult =
           steered.result ??
-          (await (durablePiRoom.runningFor(steered.parent) ?? this.submitDiscordTurn(steered.request)));
-        const consumed = durablePiRoom.parentOf(request.deliveryId)?.consumed === true;
+          (await (durablePiTurns.runningFor(steered.parent) ?? this.submitDiscordTurn(steered.request)));
+        const consumed = durablePiTurns.parentOf(request.deliveryId)?.consumed === true;
         if (!consumed) {
-          durablePiRoom.settleJoined(request.deliveryId);
+          durablePiTurns.settleJoined(request.deliveryId);
           conversations.updateRoomHandoff(childId, { state: "pending", doing: undefined });
         } else {
           const completed = parentResult.state !== "failed";
@@ -4389,7 +4399,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             },
             result,
           );
-          durablePiRoom.settleJoined(request.deliveryId, result);
+          durablePiTurns.settleJoined(request.deliveryId, result);
           return result;
         }
       }
@@ -4444,7 +4454,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             // A durable turn hears the follow-up from its journal after a restart:
             // link, then journal, before Pi sees it.
             if (run.journal !== undefined) {
-              durablePiRoom.link(request.deliveryId, liveHandoff.deliveryId);
+              durablePiTurns.link(request.deliveryId, liveHandoff.deliveryId);
               run.journal.steer(request.deliveryId, heard.prompt, images);
             }
             // steer() only queues; unlike prompt() it never starts a run of its own.
@@ -4452,7 +4462,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               await run.session.steer(heard.prompt, images);
             } catch (error) {
               run.journal?.withdraw(request.deliveryId);
-              durablePiRoom.settleJoined(request.deliveryId);
+              durablePiTurns.settleJoined(request.deliveryId);
               throw error;
             }
             conversations.updateRoomHandoff(child.conversationId, {
@@ -4468,7 +4478,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ) {
               // The run ended before reading it: this message starts its own handoff.
               run.journal?.withdraw(request.deliveryId);
-              durablePiRoom.settleJoined(request.deliveryId);
+              durablePiTurns.settleJoined(request.deliveryId);
               conversations.updateRoomHandoff(child.conversationId, { state: "pending", doing: undefined });
               return undefined;
             }
@@ -4491,7 +4501,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               },
               result,
             );
-            if (run.journal !== undefined) durablePiRoom.settleJoined(request.deliveryId, result);
+            if (run.journal !== undefined) durablePiTurns.settleJoined(request.deliveryId, result);
             return result;
           })().catch((error: unknown) => {
             if (error instanceof PiTurnPausedError) throw error;
@@ -4540,7 +4550,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           async (release) => {
             const child = admittedChild!;
             // After a restart, only an unsettled journal may continue its own running handoff.
-            if (child.roomHandoff?.state !== "pending" && !(durable && durablePiRoom.resumable(request))) {
+            if (child.roomHandoff?.state !== "pending" && !durablePiTurns.resumable(request)) {
               burst?.close();
               return {
                 state: "failed",
@@ -4552,6 +4562,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               const result = await (async (): Promise<CaptainChannelTurnResult> => {
                 const { discord, plan, owner, sender, key, access, mainConversation, participant } =
                   await resolveGrant();
+                // ADR 0284: an owner-only audience, the owner speaking, through the official
+                // bot, with no room skill or participant character, survives a restart. This
+                // changes only what survives a restart, never what anyone in the room can do.
+                const durable =
+                  lane === "discord_presence" &&
+                  request.identity.transportKind === "bot" &&
+                  participant === undefined &&
+                  access.privateContext &&
+                  access.skillGrant === undefined &&
+                  owner;
+                // A journaled turn whose audience no longer qualifies may already have had
+                // effects: it fails closed rather than running again outside its journal.
+                if (!durable && durablePiTurns.resumable(request))
+                  throw new Error("pi_turn_recovery_identity_changed");
                 if (participant?.harness === "claude") {
                   burst?.close();
                   // The public room may retain a private owner attachment from
@@ -4718,7 +4742,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 }
                 // ADR 0291: a social text room answers in its durable loop for this exact grant.
                 // Machine turns keep their own sessions; in a mixed room they stay one-shot (ADR 0251).
-                // Loops keep one warm session across turns; the journal holds one turn, so the durable room has none.
+                // Loops keep one warm session across turns and the journal holds one turn. Loops serve
+                // social plans, which an owner-only audience never has, so this only guards the invariant.
                 const loopKey =
                   !durable &&
                   (lane === "discord_presence" || participant !== undefined) &&
@@ -4994,7 +5019,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   const outcome = await (loopKey !== undefined
                     ? roomLoops.serialize(loopKey, () => dispatch())
                     : durable
-                      ? durablePiRoom
+                      ? durablePiTurns
                           .run(request, key, async (journal) => {
                             const result = await dispatch(journal);
                             // A shutdown pauses the turn unsettled, for the next process to resume.

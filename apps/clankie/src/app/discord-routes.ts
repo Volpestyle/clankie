@@ -1038,7 +1038,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
         ctx.discordTurnReceipts.begin(deliveryKey, {
           fingerprint,
           lane: expectedLane,
-          ...(ctx.dependencies.captain.canResumeDiscordTurn?.(request) ? { recoveryRequest: request } : {}),
+          ...(ctx.dependencies.captain.retainsDiscordTurn?.(request) ? { recoveryRequest: request } : {}),
           origin: {
             baseSessionKey: discordTurnSessionKey(request),
             presenceSessionId:

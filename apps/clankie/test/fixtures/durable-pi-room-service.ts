@@ -14,7 +14,7 @@ import { DiscordPresenceSession } from "@clankie/discord-presence-core";
 import type { DiscordPresenceSessionRecord } from "@clankie/interactive-environment";
 import { SettingsStore } from "@clankie/settings";
 
-// ADR 0284's prototype lane as a child process (#368): the real service, Pi,
+// ADR 0284's durable Pi turns as a child process (#368): the real service, Pi,
 // journal, file memory and shell, killed mid-tool and started again. Only the
 // model is a scripted loopback OpenAI-compatible endpoint, so a test built on
 // this proves the restart contract, not model behaviour.
@@ -158,7 +158,6 @@ setTimeout(() => {}, 300000);
     VITEST: "true",
     CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY: join(root, "fleet-resources"),
     CLANKIE_CAPTAIN_STEER_SOURCE_LANE: "discord_text",
-    CLANKIE_DURABLE_PI_ROOM: `dm:${DM}`,
     ...options.env,
   };
   const url = preset.CLANKIE_CAPTAIN_URL!;

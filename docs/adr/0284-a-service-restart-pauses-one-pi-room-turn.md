@@ -1,6 +1,7 @@
 # ADR 0284: A service restart pauses one Pi room turn
 
 Status: accepted for the bounded prototype in [VUH-2574](https://linear.app/vuhlp/issue/VUH-2574), 2026-10-20.
+Widened on 2026-11-02 to every owner-only audience; see the amendments below.
 
 ## Context
 
@@ -19,10 +20,10 @@ keep their own transcripts and are outside this decision.
 
 Prototype a local step journal around the existing coding-agent AgentSession.
 Do not replace its session format, resource loader, extensions or tool registry.
-The service host can select exactly one text-room target with
+The service host could select exactly one text-room target with
 `CLANKIE_DURABLE_PI_ROOM=guildId:channelId` (`dm:channelId` for a private DM).
-Absent, the prototype is disabled. This development rollout switch is not an
-owner preference or a new authority grant. A linked main conversation or a room
+Absent, the prototype was disabled. This development rollout switch was not an
+owner preference or a new authority grant; the owner-only amendment removed it. A linked main conversation or a room
 routed to a native seat is refused by the prototype.
 
 The public channel-turn route retains the full admitted request only for that
@@ -192,6 +193,44 @@ from its own saved request, with every guard and its journal's grant checked aga
 The store keeps a joined follow-up's handoff open across the restart, as it does for
 its parent.
 
+### Owner-only audiences (2026-11-02)
+
+The single-room dev switch is gone. A Pi room turn is durable when its room grant,
+resolved as the turn runs, proves an owner-only audience. Four conditions must hold:
+
+- the owner is speaking;
+- through the official bot;
+- in a DM or a room whose owner-only audience the room's existing proof establishes
+  (`access.privateContext`);
+- with no room skill grant and no participant character.
+
+**This changes only what survives a restart, never what anyone in the room can do.**
+Routing, tools, guards and replies are the room's own; the journal records the Pi
+dispatch they already run. To resume a turn, the service needs the full request, so
+it retains that only for the owner's own text through the official bot. It resumes
+only a delivery whose journal, or whose joined parent's, is unsettled. A journaled
+turn whose audience no longer qualifies when it resumes fails closed, as a changed
+grant does.
+
+Mixed rooms (any reader beyond the owner), the user-session body, voice, native
+children and linked-main execution keep their existing interruption behaviour, for
+these reasons:
+
+- **Mixed rooms.** A resumed turn would act for an audience that the restart may
+  have changed, and its journal holds replies meant for that audience. Widening
+  there needs its own decision about what a reader joining mid-turn may see.
+- **Voice.** It has its own floor and latency budget, and a minutes-late spoken
+  answer after a restart is worse than none.
+- **Native children and linked main.** Their harness keeps its own transcript, and
+  ADR 0284 excludes them.
+
+[`durable-pi-owner-audience.integration.test.ts`](../../apps/clankie/test/durable-pi-owner-audience.integration.test.ts)
+covers which turns are journaled. It uses the real captain, Pi and journal, a
+scripted model, and Discord channel and guild reads served as fixture data, so the
+real owner-only audience proof runs. The owner's turn in a proven owner-only room
+is journaled; the same owner's turn in a room others can read is not. The restart
+suites above now run on owner DMs with no switch set.
+
 Before enabling more lanes:
 
 1. Obtain an approved private Discord test destination and prove the full mouth
@@ -204,7 +243,7 @@ Before enabling more lanes:
    unavailable providers. Keep the original request and uncertain intents until
    reconciled. Recovery happens on the body's redelivery; a failed recovery
    settles once and does not create an unbounded automatic retry loop.
-4. Extend the same admission/step/outcome contract to linked-main service execution, owner DMs, voice handoffs, operator turns, hosted encrypted ingress,
+4. Extend the same admission/step/outcome contract to linked-main service execution, mixed rooms, voice handoffs, operator turns, hosted encrypted ingress,
    watches, scheduled wakes and background service lanes. Persist queued inputs,
    preserve source/audience ceilings, and define explicit cancellation separately
    from a service pause. Native seats remain excluded.
