@@ -535,7 +535,7 @@ export const EVIDENCE_TOOLS = [
     description:
       "Push a folder's evidence (media, and other non-Markdown files of 16 KiB or more) under an evidence root such as docs/testing to Clankie's evidence store. " +
       "Uploads only missing blobs, writes the folder's sorted evidence.json manifest of clankie://evidence links, and moves the raw files into .local/evidence/. " +
-      "Commit only the README and evidence.json. Refuses outside the evidence roots. When issue is omitted, infer from branch, worktree directory, then folder README; reports the source.",
+      "Cite the printed links in the pull request or tracker comment and commit at most a short README; the evidence.json manifest stays uncommitted. Refuses outside the evidence roots. When issue is omitted, infer from branch, worktree directory, then folder README; reports the source.",
     inputSchema: {
       type: "object" as const,
       properties: {

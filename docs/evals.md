@@ -408,7 +408,7 @@ CLI and Harbor versions, runner hash, model, subscription window usage per call,
 and arguments. Headless harnesses emit no Clankie service turns, so metrics come
 from CLI events; an isolated `turn-settled.jsonl` is read if one appears.
 
-Copy sanitized reports and summaries into `docs/testing/`, then attach the link
+Upload sanitized reports and summaries as CI artifacts or pull request comments, then attach the link
 with `clankie work attach ISSUE --url URL --caption TEXT --kind log`. Never attach
 credentials, private homes, provider sessions or held-out case content.
 

@@ -44,7 +44,7 @@ function fixture(kind: "manifest" | "bridge" = "manifest") {
     "scripts/check-extension-boundary.mjs",
     "scripts/check-retired-claims.mjs",
     "scripts/check-swallowed-rejections.mjs",
-    "scripts/testing/evidence-landing-guard.mjs",
+    "scripts/check-docs-hygiene.mjs",
   ])
     write(path, "// Static phase fixture.\n");
   for (const path of ["scripts/testing/landing-graph-reporter.mjs", "scripts/testing/landing-fs-inputs.mjs"])

@@ -21,7 +21,6 @@ coverage/
 .env
 .env.local
 *.log
-!docs/testing/**/evidence/*.log
 .DS_Store
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
@@ -48,14 +47,11 @@ DerivedData/
 **/.workflow-data/
 __pycache__/
 *.pyc
-# Raw evidence is uploaded to Clankie's evidence store and fetched into .local.
-docs/testing/**/*.png
-docs/testing/**/*.jpg
-docs/testing/**/*.jpeg
-docs/testing/**/*.gif
-docs/testing/**/*.mp4
-docs/testing/**/*.mov
-docs/testing/**/*.webm
+# Proof goes in pull request comments or CI artifacts; a new docs/testing
+# folder holds at most a short README (scripts/check-docs-hygiene.mjs).
+docs/testing/**
+!docs/testing/**/
+!docs/testing/**/README.md
 
 # Claude Code writes type scaffolding beside a loaded plugin's mods. It is never
 # authored here, and in the pinned runtime it would read as local changes.

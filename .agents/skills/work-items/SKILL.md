@@ -130,11 +130,11 @@ evidence gaps, logs or review records.
    proposals, sample data and unverified states. Before reporting work finished,
    attach decisive test output, numbers and commit links. Embed media inline where
    people read (comment, description, status update), not only as an attachment.
-   Raw captures (media, large JSON and logs) go under `docs/testing/<folder>`:
-   write its README, run `clankie evidence push <folder> --issue <KEY>` (or
+   Proof goes in pull request comments or CI artifacts, not git: push raw
+   captures (media, large JSON and logs) with `clankie evidence push <folder> --issue <KEY>` (or
    `evidence_push`; on a linked machine such as the PC both go over your pane's
-   fleet link, and the tool takes an absolute path), commit only `README.md` and
-   `evidence.json`, and cite the
+   fleet link, and the tool takes an absolute path), commit at most a short
+   `README.md`, and cite the
    printed `clankie://evidence/sha256/...` links. A tracker upload may display a
    screenshot, but the evidence-store copy is the record. Listing, key inference
    and backfill: `docs/cli.md` under `evidence push|fetch`.

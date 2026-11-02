@@ -50,6 +50,10 @@ jobs:
           pnpm exec oxfmt --check .
           pnpm exec oxlint --deny-warnings .
           node scripts/check-retired-claims.mjs
+      # No new proof folders, no search-flooding lines, a lean AGENTS.md.
+      - name: Docs hygiene
+        if: github.event_name != 'workflow_dispatch'
+        run: node scripts/check-docs-hygiene.mjs
       - name: Strict native MCP catalog contracts
         if: github.event_name != 'workflow_dispatch'
         run: pnpm mcp:check
@@ -85,7 +89,7 @@ jobs:
           retention-days: 7
   # The landing gate's checks on GitHub's free Linux runner for every push to
   # main, after the merge (ADR 0240, ADR 0332): skills, format, lint with Vox's cargo checks, deadcode,
-  # doc links, swallowed rejections, evidence, the scoped typecheck and the
+  # doc links, swallowed rejections, docs hygiene, the scoped typecheck and the
   # changed-test selection. Tests Linux skips (macOS-only) stay on the owner's
   # Mac. Exit 3 is green checks waiting for the standing reviewer (ADR 0287),
   # which needs the owner's operator credential and never answers here. A red run

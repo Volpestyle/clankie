@@ -421,7 +421,7 @@ export const EVIDENCE_PUSH_TOOL = {
   description:
     "Push a folder's evidence (media, and other non-Markdown files of 16 KiB or more) under an evidence root such as docs/testing to Clankie's evidence store, over this pane's fleet link. " +
     "Uploads only missing blobs, writes the folder's sorted evidence.json manifest of clankie://evidence links, and moves the raw files into .local/evidence/. " +
-    "Commit only the README and evidence.json. Refuses outside the evidence roots. The same as `clankie evidence push PATH --issue KEY`.",
+    "Cite the printed links in the pull request or tracker comment and commit at most a short README; the evidence.json manifest stays uncommitted. Refuses outside the evidence roots. The same as `clankie evidence push PATH --issue KEY`.",
   inputSchema: {
     type: "object",
     properties: {
