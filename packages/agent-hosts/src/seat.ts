@@ -86,6 +86,8 @@ export interface SeatView {
   readonly guard?: () => Promise<void>;
   /** Deny-only startup expectation captured by the controller before native launch. */
   readonly expectedToolNames?: readonly string[];
+  /** A host-owned background hire awaits readiness; its HTTP caller already has a receipt. */
+  readonly waitForStartup?: boolean;
   /**
    * Trusted callback as soon as native identity is reported, including startup
    * failures. CLI startup prompts may already be submitted; prepared controllers

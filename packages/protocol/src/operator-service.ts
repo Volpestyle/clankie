@@ -834,6 +834,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      /** Read an accepted start; never launches or replays a brief. */
+      startId: z.string().uuid().optional(),
       notify: WorkerNotifySchema.optional(),
       /** Relay-authenticated hiring app; callers cannot stamp themselves. */
       appDeviceId: z.string().min(1).max(256).optional(),
@@ -1622,11 +1624,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      /** Read an accepted start; never launches or replays a brief. */
+      startId: z.string().uuid().optional(),
       notify: WorkerNotifySchema.optional(),
       /** Relay-authenticated hiring app; callers cannot stamp themselves. */
       appDeviceId: z.string().min(1).max(256).optional(),
-      /** `places` lists where it can start; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
-      status: z.enum(["places", "started", "refused"]),
+      /** `places` lists where it can start; `pending` retains the start and original brief under startId; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
+      status: z.enum(["places", "pending", "started", "refused"]),
       places: z.array(StartAgentPlaceSchema).max(256),
       seatId: z.string().max(OPERATOR_CONVERSATION_REF_MAX).optional(),
       detail: z.string().max(1200).optional(),

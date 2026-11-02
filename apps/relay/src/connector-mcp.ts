@@ -341,6 +341,11 @@ function connectorServer(
         inputSchema: {
           type: "object" as const,
           properties: {
+            startId: {
+              type: "string",
+              description:
+                "Read a pending start using its receipt. Pass this alone; never repeats the hire or brief.",
+            },
             machine: { type: "string", description: "A machine from the places list." },
             workingDirectory: {
               type: "string",
@@ -909,6 +914,12 @@ function connectorServer(
         const harness = optionalString(args.harness);
         if (harness !== undefined && harness !== "claude" && harness !== "codex")
           return failure("harness is claude or codex.");
+        const startId = optionalString(args.startId);
+        if (
+          startId !== undefined &&
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(startId)
+        )
+          return failure("startId is the receipt returned by start_agent.");
         const machine = optionalString(args.machine);
         const workingDirectory = optionalString(args.workingDirectory);
         const prompt = optionalString(args.prompt);
@@ -943,6 +954,7 @@ function connectorServer(
             "notify requires a lead wake name and a 1-128 character ref using letters, digits, dot, underscore, colon or dash.",
           );
         const starting = sessions.start({
+          ...(startId === undefined ? {} : { startId }),
           ...(notify.data === undefined ? {} : { notify: notify.data }),
           ...(machine === undefined ? {} : { machine }),
           ...(workingDirectory === undefined ? {} : { workingDirectory }),

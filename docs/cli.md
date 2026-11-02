@@ -2100,6 +2100,15 @@ gives, and the apps read notes as information, not instructions. Clankie and
 his hired agents read the board too, and `clankie fleet room` shows the notes
 among the room's entries.
 
+A hire returns `pending` as soon as its pane is allocated, or after five seconds
+of preparation, with `startId` and the agent ID once known. The service retains
+the original `prompt` and completes the hire after the HTTP caller disconnects.
+Call `start_agent` with only `startId` to read progress; it never starts another
+agent or replays the brief. Receipts are scoped to the hiring app and retained
+for up to 256 starts in the running service; pending starts are never evicted.
+After a restart or an unavailable receipt, inspect `list_agents` before hiring
+again. The gateway public request deadline is 60 seconds.
+
 `answer_prompt` answers a menu, permission prompt or question open in an
 agent's pane ([ADR 0303](adr/0303-connected-apps-answer-agents-prompts.md)).
 It is off for every app until you turn it on: `clankie connector prompts`

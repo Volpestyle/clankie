@@ -25,6 +25,12 @@ it; none takes precedence over another.
   ([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)).
   If a desktop hire doesn't come up or can't be messaged, tell the owner rather
   than hiring into a TUI pane.
+- **Keep a pending start’s receipt.** Send the task as `prompt`. A hire returns
+  `pending` within five seconds, with `startId` and its agent ID once a pane
+  exists. Call `start_agent` with only that `startId` for progress; the service
+  keeps delivering the original brief after an HTTP disconnect. Never repeat
+  the hire to check it. Receipts belong to the hiring app and the current service
+  lifetime; after a restart, inspect `list_agents` before a new hire.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that

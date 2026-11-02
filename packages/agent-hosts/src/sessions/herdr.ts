@@ -165,6 +165,7 @@ export function createHerdrSessionSource(
       const result = await port.dispatch({
         op: "start_agent",
         schemaVersion: 1,
+        ...(request.startId === undefined ? {} : { startId: request.startId }),
         ...(request.notify === undefined ? {} : { notify: request.notify }),
         ...(request.machine === undefined ? {} : { machine: request.machine }),
         ...(request.workingDirectory === undefined ? {} : { workingDirectory: request.workingDirectory }),
@@ -177,6 +178,7 @@ export function createHerdrSessionSource(
       if (result.op !== "start_agent") throw new Error("Clankie answered with something else.");
       return {
         status: result.status,
+        ...(result.startId === undefined ? {} : { startId: result.startId }),
         places: result.places,
         ...(result.seatId === undefined ? {} : { id: result.seatId }),
         ...(result.detail === undefined ? {} : { detail: result.detail }),
