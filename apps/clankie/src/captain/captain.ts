@@ -309,7 +309,8 @@ export const REPORT_ROUND_MS = 10 * 60_000;
 const USAGE_SAMPLE_MS = 10 * 60_000;
 /** The worker's own label for its report (#317), said to the lead ahead of the text. */
 function reportKindLine(kind: import("@clankie/protocol").WorkerReportKind | undefined): string {
-  if (kind === "blocked") return " The agent marked this report blocked: it needs an answer before it can go on.";
+  if (kind === "blocked")
+    return " The agent marked this report blocked: it needs an answer before it can go on.";
   if (kind === "done") return " The agent marked this report done.";
   if (kind === "update") return " The agent marked this report an update: no reply needed.";
   return "";
