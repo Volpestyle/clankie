@@ -1,15 +1,22 @@
+import { FileCredentialStore, ensureInstallationKey } from "../../../packages/credential-broker/src/index.ts";
+import { HostKeys } from "../src/host-keys.ts";
+import { accountHost, proveHost } from "./host-proof-fixture.ts";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_PAIRING_ROUTE_LIFETIME_MAX_MS,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayTunnelFrameSchema,
   derivePublicGatewayHostId,
+  publicGatewayHostProofPayload,
   type PublicGatewayRequestFrame,
   type PublicGatewayTunnelFrame,
 } from "@clankie/protocol/public-gateway";
@@ -26,6 +33,8 @@ const hostId = "mac_james_12345678";
 const hostToken = "gateway-host-token-that-is-longer-than-thirty-two-characters";
 const openGateways: PublicGateway[] = [];
 const openSockets: WebSocket[] = [];
+
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   for (const socket of openSockets.splice(0)) socket.close();
@@ -76,6 +85,183 @@ describe("public gateway", () => {
     openSockets.push(denied);
     const [error] = (await once(denied, "error")) as [Error];
     expect(error.message).toMatch(/401/u);
+  });
+
+  it("pins installation keys across restarts, refuses other keys and unproven hosts, and replaces only with the same key", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gateway-host-keys-"));
+    const installationId = "I".repeat(22);
+    const accountId = "proof-account";
+    const id = derivePublicGatewayHostId(accountId, installationId);
+    const dbPath = join(directory, "host-keys.sqlite");
+    let keys = new HostKeys(dbPath);
+    const fields: Array<Readonly<Record<string, unknown>>> = [];
+    const config = {
+      hostTokens: new Map([[hostId, hostToken]]),
+      accountConfig: {
+        schemaVersion: 1,
+        account: {
+          provider: "cognito_email_otp",
+          endpoint: "https://cognito-idp.us-east-1.amazonaws.com",
+          issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_pool",
+          clientId: "client123",
+          selfSignUpEnabled: false,
+        },
+      } as const,
+      authenticateAccountToken: async (token: string) => {
+        if (token !== "signed-access") throw new Error("denied");
+        return { accountId, expiresAtMs: Date.now() + 30_000 };
+      },
+      logger: {
+        info: (entry: Readonly<Record<string, unknown>>) => {
+          fields.push(entry);
+        },
+        warn: (entry: Readonly<Record<string, unknown>>) => {
+          fields.push(entry);
+        },
+      },
+    };
+    const listen = async (gateway: PublicGateway) => {
+      openGateways.push(gateway);
+      gateway.server.listen(0, "127.0.0.1");
+      await once(gateway.server, "listening");
+      return `http://127.0.0.1:${(gateway.server.address() as AddressInfo).port}`;
+    };
+    const open = (origin: string, proof = true) => {
+      const socket = accountHost(origin, id, installationId, "signed-access", proof);
+      openSockets.push(socket);
+      return socket;
+    };
+    let gateway = createPublicGateway({ ...config, hostKeys: keys });
+    try {
+      let origin = await listen(gateway);
+      const store = new FileCredentialStore(join(directory, "credentials.json"));
+      const [key, sameKey] = await Promise.all([
+        ensureInstallationKey(installationId, store),
+        ensureInstallationKey(installationId, store),
+      ]);
+      expect(key.publicKey).toBe(sameKey.publicKey);
+      expect((await ensureInstallationKey(installationId.toLowerCase(), store)).publicKey).not.toBe(
+        key.publicKey,
+      );
+      const differentKey = await ensureInstallationKey(
+        installationId,
+        new FileCredentialStore(join(directory, "other.json")),
+      );
+      // A proof-capable socket is neither a route nor a source of tunnel frames yet.
+      const pendingProof = open(origin);
+      await once(pendingProof, "message");
+      expect((await fetch(`${origin}/h/${id}/.well-known/oauth-authorization-server`)).status).toBe(503);
+      const prematureClosed = once(pendingProof, "close");
+      pendingProof.send(
+        JSON.stringify({
+          schemaVersion: 1,
+          kind: "pairing_route",
+          offerHash: "x".repeat(43),
+          codeHash: "y".repeat(43),
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      expect((await prematureClosed)[0]).toBe(1008);
+      expect(keys.get(id)).toBeUndefined();
+      const legacy = open(origin, false);
+      await once(legacy, "open");
+      expect(keys.get(id)).toBeUndefined();
+      const oldClosed = once(legacy, "close");
+      const first = open(origin);
+      let firstPayload = "";
+      expect(
+        await proveHost(first, id, installationId, key, (nonce) => {
+          firstPayload = publicGatewayHostProofPayload(id, installationId, nonce);
+          return firstPayload;
+        }),
+      ).toEqual({ kind: "host_ready" });
+      expect((await oldClosed)[0]).toBe(1012);
+      expect(keys.get(id)).toBe(key.publicKey);
+
+      const other = open(origin);
+      expect(await proveHost(other, id, installationId, differentKey)).toEqual({
+        code: 1008,
+        reason: "installation key mismatch",
+      });
+      const unproven = open(origin, false);
+      const [code, reason] = await once(unproven, "close");
+      expect([code, reason.toString()]).toEqual([1008, "installation proof required"]);
+      for (const payload of [
+        () => firstPayload, // A proof from another socket cannot be replayed.
+        (nonce: string) => publicGatewayHostProofPayload(hostId, installationId, nonce),
+        (nonce: string) => publicGatewayHostProofPayload(id, "j".repeat(22), nonce),
+        (nonce: string) =>
+          JSON.stringify(["clankie.gateway.installation-proof.v1", id, installationId, "away", nonce]),
+        (nonce: string) => JSON.stringify(["another-context", id, installationId, "home", nonce]),
+      ]) {
+        const invalid = open(origin);
+        expect(await proveHost(invalid, id, installationId, key, payload)).toEqual({
+          code: 1008,
+          reason: "invalid installation proof",
+        });
+      }
+      expect(first.readyState).toBe(WebSocket.OPEN);
+      const response = fetch(`${origin}/h/${id}/.well-known/oauth-authorization-server`);
+      respond(first, await nextRequest(first), 200, "first still routes");
+      expect(await (await response).text()).toBe("first still routes");
+
+      const firstClosed = once(first, "close");
+      const replacement = open(origin);
+      expect(await proveHost(replacement, id, installationId, sameKey)).toEqual({ kind: "host_ready" });
+      expect((await firstClosed)[0]).toBe(1012);
+      const replacementResponse = fetch(`${origin}/h/${id}/.well-known/oauth-authorization-server`);
+      respond(replacement, await nextRequest(replacement), 200, "replacement routes");
+      expect(await (await replacementResponse).text()).toBe("replacement routes");
+      expect(fields).toContainEqual(
+        expect.objectContaining({
+          event: "gateway.host.refused",
+          hostId: id,
+          reason: "installation key mismatch",
+        }),
+      );
+      expect(fields).toContainEqual(expect.objectContaining({ event: "gateway.host.replaced", hostId: id }));
+      await gateway.close();
+      openGateways.splice(openGateways.indexOf(gateway), 1);
+      keys.close();
+      keys = new HostKeys(dbPath);
+      gateway = createPublicGateway({ ...config, hostKeys: keys });
+      origin = await listen(gateway);
+      const afterRestart = open(origin, false);
+      expect((await once(afterRestart, "close"))[0]).toBe(1008);
+      const restoredKey = await ensureInstallationKey(installationId, store);
+      const restored = open(origin);
+      expect(await proveHost(restored, id, installationId, restoredKey)).toEqual({ kind: "host_ready" });
+
+      // Only the operator's local command forgets a pin; the next proven key then pins.
+      const reset = await execFileAsync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          fileURLToPath(new URL("../src/host-keys-cli.ts", import.meta.url)),
+          "reset",
+          id,
+          "--database",
+          dbPath,
+        ],
+        { cwd: fileURLToPath(new URL("..", import.meta.url)) },
+      );
+      expect(JSON.parse(reset.stdout)).toMatchObject({
+        event: "gateway.host.key_reset",
+        hostId: id,
+        removed: true,
+      });
+      const restoredClosed = once(restored, "close");
+      const repinned = open(origin);
+      expect(await proveHost(repinned, id, installationId, differentKey)).toEqual({ kind: "host_ready" });
+      expect((await restoredClosed)[0]).toBe(1012);
+      expect(keys.get(id)).toBe(differentKey.publicKey);
+    } finally {
+      await gateway.close();
+      openGateways.splice(openGateways.indexOf(gateway), 1);
+      keys.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("routes opaque encrypted exchanges and refuses plaintext pairing and bearer headers", async () => {

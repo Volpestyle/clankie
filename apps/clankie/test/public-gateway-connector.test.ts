@@ -6,13 +6,16 @@ import { getRequestListener } from "@hono/node-server";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createPublicKey, verify, randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
+  PUBLIC_GATEWAY_HOST_PROOF_HEADER,
+  PublicGatewayHostProofSchema,
+  publicGatewayHostProofPayload,
   PUBLIC_GATEWAY_SCHEMA_VERSION,
   PublicGatewayTunnelFrameSchema,
   publicGatewayTargetFor,
@@ -844,8 +847,12 @@ describe("public gateway Mac connector", () => {
       relayUrl: gateway.origin,
       reconnectMinimumMs: 5,
       reconnectMaximumMs: 20,
-      onDoorwayChange: (change) => transitions.push(change.state),
+      onDoorwayChange: (change) => {
+        transitions.push(change.state);
+        doorways.push(connector.doorway);
+      },
     });
+    const doorways: unknown[] = [];
     connectors.push(connector);
     connector.start();
     const initial = await gateway.nextConnection();
@@ -865,6 +872,13 @@ describe("public gateway Mac connector", () => {
     expect(spent[1]!.at - spent[0]!.at).toBeLessThan(60_000);
     expect(stored).toMatchObject({ refresh: "refresh-3" });
     expect(transitions).not.toContain("sign_in_required");
+    // A refused installation key says so until a proven connection clears it.
+    recovered.socket.close(1008, "installation key mismatch");
+    await vi.waitFor(() =>
+      expect(doorways).toContainEqual({ state: "connecting", refusal: "installation_key_mismatch" }),
+    );
+    await gateway.nextConnection();
+    await vi.waitFor(() => expect(connector.doorway).toEqual({ state: "connected" }));
   });
 
   it("parks on a credential no retry can fix and says the Mac needs signing in", async () => {
@@ -1177,10 +1191,46 @@ async function fakeGateway(): Promise<{
   server.on("upgrade", (request, socket, head) => {
     webSockets.handleUpgrade(request, socket, head, (webSocket) => {
       sockets.push(webSocket);
-      const connection = fakeConnection(webSocket, request);
-      const waiter = pendingConnections.shift();
-      if (waiter === undefined) connections.push(connection);
-      else waiter(connection);
+      const attach = () => {
+        const connection = fakeConnection(webSocket, request);
+        const waiter = pendingConnections.shift();
+        if (waiter === undefined) connections.push(connection);
+        else waiter(connection);
+      };
+      if (request.headers[PUBLIC_GATEWAY_HOST_PROOF_HEADER] !== "1") {
+        attach();
+        return;
+      }
+      const nonce = randomBytes(32).toString("base64url");
+      const url = new URL(request.url!, "http://fixture.invalid");
+      webSocket.once("message", (data) => {
+        const proof = PublicGatewayHostProofSchema.parse(JSON.parse(data.toString()));
+        const key = createPublicKey({
+          key: Buffer.from(proof.publicKey, "base64url"),
+          format: "der",
+          type: "spki",
+        });
+        if (
+          !verify(
+            null,
+            Buffer.from(
+              publicGatewayHostProofPayload(
+                url.searchParams.get("hostId")!,
+                url.searchParams.get("installationId")!,
+                nonce,
+              ),
+            ),
+            key,
+            Buffer.from(proof.signature, "base64url"),
+          )
+        ) {
+          webSocket.close(1008, "invalid installation proof");
+          return;
+        }
+        webSocket.send(JSON.stringify({ kind: "host_ready" }));
+        attach();
+      });
+      webSocket.send(JSON.stringify({ kind: "host_challenge", nonce }));
     });
   });
   const origin = await listen(server);

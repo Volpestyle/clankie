@@ -87,7 +87,9 @@ function doorwayLine(status: GatewayCommandResult): string {
     case "connected":
       return "open";
     case "connecting":
-      return "configured, reconnecting";
+      return status.doorway.refusal === undefined
+        ? "configured, reconnecting"
+        : "refused: the gateway holds a different key for this Mac; the gateway operator must reset it";
     case "unavailable":
       return "configured, but Clankie holds no connection — check his log, then `clankie restart`";
     case "disabled":

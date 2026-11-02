@@ -40,6 +40,13 @@ requires owner sign-in. The connector publishes that state once and exposes it
 through gateway status and doctor. Offline startup derives the route from the
 stored account identity and resolves tokens inside the connector's retry loop.
 
+Account gateway installations also keep an Ed25519 key in the broker. Creation
+uses the broker's cross-process mutation lock; retries and service restarts reuse
+that key. Secret-free summaries expose no part of it. Each account host connect
+signs a fresh gateway nonce before routing starts; the gateway pins the public
+key on the first proven connect. Preserve both the broker key and the gateway's
+public-key database across upgrades; [gateway reference](../../apps/gateway/README.md).
+
 ## Credential storage
 
 - `KeychainCredentialStore` stores one generic-password item per provider and a

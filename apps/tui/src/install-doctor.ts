@@ -819,6 +819,11 @@ function collectRemediations(input: {
       `This Mac has been signed out of the public doorway since ${input.doorway.since}; no app reaches him until you sign it back in with /remote-access.`,
     );
   }
+  if (input.doorway.state === "connecting" && input.doorway.refusal !== undefined) {
+    remediations.push(
+      "This Mac's phone access is refused: the gateway holds a different installation key for it, and only the gateway operator can reset it (gateway README, Resetting an installation key).",
+    );
+  }
   if (input.doorway.state === "unavailable") {
     remediations.push(
       "The public doorway is configured but this Clankie holds no connection to it, so no app reaches him and pairing refuses; read his log, then `clankie restart`.",

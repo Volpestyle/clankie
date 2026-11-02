@@ -232,3 +232,5 @@ export {
   setLeadWake,
   type LeadWake,
 } from "./lead-wake.ts";
+
+export { ensureInstallationKey, type InstallationKey } from "./installation-key.ts";

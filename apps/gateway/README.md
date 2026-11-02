@@ -19,7 +19,44 @@ Production mounts the public Cognito discovery document at
 `CLANKIE_GATEWAY_ACCOUNT_CONFIG_FILE`. The gateway serves it from
 `GET /gateway/v1/config` and verifies Mac access tokens directly against the
 issuer's JWKS. A Mac route is derived from the authenticated account subject and
-its random installation id, so there is no host registry.
+its random installation id. On account gateways, set
+`CLANKIE_GATEWAY_HOST_KEYS_DATABASE` to an absolute SQLite path on persistent
+storage (independent of optional push registrations); startup refuses to proceed
+without it. Preserve this file across restarts and upgrades.
+
+The Mac creates one Ed25519 installation key in the credential broker. Each
+account connection requests proof with `x-clankie-host-proof: 1`, receives a fresh
+32-byte nonce, and signs a context-bound tuple containing the host id,
+installation id, role `home` and nonce. It has five seconds to answer; no traffic
+is routed before verification. The first successful proof pins its public key.
+The same key can reconnect and replace its socket; a different key receives
+close code 1008, `installation key mismatch`, without disturbing the live socket.
+Refusals and replacements produce structured gateway log events. Replacement
+also reaches the Mac through its existing socket-close and doorway-state path.
+
+Roll out the proof-capable gateway before updated Macs; updated Macs refuse to
+fall back to an unproven connection. During rollout, old Macs without proof can
+connect only while their host id has
+no recorded key. After the first proven connection, unproven connections close
+with 1008, `installation proof required`. Keep that Mac updated; removing a
+broker key does not reset the gateway binding. The legacy one-parameter
+static-token route is unchanged and cannot authenticate as an account route.
+
+### Resetting an installation key
+
+A Mac that lost its broker key (a reinstall or a wiped keychain) is refused with
+`installation key mismatch` until the gateway forgets its pin; `clankie doctor`
+says so. Only the gateway operator can reset it, on the gateway host, against the
+service's database; nothing over the network unpins a key:
+
+```sh
+node dist/host-keys-cli.cjs reset HOST_ID --database "$CLANKIE_GATEWAY_HOST_KEYS_DATABASE"
+# in the image: docker exec clankie-gateway node host-keys-cli.cjs reset HOST_ID --database "$CLANKIE_GATEWAY_HOST_KEYS_DATABASE"
+```
+
+It prints one `gateway.host.key_reset` line. The next proven connection for that
+host pins its key. Confirm with the owner that the Mac asking is really theirs
+before resetting, since whoever connects first afterwards is pinned.
 
 Account access tokens must include `iat`, have a positive lifetime (`exp - iat`)
 of at most 3600 seconds, and be unexpired. Every account-authenticated

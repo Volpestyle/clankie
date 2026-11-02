@@ -12,6 +12,12 @@ off` takes the Mac off remote access. `/remote-access` (`/gateway` alias) is the
 same flow in the console. There is no hosted Clankie to connect to: `clankie
 connect` says so and changes nothing.
 
+Account gateway hosts prove a broker-held Ed25519 installation key before any
+traffic is routed. The first proven connect pins the public key at the gateway;
+a different key cannot replace it. Old Macs without proof connect only until
+that host has a pinned key. Preserve broker keys and the gateway's persistent
+`CLANKIE_GATEWAY_HOST_KEYS_DATABASE`; see [gateway reference](../../../../apps/gateway/README.md).
+
 ## Model keys and connected accounts
 
 Provider-key management uses the owner model-key API
