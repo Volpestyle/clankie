@@ -210,7 +210,7 @@ Sweep the whole archive instead of one run — 40 journals in about a minute,
 counts and verdicts only:
 
 ```bash
-node docs/testing/2026-09-05-pokeagent-evidence-sweep/flows/sweep-play-archive.mjs
+node scripts/manual/sweep-play-archive.mjs
 ```
 
 `pnpm discord:voice-readiness` checks the selected TTS credential but skips

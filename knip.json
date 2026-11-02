@@ -15,6 +15,7 @@
         "integrations/herdr-plugin/claude-path-shim.d.mts",
         "scripts/scratch-stack.mjs",
         "scripts/manual/work-inbox-proof.mjs",
+        "scripts/manual/sweep-play-archive.mjs",
         "scripts/manual/tracker-peak-day.ts",
         "scripts/manual/tracker-peak-day/run.mjs",
         "scripts/manual/tracker-peak-day/browser.ts",
