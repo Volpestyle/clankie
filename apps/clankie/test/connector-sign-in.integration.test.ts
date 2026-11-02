@@ -295,6 +295,7 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(notices[0]).toContain(`device "Claude" (${self.deviceId})`);
     // The owner apps' device list and doctor's existing operator client see the revocation.
     const doctor = await inspectConnectorRefreshRevocations({
+      repoRoot: resolve(import.meta.dirname, "../../.."),
       host: host.baseUrl,
       env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
     });
@@ -349,6 +350,7 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     expect(invalidated).toEqual([self.deviceId]);
     expect(
       await inspectConnectorRefreshRevocations({
+        repoRoot: resolve(import.meta.dirname, "../../.."),
         host: host.baseUrl,
         env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
       }),
