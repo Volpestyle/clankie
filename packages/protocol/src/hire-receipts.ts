@@ -177,6 +177,10 @@ export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
       state: z.literal("abandoned"),
       receiptId: HireReceiptIdSchema,
       evidence: z.union([HireRecoveryEvidenceSchema, LocalHireSettlementEvidenceSchema]),
+      /** The local hire's own project allocation, freed by the same settlement when its checks pass. */
+      allocationId: z.string().uuid().optional(),
+      /** Whether that allocation was freed too, and if not, why its place is still held. */
+      detail: z.string().optional(),
     })
     .strict(),
   z

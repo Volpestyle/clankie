@@ -497,6 +497,18 @@ export class ProjectHires {
   public recoveryCandidate(id: string): Allocation | undefined {
     return this.read().allocations.find((a) => a.id === id && !a.confirmed && (!a.gone || a.operatorRelease));
   }
+  /** Read only: this machine's unresolved allocations recorded for one pane in one directory. */
+  public unresolvedLocal(workingDirectory: string, pane: string, harness: string): Allocation[] {
+    return this.read().allocations.filter(
+      (a) =>
+        !a.confirmed &&
+        !a.gone &&
+        a.request.fleet === undefined &&
+        a.pane === pane &&
+        a.request.workingDirectory === workingDirectory &&
+        (a.request.harness ?? "codex") === harness,
+    );
+  }
   public release(candidate: Allocation, inventory: unknown): void {
     this.change((state) => {
       const entry = state.allocations.find((a) => a.id === candidate.id);
