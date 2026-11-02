@@ -208,7 +208,11 @@ resolved as the turn runs, proves an owner-only audience. Four conditions must h
 Routing, tools, guards and replies are the room's own; the journal records the Pi
 dispatch they already run. To resume a turn, the service needs the full request, so
 it retains that only for the owner's own text through the official bot. It resumes
-only a delivery whose journal, or whose joined parent's, is unsettled. A journaled
+only a delivery that has a journal or joined a journaled turn. A settled journal
+still answers when the service died after the journal settled but before the
+receipt did; the redelivery gets the saved answer, not "unanswered", with no model
+call ([#497](https://github.com/Volpestyle/clankie/issues/497), covered by
+`durable-pi-room-restart.integration.test.ts`). A journaled
 turn whose audience no longer qualifies when it resumes fails closed, as a changed
 grant does.
 

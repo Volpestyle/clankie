@@ -1,3 +1,5 @@
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { cleanups, privateService } from "./fixtures/durable-pi-room-service.ts";
 
@@ -95,4 +97,47 @@ it("a graceful stop mid-shell pauses the handoff instead of failing it, and the 
   expect(await f.effects()).toHaveLength(1);
   expect(await f.memories()).toHaveLength(1);
   expect(await f.handoffs()).toMatchObject([{ state: "completed" }]);
+}, 240_000);
+
+it("a crash after the journal settles but before the receipt does answers the redelivery from the journal (#497)", async () => {
+  const f = await privateService();
+  await f.killMidShell();
+  await f.start();
+  await f.presence();
+  // Receipts are read at boot; from here the receipt's settle cannot be written,
+  // so the resumed turn settles its journal and the service dies holding an unsettled receipt.
+  const receipts = join(f.root, "state/discord-turn-receipts.json");
+  await rename(receipts, `${receipts}.saved`);
+  await mkdir(receipts);
+  await writeFile(join(receipts, "blocker"), "");
+  expect((await f.post()).status).toBe(202);
+  await f.until(async () => ((await f.journal()).result === undefined ? undefined : true));
+  const journaled = (await f.journal()).result;
+  expect(journaled).toMatchObject({ state: "settled", response: `${f.requestId} recovered: possibly ran` });
+  await f.until(async () =>
+    (
+      await fetch(`${f.url}/v1/captain/channel-turns/${f.requestId}`, {
+        headers: { authorization: f.authorization },
+      })
+    ).status === 502
+      ? true
+      : undefined,
+  );
+  await f.stop("SIGKILL");
+  await rm(receipts, { recursive: true });
+  await rename(`${receipts}.saved`, receipts);
+  expect(JSON.parse(await readFile(receipts, "utf8"))[`discord:${f.requestId}`].settled).toBeUndefined();
+
+  const asked = f.model.seen.length;
+  await f.start();
+  await f.presence();
+  const answered = await f.post();
+  expect(answered.status).toBeLessThan(300);
+  // The journal's answer, not "unanswered", and no model call to produce it.
+  expect(await f.settled()).toMatchObject({
+    state: "settled",
+    response: `${f.requestId} recovered: possibly ran`,
+  });
+  expect(f.model.seen.length).toBe(asked);
+  expect(await f.effects()).toHaveLength(1);
 }, 240_000);
