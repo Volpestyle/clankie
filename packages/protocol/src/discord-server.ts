@@ -39,6 +39,11 @@ export const DiscordServerActionResultSchema = z
       .optional(),
     /** Credentials are redacted by the executor before reaching any caller. */
     data: z.json().optional(),
+    /**
+     * Discord's JSON error code when Discord itself refused (10008 is Unknown Message),
+     * so a caller can tell a gone resource from a transient failure.
+     */
+    code: z.number().int().optional(),
   })
   .strict();
 export type DiscordServerActionResult = z.infer<typeof DiscordServerActionResultSchema>;

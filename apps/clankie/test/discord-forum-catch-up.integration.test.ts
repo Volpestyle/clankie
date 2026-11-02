@@ -2,9 +2,20 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { discordActorOwnsServer, executeDiscordServerAction } from "@clankie/discord-presence-core";
-import { DiscordSettingsSchema } from "@clankie/protocol";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import {
+  discordActorOwnsServer,
+  executeDiscordServerAction,
+  tryHandleCaptainDiscordActionRequest,
+} from "@clankie/discord-presence-core";
+import {
+  DiscordSettingsSchema,
+  type DiscordServerAction,
+  type DiscordServerActionResult,
+} from "@clankie/protocol";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER, type TrackerItemEvent } from "@clankie/work-items";
+import { createDiscordCaptainActionClient } from "../src/discord-captain-actions.ts";
 import { DiscordForumMirror, type DiscordForumNotice } from "../src/discord-forum-mirror.ts";
 import { BOT, FakeDiscord, FORUM, GUILD } from "./helpers/fake-discord-forum.ts";
 
@@ -44,13 +55,14 @@ async function fixture() {
   });
   const notices: DiscordForumNotice[] = [];
   const errors: unknown[] = [];
-  const mirror = () =>
+  const serverAction = (action: DiscordServerAction) =>
+    executeDiscordServerAction(action, settings, discord.rest, { source: "operator" });
+  const mirror = (via: (action: DiscordServerAction) => Promise<DiscordServerActionResult> = serverAction) =>
     new DiscordForumMirror({
       path: join(root, "discord-forum.json"),
       tracker,
       bindings: async () => settings.trackerForums.map((forum) => ({ ...forum, team: "LOCAL" })),
-      serverAction: (action) =>
-        executeDiscordServerAction(action, settings, discord.rest, { source: "operator" }),
+      serverAction: via,
       owns: (guildId, userId) => discordActorOwnsServer(settings, guildId, userId, discord.rest),
       botUserId: BOT,
       onNotice: (notice) => notices.push(notice),
@@ -69,7 +81,7 @@ async function fixture() {
       if ((await issue(event.issueId)).title === title) return event;
     return undefined;
   };
-  return { tracker, discord, mirror, notices, errors, events, save, issue, created };
+  return { tracker, discord, mirror, serverAction, notices, errors, events, save, issue, created };
 }
 
 it("posts, replies and tag changes made while the service was down reach the tracker once on restart", async () => {
@@ -214,4 +226,74 @@ it("one unreadable post never stalls the pass, a failed read is retried, and a l
   expect(f.notices.filter((notice) => notice.subject === `skipped:${gone.id}`)).toHaveLength(1);
   expect(fresh.id).toBeDefined();
   await restarted.close();
+});
+
+it("a transient failure reading a new post's starter is retried next pass; only Unknown Message skips it (#366)", async () => {
+  const f = await fixture();
+  const running = f.mirror();
+  await running.start();
+  await running.idle();
+  await running.close();
+
+  // Posts made while the service was down: Discord is briefly unavailable for one and
+  // refuses another, and a third really lost its starter.
+  const blip = f.discord.thread(f.discord.id(), "Water the ferns", [], OWNER, "Twice a week.");
+  const denied = f.discord.thread(f.discord.id(), "Prune the roses", [], OWNER, "Before spring.");
+  const gone = f.discord.thread(f.discord.id(), "Deleted starter", [], OWNER, "gone");
+  f.discord.messages.get(gone.id)!.splice(0, 1);
+  const starter = (thread: { id: string }) => `/channels/${thread.id}/messages/${thread.id}`;
+  f.discord.outage = (action) => action.method === "GET" && action.path === starter(blip);
+  f.discord.refuse = (action) => action.method === "GET" && action.path === starter(denied);
+
+  // The service reaches the body over its loopback /captain-action, so Discord's error code
+  // has to survive both sides' strict result schemas.
+  const body = createServer((request, response) => {
+    if (
+      !tryHandleCaptainDiscordActionRequest(request, response, async (input) => {
+        if (input.action !== "server_action") throw new Error(`unexpected ${input.action}`);
+        const {
+          action: _action,
+          callId: _callId,
+          source: _source,
+          sourceGuildId: _guild,
+          ...request
+        } = input;
+        return f.serverAction(request);
+      })
+    )
+      response.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => body.listen(0, "127.0.0.1", resolve));
+  const client = createDiscordCaptainActionClient({
+    DISCORD_ACTIVE_BODY: "bot",
+    CLANKIE_DISCORD_BRIDGE_CONTROL_PORT: String((body.address() as AddressInfo).port),
+  });
+  const restarted = f.mirror((action) => client.serverAction(action));
+  await restarted.start();
+  await restarted.idle();
+  expect(await f.created("Water the ferns")).toBeUndefined();
+  expect(await f.created("Prune the roses")).toBeUndefined();
+  expect(await f.created("Deleted starter")).toBeUndefined();
+  expect(Object.keys(restarted.snapshot().skipped)).toEqual([gone.id]);
+  expect(restarted.snapshot().retry).toEqual({ [blip.id]: FORUM, [denied.id]: FORUM });
+  expect(f.notices.map((notice) => notice.subject)).toEqual([`skipped:${gone.id}`]);
+
+  // Discord recovers, and the next pass imports both posts once, still skipping the gone one.
+  f.discord.outage = undefined;
+  f.discord.refuse = undefined;
+  await restarted.catchUp();
+  await restarted.idle();
+  expect(await f.created("Water the ferns")).toMatchObject({ actor: { type: "human" } });
+  expect(await f.created("Prune the roses")).toMatchObject({ actor: { type: "human" } });
+  expect(f.events.filter((event) => event.type === "created")).toHaveLength(2);
+  expect(restarted.snapshot().retry).toEqual({});
+  expect(Object.keys(restarted.snapshot().skipped)).toEqual([gone.id]);
+  expect(f.notices.map((notice) => notice.subject)).toEqual([`skipped:${gone.id}`]);
+
+  // A later pass with nothing new duplicates nothing.
+  await restarted.catchUp();
+  await restarted.idle();
+  expect(f.events.filter((event) => event.type === "created")).toHaveLength(2);
+  await restarted.close();
+  await new Promise((resolve) => body.close(resolve));
 });

@@ -273,9 +273,14 @@ export async function executeDiscordServerAction(
       ...(typeof resourceId === "string" && /^\d{5,32}$/u.test(resourceId) ? { resourceId } : {}),
       ...(response === undefined ? {} : { data: redact(response) as DiscordServerActionResult["data"] }),
     };
-  } catch {
+  } catch (error) {
     // Discord, rather than a local channel list, decides the member's grants.
-    return refuse("Discord could not complete that action. Check the server setup grants and the target.");
+    const refused = refuse(
+      "Discord could not complete that action. Check the server setup grants and the target.",
+    );
+    // Discord's own error code (discord.js DiscordAPIError) tells a gone resource from a blip.
+    const code = (error as { code?: unknown } | undefined)?.code;
+    return typeof code === "number" && Number.isInteger(code) ? { ...refused, code } : refused;
   }
 }
 

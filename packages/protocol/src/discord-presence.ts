@@ -405,6 +405,8 @@ export const DiscordCaptainActionResultSchema = z
       .regex(/^\d{5,32}$/u)
       .optional(),
     data: z.json().optional(),
+    /** Discord's JSON error code on a server action Discord refused (see DiscordServerActionResult). */
+    code: z.number().int().optional(),
   })
   .strict();
 export type DiscordCaptainActionResult = z.infer<typeof DiscordCaptainActionResultSchema>;
