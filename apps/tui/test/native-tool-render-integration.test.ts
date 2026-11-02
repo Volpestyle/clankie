@@ -64,7 +64,7 @@ function renderTranscript(jsonl: string) {
 describe("native seat tool results in the real shell", () => {
   it("shows the retained expanded native-seat evidence beneath opened rows", () => {
     const evidence = (name: string) =>
-      readFileSync(new URL(`../../../docs/testing/vuh-1661-tool-results/${name}`, import.meta.url), "utf8");
+      readFileSync(new URL(`./fixtures/native-tool-results/${name}`, import.meta.url), "utf8");
     const view = renderTranscript(evidence("native-fixture.jsonl"));
     const lines = (text: string) =>
       text

@@ -45,7 +45,7 @@ const status = (source) => {
   return clipped.charAt(0).toUpperCase() + clipped.slice(1) + partly;
 };
 
-export function adrIndex(root) {
+function adrIndex(root) {
   const directory = resolve(root, "docs/adr");
   const rows = readdirSync(directory)
     .filter((name) => /^\d{4}-.+\.md$/u.test(name))

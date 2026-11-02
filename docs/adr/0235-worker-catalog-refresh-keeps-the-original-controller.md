@@ -28,7 +28,7 @@ therefore returns `catalog-refreshed` with
 previously verified attempt. Its durable `verified` flag means catalog verified
 only. The command never starts a proof turn or dispatches a surrogate report.
 Same-thread `clankie_tools` and one new stored `message_clankie` receipt establish
-the live delivery proof. See the [real app-server and live evidence](../testing/2026-10-08-codex-next-turn-tools/README.md).
+the live delivery proof. See the [real app-server and live evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-codex-next-turn-tools/README.md).
 
 The durable attempt records dispatch before mutation. Lost acknowledgments are
 never retried. A confirmed reload with lost verification can be observed again.
@@ -63,7 +63,7 @@ All-tool/descendant adoption and a live report after refresh remain unverified.
 Remote Claude refresh now defers while the observed original is busy and refuses
 at idle with `original_remote_claude_imported_bridge_refresh_unsupported` before
 signalling the bridge. A matched root catalog and runtime do not certify this
-legacy migration. See [VUH-1742 source evidence](../testing/2026-10-08-pc-original-session-refresh/README.md).
+legacy migration. See [VUH-1742 source evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-pc-original-session-refresh/README.md).
 
 Original OpenCode controllers observe their injected native SDK connection,
 fencing root/child activity and native permission/question requests. Native

@@ -1,0 +1,96 @@
+// Run ONLY inside bounded `clankie heavy -- node scripts/manual/tracker-peak-day/run.mjs APP_CHECKOUT SCRATCH_SEED OUT`.
+// The governor retains its normal environment; the proof child receives no owner state.
+import { mkdir, mkdtemp, stat, readFile, writeFile } from "node:fs/promises";
+import { resolve, join } from "node:path";
+import { createHash } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+
+const [app, seed, output] = process.argv.slice(2).map((value) => resolve(value));
+if (!app || !seed || !output) throw new Error("APP_CHECKOUT SCRATCH_SEED OUT required");
+await mkdir(resolve(".local"), { recursive: true });
+const root = await mkdtemp(resolve(".local/peak-day-"));
+const env = {
+  PATH: process.env.PATH,
+  NODE_ENV: "test",
+  HOME: join(root, "home"),
+  CLANKIE_STATE: join(root, "state"),
+};
+env.NODE_OPTIONS = "--max-old-space-size=8192";
+for (const kind of ["CONFIG", "STATE", "DATA", "CACHE"])
+  env[`XDG_${kind}_HOME`] = join(root, kind.toLowerCase());
+env.XDG_RUNTIME_DIR = join(root, "runtime");
+for (const path of Object.values(env).filter((value) => value?.startsWith(root)))
+  await mkdir(path, { recursive: true });
+await mkdir(output, { recursive: true });
+let source = seed;
+if ((await stat(seed)).isFile()) {
+  source = join(root, "generated-60d");
+  const generated = spawnSync(
+    process.execPath,
+    [
+      resolve("scripts/manual/tracker-peak-day/generate-store.ts"),
+      "--template",
+      seed,
+      "--days",
+      "60",
+      "--out",
+      source,
+    ],
+    { env, stdio: "inherit" },
+  );
+  if (generated.status !== 0) process.exit(generated.status ?? 1);
+}
+const appRevision = spawnSync("git", ["-C", app, "rev-parse", "HEAD"], { encoding: "utf8" });
+if (appRevision.status !== 0) throw new Error("App checkout revision unavailable");
+const appSourceSha256 = Object.fromEntries(
+  await Promise.all(
+    [
+      "packages/command-center/src/workItems/syncPool.ts",
+      "packages/command-center/src/workItems/syncStorage.ts",
+    ].map(async (file) => [
+      file,
+      createHash("sha256")
+        .update(await readFile(join(app, file)))
+        .digest("hex"),
+    ]),
+  ),
+);
+const sourceSha256 = Object.fromEntries(
+  await Promise.all(
+    [
+      "scripts/manual/tracker-peak-day.ts",
+      "scripts/manual/tracker-peak-day/run.mjs",
+      "apps/clankie/test/fixtures/tracker-proof/peak-day-fixture.ts",
+      "scripts/manual/tracker-peak-day/browser.ts",
+      "apps/clankie/src/work-items.ts",
+      "packages/work-items/src/tracker-local.ts",
+    ].map(async (file) => [
+      file,
+      createHash("sha256")
+        .update(await readFile(file))
+        .digest("hex"),
+    ]),
+  ),
+);
+await writeFile(
+  join(output, "sources.json"),
+  JSON.stringify(
+    {
+      appRevision: appRevision.stdout.trim(),
+      appSourceSha256,
+      sourceSha256,
+      mode: process.argv[5] ?? "peak",
+    },
+    null,
+    2,
+  ),
+);
+const child = spawn(
+  resolve("apps/clankie/node_modules/.bin/tsx"),
+  [resolve("scripts/manual/tracker-peak-day.ts"), app, source, output, root, process.argv[5] ?? "peak"],
+  { env, stdio: "inherit" },
+);
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => child.kill(signal));
+child.on("exit", (code) => {
+  process.exitCode = code ?? 1;
+});

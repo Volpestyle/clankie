@@ -17,13 +17,13 @@ while it is awake; an account alone does not keep a sleeping Mac running.
 Sleep costs time, not messages or the sign-in. After a wake:
 
 - Discord catches up on messages that arrived while the gateway was down
-  ([VUH-1447](testing/2026-09-29-discord-reconnect-recovery.md)).
+  ([VUH-1447](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-29-discord-reconnect-recovery.md)).
 - The account doorway reconnects without a new sign-in, including after a lost
-  token rotation ([VUH-1451](testing/2026-09-30-gateway-refresh/README.md)).
+  token rotation ([VUH-1451](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-gateway-refresh/README.md)).
 - The app reconnects through the doorway once the service does.
 
 Those are tested with fakes. A real sleep and wake is a human check:
-[the wake test](testing/2026-09-30-host-sleep-awake/README.md).
+[the wake test](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-host-sleep-awake/README.md).
 
 ## What keeps a running Mac's Clankie healthy
 

@@ -7,7 +7,7 @@ real TCP cookies, shared descriptors (including private per-thread tables),
 unreadable same-user processes, pinned births, ancestry exits and serial transport.
 The portable vocabulary check compares the protocol with both production helper
 sources. Linux evidence and its initial-PID-namespace limits are recorded in
-[VUH-2118 verification](../../docs/testing/2026-10-11-linux-native-fleet-proof/README.md).
+[VUH-2118 verification](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-linux-native-fleet-proof/README.md).
 
 `fleet-health-metrics-native.integration.test.ts` runs the real macOS helper,
 live loopback TCP sockets, an isolated Herdr daemon and a service-owned private
@@ -94,8 +94,8 @@ attempts or inflate the refusal denominator.
 
 ## Additional defensive OS evidence
 
-The [four-producer evidence](../../docs/testing/2026-10-06-proof-alert-defensive-os/README.md)
-and the [seven-producer evidence](../../docs/testing/2026-10-06-additional-defensive-os/README.md)
+The [four-producer evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-proof-alert-defensive-os/README.md)
+and the [seven-producer evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-additional-defensive-os/README.md)
 (manual `fleet-additional-os-native.integration.test.ts`) establish eleven of the
 sixteen formerly unmet reasons. Those owned workloads
 cover `ancestry_bounds`, `process_census_unavailable`, `fd_list_unavailable`,
@@ -115,7 +115,7 @@ baseline verifies that the monotonic clock remains available while the wait
 is denied. The helper refuses after its real retry wait fails. Its actual fixed
 reason reaches the production schema, aggregate counter and five/sixty-minute
 windows without adding terminal proof attempts. See the
-[actual capture and limitations](../../docs/testing/2026-10-06-final-defensive-os/README.md).
+[actual capture and limitations](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-final-defensive-os/README.md).
 The same file proves `ancestry_cycle` from an owned child debugger tracing its
 parent, with actual reciprocal kernel PPIDs. A stable untraced supervisor reaps
 the original target after detach/continue; ordinary high-level exit waits during
@@ -133,7 +133,7 @@ a real owned TCP pair. An unconstrained baseline admits; bounded, untouched
 `ENOMEM`. Its actual diagnostic reaches the schema, collector and both windows.
 This manual-only case requires an executable x86_64 macOS slice (Rosetta on
 Apple Silicon); it does not claim an ARM reproduction. See the
-[producer evidence](../../docs/testing/2026-10-08-allocation-failure/README.md).
+[producer evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-allocation-failure/README.md).
 The lead's revised acceptance classifies `fd_record_invalid` and
 `socket_identity_invalid` as **defensive, not producible** through supported APIs
 on the reviewed ABI. The same manual test compiles the production guard and
@@ -142,7 +142,7 @@ missing/complete Unix/TCP identity field, then checks the production schema,
 collector and both windows. These explicitly supplied direct guard inputs are
 not records claimed to come from the OS. The kernel/ABI review and direct tests
 satisfy the revised guard acceptance; vocabulary/schema inputs alone do not.
-Actual failed candidate probes and the [pinned Apple API review](../../docs/testing/2026-10-06-final-defensive-os/kernel-audit.md)
+Actual failed candidate probes and the [pinned Apple API review](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-final-defensive-os/kernel-audit.md)
 are distinguished from successful native diagnostics.
 
 Supported FD operations have not supplied negative descriptor records, and no

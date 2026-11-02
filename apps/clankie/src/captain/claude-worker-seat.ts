@@ -506,7 +506,7 @@ export class SeatHookLog {
   }
 }
 
-const POLICY_FIX = `Approve its channel once as this machine's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there, and leave "disableSideloadFlags" unset (docs/testing/2026-09-26-interactive-swarm-workers/managed-consent.md).`;
+const POLICY_FIX = `Approve its channel once as this machine's administrator: in ${CLAUDE_MANAGED_SETTINGS}, set "channelsEnabled": true and add { "marketplace": "${CLAUDE_WORKER_PLUGIN.marketplace}", "plugin": "${CLAUDE_WORKER_PLUGIN.plugin}" } to "allowedChannelPlugins", keeping any entries already there, and leave "disableSideloadFlags" unset.`;
 
 /** Whether managed policy approves the worker plugin's channel, from the main file and its drop-ins. */
 export function managedPolicyApprovesWorker(path = CLAUDE_MANAGED_SETTINGS): boolean {

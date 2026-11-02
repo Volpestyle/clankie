@@ -880,7 +880,7 @@ current plugin. First retain its handoff, issue/evidence links and original
 thread reference, settle original receipts, and check that it has no unsent
 draft. The old thread's evidence stays on disk; a fresh hire receives that
 handoff as context, rather than replaying an old report or resuming the old
-thread automatically. See the [manual retirement steps](testing/worker-tool-refresh/manual-proof.md#pre-065-local-codex-manual-retirement).
+thread automatically. See the [manual retirement steps](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/worker-tool-refresh/manual-proof.md#pre-065-local-codex-manual-retirement).
 
 The compatibility command `clankie harness restart-tools --pane PANE` and
 `POST /v1/fleet/worker-tool-restart` remain safe refusal surfaces for local
@@ -1076,7 +1076,7 @@ release their project allocation automatically; uncertain launches stay held.
 The operator's `settle_hire_receipt` tool also accepts `release-allocation`.
 A project allocation UUID supplied with `abandoned-unknown` is refused with this
 recovery instruction: a project-only claim cannot assert an unknown native launch.
-See [the refusal and recovery evidence](testing/2026-10-07-project-hire-refusal/README.md)
+See [the refusal and recovery evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-07-project-hire-refusal/README.md)
 for the local VUH-1702 and PC Ada/Pell recovery commands.
 
 A local hire has no host reservation window, so `not-launched` refuses it.
@@ -5589,10 +5589,10 @@ owner's Take Control device can still reach a frozen body. A frozen body builds 
 means the process booted dormant: a body that froze itself and is still shutting
 down reports `frozen` but not dormant, so nothing exports from it. The real-model
 proof between two private bodies is `apps/clankie/scripts/prove-body-transfer.ts`
-([evidence](testing/2026-10-21-vuh-2577-body-transfer/README.md)). The gateway
+([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-21-vuh-2577-body-transfer/README.md)). The gateway
 proofs are in
-[VUH-2582 evidence](testing/2026-10-21-vuh-2582-transfer-gateway/README.md) and
-[VUH-2583 evidence](testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
+[VUH-2582 evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-21-vuh-2582-transfer-gateway/README.md) and
+[VUH-2583 evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
 
 ### `join`
 
@@ -7596,7 +7596,7 @@ new-process resume remain unavailable. Exact-session interrupt is supported.
 `close_seat` asks an owned live worker's original TUI to exit and succeeds only
 after its terminal disappears. Cold, replaced or switched sessions refuse;
 there is no unconditional physical pane-close fallback. See the
-[worker checkpoint and live limits](testing/2026-10-04-opencode-workers/README.md).
+[worker checkpoint and live limits](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-04-opencode-workers/README.md).
 
 Linked Mac POSIX OpenCode hires use `harness: "opencode"` and the configured fleet
 ID. Their original native controller is carried over private loopback SSH with
@@ -7605,7 +7605,7 @@ reconnection. `clankie agents list --host FLEET` and `clankie agents read FLEET:
 read only registered dedicated worker SQLite history. Resume uses the original
 live controller on that exact SSH target. The remote Mac needs Node 24+, Python
 3, Herdr, native OpenCode 1.18.18 or newer that passes the same probe, and its
-existing Clankie fleet link. Windows is unsupported. Remote live acceptance remains open; [fixture evidence and limits](testing/2026-10-05-remote-opencode/README.md).
+existing Clankie fleet link. Windows is unsupported. Remote live acceptance remains open; [fixture evidence and limits](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-remote-opencode/README.md).
 
 Every hire logs its selected lane and reason. The result carries `control.mode`:
 `channel` for the Claude worker channel, `adapter` for Codex or OpenCode,
@@ -8487,7 +8487,7 @@ After refresh, invoke `message_clankie` once to read the original receipt. A
 matching positive stored result or terminal `definitive: not_sent` result settles
 the retained claim; that invocation still sends no replacement. Invoke again
 deliberately to send the later report. A timeout, unauthenticated or mismatched
-lookup stays uncertain. See [the worker fleet regression evidence](testing/2026-10-05-worker-fleet-tools/README.md).
+lookup stays uncertain. See [the worker fleet regression evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-worker-fleet-tools/README.md).
 
 ### Owner asks: `conversations questions [ID]` and `conversations answer`
 
@@ -10937,7 +10937,7 @@ Nothing is written to Linear; port what matters by hand. A re-import then takes
 Linear's state as it stands, including any Linear writes made after the cutover,
 and never the pilot's. The VUH-1987 rehearsal on a scratch copy of the real
 Clankie Work store shows both effects
-([record](testing/2026-10-25-vuh-1987-switch-back/README.md)).
+([record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-25-vuh-1987-switch-back/README.md)).
 
 ### Work tracker settings
 

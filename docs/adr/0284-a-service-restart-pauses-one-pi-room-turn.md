@@ -112,7 +112,7 @@ without another input. It checks one persisted memory, one shell append, the
 possibly-run result, one terminal reply receipt, exact replay across repeated
 HTTP input and another restart, and a changed-input conflict. This is a manual
 product proof, not an eval or a per-commit network test. Its evidence is linked
-from VUH-2574 and the [testing record](../testing/2026-10-20-vuh-2574-durable-pi/README.md).
+from VUH-2574 and the [testing record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-20-vuh-2574-durable-pi/README.md).
 Both SIGKILL and SIGTERM proofs passed against unchanged source, with one memory,
 one shell append and one saved HTTP reply each.
 

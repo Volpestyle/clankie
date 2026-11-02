@@ -13,13 +13,7 @@ it("recovers report/peer native proof after an unavailable inventory read, using
   // Kernel facts are a golden; controller inventory crosses a real WebSocket.
   // This replay confers no live Windows registration or socket authority.
   const observed = JSON.parse(
-    await readFile(
-      new URL(
-        "../../../docs/testing/2026-10-06-remote-native-channels/sender-completion/pc-sender-probe.json",
-        import.meta.url,
-      ),
-      "utf8",
-    ),
+    await readFile(new URL("./fixtures/pc-native-goldens/pc-sender-probe.json", import.meta.url), "utf8"),
   );
   const first = observed.first;
   const fleet = { id: "pc", session: "default", ssh: { host: "pc", shell: "powershell" as const } };

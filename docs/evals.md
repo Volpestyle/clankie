@@ -42,7 +42,7 @@ opinionated skills (VUH-1457), was retired when every shipped skill became an
 ordinary always-on skill. `trimmed.md` holds the candidate text; when a cut
 lands, the file matches `current` until the next candidate. `pre-1456` keeps
 comparisons that started before the VUH-1456 cut on the old prompt
-([results](testing/2026-09-30-instruction-trim/README.md)). Bundled arms copy every
+([results](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-instruction-trim/README.md)). Bundled arms copy every
 skill `bundledSkills` lists, the same catalog a hire receives. The current arm
 is the versioned Clankie prompt in a headless harness, not the live service's
 persona, memory, tools or transport prompt.
@@ -255,7 +255,7 @@ comparisons are valid only within one harness and model.
 were on hold before its campaign could start; single development attempts passed
 `seat-wake` and `seat-baseline`, which is smoke, not a result. A partial Codex
 `bare`/`current` campaign (106 of 110 calls) is preserved in
-[the seat-eval record](testing/2026-09-30-seat-eval/README.md) and is
+[the seat-eval record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-seat-eval/README.md) and is
 inconclusive: it has no seat arm to compare with, and `current − bare` is within
 noise. That record also lists what building the harness showed about the seat's
 integrations.
@@ -317,7 +317,7 @@ It copies only an API credential, never an OAuth refresh token. It removes it
 from the scratch store in a `finally` that covers all setup after the copy;
 `--smoke --fail-after-credential` proves the removal. It refuses to run under
 `CI`. Results go to the
-[VUH-2796 record](testing/2026-10-24-vuh-2796-lane-folding/README.md).
+[VUH-2796 record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-24-vuh-2796-lane-folding/README.md).
 
 ## Statistics
 
@@ -412,10 +412,10 @@ Upload sanitized reports and summaries as CI artifacts or pull request comments,
 with `clankie work attach ISSUE --url URL --caption TEXT --kind log`. Never attach
 credentials, private homes, provider sessions or held-out case content.
 
-Baselines: [VUH-1454](testing/2026-09-30-clankie-evals/README.md) (single trials,
-current arm only) and [VUH-1467](testing/2026-09-30-eval-baseline/README.md)
+Baselines: [VUH-1454](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-clankie-evals/README.md) (single trials,
+current arm only) and [VUH-1467](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-eval-baseline/README.md)
 (repeated bare against current on both suites); VUH-1473's
-[seat-eval record](testing/2026-09-30-seat-eval/README.md) (harness built, seat arm
+[seat-eval record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-30-seat-eval/README.md) (harness built, seat arm
 unrun).
 
 ### Codex account selection
@@ -600,10 +600,10 @@ shared-index sweeps, lost/duplicated work, idle workers, unsupported/uncertain
 control, unknown usage, budget stops, tests and infrastructure. It labels even
 complete supplied records `imported-unverified`; it cannot prove that the
 inventory is complete or that a native hire actually happened. Missing costs are
-never reported as zero. See [deterministic evidence and gaps](testing/2026-10-03-lead-eval/README.md).
+never reported as zero. See [deterministic evidence and gaps](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-03-lead-eval/README.md).
 
 The campaign `run` command still refuses dispatch and reports machine-readable
-gaps. The separate [native integration continuation](testing/2026-10-03-lead-eval/native-continuation.md)
+gaps. The separate [native integration continuation](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-03-lead-eval/native-continuation.md)
 now contains an explicit manual isolated-service bootstrap, real native hire and
 owner-attachment adapters, controller-origin account observers, continuous shared
 admission, a fenced Pi lead runtime and contained coding tools. Ordinary service

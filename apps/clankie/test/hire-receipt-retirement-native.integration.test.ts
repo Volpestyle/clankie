@@ -22,7 +22,7 @@ it
   .each(["close", "harvest"])(
   "%s: operator recovery and completed hire retirement preserve uncertain dispatch fences",
   async (mode) => {
-    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-12-hire-receipts", mode);
+    const logs = join(import.meta.dirname, "../../../.local/native-proof/hire-receipts", mode);
     const herdr = await isolatedHerdr(logs);
     const root = await realpath(herdr.root);
     const cwd = join(root, "work");

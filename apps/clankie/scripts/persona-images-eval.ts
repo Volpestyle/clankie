@@ -16,8 +16,7 @@ const { values, positionals } = parseArgs({
 });
 const vibeDir = values["vibe-dir"];
 const output = resolve(
-  positionals[0] ??
-    join(root, `docs/testing/2026-09-28-persona-images/${vibeDir ? "video-abc" : "ab"}-report.md`),
+  positionals[0] ?? join(root, `.local/evals/persona-images/${vibeDir ? "video-abc" : "ab"}-report.md`),
 );
 const prompts = [
   "hey clankie, what's good?",

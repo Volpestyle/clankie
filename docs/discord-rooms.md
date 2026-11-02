@@ -52,7 +52,7 @@ the authenticated operator surface. With a Codex head, all non-owner room work
 runs on Pi with the room's own tools, including explicit actor and server ownership grants. Mixed audiences and skill
 rooms always use Pi; only owner-only rooms can use native children. See
 [ADR 0229](adr/0229-room-handoffs-are-visible-parallel-threads.md) and the
-[verification record](testing/2026-10-05-room-handoffs/README.md).
+[verification record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-room-handoffs/README.md).
 
 `clankie discord rooms` and TUI `/discord rooms` add delivery health. The API is
 `GET /v1/discord/rooms`; its strict node-free contract lives in

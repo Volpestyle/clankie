@@ -221,7 +221,7 @@ voice tools. Claude uses the existing per-speaker OpenAI transcription and
 ElevenLabs speech wrapper; it receives attributed text, and interruptions abort
 its request and retire the mouth's output. Native owner voice-setting changes
 persist public settings and require a body restart.
-[The manual Sonnet trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+[The manual Sonnet trial](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-sonnet-voice/manual-trial.md)
 owns live latency and quality proof.
 
 ### Operator conversations and fleet views

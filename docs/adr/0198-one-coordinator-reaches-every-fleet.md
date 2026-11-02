@@ -100,7 +100,7 @@ flowchart LR
   forward -. "Same SSH link starts splice" .-> splice
 ```
 
-[Read-only Windows transport proof and prepared enrollment](../testing/2026-09-27-remote-fleet/connect/README.md).
+[Read-only Windows transport proof and prepared enrollment](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-27-remote-fleet/connect/README.md).
 
 ## Windows execution sessions
 

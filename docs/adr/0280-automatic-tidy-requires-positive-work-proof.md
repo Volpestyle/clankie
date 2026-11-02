@@ -74,7 +74,7 @@ non-dumpable ones. On an ordinary systemd host those include `systemd --user`
 and `(sd-pam)` for every login session, and `ssh-agent` or `gpg-agent` where
 they run. Failing closed on them would leave Linux listing, pruning and cache
 reclaim unavailable on every such host (shown on WSL2 Ubuntu as uid 1000;
-evidence in `docs/testing/2026-10-27-vuh-2926-tidy-home-pane`). So the Linux
+evidence in clankie-ops `archive/clankie-docs-testing/2026-10-27-vuh-2926-tidy-home-pane`). So the Linux
 census skips any process whose cwd the kernel withholds (EACCES or EPERM),
 whatever its uid. Every dumpable process, which covers shells, editors, builds
 and agents, stays in the census. The residual risk is a non-dumpable process of

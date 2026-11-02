@@ -11,10 +11,7 @@ import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 // Actual authenticated PC recovery, reduced only by the existing public evidence artifact.
 const live = JSON.parse(
   await readFile(
-    new URL(
-      "../../../docs/testing/2026-10-06-remote-native-channels/live/72c1571a/original-failed-hire-abandoned.json",
-      import.meta.url,
-    ),
+    new URL("./fixtures/pc-native-goldens/72c1571a-original-failed-hire-abandoned.json", import.meta.url),
     "utf8",
   ),
 );

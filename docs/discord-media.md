@@ -38,7 +38,7 @@ remain paired with their originating calls. Interruptions abort the text request
 and retire speech output; unknown provider usage remains unknown. Inactive
 provider models remain stored so the original stack can be restored.
 
-This is a self-hosted experiment. [James's short manual trial](testing/2026-10-06-sonnet-voice/manual-trial.md)
+This is a self-hosted experiment. [James's short manual trial](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-sonnet-voice/manual-trial.md)
 records time to first audio, barge-in and how he sounds. Local provider fixtures
 prove transport and cancellation behavior; real call quality is still a manual
 gate. The hosted fleet's provider selection is separate.

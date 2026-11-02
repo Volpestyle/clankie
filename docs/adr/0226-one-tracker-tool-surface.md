@@ -974,7 +974,7 @@ live store's proportions), a single `save_issue` took 118 ms at one day of
 volume and 1,036 ms at ten. Serializing and fsyncing were only about a fifth of
 that. A single JSON string also stops working: at 60 days of that volume the
 first write fails with V8's `Invalid string length`. Method and numbers:
-[the measurement record](../testing/2026-10-27-local-vuh-42-tracker-journal/README.md).
+[the measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-27-local-vuh-42-tracker-journal/README.md).
 
 **Copy-on-write.**
 
@@ -1095,7 +1095,7 @@ because retirement reads them.
   limit.
 
 **Measured** (generated stores, migrated by the real path; method and every run in
-[the measurement record](../testing/2026-10-27-local-vuh-42-tracker-journal/README.md)):
+[the measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-27-local-vuh-42-tracker-journal/README.md)):
 
 - Single write, p50/p95, at 1, 10, 30 and 60 days: 5.0–5.3/5.3–11.8, 5.2–8.8/6.1–11.9,
   10.3–11.2/11.4–14.4 and 11.7–21.7/14.3–39.8 ms. The machine was shared, with load
@@ -1146,7 +1146,7 @@ Status: accepted (lead-approved scope, 2026-10-27).
     within 1.5× of one day. Before, it was 11.5–19.1 and 16.4–20.8 ms.
   - The service's `list_issues` after a hired write went from about 130 ms to 8 ms.
   - Details are in
-    [the measurement record](../testing/2026-10-27-local-vuh-47-tracker-write-cost/README.md).
+    [the measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-27-local-vuh-47-tracker-write-cost/README.md).
 - **Journal lines name their length.** A final line whose bytes are not a whole record
   at that length is an unacknowledged tail: a power cut kept its size but not its
   pages. Open skips it.
@@ -1188,7 +1188,7 @@ string-limit refusal at 180. The synthetic replacement for the deleted original
 seed uses its commit/issue/comment/receipt proportions, but different payloads;
 it is about 12.5% larger than LOCAL-VUH-47's 60-day checkpoint. Decision, after
 measurements and rollback evidence are in the
-[measurement record](../testing/2026-10-28-local-vuh-49-streamed-open/README.md).
+[measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-28-local-vuh-49-streamed-open/README.md).
 
 Previous journal builds read/write the unchanged layout below their string ceiling;
 above it they refuse before writing. Doctor retains the old limit and half-limit
@@ -1203,5 +1203,5 @@ continuation. On the same 126.44 MB synthetic checkpoint, three external-append
 reads fell from 976/946/797 ms to 86/93/71 ms (higher load after). A real-process
 regression observes zero checkpoint decodes on that continuation, and a fresh
 large-open guard rejects whole-buffer string conversion. The
-[measurement record](../testing/2026-10-28-local-vuh-49-streamed-open/README.md#review-revision-hash-before-decoding)
+[measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-28-local-vuh-49-streamed-open/README.md#review-revision-hash-before-decoding)
 retains the full results and the original 900 MB proof's scope.

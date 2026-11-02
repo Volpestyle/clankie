@@ -70,7 +70,7 @@ clankie heavy -- env FLEET_FINAL_OS_TEST=1 pnpm exec vitest run apps/clankie/tes
 The case is a manual Darwin opt-in and adds no churn/build to push CI. Raw owned
 observations and real production counter snapshots stay under ignored
 `.local/final-os/clock-*/evidence.json`; the public redacted capture is in
-`docs/testing/2026-10-06-final-defensive-os/`. Direct diagnostics do not establish
+clankie-ops `archive/clankie-docs-testing/2026-10-06-final-defensive-os/`. Direct diagnostics do not establish
 full HTTP admission or original owner-TUI alert acceptance.
 
 `record-guards.c` directly includes the production C validation and diagnostic

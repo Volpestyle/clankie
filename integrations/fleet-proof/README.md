@@ -55,7 +55,7 @@ change and reversal or a descriptor queued in `SCM_RIGHTS` is outside the existi
 boundary. No environment or later arguments enter proof output.
 
 The real host-PID-namespace and native Pi TUI evidence is recorded in
-[VUH-2118 verification](../../docs/testing/2026-10-11-linux-native-fleet-proof/README.md).
+[VUH-2118 verification](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-linux-native-fleet-proof/README.md).
 
 ## Darwin observations
 
@@ -484,7 +484,7 @@ libproc results. It requires HTTP admission at both native checkpoints within
 2 s, without restarting the global scan, and rejects outsiders, another pane,
 shared client FDs and a second owner born between PID lists. The shipped helper
 has no test controls. Evidence stays in `.local/admission-churn/`; see the
-[bounded-admission report](../../docs/testing/2026-10-06-admission-churn/README.md).
+[bounded-admission report](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-admission-churn/README.md).
 
 An exact HTTP 503 `fleet_admission_unavailable` means current proof is
 unavailable and that request was refused before dispatch. Claude and Codex

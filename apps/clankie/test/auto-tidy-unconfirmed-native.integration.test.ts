@@ -34,7 +34,7 @@ const git = (cwd: string, ...args: string[]) =>
 nativeIt(
   "auto-tidy adopts an unconfirmed local Claude hire from its observed session, then closes it",
   async () => {
-    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-25-vuh-2802/auto-tidy");
+    const logs = join(import.meta.dirname, "../../../.local/native-proof/auto-tidy-unconfirmed");
     const herdr = await isolatedHerdr(logs);
     const evidence: unknown[] = [];
     let store: HerdrWatchStore | undefined;

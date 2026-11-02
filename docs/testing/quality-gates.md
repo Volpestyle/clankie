@@ -126,7 +126,7 @@ gate at a time. Vitest defaults to four isolated forked processes locally and
 three in CI, reducing contention from the test files' real service, SSH and
 process fixtures on the three-core macOS runner. A two-fork full-suite estimate
 would exceed the manual job's former 45-minute ceiling; see the
-[release CI measurements](2026-10-11-release-ci-concurrency/README.md).
+[release CI measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-release-ci-concurrency/README.md).
 `VITEST_MAX_WORKERS` overrides the
 default, including the lower limits supplied by `clankie heavy`.
 Each file gets its own fixture HOME, temp directory and stores; the full suite selection
@@ -140,7 +140,7 @@ for actual readiness or terminal queue state, preserving every deadline. Package
 selection and exact-file release retries still select the same files, and reports
 include both projects. Local sampled three-core passes measured a 69–78 second
 serial phase; this is potential added release wall time, not a runner measurement.
-See [VUH-2119 evidence](2026-10-11-vuh-2119-remote-readiness/README.md).
+See [VUH-2119 evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-11-vuh-2119-remote-readiness/README.md).
 
 The fleet load gate is separate from `pnpm check` and default tests. Version-tag
 releases and explicit `workflow_dispatch` runs select it; ordinary pushes and
@@ -149,7 +149,7 @@ without model calls or owner credentials. See the retained JSON for workload,
 source revision, budgets and measured outcomes.
 The default ceilings are 9.9% captain-process CPU, 250 ms health p95, 2,000 ms
 tool p95, zero admission refusals and 24 provider calls/minute. See the
-[incident replay proof](2026-10-05-release-fleet-load/README.md) for calibration
+[incident replay proof](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-release-fleet-load/README.md) for calibration
 and the distinction between an admission failure and measured regressions.
 
 ## Isolation and reproducibility

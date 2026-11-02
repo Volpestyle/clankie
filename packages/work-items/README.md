@@ -288,10 +288,10 @@ expired. Checkpoint writing already streams records too.
 The whole store still lives in memory, and an individual record or non-array field
 must fit in one JavaScript string. Streaming removes the whole-checkpoint string
 ceiling, not all memory or response-size limits. The unrelated FastJsonStringifier
-abort in the [retained Zone OOM finding](../../docs/testing/2026-10-27-local-vuh-51-refresh/README.md#zone-oom-finding-local-vuh-49)
+abort in the [retained Zone OOM finding](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-27-local-vuh-51-refresh/README.md#zone-oom-finding-local-vuh-49)
 was not isolated to sealing and is not claimed fixed. Decision, synthetic 60/90/180-day
 measurements and real previous-build rollback proof:
-[LOCAL-VUH-49](../../docs/testing/2026-10-28-local-vuh-49-streamed-open/README.md).
+[LOCAL-VUH-49](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-28-local-vuh-49-streamed-open/README.md).
 
 `clankie doctor` still reports checkpoint size against the previous runtime's
 single-string limit (about 537 MB), warning at half for rollback headroom. This

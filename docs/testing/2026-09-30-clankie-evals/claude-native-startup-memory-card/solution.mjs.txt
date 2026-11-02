@@ -1,2 +1,0 @@
-const seen = new Map();
-export function shouldInject(session, hash, reset = false) { seen.set(session, hash); return true; }

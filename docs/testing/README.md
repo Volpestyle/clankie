@@ -21,8 +21,8 @@ play journal exists.
 pnpm testing:view
 
 # Any selected archive; --check runs the server/security smoke test and exits
-pnpm testing:view docs/testing/2026-08-18-pokeagents-trial-run
-pnpm testing:view docs/testing/2026-08-18-pokeagents-trial-run --check
+pnpm testing:view docs/testing/2026-11-02-issue-287-regression-audit
+pnpm testing:view docs/testing/2026-11-02-issue-287-regression-audit --check
 ```
 
 An archive only needs its normal `README.md`, `evidence/`, and `flows/`
@@ -42,23 +42,19 @@ raw files into the ignored `.local/evidence/` mirror. Commit only the README and
 details. Existing folders have not been migrated yet, and the viewer does not
 read the `.local/` mirror yet.
 
-- [2026-10-27 Flat built-in tracker write cost at 60 days (LOCAL-VUH-47)](2026-10-27-local-vuh-47-tracker-write-cost/README.md)
-- [2026-10-27 Built-in tracker write cost at fleet volume (LOCAL-VUH-42)](2026-10-27-local-vuh-42-tracker-journal/README.md)
-- [2026-10-08 PC Claude cache delivery](2026-10-08-pc-claude-cache-delivery/README.md)
-- [2026-10-06 Linear native delivery investigation](2026-10-06-linear-native-delivery/README.md)
-- [2026-10-06 Mac companion service setup](2026-10-06-mac-service-setup/README.md)
-- [2026-10-05 Project membership and conversational onboarding source handoff](2026-10-05-project-onboarding/README.md)
-- [2026-09-30 Clankie trim/account integration and existing eval harvest](2026-09-30-clankie-integration/README.md)
-- [2026-09-30 Codex account headroom and launch selection](2026-09-30-codex-accounts/README.md)
-- [2026-09-29 Headless browser bursts and recording persistence](2026-09-29-browser-bursts/README.md)
-- [2026-09-28 Discord voice arrival choice](2026-09-28-discord-voice-arrival/README.md)
-- [2026-09-28 Discord empty stays and false speech interruptions](2026-09-28-discord-voice-cutoffs/README.md)
-- [2026-09-06 Agent-to-agent edges, proved from a real Herdr to a real fleet snapshot](2026-09-06-fleet-agent-edges/README.md)
-- [2026-09-20 Delivered files through a real isolated host, relay, and mobile app](2026-09-20-delivered-files-live/README.md)
-- [2026-09-05 PokeAgent evidence sweep: every journal this machine has kept](2026-09-05-pokeagent-evidence-sweep/README.md)
-- [2026-08-16 PokeAgent performance](2026-08-16-pokeagent-performance/README.md)
-- [2026-08-18 PokeAgents trial run](2026-08-18-pokeagents-trial-run/README.md)
-- [2026-08-30 Hosted FireRed intro on current Clankie](2026-08-30-hosted-firered-intro/README.md)
-- [2026-09-04 Clankie boots in a Linux container](2026-09-04-linux-service-spike/README.md)
-- [2026-09-04 Astra/Terra comparison: case A](2026-09-04-astra-terra-comparison/README.md)
-- [2026-09-04 Astra/Terra fleet comparison: case B and harness limits](2026-09-04-case-b-execution-metrics/README.md)
+## Current records
+
+- [2026-11-02 Surviving Codex report admission (#288)](2026-11-02-restart-report/README.md)
+- [2026-11-02 #287 post-merge regression audit](2026-11-02-issue-287-regression-audit/README.md)
+- [2026-11-02 Issue #280: main checkpoint close-out proof](2026-11-02-issue-280-main-checkpoint/README.md)
+- [2026-11-02 Codex hire cwd (#252)](2026-11-02-codex-hire-cwd/README.md)
+- [2026-11-01 #265: a landed hire's close removes its worktree](2026-11-01-issue-265-close-worktree/README.md)
+
+## Archive
+
+Records dated before 2026-11-01, and the undated Linear-era `vuh-*` records,
+moved to the private `Volpestyle/clankie-ops` repository under
+[`archive/clankie-docs-testing/`](https://github.com/Volpestyle/clankie-ops/tree/main/archive/clankie-docs-testing)
+as a plain copy of clankie commit `44c53e19d`. Their history stays in this
+repository's git log. Links elsewhere in this repository point at the archived
+copy.

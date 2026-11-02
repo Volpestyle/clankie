@@ -73,7 +73,7 @@ API keys. OpenAI receives consented room audio; Anthropic receives attributed
 text and admitted context; ElevenLabs receives the words Clankie chooses to say.
 The model ID is explicit and is never silently replaced by a catalog fallback.
 Changes take effect after restarting the active body. This is a self-hosted
-experiment; [James's manual trial](../../docs/testing/2026-10-06-sonnet-voice/manual-trial.md)
+experiment; [James's manual trial](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-06-sonnet-voice/manual-trial.md)
 must establish call latency, interruption and how it sounds.
 
 For OpenAI plus ElevenLabs, explicit `voice.elevenLabsModelId: eleven_v4_turbo`

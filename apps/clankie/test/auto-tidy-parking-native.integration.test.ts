@@ -55,7 +55,7 @@ const authority: ConversationAuthority = { owner: lead, current: () => true, aut
 nativeIt(
   "parks clean unlanded commits on a keep ref, records them in the close receipt and closes the real pane",
   async () => {
-    const logs = join(import.meta.dirname, "../../../docs/testing/2026-10-25-vuh-2802/parking");
+    const logs = join(import.meta.dirname, "../../../.local/native-proof/auto-tidy-parking");
     const herdr = await isolatedHerdr(logs);
     const evidence: unknown[] = [];
     let store: HerdrWatchStore | undefined;

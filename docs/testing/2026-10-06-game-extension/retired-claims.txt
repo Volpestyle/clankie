@@ -1,2 +1,0 @@
-Command: node scripts/check-retired-claims.mjs
-Observed exit code: 0

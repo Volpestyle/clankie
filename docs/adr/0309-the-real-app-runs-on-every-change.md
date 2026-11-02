@@ -48,7 +48,7 @@ home holds no harness account, so a launched worker is out of reach here.
 ### Pruning
 
 An integration test whose whole claim a flow now proves is removed in a reviewed
-batch, recorded in the [test-pruning review](test-pruning-review.md). Kept regardless:
+batch, recorded in the [test-pruning review](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-adr/test-pruning-review.md). Kept regardless:
 trust-boundary proofs (seat binding, the process census, who may connect, device
 pairing and gateway encryption), published contracts, and the fast tests.
 

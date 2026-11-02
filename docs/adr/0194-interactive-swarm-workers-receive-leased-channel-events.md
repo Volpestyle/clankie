@@ -13,7 +13,7 @@ runtime setting or agent installs or edits managed policy. Native-only source
 now defaults to interactive; an unsupported installed runtime disables dispatch
 instead of starting headless workers. Claude still requires
 the two-fresh-session consent probe and a live interactive dispatch. The
-seat-preservation checks in [managed consent](../testing/2026-09-26-interactive-swarm-workers/managed-consent.md)
+seat-preservation checks in [managed consent](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/managed-consent.md)
 still apply when the policy is adopted.
 
 ## Implementation status
@@ -56,7 +56,7 @@ no reset of actors, tasks, claims or fingerprints.
 ## Current stream-worker implementation
 
 The readiness, independent MCP-health and stale-progress subset is implemented
-upstream in `dff68e3`, with [regression evidence and rollout limits](../testing/2026-09-26-interactive-swarm-workers/stream-readiness.md).
+upstream in `dff68e3`, with [regression evidence and rollout limits](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/stream-readiness.md).
 It was re-vendored and verified in a drained runtime upgrade on 2026-09-26. This does not
 implement interactive workers, consent, model/effort selection, an install lock
 or immutable runtime generations. Existing-peer and OpenCode protocols are unchanged.
@@ -76,7 +76,7 @@ Swarm workers. This proposal has no keyboard fallback.
 
 ## Measured transport
 
-[Probe evidence](../testing/2026-09-26-interactive-swarm-workers/README.md) uses
+[Probe evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/README.md) uses
 Claude Code 2.1.283, interactive Sonnet 5 with low effort, a single bare MCP server
 and no Clankie seat credentials. A channel event starts an idle turn, preserves
 an unsent draft, and queues behind a running tool. Native `UserPromptSubmit`,
@@ -111,7 +111,7 @@ that persistent approval through the documented macOS file at
 `/Library/Application Support/ClaudeCode/managed-settings.json`. Local admin
 control is explicitly supported by the
 [deployment guide](https://code.claude.com/docs/en/managed-settings). We prepared
-[exact snippets and an owner-run probe](../testing/2026-09-26-interactive-swarm-workers/managed-consent.md),
+[exact snippets and an owner-run probe](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/managed-consent.md),
 but did not apply policy or empirically test it on this personal Max account. `clankie seat` itself passes the development
 flag; its settings enable the plugin and command permissions, not persistent
 channel consent.
@@ -211,7 +211,7 @@ another one. Organization policy failures are explicit unsupported states.
 
 ### Dispatch success requires worker readiness and ownership
 
-The [startup incident evidence](../testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
+The [startup incident evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/startup-incident.md)
 shows four new workers with no Swarm tool calls, despite reported binding. The
 current provider accepts a persisted `started` flag plus `available`/`busy` session
 observation; `DispatchTransaction.bind` then claims the task on the worker's

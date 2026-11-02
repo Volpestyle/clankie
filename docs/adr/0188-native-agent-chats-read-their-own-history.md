@@ -76,4 +76,4 @@ As of September 27, 2026, the same on-demand boundary includes registered SSH
 Herdr fleets. A qualified seat resolves only its exact harness/session on that
 host through the confined transcript reader. Remote image paths cannot be
 published by the local file service. The live read-through and bounds are
-recorded in [VUH-1408 verification](../testing/2026-09-27-cross-device-messages/README.md).
+recorded in [VUH-1408 verification](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-27-cross-device-messages/README.md).

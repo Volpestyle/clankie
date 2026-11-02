@@ -78,4 +78,4 @@ controller labels (`clankie:<conversation>` and
 They are coordination infrastructure, not extra Clankie contacts. Previously
 saved records remain available by ID; no conversation or identity is deleted or
 merged. This is a presentation filter, not an authorization decision. See
-[VUH-1408 verification](../testing/2026-09-27-cross-device-messages/README.md).
+[VUH-1408 verification](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-27-cross-device-messages/README.md).

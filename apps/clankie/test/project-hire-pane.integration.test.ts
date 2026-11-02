@@ -9,13 +9,12 @@ import { ProjectHires, type ProjectHireProcessProof } from "../src/captain/proje
 
 // The actual failed PC hire supplied these pane/process identities. This test
 // exercises the persisted assignment boundary, not a live Windows process proof.
-const evidenceRoot = new URL(
-  "../../../docs/testing/2026-10-06-remote-native-channels/live/2e1c08be/",
-  import.meta.url,
+const evidenceRoot = new URL("./fixtures/pc-native-goldens/", import.meta.url);
+const census = JSON.parse(
+  await readFile(new URL("2e1c08be-tracker-and-process-proof.json", evidenceRoot), "utf8"),
 );
-const census = JSON.parse(await readFile(new URL("tracker-and-process-proof.json", evidenceRoot), "utf8"));
 const settlement = JSON.parse(
-  await readFile(new URL("fresh-failed-hire-abandoned.json", evidenceRoot), "utf8"),
+  await readFile(new URL("2e1c08be-fresh-failed-hire-abandoned.json", evidenceRoot), "utf8"),
 );
 const owned = census.owned.find((entry: { pane: string }) => entry.pane === "wC:p2");
 const address = settlement.evidence.allocation.paneId;
