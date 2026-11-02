@@ -21,6 +21,7 @@ import {
   autoStaffingSeats,
   projectStaffing,
   projectStaffingSeats,
+  projectIssueKeys,
   staffingSection,
   staffingSignals,
   staffingTotals,
@@ -92,6 +93,10 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
     return await options.remoteOrigin(workspace);
   });
   const autoRoundRecord = new AutoRoundRecord(join(options.stateDir, "auto-rounds"));
+  // Each project's issue keys from its last tracker and queue reads, so a seat holding one
+  // of them counts toward it from any repo's worktree (#387). Unknown until first read.
+  const trackerIssueKeys = new Map<string, readonly string[]>();
+  const issueKeysByProject = new Map<string, ReadonlySet<string>>();
   const velocityDeps: VelocityDeps = {
     outcomes:
       options.projectOutcomes ??
@@ -142,7 +147,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
     const { seats, unavailableMachines } = snapshot ?? (await readAutoStaffingCensus());
     const workerCounts = new Map(
       current.projects.projects.map((project) => {
-        const workers = projectStaffingSeats(project, seats);
+        const workers = projectStaffingSeats(project, seats, issueKeysByProject.get(project.id));
         const unknown =
           [...project.workspaces, ...project.worktreeRoots].some((root) =>
             unavailableMachines.has(root.machineId),
@@ -196,6 +201,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
           const correction = autoRoundRecord.pendingCorrection(project.id);
           const velocity = await measureVelocityWithin(project, autoRoundRecord.lastMilestone(project.id), {
             ...velocityDeps,
+            observeIssueKeys: (keys) => trackerIssueKeys.set(project.id, keys),
             ...(correction ? { correction } : {}),
           });
           // A stopped runtime must not append after its state directory is handed over.
@@ -264,6 +270,13 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
         }
         if (shutdown.signal.aborted) return;
         const previous = autoRoundRecord.read({ projectId: project.id, limit: 1 })[0];
+        const issueKeys = projectIssueKeys([
+          ...(trackerIssueKeys.get(project.id) ?? []),
+          ...(queue.state === "known"
+            ? [...queue.ready, ...queue.backlog, ...queue.blocked.map((entry) => entry.issue)]
+            : []),
+        ]);
+        issueKeysByProject.set(project.id, issueKeys);
         autoMeasurements.set(project.id, {
           ...velocity,
           staffing: projectStaffing({
@@ -273,13 +286,17 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
             plans,
             started: velocity.started,
             unavailableMachines: census.unavailableMachines,
+            issueKeys,
             ...(previous ? { previous } : {}),
           }),
         });
       }),
     );
     if (shutdown.signal.aborted) return;
-    for (const [conversationId, states] of rounds) {
+    // Re-read with this tick's issue keys, so each prompt's worker count includes their holders.
+    const attributed = await readAutoRounds(census);
+    for (const [conversationId, measuredStates] of rounds) {
+      const states = attributed.get(conversationId) ?? measuredStates;
       if (pendingAutoRounds.has(conversationId)) continue;
       const fingerprint = autoFingerprint(states);
       if (!autoRoundDue(fingerprint, autoCadence.last(conversationId), Date.now(), options.autoIdleRewakeMs))
@@ -309,7 +326,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
             staffingTotals(
               velocities,
               plans.filter((plan) => groupMachines.has(plan.machine)),
-              { seats, projects: groupProjects },
+              { seats, projects: groupProjects, issueKeys: issueKeysByProject },
             ),
           );
           autoCadence.claim(conversationId, roundId, fingerprint);

@@ -12,6 +12,7 @@ import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER } from "@clankie/work-i
 import {
   autoPlanCapacity,
   autoStaffingSeats,
+  projectIssueKeys,
   projectStaffing,
   staffingSection,
   staffingSignals,
@@ -566,4 +567,95 @@ it("stays under the recorded Linear complexity limit and pages every issue and b
       if ("closeAllConnections" in server) server.closeAllConnections();
     });
   }
+});
+
+it("counts a seat holding the project's issue from another repo's worktree, by unambiguous keys only (#387)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "auto-staffing-holders-"));
+  roots.push(root);
+  const tracker = createLocalTracker({ directory: join(root, "tracker"), clock: () => at });
+  const actor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_OWNER] };
+  const call = (name: string, args: Record<string, unknown>) => tracker.call(name, args, { actor });
+  const tracked = (await call("save_project", { name: "Clankie", addTeams: ["LOCAL"] })) as { id: string };
+  const create = async (title: string, state: string) =>
+    (await call("save_issue", { team: "LOCAL", project: tracked.id, title, state })) as {
+      identifier: string;
+    };
+  const started = await create("App half of the fix", "In Progress");
+  const ready = await create("Next app screen", "Todo");
+  const project = ProjectSchema.parse({
+    id: "core",
+    name: "Clankie",
+    auto: true,
+    trackerProjectId: tracked.id,
+    workspaces: [{ id: "core-work", machineId: "local", platform: "posix", path: "/fixture/core" }],
+  });
+  const queue = await readProjectWorkQueue(project, {
+    route: async () => root,
+    linearQuery: async () => {
+      throw new Error("Must use saved built-in route");
+    },
+    builtIn: tracker,
+  });
+  if (queue.state !== "known") throw new Error(queue.reason);
+  let observed: readonly string[] = [];
+  const velocity = await measureVelocity(
+    project,
+    null,
+    {
+      outcomes: async (_p, input) => ({
+        state: "read",
+        outcomes: await tracker.readOutcomes({ projectId: tracked.id, ...input }),
+      }),
+      history: async () => ({ state: "unknown", reason: "No git in replay" }),
+      churn: async () => {
+        throw new Error("No git in replay");
+      },
+      observeIssueKeys: (keys) => (observed = keys),
+      timeZone: "UTC",
+    },
+    at,
+  );
+  expect(observed).toContain(started.identifier);
+  const issueKeys = projectIssueKeys([...observed, ...queue.ready, ...queue.backlog]);
+  const holding = (seatId: string, directory: string, status: string, itemId?: string) => ({
+    seatId,
+    occupantId: `${seatId}-native`,
+    machine: "builder-mac.local",
+    workingDirectory: directory,
+    status,
+    ...(itemId
+      ? { assignment: { objective: "Fix it", issue: { repoId: "app", itemId }, updatedAt: at.toISOString() } }
+      : {}),
+  });
+  const census = autoStaffingSeats([
+    holding("in-workspace", "/fixture/core", "idle"),
+    // In clankie-app's worktrees, holding the project's started and ready issues.
+    holding("app-started", "/fixture/app-worktrees/fix", "working", started.identifier.toLowerCase()),
+    holding("app-ready", "/fixture/app-worktrees/screen", "idle", ready.identifier),
+    // A bare GitHub number names an issue only within its own repo; another project's key isn't ours.
+    holding("app-bare", "/fixture/app-worktrees/bare", "working", "#1"),
+    holding("app-other", "/fixture/app-worktrees/other", "working", "OTHER-9"),
+  ]);
+  const plans = autoPlanCapacity([accounts], +at);
+  const staffing = projectStaffing({
+    project,
+    queue,
+    seats: census,
+    plans,
+    started: velocity.started,
+    issueKeys,
+  });
+  expect(staffing).toMatchObject({ activeSeats: 1, idleSeats: 2, occupiedSeats: 3 });
+  // Before #387 only the workspace seat counted.
+  expect(projectStaffing({ project, queue, seats: census, plans, started: velocity.started })).toMatchObject({
+    activeSeats: 0,
+    occupiedSeats: 1,
+  });
+  expect(
+    staffingTotals([{ ...velocity, staffing }], plans, {
+      seats: census,
+      projects: [project],
+      issueKeys: new Map([[project.id, issueKeys]]),
+    }),
+  ).toMatchObject({ activeSeats: 1, idleSeats: 2 });
 });

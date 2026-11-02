@@ -42,6 +42,8 @@ export interface VelocityDeps {
   readonly linkedRepos?: (project: Project) => Promise<readonly string[]>;
   readonly churn: (repository: string, window: ChurnWindow) => Promise<RepositoryChurn>;
   readonly timeZone?: string;
+  /** The identifiers of every issue the tracker read saw, so staffing can find their holders (#387). */
+  readonly observeIssueKeys?: (keys: readonly string[]) => void;
 }
 
 const zero = (): ChurnLines => ({ product: 0, tooling: 0, docs: 0, excluded: 0 });
@@ -181,6 +183,12 @@ export async function measureVelocity(
   } catch (error) {
     outcomes = { state: "unknown", reason: reasonOf(error) };
   }
+  if (!("state" in outcomes))
+    deps.observeIssueKeys?.(
+      [...outcomes.closed, ...outcomes.started.issues, ...(outcomes.history ?? [])].map(
+        (issue) => issue.identifier,
+      ),
+    );
   const found = "state" in outcomes ? [] : trackerMilestones(outcomes);
   const lastMilestone = later(previous, found.at(-1) ?? null);
   const since = lastMilestone?.at ?? lookbackStart;
