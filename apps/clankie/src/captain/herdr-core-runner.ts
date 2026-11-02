@@ -347,6 +347,7 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
       const endpoint = codexControlEndpoint(process);
       if (!sessionId || typeof endpoint !== "string") return undefined;
       const socket = await openCodexSocket(`ws+unix://${endpoint.slice(7)}:/`);
+      if (!socket) return undefined;
       const client = new CodexAppServerClient(socket, () => {}, 5000);
       try {
         await client.initialize(true);

@@ -111,7 +111,7 @@ export function createFleetSeatControl(
     };
   };
   const attach = async (agent: HerdrAgentSnapshot): Promise<SeatControl | undefined> => {
-    const fleet = codexFleet(agent.paneId);
+    const fleet = splitFleetQualified(agent.paneId)?.fleet;
     const available = fleet === undefined ? adapters : remoteAdapters?.(fleet);
     const adapter =
       available?.get(agent.agent) ?? available?.get(agent.session?.source.replace(/^herdr:/u, "") ?? "");
@@ -210,12 +210,17 @@ export function createFleetSeatControl(
             ? ((await runner.openFiles?.(process.pid).catch(() => "")) ?? "")
             : "";
         const session = resolveCodexSessionId(process ? [process] : [], files, expected) ?? expected;
-        if (session && (expected === undefined || session === expected)) {
+        const desktop = agent.paneId.startsWith(`${HERDR_CORE_FLEET}/`);
+        if (
+          session &&
+          (expected === undefined || session === expected) &&
+          (!desktop || (process && typeof codexControlEndpoint(process) === "string"))
+        ) {
           if (!result.deliveryModes.includes("queue")) result.deliveryModes.push("queue");
           if (
             process &&
             codexControlEndpoint(process) !== null &&
-            runner.codexControl &&
+            (runner.codexControl || desktop) &&
             !result.deliveryModes.includes("steer")
           )
             result.deliveryModes.push("steer");
@@ -320,14 +325,16 @@ export function createFleetSeatControl(
       return undefined;
     let sessionId = agent.session?.kind === "id" ? agent.session.value : undefined;
     let home: string | undefined;
+    let selectedPid: number | undefined;
     // Until argv is observed, the pane might point at a different server.
     let endpoint: string | undefined | null = null;
     try {
       const processes = await paneProcesses(agent.paneId);
       const process = codexProcess(processes);
       if (process !== undefined) {
+        selectedPid = process.pid;
         endpoint = codexControlEndpoint(process);
-        const files = (await openFiles?.(process.pid)) ?? "";
+        const files = desktop ? "" : ((await openFiles?.(process.pid)) ?? "");
         const resolved = resolveCodexSessionId(processes, files, sessionId);
         if (sessionId !== undefined && resolved !== undefined && sessionId !== resolved)
           return {
@@ -350,16 +357,17 @@ export function createFleetSeatControl(
         if (typeof endpoint !== "string")
           return { outcome: "undelivered", detail: "Desktop Codex socket is unavailable; nothing was sent." };
         const selectedEndpoint = endpoint;
-        const check = withCurrent(async () => {
+        const check = async () => {
           if (authorized && !(await authorized())) return false;
           const fresh = await runner.resolveTerminal(agent.terminalId);
           const observed = codexProcess(await paneProcesses(agent.paneId));
           return (
             fresh?.paneId === agent.paneId &&
             nativeSessionId(fresh) === sessionId &&
+            observed?.pid === selectedPid &&
             codexControlEndpoint(observed) === selectedEndpoint
           );
-        }, currentOf(authorized));
+        };
         const connect = () => openCodexSocket(`ws+unix://${selectedEndpoint.slice(7)}:/`);
         if (delivery !== "queue") {
           const steered = await codexSocketControl(connect)(sessionId, text, undefined, undefined, check);

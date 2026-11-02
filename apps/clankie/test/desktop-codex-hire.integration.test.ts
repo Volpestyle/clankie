@@ -3,9 +3,11 @@
 // Codex adapter, desktop runner, private-server registry and project proof; the core's socket
 // (which needs the desktop app) and the Codex app-server stand in at their seams. The Mac's
 // Herdr TUI server need not run at all: nothing here reaches a Herdr CLI.
+import { once } from "node:events";
+import { build } from "esbuild";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
@@ -24,6 +26,9 @@ import {
   readDesktopSeat,
 } from "../src/captain/herdr-core-runner.ts";
 import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
+import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
+import { createFleetSeatControl } from "../src/captain/fleet-seat-control.ts";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 import { fleetProcessHelper } from "../src/local-fleet-process.ts";
 import { localProjectProof } from "../src/local-fleet-proof.ts";
@@ -291,3 +296,218 @@ it("a Codex launch names no session on its command line, so only its server's re
   const census = JSON.parse(await herdrCoreCensusFleet(runner, async () => true).run(["agent", "list"]));
   expect(census.result.agents).toEqual([]);
 });
+
+// Real surviving view process and dedicated Unix protocol server; reconstruct
+// service controllers and desktop runner without touching the installed service.
+it("delivers once to a pre-restart desktop Codex hire and settles absent originals from its native transcript", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-restart-"));
+  roots.push(root);
+  const seats = core();
+  const runnerOptions = {
+    seats,
+    launchDirectory: join(root, "launches"),
+    seatDirectory: join(root, "seats"),
+    harnessCommand: async () => [await realpath(process.execPath), codex],
+  };
+  const runner = createHerdrCoreRunner(runnerOptions);
+  const native = await codex0160Protocol(root, { socketPath: join(root, "rpc.sock") });
+  cleanups.push(native.close);
+  const adapter = createCodexSeatAdapter({
+    desktop: desktopCodexViews(runner),
+    server: native.launch,
+    trackerOverrides: async () => [],
+  });
+  const address = await runner.createTab({ cwd: root, harness: "codex", label: "restart proof" });
+  const paneId = `${HERDR_CORE_FLEET}/${address}`;
+  const started = await adapter.start(
+    { harness: "codex", cwd: root, brief: "" },
+    {
+      paneId,
+      name: "restart-proof",
+      run: async () => {
+        throw new Error("No terminal fallback");
+      },
+      start: async (kind, argv) => {
+        native.startView();
+        await runner.startAgent({ name: "restart-proof", kind, paneId: address, args: argv });
+      },
+    },
+  );
+  expect(started.outcome).toBe("started");
+  const routed = (desktop: ReturnType<typeof createHerdrCoreRunner>) =>
+    routeHerdrFleets(
+      {
+        get: async () => {
+          throw new Error("No legacy pane");
+        },
+        resolveTerminal: async () => undefined,
+        wait: async () => {
+          throw new Error("No terminal fallback");
+        },
+      },
+      new Map([[HERDR_CORE_FLEET, desktop]]),
+    );
+  const path = join(root, "watch.json");
+  const before = new HerdrWatchStore(path, {
+    runner: routed(runner),
+    seatAdapters: [adapter],
+  });
+  cleanups.push(async () => {
+    before.close();
+    if (started.outcome === "started") await started.control.close();
+  });
+  expect(await before.deliverToSeat(paneId, "Before restart")).toMatchObject({ outcome: "delivered" });
+  before.close();
+  const coldRunner = routed(createHerdrCoreRunner(runnerOptions));
+  const after = new HerdrWatchStore(path, {
+    runner: coldRunner,
+    seatAdapters: [],
+    remoteSeatAdapters: () => [],
+    remoteCodexQueue: async () => {
+      throw new Error("Local desktop must never use SSH queue");
+    },
+  });
+  cleanups.push(async () => after.close());
+  expect(await after.deliverToSeat(paneId, "Steer after restart")).toMatchObject({
+    outcome: "delivered",
+    state: "steered",
+  });
+  expect(native.requests.filter(({ method }) => method === "turn/steer")).toHaveLength(1);
+  native.finish("completed", "Finished after restart");
+  const options = { stableReceiptKey: "post-restart-original", delivery: "queue" as const };
+  expect(await after.deliverToSeat(paneId, "After restart", undefined, options)).toMatchObject({
+    outcome: "delivered",
+    state: "queued",
+    messageId: expect.stringMatching(/^codex-input:/u),
+  });
+  expect(await after.deliverToSeat(paneId, "After restart", undefined, options)).toMatchObject({
+    outcome: "delivered",
+  });
+  expect(native.requests.filter(({ method }) => method === "thread/queue/add")).toHaveLength(1);
+  expect(
+    (await coldRunner.transcript!((await coldRunner.resolveTerminal(paneId))!))?.entries.some(
+      (entry) => entry.type === "message" && entry.text === "After restart",
+    ),
+  ).toBe(true);
+
+  // Kill and replace an actual disposable service process as well: the view
+  // PID and native server survive. Its durable receipt must survive too.
+  await writeFile(join(root, "terminals.json"), JSON.stringify([...seats.terminals.values()]));
+  const entry = join(root, "delivery-service.mjs");
+  await build({
+    entryPoints: [fileURLToPath(new URL("./fixtures/desktop-codex-delivery-service.ts", import.meta.url))],
+    outfile: entry,
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    banner: {
+      js: "import { createRequire as fixtureRequire } from 'node:module'; const require = fixtureRequire(import.meta.url);",
+    },
+  });
+  const startService = async () => {
+    const child = spawn(process.execPath, [entry, root], {
+      env: {
+        PATH: process.env.PATH,
+        HOME: root,
+        USERPROFILE: root,
+        NODE_ENV: "test",
+        VITEST: "true",
+        XDG_CONFIG_HOME: join(root, "config"),
+        XDG_STATE_HOME: join(root, "state"),
+        XDG_DATA_HOME: join(root, "data"),
+        XDG_CACHE_HOME: join(root, "cache"),
+      },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+    });
+    children.push(child);
+    let stderr = "";
+    child.stderr!.on("data", (bytes) => {
+      stderr += String(bytes);
+    });
+    const ready = await Promise.race([
+      once(child, "message"),
+      once(child, "exit").then(() => {
+        throw new Error(stderr);
+      }),
+    ]);
+    expect(ready[0]).toEqual({ ready: true });
+    return child;
+  };
+  const send = async (
+    child: ChildProcess,
+    text = "Across process restart",
+    receipt = "process-restart-original",
+  ) => {
+    const result = once(child, "message");
+    child.send({ seatId: paneId, text, receipt });
+    return (await result)[0];
+  };
+  const firstService = await startService();
+  expect(await send(firstService)).toMatchObject({ result: { outcome: "delivered" } });
+  const exited = once(firstService, "exit");
+  firstService.kill("SIGKILL");
+  await exited;
+  const secondService = await startService();
+  expect(await send(secondService)).toMatchObject({ result: { outcome: "delivered" } });
+  expect(
+    await send(secondService, "New message after process restart", "new-process-original"),
+  ).toMatchObject({ result: { outcome: "delivered" } });
+  expect(
+    await send(secondService, "New message after process restart", "new-process-original"),
+  ).toMatchObject({ result: { outcome: "delivered" } });
+  const processStopped = once(secondService, "exit");
+  secondService.kill("SIGTERM");
+  await processStopped;
+
+  // Same native boundary, with an elapsed settlement clock. A rejected write is
+  // uncertain until the exact transcript is read; never replay that original.
+  let now = Date.now();
+  const control = createFleetSeatControl(
+    coldRunner,
+    new Map(),
+    undefined,
+    undefined,
+    undefined,
+    join(root, "uncertain.json"),
+    undefined,
+    undefined,
+    { now: () => now },
+  );
+  native.failNextQueue("absent");
+  const absentOptions = { stableReceiptKey: "absent-original" };
+  expect(await control.deliverToSeat(paneId, "Absent original", undefined, absentOptions)).toMatchObject({
+    outcome: "unconfirmed",
+  });
+  expect(await control.deliverToSeat(paneId, "Later message")).toMatchObject({ outcome: "undelivered" });
+  now += 5 * 60_000;
+  expect(await control.deliverToSeat(paneId, "Later message")).toMatchObject({ outcome: "delivered" });
+  await expect(control.deliverToSeat(paneId, "Absent original", undefined, absentOptions)).rejects.toThrow(
+    "reconcile its original receipt",
+  );
+  native.failNextQueue("arrived");
+  expect(await control.deliverToSeat(paneId, "Arrived without ack")).toMatchObject({
+    outcome: "unconfirmed",
+  });
+  expect(await control.deliverToSeat(paneId, "Arrived without ack")).toMatchObject({
+    outcome: "delivered",
+    deliveryStage: "consumed",
+  });
+  const queuedText = native.requests
+    .filter(({ method }) => method === "thread/queue/add")
+    .map(({ params }) => (params.input as { text: string }[])[0]!.text);
+  expect(queuedText).toEqual([
+    "After restart",
+    "Across process restart",
+    "New message after process restart",
+    "Absent original",
+    "Later message",
+    "Arrived without ack",
+  ]);
+  // A replaced terminal PID cannot supply the old hire's socket or transcript.
+  const terminal = seats.terminals.get(address)!;
+  seats.terminals.set(address, { ...terminal, pid: process.pid });
+  expect(await control.deliverToSeat(paneId, "Must not reach a replacement")).toMatchObject({
+    outcome: "undelivered",
+  });
+  expect(native.requests.filter(({ method }) => method === "thread/queue/add")).toHaveLength(6);
+}, 30_000);

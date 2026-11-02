@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { appendFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -59,6 +60,7 @@ export async function codex0160Protocol(
   let closed = false;
   let silentInterrupt = false;
   let omitUserReceipt = false;
+  let queueFailure: "absent" | "arrived" | undefined;
   const subscribed = new Set<WebSocket>();
   let nextRead: { entered: () => void; release: Promise<void> } | undefined;
   let nextMutationReply: { entered: () => void; release: Promise<void> } | undefined;
@@ -164,7 +166,7 @@ export async function codex0160Protocol(
               request.params.threadId !== threadId ||
               request.params.limit !== 1 ||
               request.params.sortDirection !== "desc" ||
-              request.params.itemsView !== "full"
+              !["full", "notLoaded"].includes(String(request.params.itemsView))
             )
               throw new Error("Unexpected latest-turn page contract");
             result = { data: turns.slice(-1), nextCursor: null, backwardsCursor: null };
@@ -187,6 +189,39 @@ export async function codex0160Protocol(
             };
             subscribed.add(socket);
             break;
+          case "thread/queue/add": {
+            const failure = queueFailure;
+            queueFailure = undefined;
+            if (
+              request.params.threadId !== threadId ||
+              typeof request.params.clientUserMessageId !== "string"
+            )
+              throw new Error("Wrong queue identity");
+            if (failure !== "absent") {
+              appendFileSync(
+                rolloutPath,
+                JSON.stringify({
+                  timestamp: new Date().toISOString(),
+                  type: "response_item",
+                  payload: {
+                    type: "message",
+                    id: randomUUID(),
+                    role: "user",
+                    content: (request.params.input as { text: string }[]).map((item) => ({
+                      type: "input_text",
+                      text: item.text,
+                    })),
+                    internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] },
+                  },
+                }) + "\n",
+              );
+            }
+            if (failure) throw new Error("Injected lost queue confirmation");
+            result = {
+              queuedSubmission: { id: randomUUID(), clientUserMessageId: request.params.clientUserMessageId },
+            };
+            break;
+          }
           case "turn/start": {
             if (active()) throw new Error("A second turn started before native idle");
             if (turns.length === 0 && options.historicalQuestion)
@@ -281,6 +316,9 @@ export async function codex0160Protocol(
     turns,
     notify,
     close,
+    failNextQueue: (fate: "absent" | "arrived") => {
+      queueFailure = fate;
+    },
     startView: () => {
       loaded = true;
     },

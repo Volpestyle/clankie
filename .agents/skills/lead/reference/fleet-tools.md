@@ -364,6 +364,12 @@ resend through the service as a fallback. Answer another lead's message with its
 plain `message_seat` to its sender. Only a reply the sender's lead channel
 acknowledges marks it answered.
 
+Desktop Codex hires (`herdr-core/t…`) remain messageable after a service restart:
+Clankie reconnects to the surviving terminal's observed dedicated socket. Its
+service-owned seat record and exact native transcript establish the recipient;
+no rehire or terminal typing is needed. An unavailable socket proves nothing was
+sent; an uncertain native write still keeps its original receipt fence.
+
 ## Unresolved Claude channel deliveries
 
 A bridge ACK proves transport delivery, not model consumption. A working
