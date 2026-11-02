@@ -2,7 +2,7 @@
 
 Status: Proposed, 2026-11-02, from James's direction the same day ("Clankie will
 have a setting for how it does desktop use, 'raw-dog' or 'vm'", and "private
-browser is ok as long as we have a way to securely store and pass credentials"). Amended the same day: `host` (background) is the default, full
+browser is ok as long as we have a way to securely store and pass credentials"). Amended the same day: agents get only their own private browser by default, full
 screen control is its own `screen` mode, the VM is a sandbox option, and a lead
 may carry its own mode.
 Tracks [#229](https://github.com/Volpestyle/clankie/issues/229). Narrows
@@ -45,9 +45,12 @@ There are three honest places for that work:
   are its windows. The cost is disk (a guest image is tens of gigabytes), RAM
   while it runs, and sign-ins made again inside the guest.
 
-Each fits a different owner. Most owners want the second: agents work in their
-real apps in the background, through the accessibility tree, without taking the
-pointer. Some want an agent to drive their screen outright. Some want a
+Each fits a different owner, and none of them is the starting point. By
+default an agent gets only its own private browser, in a Herdr browser pane
+where the workspace has one (ADR 0344), with no reach into the owner's
+desktop, apps or signed-in browsers. On top of that, some owners want agents in
+their real apps in the background, through the accessibility tree, without
+taking the pointer. Some want an agent to drive their screen outright. Some want a
 sandbox, so an agent's clicks land in a guest that can be thrown away. And a
 connected lead such as Grok Bot may bring a VM of its own. James's direction
 (2026-11-02): the VM is a sandbox option, not the way to keep agents off the
@@ -59,12 +62,12 @@ owner's screen, and every one of these should be a choice the owner makes.
 `computer.desktopMode` = `host` | `screen` | `vm` | `none`, with an
 override per lead.**
 
-| Mode     | Where the work happens                                                                                                                | Default                                           |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `host`   | The owner's own Mac, in the background only: accessibility actions and background computer use, never the pointer or the front window | Yes, where the machine's screen ceiling allows it |
-| `screen` | The owner's own screen, in full: the agent may front windows, move the pointer and type, as the owner would                           | Opt-in, the owner says so for this machine        |
-| `vm`     | A macOS guest on this Mac, booted with the Virtualization framework, with agent-desktop inside it: a sandbox                          | Opt-in, needs the disk room                       |
-| `none`   | No desktop. Web work runs in a browser pane or a private headless browser; a hire that needs a native app is refused                  | Where the screen ceiling is off                   |
+| Mode     | Where the work happens                                                                                                                                                    | Default                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `none`   | No desktop. The agent gets only its own private browser: a Herdr browser pane where there is one, otherwise a headless browser. A hire that needs a native app is refused | Yes, on every install                         |
+| `host`   | The owner's own Mac, in the background only: accessibility actions and background computer use, never the pointer or the front window                                     | Opt-in, needs the machine's screen ceiling on |
+| `screen` | The owner's own screen, in full: the agent may front windows, move the pointer and type, as the owner would                                                               | Opt-in, needs the machine's screen ceiling on |
+| `vm`     | A macOS guest on this Mac, booted with the Virtualization framework, with agent-desktop inside it: a sandbox                                                              | Opt-in, needs the disk room                   |
 
 **Per lead.** `computer.desktopMode` is the machine's default. A connected lead
 can carry its own mode for the hires it leads, set by the owner: Grok Bot's
@@ -173,12 +176,13 @@ secret from Clankie's vault; the two vaults stay separate.
 
 ## Consequences
 
-- The screen takeover of 2026-11-01 has nowhere to happen by default: the
-  default `host` mode is background-only by rule and by brief, and full screen
-  control happens only in `screen` mode, which the owner turns on.
-- James's Mac stays on `host`. Its `clankie-desktop` guest is there for work he
-  wants sandboxed, chosen per lead or per task, with any sign-in made inside it
-  through the vault card (and a 2FA code through the same card).
+- The screen takeover of 2026-11-01 has nowhere to happen by default: a new
+  install gives agents only their own private browser. Background control
+  (`host`), full control (`screen`) and a sandbox (`vm`) each start only when
+  the owner turns them on, for a machine or for one lead.
+- James picks his Mac's mode. Its `clankie-desktop` guest is ready for a lead
+  or task he wants sandboxed, with any sign-in made inside it through the vault
+  card (and a 2FA code through the same card).
 - New code: the `computer.desktopMode` setting and CLI, hire routing and the
   `desktop` hire flag, the guest manager over Tart or Lume (whichever the
   owner's Mac already has; Tart first otherwise), the vault card on the app,
