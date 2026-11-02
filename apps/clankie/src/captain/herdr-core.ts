@@ -254,10 +254,16 @@ export class HerdrCoreError extends Error {
 export const herdrCoreCall = (socketPath: string, method: string, params: Record<string, unknown>) =>
   call(socketPath, method, params);
 
+/** Core calls still waiting on an answer, by method, so a timeout can say what else was queued on the core. */
+const inFlight = new Map<number, string>();
+let nextCallId = 0;
+
 /** One call on a fresh connection: `hello` to check the generation and the method, then the call. */
 async function call(socketPath: string, method: string, params: Record<string, unknown>): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
+    const callId = nextCallId++;
+    inFlight.set(callId, method);
     // How far the call got, so a timeout says whether the socket, the handshake or the method stalled.
     let stage: "connecting" | "hello" | "method" = "connecting";
     // When the event loop last ran a tick during this call: a late timer with no lag means herdr-core
@@ -270,6 +276,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
     const finish = (error: Error | undefined, result?: unknown) => {
       clearTimeout(timer);
       clearInterval(ticker);
+      inFlight.delete(callId);
       connection.destroy();
       if (error === undefined) resolve(result);
       else reject(error);
@@ -284,6 +291,13 @@ async function call(socketPath: string, method: string, params: Record<string, u
           elapsedMs: now - started,
           eventLoopGapMs: now - lastTick,
           bufferedBytes: buffered.length,
+          ...(typeof params.terminal === "string" ? { terminal: params.terminal.slice(0, 64) } : {}),
+          ...(typeof params.lines === "number" ? { lines: params.lines } : {}),
+          // Other core calls open at the same moment: many means the core may answer one at a time.
+          concurrent: [...inFlight]
+            .filter(([id]) => id !== callId)
+            .map(([, other]) => other)
+            .slice(0, 16),
         },
         "A herdr-core call timed out",
       );
