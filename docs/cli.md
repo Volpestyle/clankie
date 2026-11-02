@@ -9939,7 +9939,11 @@ between panes. They do not write tracker status or ownership, but they are what
 "in progress" means (#318): work reads (`clankie work list`, `list_issues`, the
 app's views) and `clankie metrics --issues` count an open issue as `in_progress`
 only while a live agent (not done, stopped or gone) holds it this way. Its
-`heldBy` names those agents. An issue the tracker calls in progress with no live
+`heldBy` names those agents. A hire with no stated deliverable holds the one issue
+its brief names: an issue URL, `owner/repo#N`, or "Closes #N" in a checkout whose
+origin is on GitHub. Work reads also count an open draft pull request that closes
+an issue as holding it, with the pull request's URL in `heldBy`; `clankie metrics
+--issues` counts only agents. An issue the tracker calls in progress with no live
 holder reads `todo`, with `trackerStatus` keeping the tracker's own word. The fleet also
 projects local Codex goals from its native goal store and Clankie's conversation
 goals. Native goal state remains separate from turn activity.

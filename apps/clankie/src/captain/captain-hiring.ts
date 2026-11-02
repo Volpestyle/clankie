@@ -8,7 +8,8 @@ import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
-import { readSeatCommitBaseline } from "./seat-telemetry.ts";
+import { readGithubOriginSlug, readSeatCommitBaseline } from "./seat-telemetry.ts";
+import { briefDeliverable } from "../work-item-holders.ts";
 import { type OperatorFleetSeat } from "@clankie/protocol";
 import { SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { realpath } from "node:fs/promises";
@@ -379,6 +380,15 @@ export function createHiring(ctx: HiringContext) {
     // arbitrary recent commit from its cwd.
     const commitBaseline =
       request.fleet === undefined ? await readSeatCommitBaseline(request.workingDirectory) : undefined;
+    // The issue this hire holds (#318): its stated deliverable, else the one issue its brief names.
+    const deliverable =
+      request.deliverable ??
+      (leadBrief === undefined
+        ? undefined
+        : briefDeliverable(
+            leadBrief,
+            request.fleet === undefined ? await readGithubOriginSlug(request.workingDirectory) : undefined,
+          ));
     const result = await herdrWatches.spawnSeat(
       request,
       undefined,
@@ -402,7 +412,7 @@ export function createHiring(ctx: HiringContext) {
         seatEfficiency.assign(seat.occupantId, {
           owner: authority.owner,
           ...(commitBaseline === undefined ? {} : { commitBaseline }),
-          ...(request.deliverable === undefined ? {} : { deliverable: request.deliverable }),
+          ...(deliverable === undefined ? {} : { deliverable }),
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.effort === undefined ? {} : { effort: request.effort }),
         });

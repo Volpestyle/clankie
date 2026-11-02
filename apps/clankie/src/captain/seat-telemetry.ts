@@ -225,6 +225,18 @@ const gitEnvironment = () => {
 const git = (cwd: string, args: string[]) =>
   execFileAsync("git", ["-C", cwd, ...args], { timeout: 1500, maxBuffer: 16_384, env: gitEnvironment() });
 
+/** The checkout's GitHub `owner/repo` from its `origin`, so "Closes #N" in a brief names one issue. */
+export async function readGithubOriginSlug(cwd: string): Promise<string | undefined> {
+  if (!isAbsolute(cwd)) return undefined;
+  try {
+    const url = (await git(cwd, ["remote", "get-url", "origin"])).stdout.trim();
+    return /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/u.exec(url)?.[1];
+  } catch {
+    // allow-swallowed-rejection -- no GitHub origin leaves a bare "#N" unattributed; nothing is guessed.
+    return undefined;
+  }
+}
+
 /** Capture before native work begins; a primary checkout cannot own this signal. */
 export async function readSeatCommitBaseline(cwd: string): Promise<SeatCommitBaseline | undefined> {
   if (!isAbsolute(cwd)) return undefined;
