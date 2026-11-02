@@ -85,7 +85,11 @@ it("refreshes connected fleets and starts their watches with the default workspa
   try {
     await vi.waitFor(() =>
       expect(read).toHaveBeenCalledWith(
-        expect.objectContaining({ localAvailable: false, fleets: [expect.objectContaining({ id: "pc" })] }),
+        expect.objectContaining({
+          localAvailable: false,
+          // The desktop app's own fleet (herdr-core) is always in the census beside connected ones.
+          fleets: expect.arrayContaining([expect.objectContaining({ id: "pc" })]),
+        }),
       ),
     );
     expect(watch).toHaveBeenCalled();
