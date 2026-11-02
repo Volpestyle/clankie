@@ -250,7 +250,17 @@ it("update hold, holds and release place, list and end a timed hold through the 
   };
   await expect(run(["hold", "--holder", "Bram", "--reason", "live test"])).rejects.toThrow("--minutes");
   const id = randomUUID();
-  const placed = await run(["hold", "--id", id, "--holder", "Bram", "--reason", "live test", "--minutes", "30"]);
+  const placed = await run([
+    "hold",
+    "--id",
+    id,
+    "--holder",
+    "Bram",
+    "--reason",
+    "live test",
+    "--minutes",
+    "30",
+  ]);
   expect(placed.code).toBe(0);
   const hold = (await f.holds.list()).find((entry) => entry.id === id)!;
   expect(hold).toMatchObject({ holder: "Bram", reason: "live test" });
