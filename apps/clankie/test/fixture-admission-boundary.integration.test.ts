@@ -141,7 +141,10 @@ it("separate callback listener has no pane/MCP/catalog or dispatch fallback", as
 it.skipIf(!["darwin", "linux"].includes(process.platform))(
   "owned artifact bootstrap pins actual child lifetime; denied verification never reads domain data",
   async () => {
-    const root = await mkdtemp(join(tmpdir(), "fixture-owned-bootstrap-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "fixture-owned-bootstrap-")));
+    // pnpm hardlinks dependency inputs on Linux; bootstrap intentionally refuses
+    // multiply-linked files. Supply private, single-link build inputs on both platforms.
+    const copy = await privateRepoCopy(root);
     let callbacks = 0,
       callbackPid: number | undefined;
     const callback = serve({
@@ -157,7 +160,7 @@ it.skipIf(!["darwin", "linux"].includes(process.platform))(
     });
     let fixture;
     try {
-      const bootstrap = await createFixtureBootstrap(repoRoot, root);
+      const bootstrap = await createFixtureBootstrap(copy, join(root, "scratch"));
       fixture = await bootstrap(await address(callback), Date.now() + 60_000);
       expect(await fixture.assertCurrent()).toBe(true);
       expect(fixture.descriptor.process.pid).toBe(fixture.child.pid);

@@ -69,7 +69,7 @@ it("reports harness registration, generated config source, and live membership s
       expect(report.linkedSession.panes[0]).toMatchObject({
         paneId: "w1:p1",
         status: "missing",
-        remediation: expect.stringContaining("--plugin-dir"),
+        remediation: expect.stringMatching(/--plugin-dir.*--channels plugin:clankie-worker@inline/u),
       });
     const outside = await inspectHarnessBridges({ HOME: home }, execute, probe);
     expect(outside.localFleet.membership).toBe(
