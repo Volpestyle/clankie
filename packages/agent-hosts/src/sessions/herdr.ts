@@ -315,6 +315,12 @@ export function createHerdrSessionSource(
           status: "refused",
           detail: `It's ${refusal.status}, not finished. Close it once it's idle, or message it to wrap up first.`,
         };
+      if (refusal.reason !== "unlanded_work")
+        return {
+          id,
+          status: "refused",
+          detail: `${refusal.reason}: ${refusal.commit ?? "merge unknown"}${refusal.runUrl ? ` ${refusal.runUrl}` : ""}; failing jobs: ${refusal.failingJobs.join(", ") || "none observed"}. ${refusal.detail ?? "Complete main checkpoint proof or file and link its red-run bug before close-out."}`,
+        };
       const where = refusal.worktrees
         .map((worktree) => {
           const details = [

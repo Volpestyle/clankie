@@ -54,6 +54,10 @@ import {
   WorkInitDecisionRequired,
   WorkInitInvalid,
   type CommandRunner,
+  mainCheckpoint,
+  MainCheckpointCache,
+  MainCheckpointRefused,
+  type MainCheckpointHold,
   githubRestApi,
   ghCliApi,
   type GhRunner,
@@ -715,10 +719,112 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  let checkpointConnection:
+    | { binding: string; api: NonNullable<TrackerDeps["github"]>; cache: MainCheckpointCache }
+    | undefined;
+  const checkpointAccess = (token: string | undefined) => {
+    const binding = token ? createHash("sha256").update(token).digest("hex") : "local-gh";
+    if (checkpointConnection?.binding === binding) return checkpointConnection;
+    checkpointConnection = {
+      binding,
+      api: token
+        ? githubRestApi({
+            token,
+            ...(options.githubApiBase ? { baseUrl: options.githubApiBase } : {}),
+            ...(options.fetch ? { fetch: options.fetch } : {}),
+          })
+        : ghCliApi(
+            options.hosted
+              ? async () => {
+                  throw new Error("GitHub connection unavailable");
+                }
+              : (options.gh ?? defaultGh(options.stateDirectory)),
+          ),
+      cache: new MainCheckpointCache(() => clock().getTime()),
+    };
+    return checkpointConnection;
+  };
+  const checkpointUnknown = (detail: string): MainCheckpointHold => ({
+    reason: "main_unknown",
+    failingJobs: [],
+    detail,
+  });
+  const checkpointForCheckout = async (
+    path: string,
+    gitRun: CommandRunner = run,
+    startHead?: string,
+  ): Promise<MainCheckpointHold | undefined> => {
+    try {
+      const remote = (await gitRun("git", ["remote", "get-url", "origin"], path)).trim();
+      const repo =
+        /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
+          remote,
+        )?.[1];
+      if (!repo) return undefined; // Another forge has no GitHub main checkpoint.
+      const head = (await gitRun("git", ["rev-parse", "HEAD"], path)).trim();
+      const base =
+        startHead ??
+        (
+          await gitRun("git", ["merge-base", "--fork-point", "refs/remotes/origin/main", "HEAD"], path).catch(
+            async () => {
+              // A linked worktree's first HEAD reflog entry retains its creation base
+              // when origin's reflog no longer has the fork point.
+              const starts = (await gitRun("git", ["reflog", "show", "--format=%H", "HEAD"], path))
+                .trim()
+                .split("\n");
+              const first = starts.at(-1);
+              if (!first) throw new Error("Worker start unavailable");
+              return first;
+            },
+          )
+        ).trim();
+      const own = (await gitRun("git", ["rev-list", "--count", `${base}..${head}`], path)).trim();
+      if (own === "0") return undefined;
+      if (!/^\d+$/u.test(own)) throw new Error("Worker commit observation unavailable");
+      const access = checkpointAccess(await options.githubToken?.());
+      return await mainCheckpoint(access.api, repo, head, { ignoreUnlanded: true, cache: access.cache });
+    } catch {
+      return checkpointUnknown("Worker repository or GitHub checkpoint unavailable");
+    }
+  };
+  const checkIssueCheckpoint = async (issue: Readonly<Record<string, unknown>>) => {
+    const links = issue.links as { url: string }[] | undefined;
+    const references = (links ?? []).flatMap((link) => {
+      const match =
+        /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(commit|pull)\/([a-f0-9]+)(?:[/?#].*)?$/u.exec(link.url);
+      return match ? [{ repo: match[1]!, kind: match[2]!, value: match[3]! }] : [];
+    });
+    if (!references.length) {
+      throw new MainCheckpointRefused(
+        checkpointUnknown("Attach an immutable landed commit or pull request before Done"),
+      );
+    }
+    for (const reference of references) {
+      try {
+        const { api, cache } = checkpointAccess(await options.githubToken?.());
+        let head = reference.value;
+        if (reference.kind === "pull") {
+          const pull = (await api.request("GET", `repos/${reference.repo}/pulls/${reference.value}`)) as {
+            head: { sha: string };
+            merged: boolean;
+          };
+          if (!pull.merged) throw new MainCheckpointRefused(checkpointUnknown("Pull request has not merged"));
+          head = pull.head.sha;
+        }
+        const held = await mainCheckpoint(api, reference.repo, head, { cache });
+        if (held) throw new MainCheckpointRefused(held);
+      } catch (error) {
+        if (error instanceof MainCheckpointRefused) throw error;
+        throw new MainCheckpointRefused(checkpointUnknown("GitHub checkpoint observation unavailable"));
+      }
+    }
+  };
+
   const openBuiltIn =
     options.builtInTracker ??
     ((assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void) =>
       createLocalTracker({
+        checkMainCheckpoint: checkIssueCheckpoint,
         directory: options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
         ...(options.projects === undefined
           ? {}
@@ -792,10 +898,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
+    const checkpoint = checkpointAccess(token);
     const builtIn = await builtInBinding(path, projectId);
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
     return {
       run,
+      checkpointCache: checkpoint.cache,
       // A delegated call uses the connected account when there is one, else the owner's gh login.
       ...(options.hosted === true || (!local && token !== undefined)
         ? {}
@@ -1610,6 +1718,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
 
   return {
+    mainCheckpoint: checkpointForCheckout,
+    checkIssueCheckpoint,
     handleOwnerWrite,
     /**
      * Resolve existing local identities without enrolling a repo or opening a tracker backend.

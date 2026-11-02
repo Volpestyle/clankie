@@ -312,6 +312,15 @@ export const HerdrCoreAgentSchema = z
 export type HerdrCoreAgent = z.infer<typeof HerdrCoreAgentSchema>;
 
 const CloseSeatRefusalSchema = z.discriminatedUnion("reason", [
+  z
+    .object({
+      reason: z.enum(["main_red", "main_pending", "main_unknown"]),
+      commit: z.string().optional(),
+      runUrl: z.string().optional(),
+      failingJobs: z.array(z.string()),
+      detail: z.string().optional(),
+    })
+    .strict(),
   /** Its worktree holds unlanded work and no reason was given. */
   z
     .object({

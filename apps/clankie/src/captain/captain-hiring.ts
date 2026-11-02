@@ -442,5 +442,8 @@ export function createHiring(ctx: HiringContext) {
     return { ...result, seat: adopted, ...(roleAssignment ? { roleAssignment } : {}) };
   };
 
-  return { hireSeat };
+  return {
+    hireSeat,
+    hireWorktreeBase: (fleet: string | undefined, path: string) => hireWorktrees.baseFor(fleet, path),
+  };
 }

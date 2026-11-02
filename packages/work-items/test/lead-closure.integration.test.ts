@@ -1,3 +1,5 @@
+import { checkpointFixture } from "./fixtures/main-checkpoint.ts";
+import { MainCheckpointRefused } from "../src/main-checkpoint.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,13 +34,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(checkMainCheckpoint: () => Promise<void> = async () => undefined) {
   const root = await mkdtemp(join(tmpdir(), "tracker-lead-closure-"));
   roots.push(root);
   const directory = join(root, "tracker");
   const evidence = EvidenceStore.local(join(root, "evidence"));
   const options = {
     directory,
+    checkMainCheckpoint,
     async validateEvidence(_issueKey: string, references: readonly EvidenceReference[]) {
       for (const reference of references) {
         const record = await evidence.record(reference.recordId);
@@ -150,6 +153,7 @@ async function fixture() {
     check,
     ready,
     reopenStore: () => createLocalTracker(options),
+    withoutCheckpoint: () => createLocalTracker({ directory, validateEvidence: options.validateEvidence }),
     storeBytes: () => readFile(join(directory, "tracker.json"), "utf8"),
     revoke: () => {
       admitted = false;
@@ -324,4 +328,30 @@ it("rejects late fixture revocation before atomic publication without committing
   expect(await f.storeBytes()).toBe(before);
   expect(await f.events()).toEqual(priorEvents);
   expect(await f.reopenStore().call("get_issue", { id: f.issue.id })).not.toHaveProperty("leadCompletion");
+});
+
+it("holds lead Done for a red, unfiled post-merge checkpoint (#280 repro)", async () => {
+  const checkpoint = await checkpointFixture();
+  try {
+    const f = await fixture(async () => {
+      const held = await checkpoint.check();
+      if (held) throw new MainCheckpointRefused(held);
+    });
+    await f.ready();
+    await expect(f.close()).rejects.toMatchObject({ reason: "main_red" });
+    expect(await f.read()).not.toHaveProperty("leadCompletion");
+    checkpoint.link("sha");
+    expect(await f.close()).toHaveProperty("leadCompletion");
+  } finally {
+    await checkpoint.close();
+  }
+});
+
+it("lead Done fails closed when the host has no checkpoint reader", async () => {
+  const f = await fixture();
+  await f.ready();
+  await expect(
+    f.withoutCheckpoint().call("save_issue", { id: f.issue.id, state: "Done" }, f.authority),
+  ).rejects.toMatchObject({ reason: "main_unknown" });
+  expect(await f.read()).not.toHaveProperty("leadCompletion");
 });

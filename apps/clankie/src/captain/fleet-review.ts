@@ -139,6 +139,9 @@ export function fleetReviewContext(
 
 /** What the lead does about each auto-tidy blocker; every refusal stays the close's own. */
 const HELD_ACTIONS: Record<string, string> = {
+  main_red: "file and link a repository bug naming the merge SHA or red run URL, then retry close-out",
+  main_pending: "wait for a completed main checkpoint or a covering green descendant",
+  main_unknown: "restore GitHub access and obtain positive checkpoint evidence before close-out",
   reports_unread: "close_worker_pane, or acknowledge_worker_reports so auto-tidy closes it",
   results_not_kept: "ask it for its final report, or close_worker_pane with a reportPath",
   unlanded_work:
@@ -162,6 +165,7 @@ export function autoTidyHeldReview(rows: readonly AutoTidyHeld[]): { text: strin
     harness: row.harness,
     idleSince: row.idleSince,
     blocker: row.blocker,
+    ...(row.checkpoint ? { checkpoint: row.checkpoint } : {}),
     ...(row.unreadReports === undefined ? {} : { unreadReports: row.unreadReports }),
     next: HELD_ACTIONS[row.blocker] ?? `close_worker_pane refused (${row.blocker}); inspect before retrying`,
   }));

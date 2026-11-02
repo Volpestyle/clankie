@@ -165,7 +165,21 @@ the boundary that could break; where a project wants independent review of every
 landing, give it a standing reviewer rather than relaying reviews yourself
 ([delivery](reference/delivery.md)). Independent
 bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
-silently (`tidy`).
+silently (`tidy`). Before closing a merged job's pane or setting Done, obtain
+main's checkpoint for the first main commit containing its landed HEAD. All
+three post-merge jobs (`landing`, `checkpoint`, `mac`) must complete green, or
+file and link a repository issue naming the red run URL or merge SHA (open or
+closed issues count). A green descendant main run covers a cancelled merge run;
+cancelled, running and unavailable observations themselves never pass. Keep
+working other tasks while close-out holds. Built-in lead Done needs the landed
+commit or merged pull-request link on the issue; today's workspace HEAD is not
+the job's landing proof. `main_red` names the commit, run and failing jobs in
+the fleet round; `main_pending` and `main_unknown` keep incomplete proof open.
+A repository with no checkpoint jobs in its 20 recent main push runs has none
+to wait for. Workers that authored no commits beyond their recorded hire/base
+or Git fork point have no merge to account for. Shared connection-scoped CI
+and bug caches last three minutes; a newly filed bug is observed after expiry.
+Rate limits and unreadable configured checkpoints keep close-out held.
 
 ## Never wait on CI
 

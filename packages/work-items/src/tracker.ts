@@ -1,3 +1,4 @@
+import type { MainCheckpointCache } from "./main-checkpoint.ts";
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import { join } from "node:path";
 import type { WorkBackend, WorkWriteCallbacks } from "./backend.ts";
@@ -35,6 +36,7 @@ export interface TrackerDeps extends WorkWriteCallbacks {
   readonly gh?: GhRunner;
   /** A GitHub account connection (ADR 0196); preferred over `gh` when present. */
   readonly github?: GithubApi;
+  readonly checkpointCache?: MainCheckpointCache;
   readonly linear?: LinearToolCall;
   readonly clock?: () => Date;
   readonly scopedWrites?: boolean;
@@ -200,12 +202,22 @@ function nativeBackendFor(root: string, convention: WorkConvention, deps: Tracke
     case "github":
       if (convention.github === undefined) throw new Error("A github convention names its repo");
       if (deps.github !== undefined)
-        return createGithubBackend({ repo: convention.github.repo, api: deps.github, ...writes });
+        return createGithubBackend({
+          repo: convention.github.repo,
+          api: deps.github,
+          ...(deps.checkpointCache ? { checkpointCache: deps.checkpointCache } : {}),
+          ...writes,
+        });
       if (deps.gh === undefined)
         throw new BackendUnavailableError(
           `This repo tracks work in GitHub issues (${convention.github.repo}); connect GitHub to Clankie to use it`,
         );
-      return createGithubBackend({ repo: convention.github.repo, gh: deps.gh, ...writes });
+      return createGithubBackend({
+        repo: convention.github.repo,
+        gh: deps.gh,
+        ...(deps.checkpointCache ? { checkpointCache: deps.checkpointCache } : {}),
+        ...writes,
+      });
     case "builtin": {
       const tools = builtInToolsFor(convention, deps);
       return createLinearBackend({

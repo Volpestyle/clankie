@@ -5212,7 +5212,7 @@ standing reviewer (`review.seat`), and no one kept it with
 `keep_worker_pane` (`clankie agents keep`); a keep whose pane and session are
 both gone from their fleet's listing is dropped by the same five-minute round,
 and `unkeep` releases a gone pane's keep by its old pane id. The close runs `close_worker_pane`'s
-guards: no unsent draft, still idle, and positive work proof. A lifecycle counter
+guards: no unsent draft, still idle, positive work proof, and the merged job’s main checkpoint (see below). A lifecycle counter
 change restarts the full idle window when observed, even for a turn between
 sweeps. Reports (including acknowledged ones) and recorded progress extend the
 window too, even on older Herdr builds that omit lifecycle counters and cannot
@@ -8549,6 +8549,18 @@ unlanded-work checks still apply.
 conversation MCP API (`/v1/mcp?conversationId=ID`). Use a bare local
 pane or a fleet-qualified remote address. Only the current owning lead can
 retire its hire; the native output and nonempty saved report are kept first.
+For merged GitHub work, `landing`, `checkpoint` and `mac` must complete green on
+the first main commit containing its landed HEAD or a descendant, or a repository
+issue must name the red run URL or merge SHA. Cancelled runs supply no result.
+`main_red`, `main_pending` and `main_unknown` hold close-out and report the commit,
+run URL and failing jobs when available. File and link a red-run bug before
+retrying. This applies to automatic tidy, connector `close_agent`, and lead Done
+after landing too; built-in lead Done needs an immutable commit or merged PR
+link on the issue. An unlanded-work reason cannot waive checkpoint proof.
+Repos with none of those jobs in their 20 recent main push runs have no checkpoint
+to wait for. Workers with no commits beyond their recorded hire/worktree base or
+Git fork point have no merge to account for. Connection-scoped results and bug
+searches are cached for three minutes; rate-limited reads still hold as unknown.
 For a settled-abandoned fresh hire, `not_ready` names the retained allocation,
 pane, fresh intent and native receipt. Settlement ends delivery uncertainty,
 but retains the live allocation. Launched unconfirmed hires are eligible only

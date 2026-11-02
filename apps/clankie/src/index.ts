@@ -631,6 +631,8 @@ const evidenceStore =
         evidenceStorageOptions,
       );
 const builtInTrackerOptions = {
+  checkMainCheckpoint: (issue: Readonly<Record<string, unknown>>): Promise<void> =>
+    workItems.checkIssueCheckpoint(issue),
   authorizeGuidedReviewSource: createGuidedReviewSourceAuthorizer({
     projects: async () => (await settingsStore.read()).projects,
     projectsFence: async () => {

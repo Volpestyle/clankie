@@ -37,6 +37,8 @@ async function fixture() {
   await mkdir(workspace);
   const evidence = EvidenceStore.local(join(root, "evidence"));
   const tracker = createLocalTracker({
+    // This fixture tests lead routing; checkpoint outcomes have their own Git/HTTP proof.
+    checkMainCheckpoint: async () => undefined,
     directory: join(root, "tracker"),
     async validateEvidence(_issueKey: string, references: readonly EvidenceReference[]) {
       for (const reference of references) {

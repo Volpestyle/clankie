@@ -1,3 +1,4 @@
+import { mainCheckpoint, MainCheckpointRefused, type MainCheckpointCache } from "../main-checkpoint.ts";
 import {
   WorkItemSchema,
   type WorkItem,
@@ -173,7 +174,11 @@ function numberOf(id: string): number {
 }
 
 export function createGithubBackend(
-  options: { readonly repo: string; readonly scopedWrites?: boolean } & WorkWriteCallbacks &
+  options: {
+    readonly repo: string;
+    readonly scopedWrites?: boolean;
+    readonly checkpointCache?: MainCheckpointCache;
+  } & WorkWriteCallbacks &
     ({ readonly gh: GhRunner } | { readonly api: GithubApi }),
 ): WorkBackend {
   const base = `repos/${options.repo}/issues`;
@@ -245,6 +250,49 @@ export function createGithubBackend(
       if (error instanceof WorkItemNotFoundError) throw error;
       if (/\b404\b|Not Found/u.test(String(error))) throw new WorkItemNotFoundError(id);
       throw error;
+    }
+  };
+
+  const checkMergedJob = async (number: number) => {
+    try {
+      const timeline = (await github.list(`${base}/${number}/timeline?per_page=100`)) as {
+        event: string;
+        commit_id?: string | null;
+        source?: { issue?: { pull_request?: { url: string } } };
+      }[];
+      const heads = new Set<string>();
+      for (const event of timeline) {
+        if (event.event === "closed" && event.commit_id) heads.add(event.commit_id);
+        const url = event.source?.issue?.pull_request?.url;
+        const prefix = `https://api.github.com/repos/${options.repo}/pulls/`;
+        if (
+          event.event !== "cross-referenced" ||
+          !url?.startsWith(prefix) ||
+          !/^\d+$/u.test(url.slice(prefix.length))
+        )
+          continue;
+        const pull = (await github.request(
+          "GET",
+          `repos/${options.repo}/pulls/${url.slice(prefix.length)}`,
+        )) as { merged: boolean; head: { sha: string } };
+        if (pull.merged) heads.add(pull.head.sha);
+      }
+      for (const head of heads) {
+        const held = await mainCheckpoint(
+          github,
+          options.repo,
+          head,
+          options.checkpointCache ? { cache: options.checkpointCache } : {},
+        );
+        if (held) throw new MainCheckpointRefused(held);
+      }
+    } catch (error) {
+      if (error instanceof MainCheckpointRefused) throw error;
+      throw new MainCheckpointRefused({
+        reason: "main_unknown",
+        failingJobs: [],
+        detail: "GitHub merged-job checkpoint observation unavailable",
+      });
     }
   };
 
@@ -339,6 +387,7 @@ export function createGithubBackend(
     async update(id, patch: WorkItemPatch) {
       const issue = await fetchIssue(id);
       const current = toItem(issue);
+      if (patch.status === "done") await checkMergedJob(issue.number);
       if (
         options.scopedWrites &&
         [...(patch.labels ?? []), ...(patch.addLabels ?? []), ...(patch.removeLabels ?? [])].some(
