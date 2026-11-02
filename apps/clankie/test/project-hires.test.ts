@@ -1,6 +1,7 @@
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { HireLayoutUnconfirmed } from "../src/captain/hire-layout.ts";
 import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -703,6 +704,60 @@ describe("project hiring", () => {
     expect(await restarted.spawnSeat({ ...request(f.root), workingDirectory: tmpdir() })).toMatchObject({
       outcome: "failed",
       detail: expect.stringContaining("allows 1"),
+    });
+    restarted.close();
+  });
+  it("settles a stale hire whose pane never appeared, but only once no agent runs in its directory (#251)", async () => {
+    const f = await fixture();
+    const cwd = await realpath(f.root);
+    f.runner.createTab = vi.fn(async () => {
+      throw new HireLayoutUnconfirmed("tab reply lost");
+    });
+    expect(await f.store.spawnSeat(request(f.root))).toMatchObject({
+      outcome: "failed",
+      reason: "start_unconfirmed",
+    });
+    const fresh = await f.store.spawnSeat(request(f.root));
+    expect(fresh).toMatchObject({ outcome: "failed", detail: expect.stringContaining("No new agent was started.") });
+    expect(fresh.outcome === "failed" && fresh.detail).toContain("Its pane never appeared; it settles itself once 5 minutes old");
+    f.store.close();
+    // Six minutes later, after a restart: the place is still checked before it frees itself.
+    const old = Date.now() - 6 * 60_000;
+    const receipts = JSON.parse(await readFile(`${f.path}.hire-receipts.json`, "utf8"));
+    const [[, original]] = Object.entries(receipts) as [[string, { messageId: string; beganAt?: number; paneId?: string }]];
+    expect(original.beganAt).toEqual(expect.any(Number));
+    expect(original.paneId).toBeUndefined();
+    original.beganAt = old;
+    await writeFile(`${f.path}.hire-receipts.json`, JSON.stringify(receipts));
+    const ledger = JSON.parse(await readFile(`${f.path}.project-hires.json`, "utf8"));
+    ledger.allocations[0].beganAt = old;
+    await writeFile(`${f.path}.project-hires.json`, JSON.stringify(ledger));
+    // A Claude agent runs in that directory, so it may be the unrecorded launch: nothing settles.
+    f.runner.list = vi.fn(async () => [{ ...f.agent, workingDirectory: cwd }]);
+    f.runner.paneShell = vi.fn(async () => ({ shellPid: 7, foreground: [{ pid: 7, name: "zsh" }] }));
+    const restarted = new HerdrWatchStore(f.path, f.options);
+    expect(await restarted.spawnSeat(request(f.root))).toMatchObject({
+      outcome: "failed",
+      receiptId: original.messageId,
+    });
+    expect(f.runner.createTab).toHaveBeenCalledOnce();
+    // Nothing runs there any more: the old hire settles as abandoned and the new one starts.
+    f.runner.list = vi.fn(async () => []);
+    f.runner.createTab = vi.fn(async () => "p1");
+    expect(await restarted.spawnSeat(request(f.root))).toMatchObject({ outcome: "spawned" });
+    expect(f.runner.createTab).toHaveBeenCalledOnce();
+    const settled = JSON.parse(await readFile(`${f.path}.hire-receipts.json`, "utf8"));
+    expect(Object.values(settled)).toContainEqual(
+      expect.objectContaining({
+        messageId: original.messageId,
+        settlement: expect.objectContaining({ disposition: "abandoned", journal: "local-host-inventory" }),
+      }),
+    );
+    const released = JSON.parse(await readFile(`${f.path}.project-hires.json`, "utf8"));
+    expect(released.allocations[0]).toMatchObject({
+      id: ledger.allocations[0].id,
+      gone: true,
+      operatorRelease: expect.any(Object),
     });
     restarted.close();
   });

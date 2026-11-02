@@ -33,6 +33,8 @@ it; none takes precedence over another.
   lifetime; after a restart, inspect `list_agents` before a new hire.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
+  A blocking hire whose pane never appeared settles itself once it is five
+  minutes old and nothing runs in its directory; start again after that.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
   place before retrying; a lost answer can leave an agent running.
 - **Read bounded inbox pages.** `read_inbox` puts `unreadReports` first and bounds each serialized page to 24,000 characters and at most 50 held items. Pass `next` as `after` while `more` is true. Long held texts include a `readMore` pointer; pass its `item` (sequence number) and `offset` back to `read_inbox` for the next text chunk, repeating until `readMore` is absent. Reading does not acknowledge anything. Held items can age out of retention; an expired sequence returns an error. If `nextReportsAfter` is present, pass it as `reportsAfter` to read the remaining unread report threads separately from the held-item cursor.

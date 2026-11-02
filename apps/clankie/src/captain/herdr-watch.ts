@@ -458,6 +458,11 @@ const SETTLED_STATUSES = new Set(["idle", "done", "blocked"]);
 const REPLY_STATUSES = new Set(["idle", "done"]);
 const AGENT_STATUSES = ["idle", "working", "blocked", "done", "unknown"] as const;
 const RETRY_ADMISSION_MS = 5_000;
+/**
+ * An uncertain local hire whose pane never appeared fences its place this long; after
+ * it, a complete inventory showing no harness in its directory settles it (#251).
+ */
+export const UNRECORDED_HIRE_SETTLE_MS = 5 * 60_000;
 /** ADR 0322: within the nine-minute Claude hook wait, a lead hears an open question again. */
 const QUESTION_REMINDERS = { retryMs: 30_000, remindMs: 3 * 60_000, windowMs: 9 * 60_000 } as const;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
@@ -1039,6 +1044,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
   private readonly projectRecoveryOnly = new WeakMap<SpawnOperatorSeat, string>();
+  /** Age floor for receipts and allocations that predate a recorded start time. */
+  private readonly loadedAt = Date.now();
   private readonly projectLiveReuse = new WeakSet<SpawnOperatorSeat>();
   private readonly projectContexts = new WeakMap<
     SpawnOperatorSeat,
@@ -2578,7 +2585,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     });
     const receipt = receipts.length === 1 ? receipts[0]![1] : undefined;
     const receiptId = receipt?.messageId;
-    return `${this.projectHires.describe(id)}; native receipt ${receiptId ?? "not recorded"}. Owner: inspect the original agent; if it is gone, run \`clankie hire-receipt settle ${receiptId ?? id} abandoned\`, then \`clankie hire-receipt settle ${id} release-allocation\``;
+    return `${this.projectHires.describe(id)}; native receipt ${receiptId ?? "not recorded"}. ${allocation?.pane === undefined ? `Its pane never appeared; it settles itself once ${UNRECORDED_HIRE_SETTLE_MS / 60_000} minutes old if no agent runs in its directory. ` : ""}Owner: inspect the original agent; if it is gone, run \`clankie hire-receipt settle ${receiptId ?? id} abandoned\`, then \`clankie hire-receipt settle ${id} release-allocation\``;
   }
 
   public async spawnSeat(
@@ -2666,6 +2673,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
         if (canonicalDirectory === undefined)
           return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
         input = { ...input, workingDirectory: canonicalDirectory };
+        if (resume === undefined && input.freshIntent === undefined)
+          await this.retireGoneProjectHires(input.workingDirectory, async () => {
+            if (authority !== undefined) await assertConversationAuthority(authority);
+          });
       }
       const settings = await this.projectPolicy.settings();
       const projectId = await this.projectPolicy.project(input, settings, authority);
@@ -3344,6 +3355,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       receipt = this.hireReceipts.begin(receiptKey, {
         fingerprint: deliveryFingerprint(brief ?? ""),
+        beganAt: Date.now(),
         ...(fresh ? { freshHire: fresh.metadata } : {}),
         ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
         ...(resume === undefined ? { beforeIds: [] } : {}),
@@ -3848,9 +3860,42 @@ export class HerdrWatchStore implements HerdrWatchPort {
       : `Pane ${pane.paneId} runs a foreground process other than its shell (${shell.foreground.map((process) => process.name).join(", ") || "none observed"})`;
   }
 
+  private unrecordedHireStale(beganAt: number | undefined): boolean {
+    return Date.now() - (beganAt ?? this.loadedAt) >= UNRECORDED_HIRE_SETTLE_MS;
+  }
+
+  /**
+   * Frees a project place in this directory whose earlier hire's agent is gone (#251):
+   * settles its native receipts as {@link retireGoneLocalHires} does, then releases a
+   * stale allocation whose pane never appeared through the operator's own census.
+   */
+  private async retireGoneProjectHires(workingDirectory: string, guard: () => Promise<void>): Promise<void> {
+    for (const allocation of this.projectHires.unresolvedLocalAt(workingDirectory)) {
+      const harness = allocation.request.harness;
+      if (this.activeProjectHires.has(allocation.id) || allocation.request.freshIntent || !harness) continue;
+      await this.retireGoneLocalHires(JSON.stringify(["local", harness, workingDirectory, "new"]), guard);
+      const current = this.projectHires.allocation(allocation.id);
+      if (
+        !current ||
+        current.gone ||
+        current.confirmed ||
+        current.pane !== undefined ||
+        !this.unrecordedHireStale(current.beganAt)
+      )
+        continue;
+      const released = await this.settleNativeHireReceipt(allocation.id, guard, "release-allocation");
+      if (released.state === "allocation-released")
+        console.warn("Released a project hire whose pane never appeared", {
+          allocationId: allocation.id,
+          workingDirectory,
+        });
+    }
+  }
+
   /**
    * Settles each unresolved hire at this place whose agent is gone (ADR 0331): its
-   * recorded pane is absent from this machine's complete inventory or holds no harness.
+   * recorded pane is absent from this machine's complete inventory or holds no harness,
+   * or it never recorded a pane, is a few minutes old, and no such harness runs there.
    * The same proof the operator's settlement takes; a hire still running is left as is,
    * and a refusal changes nothing. Never closes, sends or relaunches anything.
    */
@@ -3860,8 +3905,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       unresolved = this.hireReceipts.entries().filter(
         ([key, receipt]) =>
           (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === baseKey &&
-          // Only a hire that recorded its pane: an unrecorded launch is the operator's to judge.
-          receipt.paneId !== undefined &&
+          // A hire whose pane never appeared waits a few minutes: its launch may still draw one.
+          (receipt.paneId !== undefined || this.unrecordedHireStale(receipt.beganAt)) &&
           !receipt.freshHire &&
           !this.activeHires.has(key),
       );
@@ -4003,7 +4048,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
     guard: () => Promise<void>,
     abandoned: HireReceiptSettlement & { state: "abandoned" },
   ): Promise<HireReceiptSettlement> {
-    if (paneId === undefined) return abandoned;
     const [, harness, cwd] = JSON.parse(receiptKey) as string[];
     if (!harness || !cwd) return abandoned;
     const candidates = this.projectHires.unresolvedLocal(cwd, paneId, harness);
