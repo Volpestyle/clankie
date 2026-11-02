@@ -1,5 +1,7 @@
 # ADR 0177: Discord delivery survives a bridge restart
 
+Status: accepted (2026-09-22, when the delivery journal shipped; the record had no status line before 2026-11-02).
+
 ## Decision
 
 The official bot keeps a mode-0600 SQLite delivery journal beside its receipt

@@ -1,6 +1,6 @@
 # ADR 0297: Hosted evidence uses renewable tenant credentials
 
-Status: Accepted (offline slice only), 2026-10-26, James; hosted proof and activation not authorized
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. The private fleet issuer went with the hosted control plane; evidence storage follows [ADR 0258](0258-evidence-lives-in-the-evidence-store.md). Previously: accepted (offline slice only), 2026-10-26, James; hosted proof and activation not authorized
 
 Extends [ADR 0258](0258-evidence-lives-in-the-evidence-store.md), subject to the
 managed credits-only amendments in

@@ -1,6 +1,6 @@
 # 0144. The phone reaches into the pane
 
-Accepted 2026-08-30.
+Status: accepted (2026-08-30).
 
 ## Context
 

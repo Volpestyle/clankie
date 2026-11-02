@@ -1,6 +1,6 @@
 # ADR 0232: Hosted Connections use the body broker
 
-Status: proposed (2026-10-05). Implements the code portion of
+Status: partly retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md): the hosted portal path went with the hosted body. GitHub and Linear connections held in the body's credential broker through `/v1/accounts` remain current. Previously: proposed (2026-10-05). Implements the code portion of
 [VUH-1383](https://linear.app/vuhlp/issue/VUH-1383), updating
 [ADR 0196](0196-account-connections-keep-tokens-on-the-body.md)'s initial
 account API proposal. Provider registrations and production authorization remain

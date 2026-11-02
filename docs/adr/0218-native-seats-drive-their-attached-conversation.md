@@ -1,6 +1,6 @@
 # ADR 0218: Native seats drive their attached conversation
 
-Status: accepted for engineering (James, 2026-10-04). Extends
+Status: partly superseded: its Linear work-routing extension is superseded by [ADR 0214](0214-linear-wakes-require-attribution-and-rules.md#amendment--one-ordinary-chat-receives-signed-linear-activity-2026-10-04)'s 2026-10-04 amendment; native seats driving their attached conversation stands. Previously: accepted for engineering (James, 2026-10-04). Extends
 [room turn admission](0118-a-text-room-is-a-durable-lane.md),
 [room inspection](0176-every-room-is-an-inspectable-conversation.md),
 [room-owned harvests](0186-a-discord-room-harvests-its-own-workers.md), and

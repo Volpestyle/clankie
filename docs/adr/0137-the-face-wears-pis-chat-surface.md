@@ -1,6 +1,6 @@
 # 0137. The face wears pi's chat surface
 
-Accepted 2026-08-29.
+Status: accepted (2026-08-29).
 
 ## Context
 

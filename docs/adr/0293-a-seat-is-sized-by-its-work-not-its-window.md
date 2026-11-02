@@ -1,6 +1,7 @@
 # 0293: A seat is sized by its work, not its window
 
-- Status: Accepted (lead, 2026-10-26, ratifying the budgets James requested)
+Status: accepted (lead, 2026-10-26, ratifying the budgets James requested).
+
 - Work: VUH-2820 (VUH-2821 lead restart, VUH-2822 watch notices, VUH-2823
   context telemetry, VUH-2824 hired-seat restarts, VUH-2825 waits, VUH-2826
   ledger); follows VUH-2274

@@ -1,6 +1,6 @@
 # ADR 0238: Hosted Claude workers trust their own workspace
 
-Status: Accepted (2026-10-06). Narrows, for hosted bodies only, the rule that a
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. Previously: accepted (2026-10-06). Narrows, for hosted bodies only, the rule that a
 hire never accepts folder trust or answers permission prompts. Builds on
 [ADR 0237](0237-hosted-bodies-update-themselves-to-official-releases.md).
 

@@ -1,6 +1,6 @@
 # ADR 0195: Hosted requests fit the model proxy
 
-Status: accepted (lead, 2026-09-26; the 250k threshold is James's call). Tracks
+Status: partly retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md): the included-usage model proxy went with the hosted body. The compaction threshold (`clankie model compaction`) still applies. Previously: accepted (lead, 2026-09-26; the 250k threshold is James's call). Tracks
 [VUH-1371](https://linear.app/vuhlp/issue/VUH-1371).
 
 ## Context

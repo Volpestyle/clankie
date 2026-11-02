@@ -1,6 +1,7 @@
 # 0271: The lead seat restarts fresh in its own pane
 
-- Status: Accepted (James, 2026-10-15, through the lead)
+Status: accepted (James, 2026-10-15, through the lead).
+
 - Work: VUH-2274; shared with VUH-2273 (lead seat failover)
 - Extends: [0152](0152-a-harness-takes-the-operator-seat.md) and
   [0218](0218-native-seats-drive-their-attached-conversation.md)

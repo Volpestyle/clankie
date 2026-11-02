@@ -1,6 +1,6 @@
 # 0139. Clankie rides vanilla herdr
 
-Accepted 2026-08-29. The runtime ownership and fork-retirement decision is
+Status: accepted (2026-08-29), partly superseded. The runtime ownership and fork-retirement decision is
 superseded by [ADR 0157](0157-herdr-is-an-owned-runtime.md), and the fork's
 scheduled death by [ADR 0164](0164-the-fleet-is-its-own-session.md): Clankie
 runs its own herdr and does not upstream. The upstream CLI/socket boundary

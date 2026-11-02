@@ -1,6 +1,6 @@
 # ADR 0272: A hosted body runs model-directed work as a separate uid
 
-Status: Proposed (VUH-2320, 2026-10-16). Not a boundary until increment 2 lands
+Status: retired by [ADR 0300](0300-clankie-runs-only-on-the-owners-machine.md), which removed the hosted body. It was never activated. Previously: proposed (VUH-2320, 2026-10-16). Not a boundary until increment 2 lands
 and the launcher opts in (increment 3). Until then a hosted body keeps today's
 single-uid model.
 

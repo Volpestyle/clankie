@@ -3,6 +3,10 @@
 Status: accepted (2026-10-09; proposed 2026-10-09). Tracks [VUH-1902](https://linear.app/vuhlp/issue/VUH-1902).
 The first slice of the built-in tracker ("Clankie Work"); its evidence bundles
 reference the records defined here.
+Amended 2026-11-02 ([below](#amendment-2026-11-02-proof-stays-out-of-the-repository)):
+proof goes in pull request comments, CI artifacts or `clankie evidence push`
+storage, with at most a short `README.md` in the repository; `evidence.json`
+manifests are no longer committed.
 
 ## Context
 
@@ -244,7 +248,8 @@ Paired owner devices may read recorded media in bounded byte ranges through thei
 
 - Workers publish evidence by writing the folder's `README.md`, running
   `clankie evidence push <folder> --issue <key>` (or the MCP tool), and
-  committing only the README and `evidence.json`. Tracker comments cite the
+  committing only the README and `evidence.json` (until the 2026-11-02
+  amendment, which keeps `evidence.json` out of the repository too). Tracker comments cite the
   printed `clankie://evidence` links. The `clankie` skill, the `linear-issues`
   media rules and the [testing records](../testing/README.md) guide change when
   the commands ship.
@@ -260,3 +265,25 @@ Paired owner devices may read recorded media in bounded byte ranges through thei
   and no process to supervise; `clankie doctor` reports its backends and data
   directory (2026-10-09, James: performance doesn't matter for a blob store; no
   second toolchain). Store growth is unbounded until a retention decision.
+
+## Amendment 2026-11-02: proof stays out of the repository
+
+In this repository, dated proof folders flooded agent searches: by 2026-11-02 `docs/testing` held
+525 entries and 1,650 files, and the older ones moved to the private
+`clankie-ops` archive. Proof now lives where a reader of the change looks for it:
+
+- **Pull request comments** carry the narrative and the `clankie://evidence`
+  links a reviewer needs.
+- **CI artifacts** hold what a CI run produced.
+- **`clankie evidence push` storage** holds raw captures, as decided above.
+
+A change here commits at most a short `README.md` under `docs/testing/<folder>/`
+when the record is worth finding beside the code. It does not commit
+`evidence.json`, logs, run JSON or media; `pnpm docs:check` rejects any other
+new file there, and `.gitignore` ignores everything under `docs/testing`
+except READMEs. The `evidence.json` that `clankie evidence push` writes stays
+beside the README, untracked, and the pushed records stay listable by issue or
+commit.
+The parts of the decision above that commit a manifest beside the README are
+superseded by this amendment; the store, its records and its access rules are
+unchanged.

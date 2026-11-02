@@ -1,6 +1,6 @@
 # 0171. The console keeps work in the background
 
-Accepted 2026-09-20. Amended 2026-10-09: tool calls render one per row; see
+Status: accepted (2026-09-20). Amended 2026-10-09: tool calls render one per row; see
 [Amendment](#amendment-2026-10-09-one-row-per-tool-call).
 
 ## Context
