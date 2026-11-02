@@ -1248,6 +1248,13 @@ export class ConversationStore {
     return meta === undefined ? undefined : publicConversation(meta);
   }
 
+  /** Open conversations with exactly this scope, as the `list` op returns them. */
+  public listConversations(scope: OperatorConversationScope): OperatorConversation[] {
+    return [...this.metas.values()]
+      .filter((meta) => sameScope(meta.scope, scope))
+      .map((meta) => publicConversation(meta));
+  }
+
   /** Host-only stop admission: includes queued runs and drivers still settling after their last event. */
   public turnIdle(conversationId: string): boolean {
     return !this.hasNativeSeat(conversationId) && this.serviceTrackedIdle(conversationId);

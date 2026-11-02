@@ -8386,9 +8386,13 @@ edge and routes to that exact native lead or its attached conversation. Explicit
 adoption wins; tabs, titles and report text establish no ownership. The parent
 needs an exact-session native mailbox, authenticated hook or existing harness
 control/queue path. A room still needs its original Discord admission and grants.
-If no eligible parent exists, the report falls back to `global-default` with
-`workerReportRouting.source: "unadopted"` on its durable accepted turn and a
-reason (`no_parent`, `parent_unavailable`, `parent_unlinked`, or `owner_removed`).
+If no eligible parent exists, the report goes to the one top-level lead chat whose
+`workspace` scope is the reporter's exact working directory on its machine (#346);
+that lead's first `message_seat` to the agent adopts it. With no such chat, or
+more than one, it falls back to `global-default`. Either way the durable accepted
+turn carries `workerReportRouting.source: "unadopted"`, the chat that received it,
+and a reason (`no_parent`, `parent_unavailable`, `parent_unlinked`); a removed
+adopted owner always falls back to `global-default` with `owner_removed`.
 The fleet roster exposes the same diagnostic and parent pane/seat when known.
 Observed launcher edges are retained by native child and parent thread identity.
 After a Herdr reset, a missing edge is recovered only while one exact original

@@ -143,6 +143,14 @@ doctor names the observed parent and children when the parent lacks a bridge.
 A removed explicitly adopted conversation retains the existing default fallback
 with an `owner_removed` reason; it does not enable implicit parent adoption.
 
+Amended 2026-11-02 ([#346](https://github.com/Volpestyle/clankie/issues/346)):
+before that fallback, an unadopted report without an eligible parent goes to the
+single top-level `workspace` conversation scoped to the reporter's exact working
+directory and machine, matching how Auto rounds pick project leads. Several or
+none keep the default fallback. The route stays tagged `unadopted` with its
+reason; it creates no ownership, and that lead adopts the agent only by messaging
+it, as any conversation does.
+
 ## Extension — Linear work ownership, 2026-10-04
 
 Superseded later that day by
