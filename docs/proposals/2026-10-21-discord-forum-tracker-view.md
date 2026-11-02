@@ -201,9 +201,11 @@ so slice 2 adds an exception for exactly the owner-bound forum.
      pass only marks where the view begins, so binding never imports the
      forum's earlier posts. Every import keeps its Discord-keyed idempotency, so
      repeated passes change nothing. One post never stalls a pass: a post whose
-     starter Discord refuses to read (deleted) is skipped with one notice, and a
-     post that fails partway is read directly on the next pass, even once
-     archived. The body allows these reads and their paging (`after`, `before`,
+     starter is gone (Discord's Unknown Message, 10008, which the body passes
+     through as the result's `code`) is skipped with one notice, and any other
+     failure, including a rate limit, an outage or a refused read, is tried
+     again on the next pass, even once archived (#366). A retried post leaves
+     the retry list only when Discord answers Unknown Channel (10003). The body allows these reads and their paging (`after`, `before`,
      `limit`, and `action_type` 111 for the audit log) only for a guild with a
      bound forum; the active-threads and audit-log reads are guild-wide and stay
      on the host;

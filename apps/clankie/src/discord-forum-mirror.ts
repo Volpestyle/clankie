@@ -195,7 +195,17 @@ const sameTags = (left: unknown, right: readonly string[]) =>
   left.every((tag) => typeof tag === "string" && right.includes(tag));
 const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
 /** Discord answered and refused: nothing changed. */
-class DiscordRefusal extends Error {}
+class DiscordRefusal extends Error {
+  /** Discord's JSON error code, when the body passed one through. */
+  readonly code: number | undefined;
+  constructor(message: string, code: number | undefined) {
+    super(message);
+    this.code = code;
+  }
+}
+/** Discord's error codes for a channel or message that no longer exists. */
+const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_MESSAGE = 10008;
 
 /** The status tag that shows a built-in status; custom statuses fall back to their type. */
 function discordStatusTag(status: string, type: string): StatusTag {
@@ -459,7 +469,8 @@ export class DiscordForumMirror {
 
   private async rest(action: DiscordServerAction): Promise<DiscordServerActionResult> {
     const result = await this.options.serverAction(action);
-    if (!result.ok) throw new DiscordRefusal(`Discord ${action.method} ${action.path}: ${result.message}`);
+    if (!result.ok)
+      throw new DiscordRefusal(`Discord ${action.method} ${action.path}: ${result.message}`, result.code);
     return result;
   }
 
@@ -919,7 +930,9 @@ export class DiscordForumMirror {
           );
         } catch (error) {
           if (!(error instanceof DiscordRefusal)) throw error;
-          delete this.journal.retry[threadId];
+          // Only a deleted post leaves the retry list; any other refusal is tried again next pass.
+          if (error.code === UNKNOWN_CHANNEL) delete this.journal.retry[threadId];
+          else this.options.onError?.(error);
         }
     const people = new Map<string, Promise<DiscordForumAuthor>>();
     const who = (user: ForumMessage["author"]) => {
@@ -1000,8 +1013,9 @@ export class DiscordForumMirror {
         starter = (await this.rest({ method: "GET", path: `/channels/${thread.id}/messages/${thread.id}` }))
           .data as unknown as ForumMessage;
       } catch (error) {
-        if (!(error instanceof DiscordRefusal)) throw error;
-        // Discord answered and refused (the starter was deleted): there is no post to import.
+        // Only Unknown Message means the starter was deleted and there is no post to import.
+        // Any other failure (a rate limit, an outage, a blip) is retried on the next pass.
+        if (!(error instanceof DiscordRefusal) || error.code !== UNKNOWN_MESSAGE) throw error;
         this.journal.skipped[thread.id] = cut(error.message, 300);
         this.notice({
           forumId: binding.forumId,

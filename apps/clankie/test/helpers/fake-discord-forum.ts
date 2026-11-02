@@ -35,11 +35,22 @@ interface FakeAuditEntry {
   action_type: 111;
   changes: { key: string; new_value: string[] }[];
 }
+/** Discord's JSON error codes for the refusals this fake gives (discord.js `DiscordAPIError.code`). */
+const CODES: Record<string, number> = {
+  "Unknown Channel": 10003,
+  "Unknown Member": 10007,
+  "Unknown Message": 10008,
+  "Missing Permissions": 50013,
+  "Invalid Form Body": 50035,
+  "Thread is archived": 50083,
+};
 class Refused extends Error {
   readonly status: number;
+  readonly code: number | undefined;
   constructor(status: number, message: string) {
     super(`${status} ${message}`);
     this.status = status;
+    this.code = CODES[message];
   }
 }
 export class FakeDiscord {
@@ -58,6 +69,8 @@ export class FakeDiscord {
   readonly members = new Map<string, string[]>();
   hang: ((action: DiscordServerAction) => boolean) | undefined;
   refuse: ((action: DiscordServerAction) => boolean) | undefined;
+  /** A transient failure with no Discord error code, like a 503 or a dropped connection. */
+  outage: ((action: DiscordServerAction) => boolean) | undefined;
   /** Without View Audit Log, the audit log answers 403. */
   auditDenied = false;
 
@@ -71,6 +84,7 @@ export class FakeDiscord {
     this.requests.push(structuredClone(action));
     if (this.hang?.(action)) return new Promise(() => {});
     if (this.refuse?.(action)) throw new Refused(403, "Missing Permissions");
+    if (this.outage?.(action)) throw new Refused(503, "Service Unavailable");
     return structuredClone(this.handle(action));
   };
 
@@ -80,7 +94,8 @@ export class FakeDiscord {
       const data = (await this.rest(action)) as { id?: string };
       return { ok: true, message: "ok", data: data as never, ...(data?.id ? { resourceId: data.id } : {}) };
     } catch (error) {
-      return { ok: false, message: (error as Error).message };
+      const code = (error as Refused).code;
+      return { ok: false, message: (error as Error).message, ...(code === undefined ? {} : { code }) };
     }
   };
 
