@@ -14,8 +14,10 @@ const lines = (text, separator = "\n") => text.split(separator).filter(Boolean);
 const AGENTS_LIMIT = 16 * 1024;
 const LINE_LIMIT = 10_000;
 const README_LIMIT = 4 * 1024;
-// Generated files that are legitimately one long line.
-const longLineAllowed = /(?:^|\/)(?:pnpm-lock\.yaml|Cargo\.lock)$|\.svg$/u;
+// Generated or vendored files that are legitimately one long line; .ignore
+// keeps the models.dev snapshot out of searches.
+const longLineAllowed =
+  /(?:^|\/)(?:pnpm-lock\.yaml|Cargo\.lock)$|\.svg$|^packages\/model-registry\/data\/models-dev-snapshot\.json$/u;
 const adr = /^docs\/adr\/\d{4}-[^/]+\.md$/u;
 const status = /^\s*(?:[-*]\s*)?(?:\*\*)?Status(?:\*\*)?:/imu;
 

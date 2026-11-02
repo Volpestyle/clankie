@@ -42,7 +42,7 @@ do not inherit Clankie's root compiler options.
 ## Re-vendoring the snapshot
 
 ```sh
-curl -s https://models.dev/api.json | node -e "process.stdout.write(JSON.stringify(JSON.parse(require('fs').readFileSync(0, 'utf8')), null, 2) + '\\n')" > packages/model-registry/data/models-dev-snapshot.json
+curl https://models.dev/api.json > packages/model-registry/data/models-dev-snapshot.json
 ```
 
 Run that command from the repository root. Last vendored 2026-09-26.

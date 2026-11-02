@@ -3839,8 +3839,8 @@ disposable file broker, production SDK/owned loopback MinIO and actual HTTP. It 
 fixture destination proof, not owner activation or full service startup.
 
 Moves raw evidence out of git into Clankie's evidence store
-([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)). Git keeps each
-folder's `README.md` and an `evidence.json` manifest; the store keeps the bytes
+([ADR 0258](adr/0258-evidence-lives-in-the-evidence-store.md)). Git keeps at most
+a short `README.md` per folder; the store keeps the bytes
 and the records that describe them. Paths resolve from the current directory
 inside any git repository, with no per-repository configuration. Each command
 prints one JSON document; push and fetch also print a plain summary on stderr.
@@ -3910,8 +3910,8 @@ may expire sooner); manifests keep only stable `clankie://evidence` links.
   `{"roots":["docs/testing","artifacts"]}`. Outside one it
   refuses, names the roots and changes nothing. It hashes the in-scope files
   under `PATH`: media (png, jpg, gif, mp4, mov, webm) of any size, and any other
-  non-Markdown file of 16 KiB or more. Smaller text, Markdown and
-  `evidence.json` stay in git. It uploads only blobs the store lacks, then
+  non-Markdown file of 16 KiB or more. Smaller text and Markdown are left in
+  place. It uploads only blobs the store lacks, then
   writes or updates the folder's `evidence.json`. That is the nearest one
   above `PATH`, or else the one beside the nearest `README.md`. The JSON
   reports `added` and `changed` entries with their `clankie://evidence/sha256/…`
@@ -3919,8 +3919,9 @@ may expire sooner); manifests keep only stable `clankie://evidence` links.
   moves to `.local/evidence/<repo-relative folder>/<path>`, which git ignores.
   A second push uploads nothing, leaves the manifest byte-identical and says
   `Nothing uploaded; … unchanged`. A listed file that is missing locally keeps
-  its entry; removing one is an explicit manifest edit. Commit only the README
-  and `evidence.json`, and cite the printed links in tracker comments.
+  its entry; removing one is an explicit manifest edit. Cite the printed links
+  in the pull request or tracker comment and commit at most a short README; the
+  `evidence.json` manifest stays uncommitted.
   When `--issue` is omitted, push infers keys from the branch, then the worktree
   directory name, then the folder's README, and reports the source. An inferred
   key is a built-in key (`LOCAL-n`, or `LOCAL-VUH-n` once the store holds an
