@@ -168,6 +168,12 @@ Register project workspaces with the fleet's own machine ID
 ([trust contract](../../../../docs/remote-process-proof.md)). Only an owner-run
 pane check establishes that a real pane sees its native catalog.
 
+Before hiring on another machine, `clankie doctor --machine FLEET_ID` shows
+`harnesses.catalog`. `refreshNeeded: true` means that machine's worker bridge
+lacks tools this service serves (the `reason` names them) and every Claude or
+Codex hire there would fail its first catalog; run `clankie herdr prepare
+FLEET_ID` first. A matching plugin version alone does not prove the catalog.
+
 For repeated Claude catalog warnings, compare the native plugin cache with the
 prepared marketplace; ship a new worker version and use `clankie herdr prepare
 FLEET_ID`, then coordinate save/restart/resume with that pane's owner rather than

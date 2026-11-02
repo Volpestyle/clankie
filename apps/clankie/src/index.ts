@@ -2546,6 +2546,7 @@ const clankie = await createClankieApp({
     return inspectFleetHarnesses(fleet, {
       shell: runtimes.fleetShell(fleet),
       workerPluginDir: workerPluginDir(repoRoot),
+      expectedBridgeTools: () => workerMcp.expectedBridgeToolNames(),
     });
   },
   inspectFleetMembership: async (id: string) => {

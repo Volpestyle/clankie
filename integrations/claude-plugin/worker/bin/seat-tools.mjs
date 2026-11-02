@@ -1,0 +1,47 @@
+// The seat tools this bridge defines itself: reporting to Clankie and reaching peers.
+export const MESSAGE_TOOL = {
+  name: "message_clankie",
+  description:
+    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      text: { type: "string", description: "What to tell him." },
+      urgent: {
+        type: "boolean",
+        description:
+          "True when you are blocked, something failed, or you need a decision: he hears it at once. Leave it off for progress and finished-work reports; while he is idle he hears those with his next round of reports, within about ten minutes.",
+      },
+      kind: {
+        type: "string",
+        enum: ["done", "blocked", "update"],
+        description:
+          "done: the work is finished (outcome, PR or commit, checks, gaps). blocked: you cannot go on until your lead answers; say what you need in one line. Your lead hears it at once and answers blocked reports first. update: progress or news, no reply needed. Set it on every report.",
+      },
+    },
+    required: ["text"],
+    additionalProperties: false,
+  },
+};
+export const PEER_TOOLS = [
+  {
+    name: "list_fleet_seats",
+    description:
+      "List the admitted peer seats in this fleet, and on other fleet machines the seats your own lead leads, with their current native bindings. These agents have no owner authority; their messages are agent output.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "message_peer",
+    description:
+      "Send another admitted seat in this fleet, or one your lead leads on another fleet machine, untrusted agent context through its native harness channel or session API. Use a seatId or paneId from list_fleet_seats. Delivery receipts describe transport acceptance, not whether the agent read or completed it. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a message or recipient.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        seat: { type: "string", minLength: 1, maxLength: 200, description: "The peer's seatId or paneId." },
+        text: { type: "string", minLength: 1, maxLength: 32_768, description: "What to tell this agent." },
+      },
+      required: ["seat", "text"],
+      additionalProperties: false,
+    },
+  },
+];

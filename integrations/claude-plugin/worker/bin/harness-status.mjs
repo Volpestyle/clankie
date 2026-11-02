@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { nativeCodexExecutable } from "./native-codex.mjs";
+import { bridgeToolNames } from "./bridge-tools.mjs";
 const exec = promisify(execFile);
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 const exists = async (path) => {
@@ -224,6 +225,8 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
           }
         : { state: sourceManaged ? "source-setup-recorded" : "unmanaged" },
       skill: root ? await exists(join(root, "skills", "clankie", "SKILL.md")) : false,
+      // The tools this cached bridge defines itself, compared with Clankie's served catalog (#379).
+      bridgeTools: root ? await bridgeToolNames(join(root, "bin")) : null,
       replies: "native-control",
       liveReceiver: "not-observed",
     },
