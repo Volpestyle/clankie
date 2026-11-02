@@ -462,7 +462,7 @@ const RETRY_ADMISSION_MS = 5_000;
  * An uncertain local hire whose pane never appeared fences its place this long; after
  * it, a complete inventory showing no harness in its directory settles it (#251).
  */
-export const UNRECORDED_HIRE_SETTLE_MS = 5 * 60_000;
+const UNRECORDED_HIRE_SETTLE_MS = 5 * 60_000;
 /** ADR 0322: within the nine-minute Claude hook wait, a lead hears an open question again. */
 const QUESTION_REMINDERS = { retryMs: 30_000, remindMs: 3 * 60_000, windowMs: 9 * 60_000 } as const;
 const HERDR_COMMAND_TIMEOUT_MS = 5_000;
