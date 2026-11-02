@@ -350,6 +350,12 @@ export class WorkerMcp {
   private issuerPromise: Promise<CapabilityTokenIssuer> | undefined;
   private readonly options: {
     directory: string;
+    /**
+     * TESTS ONLY: keep connected-call receipts in memory, with no file or fsync. A crash
+     * then forgets admitted calls, so the service never sets this; a test that doesn't
+     * prove restart or crash recovery may, to skip about a dozen fsyncs per call (#383).
+     */
+    nonDurableCallReceipts?: true;
     credentials: CredentialStore;
     host: McpHost & WorkerReadReceiptHost;
     projects?(): Promise<ProjectsSettings>;
@@ -516,7 +522,9 @@ export class WorkerMcp {
     if (!Number.isInteger(timeout) || timeout <= 0) throw new Error("Invalid worker request timeout");
     this.requestTimeoutMs = Math.min(timeout, WORKER_REQUEST_TIMEOUT_MS);
     this.callReceipts = new DurableReceiptStore({
-      path: join(options.directory, "receipts", "connected-calls.json"),
+      ...(options.nonDurableCallReceipts
+        ? {}
+        : { path: join(options.directory, "receipts", "connected-calls.json") }),
       sharded: true,
       schema: WorkerCallReceiptSchema,
       unreadableMessage: "Worker call receipts are unreadable; no connected call was dispatched",
