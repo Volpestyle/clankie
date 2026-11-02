@@ -30,6 +30,7 @@ import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain, type CaptainPort } from "../src/captain/port.ts";
 import { projectStatuses } from "../src/captain/auto-projects.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
+import { personaRoutes } from "../src/persona-extension.ts";
 
 const exec = promisify(execFile);
 const cleanup: Array<() => Promise<void>> = [];
@@ -93,6 +94,8 @@ async function fixture(captain: Partial<CaptainPort> = {}) {
   const app = await createClankieApp({
     captain: createStubCaptain(captain),
     settings,
+    // The persona serves its own routes as an ADR 0328 extension.
+    extensionRoutes: [personaRoutes()],
     runtimes,
     herdrBinding: () => binding,
     authenticateOperator: async (request) => {
