@@ -57,6 +57,12 @@ A refusal now means no fresh `origin/main` or a managed runtime: fix that
 instead of retrying the hire or removing its checkout.
 High load never blocks a hire, only its heavy steps (read the receipt's
 `resourceNotice`); low memory refuses one.
+A local Claude hire's `permissionMode` says how it runs: `auto`, `dontAsk`
+(read-only) or `bypassPermissions` (maximum trust). Before an `auto` launch the
+service asks that Claude whether it will take auto mode for the hire's model; a
+refusal (`auto_mode_unavailable: ...`, for example an older model) starts
+nothing, because the worker would stall at its first command prompt. Hire a
+model that supports auto mode; turning on maximum trust is the owner's call.
 
 In the service lane, an autonomous `hire_agent` needs the master switch on,
 saved global Full autonomy, and a resolved project on Auto, and project

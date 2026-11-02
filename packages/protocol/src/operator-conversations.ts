@@ -1312,6 +1312,12 @@ export const OperatorSeatSpawnResultSchema = z.discriminatedUnion("outcome", [
       deliveryStage: DeliveryStageSchema.optional(),
       seat: OperatorFleetSeatSchema,
       control: SeatControlModeSchema.optional(),
+      /**
+       * The Claude permission mode the worker launched in (#341): `auto` (Claude's
+       * classifier, checked available before launch), `dontAsk` (read-only) or
+       * `bypassPermissions` (the owner's maximum trust mode).
+       */
+      permissionMode: z.enum(["auto", "dontAsk", "bypassPermissions"]).optional(),
       profile: HireProfileSchema.optional(),
       /**
        * Which harness and account the hire landed on when Clankie chose either,
