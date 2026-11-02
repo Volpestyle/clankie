@@ -755,7 +755,15 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     startHead?: string,
   ): Promise<MainCheckpointHold | undefined> => {
     try {
-      const remote = (await gitRun("git", ["remote", "get-url", "origin"], path)).trim();
+      let remote: string;
+      try {
+        remote = (await gitRun("git", ["remote", "get-url", "origin"], path)).trim();
+      } catch (error) {
+        // Only Git's positive non-repository result exempts research work.
+        // Missing paths and a lost recorded hire still need positive proof.
+        if (!startHead && /not a git repository/iu.test(String(error))) return undefined;
+        throw error;
+      }
       const repo =
         /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
           remote,

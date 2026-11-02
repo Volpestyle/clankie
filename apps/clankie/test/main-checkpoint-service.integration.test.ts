@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { checkpointFixture } from "../../../packages/work-items/test/fixtures/main-checkpoint.ts";
@@ -80,4 +82,23 @@ it("a worker's own landed commits do not hold a repo without post-merge checkpoi
   });
   expect(await service.mainCheckpoint(f.root, undefined, f.start)).toBeUndefined();
   expect(f.requests.some((path) => path.startsWith("/repos/fixture/repo/compare/"))).toBe(false);
+});
+
+it("non-Git research has no checkpoint, while missing or lost recorded checkouts stay unknown", async () => {
+  const root = await mkdtemp(join(tmpdir(), "checkpoint-non-git-"));
+  const service = createWorkItemsService({
+    stateDirectory: root,
+    githubToken: async () => {
+      throw new Error("Non-Git work must not read GitHub");
+    },
+  });
+  try {
+    expect(await service.mainCheckpoint(root)).toBeUndefined();
+    expect(await service.mainCheckpoint(root, undefined, "a".repeat(40))).toMatchObject({
+      reason: "main_unknown",
+    });
+    expect(await service.mainCheckpoint(join(root, "missing"))).toMatchObject({ reason: "main_unknown" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

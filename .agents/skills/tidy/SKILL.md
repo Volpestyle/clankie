@@ -55,7 +55,7 @@ running, missing or unreachable evidence holds the pane. `main_red`,
 failing jobs when known. Repositories whose 20 recent main push runs have none
 of those jobs have no checkpoint to wait for. A worker with no commits beyond
 its recorded hire/worktree base (or Git fork point) is not charged with someone
-else's main commit. CI and bug reads share a three-minute connection-scoped
+else's main commit. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown; other retirement guards still apply. CI and bug reads share a three-minute connection-scoped
 cache, so retry after expiry when a bug was just filed. Unreadable or rate-limited
 reads still hold. File and link the red-run bug, then retry; an
 `unlandedReason` never overrides this hold. The same guard covers auto-tidy and

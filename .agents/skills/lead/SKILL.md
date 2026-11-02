@@ -177,7 +177,7 @@ the job's landing proof. `main_red` names the commit, run and failing jobs in
 the fleet round; `main_pending` and `main_unknown` keep incomplete proof open.
 A repository with no checkpoint jobs in its 20 recent main push runs has none
 to wait for. Workers that authored no commits beyond their recorded hire/base
-or Git fork point have no merge to account for. Shared connection-scoped CI
+or Git fork point have no merge to account for. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown; other retirement guards still apply. Shared connection-scoped CI
 and bug caches last three minutes; a newly filed bug is observed after expiry.
 Rate limits and unreadable configured checkpoints keep close-out held.
 
