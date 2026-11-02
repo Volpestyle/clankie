@@ -6,7 +6,7 @@ import {
   type CheckoutSyncResult,
 } from "@clankie/settings";
 import type { createLogger } from "@clankie/observability";
-import { stat } from "node:fs/promises";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -27,18 +27,16 @@ export function ownerCheckoutSyncReport(logger: Pick<ReturnType<typeof createLog
 /**
  * What can move `origin/main` in an owner checkout: its loose ref and `packed-refs`, by
  * identity and timestamps. Undefined when its git directory isn't a plain `.git`
- * directory; then every tick asks git, as before (#360).
+ * directory; then every tick asks git, as before (#360). Sync stats with
+ * `throwIfNoEntry: false`, so a packed (missing) loose ref never throws.
  */
-async function mainRefSignature(owner: string): Promise<string | undefined> {
+function mainRefSignature(owner: string): string | undefined {
   const git = join(owner, ".git");
-  const directory = await stat(git, { bigint: true, throwIfNoEntry: false });
-  if (!directory?.isDirectory()) return undefined;
-  const parts = await Promise.all(
-    [join(git, "refs", "remotes", "origin", "main"), join(git, "packed-refs")].map(async (path) => {
-      const info = await stat(path, { bigint: true, throwIfNoEntry: false });
-      return info ? `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` : "-";
-    }),
-  );
+  if (!statSync(git, { throwIfNoEntry: false })?.isDirectory()) return undefined;
+  const parts = [join(git, "refs", "remotes", "origin", "main"), join(git, "packed-refs")].map((path) => {
+    const info = statSync(path, { bigint: true, throwIfNoEntry: false });
+    return info ? `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` : "-";
+  });
   return parts.join("|");
 }
 
@@ -88,7 +86,7 @@ export function startOwnerCheckoutSync(options: {
             await fetchCheckoutMain(owner);
             fetched.set(owner, Date.now());
           }
-          const signature = await mainRefSignature(owner);
+          const signature = mainRefSignature(owner);
           if (signature !== undefined && observed.has(owner) && observedRef.get(owner) === signature)
             continue;
           const main = (await checkoutGit(owner, ["rev-parse", "--verify", "origin/main^{commit}"])).trim();
