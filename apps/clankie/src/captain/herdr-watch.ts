@@ -5276,6 +5276,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         startAttempted = true;
         const launchView: SeatView = {
           paneId,
+          ...(authority?.onHirePane === undefined ? {} : { waitForStartup: true }),
           name: subject,
           ...(expectedToolNames === undefined ? {} : { expectedToolNames }),
           guard: async () => {

@@ -20,6 +20,7 @@ import {
 } from "../src/captain/captain-operator-service.ts";
 import type { HireSeat } from "../src/captain/port.ts";
 import { captureConversationAuthority } from "../src/captain/conversation-owner.ts";
+import { startCodexAppServerSeat } from "../src/captain/codex-app-server.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import { codex0160Protocol } from "./fixtures/codex-0160-protocol.ts";
 
@@ -42,6 +43,10 @@ async function fixture() {
   let closed = false;
   const adapter = createCodexSeatAdapter({
     server: native.launch,
+    start: async (options) => {
+      options.onThreadPending?.();
+      return startCodexAppServerSeat(options);
+    },
     trackerOverrides: async () => [],
     desktop: { owns: () => true, report: async () => {}, gone: () => () => {} },
   });
@@ -86,6 +91,7 @@ async function fixture() {
         { harness: "codex", cwd: root, brief: brief ?? "" },
         {
           paneId: "pc/term_proof",
+          waitForStartup: true,
           run: async () => {
             native.startView();
           },
