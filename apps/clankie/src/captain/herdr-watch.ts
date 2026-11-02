@@ -3841,6 +3841,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           receiptId: receipt.messageId,
           place: key,
           pane: receipt.paneId ?? "none recorded",
+          ...(settled.allocationId === undefined
+            ? {}
+            : { allocationId: settled.allocationId, allocation: settled.detail }),
         });
     }
   }
@@ -3859,7 +3862,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const settled = this.hireReceipts.settlement(receiptId);
     if (settled)
       return settled.journal === "local-host-inventory" && settled.disposition === "abandoned"
-        ? { state: "abandoned", receiptId, evidence: settled }
+        ? this.releaseSettledHireAllocation(settled.receiptKey, settled.pane?.paneId, guard, {
+            state: "abandoned",
+            receiptId,
+            evidence: settled,
+          })
         : refused("Original receipt already has a different retained disposition.");
     const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === receiptId);
     if (!original) return refused("No unresolved original local hire receipt; nothing settled.");
@@ -3887,6 +3894,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         "Complete local Herdr inventory and pane process info are unavailable; nothing settled.",
       );
     this.activeHires.add(key);
+    let abandoned: HireReceiptSettlement & { state: "abandoned" };
     try {
       const observe = async () => {
         const inventory = await this.runner.list!(inventoryFleet);
@@ -3936,13 +3944,58 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(final.pane === undefined ? {} : { pane: final.pane }),
       };
       this.hireReceipts.settleLocal(key, receiptId, evidence);
-      return { state: "abandoned", receiptId, evidence };
+      abandoned = { state: "abandoned", receiptId, evidence };
     } catch (error) {
       return refused(
         `Local settlement refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
       );
     } finally {
       this.activeHires.delete(key);
+    }
+    return this.releaseSettledHireAllocation(key, receipt.paneId, guard, abandoned);
+  }
+
+  /**
+   * A settled local hire's own project allocation would otherwise keep refusing
+   * every new hire in its place ("The earlier hire still needs checking"). Free it
+   * through the operator release-allocation path, with that path's own complete
+   * inventory checks: nothing in the original pane but its shell, and no worker in
+   * its directory. The settlement stands whether or not the release passes.
+   */
+  private async releaseSettledHireAllocation(
+    receiptKey: string,
+    paneId: string | undefined,
+    guard: () => Promise<void>,
+    abandoned: HireReceiptSettlement & { state: "abandoned" },
+  ): Promise<HireReceiptSettlement> {
+    if (paneId === undefined) return abandoned;
+    const [, harness, cwd] = JSON.parse(receiptKey) as string[];
+    if (!harness || !cwd) return abandoned;
+    const candidates = this.projectHires.unresolvedLocal(cwd, paneId, harness);
+    if (candidates.length !== 1) return abandoned;
+    const allocationId = candidates[0]!.id;
+    try {
+      const released = await this.settleNativeHireReceipt(allocationId, guard, "release-allocation");
+      return {
+        ...abandoned,
+        allocationId,
+        detail:
+          released.state === "allocation-released"
+            ? "Its project allocation was released too, so its place takes a new hire."
+            : `Its project allocation still holds the place: ${"detail" in released ? released.detail : released.state}`.slice(
+                0,
+                OPERATOR_CONVERSATION_SUMMARY_MAX,
+              ),
+      };
+    } catch (error) {
+      return {
+        ...abandoned,
+        allocationId,
+        detail: `Its project allocation still holds the place: ${reasonDetail(error)}`.slice(
+          0,
+          OPERATOR_CONVERSATION_SUMMARY_MAX,
+        ),
+      };
     }
   }
 

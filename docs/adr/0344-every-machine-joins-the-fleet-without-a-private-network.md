@@ -1,4 +1,4 @@
-# ADR 0342: Every machine joins the fleet without a private network
+# ADR 0344: Every machine joins the fleet without a private network
 
 Status: Proposed, 2026-11-02, on James's ask that a new owner's PCs show up in
 one fleet with no Tailscale, SSH or open ports, and his condition that the
