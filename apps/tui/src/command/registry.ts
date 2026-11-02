@@ -514,6 +514,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["fleet"],
     lines: [
+      "  fleet leads [--json]  Read active Clankie and connected app leads",
       "  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards",
 
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",

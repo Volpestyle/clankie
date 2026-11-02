@@ -42,6 +42,37 @@ tags:
 security: []
 
 paths:
+  /v1/fleet/leads:
+    get:
+      tags: [Operator]
+      summary: Read Clankie and connected app lead activity
+      description: Owner operator or owner Take Control device, through the relay like the fleet roster. Sorted by id, with no ranking or authority. Connector devices cannot read this route. Clankie is active when selected as lead or after model activity within ten minutes; connector devices are active when seen within fifteen minutes. Revoked and expired registrations are omitted.
+      responses:
+        "200":
+          description: Current host lead observations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [schemaVersion, observedAt, leads]
+                properties:
+                  schemaVersion: { type: integer, enum: [1] }
+                  observedAt: { type: string, format: date-time }
+                  leads:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: false
+                      required: [id, kind, name, active]
+                      properties:
+                        id: { type: string, minLength: 1 }
+                        kind: { type: string, enum: [clankie, app] }
+                        name: { type: string, minLength: 1 }
+                        active: { type: boolean }
+                        lastActiveAt: { type: string, format: date-time }
+        "403": { description: Owner fleet read required }
+        "503": { description: Lead observations unavailable }
   /v1/operator/http-settings:
     get:
       tags: [Operator]

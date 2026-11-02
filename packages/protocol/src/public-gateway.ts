@@ -1,3 +1,4 @@
+import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { SHIPPING_PATH } from "./integrate.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
@@ -249,6 +250,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: SHIPPING_PATH, target: "relay" },
   { method: "POST", path: VIEWS_PATH, target: "relay" },
   { method: "GET", path: FLEET_ROSTER_PATH, target: "relay" },
+  { method: "GET", path: FLEET_LEADS_PATH, target: "relay" },
   { method: "POST", path: FLEET_ROSTER_RETIRE_PATH, target: "relay" },
   { method: "POST", path: FLEET_ROSTER_UNDO_PATH, target: "relay" },
   { method: "GET", path: ROUTINES_PATH, target: "relay" },

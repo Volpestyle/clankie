@@ -1,3 +1,5 @@
+import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema, type FleetLead } from "@clankie/protocol/fleet-leads";
+import { isDeviceRunExpired } from "../devices.ts";
 import { SHIPPING_PATH, ShippingSnapshotSchema } from "@clankie/protocol/integrate";
 import type {
   IssueWriteResult,
@@ -149,42 +151,83 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     if (!ctx.dependencies.integration) return context.json({ error: "integration_unavailable" }, 503);
     return context.json(ShippingSnapshotSchema.parse(await ctx.dependencies.integration.shipping()));
   });
-  for (const path of [FLEET_ROSTER_PATH, FLEET_ROSTER_RETIRE_PATH, FLEET_ROSTER_UNDO_PATH]) {
-    ctx.app.on(path === FLEET_ROSTER_PATH ? "GET" : "POST", path, async (context) => {
-      context.header("cache-control", "no-store");
-      // Owner operator or a paired Take Control device; ordinary fleet workers and support reads are excluded.
-      const authorize = async () => {
-        const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-        if (operator && operator !== "unavailable") return true;
-        const device = await ctx.authenticateDevice(context.req.raw);
-        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
-        const record = ctx.devices.get(device.deviceId);
-        return ownerDeviceRecord(record);
-      };
-      if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
-      if (!ctx.dependencies.captain.fleetRoster || !ctx.dependencies.captain.fleetRosterAction)
-        return context.json({ error: "fleet_roster_unavailable" }, 503);
-      if (path === FLEET_ROSTER_PATH)
-        return context.json(
-          await ctx.dependencies.captain.fleetRoster({
-            includeWork: context.req.query("includeWork") === "true",
-            includeStarters: context.req.query("includeStarters") === "true",
-          }),
-        );
-      const parsed = (
-        path === FLEET_ROSTER_RETIRE_PATH ? RetireFleetAgentSchema : UndoFleetAgentSchema
-      ).safeParse(await readJson(context.req.raw));
-      if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
-      let current = true;
-      const result = await ctx.dependencies.captain.fleetRosterAction(parsed.data, {
-        current: () => current && !context.req.raw.signal.aborted,
-        authorize: async () => {
-          current = await authorize();
-          return current;
-        },
-      });
-      return context.json(result);
-    });
+  for (const path of [
+    FLEET_LEADS_PATH,
+    FLEET_ROSTER_PATH,
+    FLEET_ROSTER_RETIRE_PATH,
+    FLEET_ROSTER_UNDO_PATH,
+  ]) {
+    ctx.app.on(
+      path === FLEET_ROSTER_PATH || path === FLEET_LEADS_PATH ? "GET" : "POST",
+      path,
+      async (context) => {
+        context.header("cache-control", "no-store");
+        // Owner operator or a paired Take Control device; ordinary fleet workers and support reads are excluded.
+        const authorize = async () => {
+          const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+          if (operator && operator !== "unavailable") return true;
+          const device = await ctx.authenticateDevice(context.req.raw);
+          if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
+          const record = ctx.devices.get(device.deviceId);
+          return ownerDeviceRecord(record);
+        };
+        if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
+        if (path === FLEET_LEADS_PATH) {
+          if (!ctx.dependencies.captain.fleetLeadState)
+            return context.json({ error: "fleet_leads_unavailable" }, 503);
+          const now = ctx.clock();
+          const state = await ctx.dependencies.captain.fleetLeadState();
+          const recent = (at: string | undefined, windowMs: number) =>
+            at !== undefined && now.getTime() - Date.parse(at) < windowMs;
+          const leads: FleetLead[] = [
+            {
+              id: "clankie",
+              kind: "clankie",
+              name: "Clankie",
+              active: state.lead === "clankie" || recent(state.lastActiveAt, 10 * 60_000),
+              ...(state.lastActiveAt === undefined ? {} : { lastActiveAt: state.lastActiveAt }),
+            },
+          ];
+          for (const record of ctx.devices.values()) {
+            if (record.scope !== "connector" || record.status !== "active" || isDeviceRunExpired(record, now))
+              continue;
+            leads.push({
+              id: record.deviceId,
+              kind: "app",
+              name: record.name,
+              active: recent(record.lastSeenAt, 15 * 60_000),
+              ...(record.lastSeenAt === undefined ? {} : { lastActiveAt: record.lastSeenAt }),
+            });
+          }
+          leads.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+          return context.json(
+            FleetLeadsSnapshotSchema.parse({ schemaVersion: 1, observedAt: now.toISOString(), leads }),
+          );
+        }
+        if (!ctx.dependencies.captain.fleetRoster || !ctx.dependencies.captain.fleetRosterAction)
+          return context.json({ error: "fleet_roster_unavailable" }, 503);
+        if (path === FLEET_ROSTER_PATH)
+          return context.json(
+            await ctx.dependencies.captain.fleetRoster({
+              includeWork: context.req.query("includeWork") === "true",
+              includeStarters: context.req.query("includeStarters") === "true",
+            }),
+          );
+        const parsed = (
+          path === FLEET_ROSTER_RETIRE_PATH ? RetireFleetAgentSchema : UndoFleetAgentSchema
+        ).safeParse(await readJson(context.req.raw));
+        if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+        let current = true;
+        const result = await ctx.dependencies.captain.fleetRosterAction(parsed.data, {
+          current: () => current && !context.req.raw.signal.aborted,
+          authorize: async () => {
+            current = await authorize();
+            return current;
+          },
+        });
+        return context.json(result);
+      },
+    );
   }
 
   for (const retire of [false, true]) {

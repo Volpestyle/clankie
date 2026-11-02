@@ -10881,6 +10881,18 @@ command is sent, and a call that cannot be recorded is refused. The audit stores
 only the digest, but the full command text stays in that conversation's session
 transcript. The digest is a convention, not secrecy.
 
+### `fleet leads [--json]`
+
+Reads `GET /v1/fleet/leads` through the same owner-only boundary as the roster.
+Prints each lead's id, registered name, active/inactive state and last activity
+when known; `--json` returns `{ schemaVersion: 1, observedAt, leads }`.
+Clankie is active while `connector lead` selects `clankie`, or for ten minutes
+following his own model activity. Each active connector device is listed as an
+app lead, active when seen within fifteen minutes. Revoked and expired devices
+are omitted. Rows are sorted by id, with no ranking or authority implied.
+Connector calls refresh their device's last seen time at most once per minute
+through the relay's `/v1/devices/self` authorization check.
+
 ### `fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]`
 
 Read the owner's live fleet counts, grouped by working, waiting, idle and

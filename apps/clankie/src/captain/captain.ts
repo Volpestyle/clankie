@@ -1228,12 +1228,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (capture !== undefined) evaluator.capture({ ...capture(), metrics });
     deps.onTurnSettled?.(metrics);
   });
+  // Include a service turn before it settles; restart history comes from the existing metrics log.
+  let lastCaptainTurnAt: string | undefined;
   function captureEvaluationStart(
     runId: string,
     conversationId: string,
     session: AgentSession,
     request: string,
   ): void {
+    lastCaptainTurnAt = new Date().toISOString();
     if (!evaluator.isEnabled()) return;
     const scope = conversations.conversation(conversationId)?.scope;
     const context = {
@@ -5203,6 +5206,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     evaluatorCommand: (command) => evaluator.command(command),
     routineCommand: (command) => routines.command(command, { kind: "owner" }),
 
+    async fleetLeadState() {
+      const [last] = await turnSettled.read({ limit: 1 });
+      const settledAt = last?.completedAt ?? last?.failedAt;
+      const lastActiveAt = [lastCaptainTurnAt, settledAt]
+        .filter((at): at is string => at !== undefined)
+        .sort()
+        .at(-1);
+      return { lead: lead.status().lead, ...(lastActiveAt === undefined ? {} : { lastActiveAt }) };
+    },
     async readTurnMetrics(query: TurnMetricsQuery) {
       return turnSettled.read(query);
     },

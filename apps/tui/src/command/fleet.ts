@@ -55,6 +55,7 @@ const FLEET_USAGE = [
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
+  "       clankie fleet leads [--json]",
   "       clankie fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]",
   "       clankie fleet processes [retire]",
   "       clankie fleet tracker [SELECTION_JSON [--revision PREVIEW_REVISION]]",

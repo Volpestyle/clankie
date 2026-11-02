@@ -1,3 +1,4 @@
+import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema } from "../../../packages/protocol/src/fleet-leads.ts";
 import {
   CAPTAIN_SEAT_PATH,
   CAPTAIN_SEAT_START_PATH,
@@ -234,6 +235,7 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: VIEWS_PATH },
   { method: "GET", path: SHIPPING_PATH },
   { method: "GET", path: FLEET_ROSTER_PATH },
+  { method: "GET", path: FLEET_LEADS_PATH },
   { method: "POST", path: FLEET_ROSTER_RETIRE_PATH },
   { method: "POST", path: FLEET_ROSTER_UNDO_PATH },
   { method: "GET", path: ROUTINES_PATH },
@@ -351,6 +353,7 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   [HUDDLE_CLOSE_PATH]: { methods: ["POST"], update: CloseHuddleSchema, snapshot: HuddleSchema },
   [VIEWS_PATH]: { methods: ["GET", "POST"], update: ViewRequestSchema, snapshot: ViewsResponseSchema },
   [SHIPPING_PATH]: { methods: ["GET"], snapshot: ShippingSnapshotSchema },
+  [FLEET_LEADS_PATH]: { methods: ["GET"], snapshot: FleetLeadsSnapshotSchema },
   [FLEET_ROSTER_PATH]: { methods: ["GET"], snapshot: FleetRosterSnapshotSchema },
   [FLEET_ROSTER_RETIRE_PATH]: {
     methods: ["POST"],
