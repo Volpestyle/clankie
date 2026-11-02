@@ -206,7 +206,7 @@ export function autoRoundPrompt(
     "Projects on Auto (owner settings):",
     ...states.map(
       (state) =>
-        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers in its workspaces now: ${state.workers ?? "unknown"}`,
+        `- ${state.name} (${state.id}): ${state.focus === undefined ? "no focus set" : `focus: ${state.focus}`}; built-in tracker project: ${state.trackerProjectId ?? "none bound"}; Linear project: ${state.linearProjectBinding?.projectId ?? "none bound"}; workers on it now (in its workspaces or holding its issues): ${state.workers ?? "unknown"}`,
     ),
     ...(velocity.length
       ? [

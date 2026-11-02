@@ -10,6 +10,7 @@ import type { Project } from "@clankie/protocol/projects";
 import type { OperatorFleetSeat } from "@clankie/protocol";
 import { usageWindowPace } from "@clankie/protocol/worker-accounts";
 import { accountTier } from "./account-allocation.ts";
+import { liveIssueHolders } from "../work-item-holders.ts";
 import type { MachineWorkerAccounts } from "./harness-accounts.ts";
 
 /** Preserve the actual observation and pace. Neither a reset timestamp nor an alias creates capacity. */
@@ -76,13 +77,32 @@ export interface StaffingSeat {
   readonly machine: string;
   readonly directory?: string | undefined;
   readonly status: string;
+  /** The issue the seat holds now (#318), only when its key names one issue anywhere (#387). */
+  readonly issue?: string;
+}
+
+/**
+ * A key that names one tracker issue wherever it appears: `TEAM-n`, `LOCAL-TEAM-n` or
+ * `owner/repo#n`. A bare `#n` names an issue only within its repo, so it never attributes.
+ */
+export function unambiguousIssueKey(key: string): string | undefined {
+  const trimmed = key.trim();
+  if (/^(?:LOCAL-)?[A-Z][A-Z0-9]*-\d+$/iu.test(trimmed)) return trimmed.toUpperCase();
+  const github = /^([\w.-]+\/[\w.-]+)#(\d+)$/u.exec(trimmed);
+  return github ? `${github[1]!.toLowerCase()}#${github[2]!}` : undefined;
+}
+
+/** A project's issue keys, as `unambiguousIssueKey` normalizes them. */
+export function projectIssueKeys(keys: Iterable<string>): Set<string> {
+  return new Set([...keys].flatMap((key) => unambiguousIssueKey(key) ?? []));
 }
 /** Project machine IDs are routing IDs, never the census's display hostname. */
 export function autoStaffingSeats(
-  seats: readonly Pick<
+  seats: readonly (Pick<
     OperatorFleetSeat,
     "seatId" | "occupantId" | "fleet" | "machine" | "workingDirectory" | "status"
-  >[],
+  > &
+    Partial<OperatorFleetSeat>)[],
   localFleets: readonly string[] = [],
 ): StaffingSeat[] {
   const seen = new Set<string>();
@@ -92,7 +112,10 @@ export function autoStaffingSeats(
     const key = JSON.stringify([machine, seat.occupantId ?? seat.seatId]);
     if (seen.has(key)) return [];
     seen.add(key);
-    return [{ machine, directory: seat.workingDirectory, status: seat.status }];
+    // liveIssueHolders reads only the optional assignment and report fields a census seat may lack.
+    const held = liveIssueHolders([seat as OperatorFleetSeat])[0]?.itemId;
+    const issue = held === undefined ? undefined : unambiguousIssueKey(held);
+    return [{ machine, directory: seat.workingDirectory, status: seat.status, ...(issue ? { issue } : {}) }];
   });
 }
 const inside = (root: string, directory: string, windows: boolean) => {
@@ -105,16 +128,25 @@ const inside = (root: string, directory: string, windows: boolean) => {
   return b === a || b.startsWith(`${a}/`);
 };
 
-/** Shared workspace attribution for each project, the prompt and aggregate census. */
-export function projectStaffingSeats(project: Project, seats: readonly StaffingSeat[]): StaffingSeat[] {
+/**
+ * Shared attribution for each project, the prompt and aggregate census: seats in its
+ * workspaces, and seats elsewhere holding one of its issues (#387), from `issueKeys`.
+ */
+export function projectStaffingSeats(
+  project: Project,
+  seats: readonly StaffingSeat[],
+  issueKeys?: ReadonlySet<string>,
+): StaffingSeat[] {
   const roots = [...project.workspaces, ...project.worktreeRoots];
   return seats.filter(
     (seat) =>
-      seat.directory !== undefined &&
-      roots.some(
-        (root) =>
-          root.machineId === seat.machine && inside(root.path, seat.directory!, root.platform === "windows"),
-      ),
+      (seat.issue !== undefined && issueKeys?.has(seat.issue) === true) ||
+      (seat.directory !== undefined &&
+        roots.some(
+          (root) =>
+            root.machineId === seat.machine &&
+            inside(root.path, seat.directory!, root.platform === "windows"),
+        )),
   );
 }
 
@@ -127,10 +159,12 @@ export function projectStaffing(input: {
   started: ProjectVelocity["started"];
   previous?: AutoRound;
   unavailableMachines?: ReadonlySet<string>;
+  /** The project's issue keys, so a seat on one of them in another repo counts (#387). */
+  issueKeys?: ReadonlySet<string>;
 }): AutoProjectStaffing {
   const { project, queue } = input;
   const roots = [...project.workspaces, ...project.worktreeRoots];
-  const seats = projectStaffingSeats(project, input.seats);
+  const seats = projectStaffingSeats(project, input.seats, input.issueKeys);
   const censusKnown =
     !roots.some((root) => input.unavailableMachines?.has(root.machineId)) &&
     !seats.some((seat) => seat.status === "unknown");
@@ -216,7 +250,11 @@ export function projectStaffing(input: {
 export function staffingTotals(
   projects: readonly ProjectVelocity[],
   plans: readonly AutoPlanCapacity[],
-  context?: { seats: readonly StaffingSeat[]; projects: readonly Project[] },
+  context?: {
+    seats: readonly StaffingSeat[];
+    projects: readonly Project[];
+    issueKeys?: ReadonlyMap<string, ReadonlySet<string>>;
+  },
 ): AutoStaffingTotals {
   const snapshots = projects.flatMap((project) => (project.staffing ? [project.staffing] : []));
   const sum = (
@@ -226,7 +264,9 @@ export function staffingTotals(
       ? snapshots.reduce((total, s) => total + s[field]!, 0)
       : null;
   const coveredSeats = context?.seats.filter((seat) =>
-    context.projects.some((project) => projectStaffingSeats(project, [seat]).length > 0),
+    context.projects.some(
+      (project) => projectStaffingSeats(project, [seat], context.issueKeys?.get(project.id)).length > 0,
+    ),
   );
   const censusKnown = snapshots.every((s) => s.activeSeats !== null);
   return {
