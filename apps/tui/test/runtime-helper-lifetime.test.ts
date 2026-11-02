@@ -26,18 +26,26 @@ it("the actual scheduled detached process survives its fixture service process g
   // The fixtures publish each record by rename: inotify reports a plain write's empty create.
   // Subscribe before either process starts. Startup is a condition, not a
   // two-second assumption; the unchanged test deadline still catches a hang.
+  // FSEvents may coalesce or drop an event under load, so a short poll backs the watch:
+  // each wait settles once its file exists, whether or not an event arrived (#320).
   const pendingFiles = [ready, helperReady, completed].map((path) => {
     let finish!: () => void;
     const promise = new Promise<void>((resolveFile) => {
       finish = resolveFile;
     });
-    const watcher = watch(home, () => {
-      if (existsSync(path)) {
-        watcher.close();
-        finish();
-      }
-    });
-    return { promise, close: () => watcher.close() };
+    const check = () => {
+      if (!existsSync(path)) return;
+      close();
+      finish();
+    };
+    const watcher = watch(home, check);
+    const poll = setInterval(check, 50);
+    const close = () => {
+      watcher.close();
+      clearInterval(poll);
+    };
+    check();
+    return { promise, close };
   });
   const helper = join(home, "fake-helper.mjs"),
     service = join(home, "fake-service.mjs");
