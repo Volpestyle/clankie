@@ -159,7 +159,12 @@ it("a hire launches under the owner's maximum trust mode only while it is on (VU
       async () => ({ outcome: "started", control: {} as SeatControl }),
       { maximumTrustMode: async () => enabled },
     );
-    await hire("the brief");
+    const result = await hire("the brief");
+    // The receipt names the mode the worker runs in (#341).
+    expect(result).toMatchObject({
+      outcome: "spawned",
+      permissionMode: enabled ? "bypassPermissions" : "auto",
+    });
     const launch = vi.mocked(adapter.start).mock.calls[0]![0];
     expect(launch.maximumTrust).toBe(enabled ? true : undefined);
     expect(claudeWorkerLaunchArgs(launch).includes("--dangerously-skip-permissions")).toBe(enabled);

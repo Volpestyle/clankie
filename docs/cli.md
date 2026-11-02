@@ -5350,7 +5350,11 @@ service; older services refuse the query.
 The owner's one switch over the guardrails of every harness Clankie launches
 (VUH-2048). Off, the default, keeps each harness's own auto mode: `clankie claude`
 and Claude hires start with `--permission-mode auto`, whose classifier stops
-risky commands. On, the next launches start without their permission and
+risky commands. Claude refuses auto mode for some models (older ones, some
+providers) and would ask before every command, so a local Claude hire first asks
+the installed Claude, without a prompt, and is refused before launch with
+Claude's reason when auto mode is unavailable; the hire receipt's
+`permissionMode` names the mode the worker runs in. On, the next launches start without their permission and
 command guardrails, through each harness's native flag:
 
 | Harness         | Flag while on                                                                                                      | Applied at launch                                    |

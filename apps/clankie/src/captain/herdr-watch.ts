@@ -36,7 +36,7 @@ import {
 import { DiscordWatchOriginSchema, type DiscordWatchOrigin } from "./conversation-owner.ts";
 export type { DiscordWatchOrigin } from "./conversation-owner.ts";
 import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
-import { channelBody } from "./claude-worker-seat.ts";
+import { channelBody, claudeWorkerPermissionMode } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, codexProxySettled, type ExternalCodexControl } from "./external-codex-control.ts";
 import { createFleetSeatControl, isMessageableSeat } from "./fleet-seat-control.ts";
@@ -5665,6 +5665,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
           return {
             ...spawnedSeat(agent, paneId, subject, input, account),
             control,
+            ...(effectiveLaunch.harness === "claude"
+              ? { permissionMode: claudeWorkerPermissionMode(effectiveLaunch) }
+              : {}),
           };
         }
         // A prepared initial command may already be alive; never treat its pane

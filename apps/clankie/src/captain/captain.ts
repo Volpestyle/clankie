@@ -157,6 +157,7 @@ import {
   SeatHookLog,
   type ClaudeWorkerSeatDeps,
 } from "./claude-worker-seat.ts";
+import { probeClaudeAutoMode } from "./claude-auto-mode.ts";
 import { createCodexSeatAdapter } from "./codex-seat-adapter.ts";
 import {
   assertConversationAuthority,
@@ -746,6 +747,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const claudeWorkerSeats = createClaudeWorkerSeatAdapter({
     consent: () => claudeWorkerChannelConsent(),
     fleetGates: localFleetGates,
+    autoMode: (launch) => probeClaudeAutoMode(launch),
     ...claudeWorkerDeps,
   });
   const hireRegistry = createModelRegistry();

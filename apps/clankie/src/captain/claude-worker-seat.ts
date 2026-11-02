@@ -49,6 +49,7 @@ import { paneInputLine } from "./pane-draft.ts";
 import { claudeTrackerDenyRules } from "./tracker-isolation.ts";
 import { claudeWorkerMcpAllowlist, type ClaudeMcpPolicyEntry } from "./worker-mcp-profile.ts";
 import { shippedWorkerFile } from "../worker-plugin-path.ts";
+import type { ClaudeAutoModeProbeInput, ClaudeAutoModeVerdict } from "./claude-auto-mode.ts";
 
 const defaultTrackerDeny = (cwd: string, env?: Readonly<Record<string, string>>) =>
   claudeTrackerDenyRules(cwd, { ...process.env, ...env });
@@ -124,6 +125,16 @@ export interface ClaudeWorkerSeatDeps {
   readonly settingsArg?: (json: string) => Promise<string>;
   /** Stage the private first brief on the launch host; never pass its body through a shell. */
   readonly briefFile?: (json: string) => Promise<string>;
+  /**
+   * Asks the seat's own Claude whether this hire would run in auto mode (#341).
+   * Absent, the hire launches unchecked, as on a host that cannot run the probe.
+   */
+  readonly autoMode?: (launch: ClaudeAutoModeProbeInput) => Promise<ClaudeAutoModeVerdict>;
+}
+
+/** The permission mode a launch runs in: the read-only, maximum trust or auto default. */
+export function claudeWorkerPermissionMode(launch: SeatLaunch): "dontAsk" | "bypassPermissions" | "auto" {
+  return launch.readOnly === true ? "dontAsk" : launch.maximumTrust === true ? "bypassPermissions" : "auto";
 }
 
 const READY_MS = 30_000;
@@ -1136,6 +1147,22 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
         const consent = await deps.consent(launch.env);
         if (!consent.approved)
           return { outcome: "blocked", reason: "consent_required", detail: consent.detail, fix: consent.fix };
+      }
+      const permissionMode = claudeWorkerPermissionMode(launch);
+      if (permissionMode === "auto" && deps.autoMode) {
+        // Claude falls back to asking per command when it refuses auto mode, and
+        // only the owner can answer those prompts: the hire would stall at its first command.
+        const verdict = await deps.autoMode({
+          cwd: launch.cwd,
+          ...(launch.model === undefined ? {} : { model: launch.model }),
+          ...(launch.env === undefined ? {} : { env: launch.env }),
+        });
+        if (verdict.available === false)
+          return {
+            outcome: "failed",
+            reason: "harness_unavailable",
+            detail: `auto_mode_unavailable: Claude refuses auto mode for ${launch.model === undefined ? "its default model" : launch.model} (${verdict.code}: ${verdict.reason}). It would ask before every command and stall, so no worker was started. Hire a model that supports auto mode, or the owner can turn on maximum trust mode.`,
+          };
       }
       const nativePrompt = launch.resumeSessionId === undefined && launch.brief.length > 0;
       // A fresh session takes the id Clankie names, unless the owner's own arguments pick one.
