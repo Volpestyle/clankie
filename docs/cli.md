@@ -8557,6 +8557,10 @@ run URL and failing jobs when available. File and link a red-run bug before
 retrying. This applies to automatic tidy, connector `close_agent`, and lead Done
 after landing too; built-in lead Done needs an immutable commit or merged PR
 link on the issue. An unlanded-work reason cannot waive checkpoint proof.
+Repos with none of those jobs in their 20 recent main push runs have no checkpoint
+to wait for. Workers with no commits beyond their recorded hire/worktree base or
+Git fork point have no merge to account for. Connection-scoped results and bug
+searches are cached for three minutes; rate-limited reads still hold as unknown.
 For a settled-abandoned fresh hire, `not_ready` names the retained allocation,
 pane, fresh intent and native receipt. Settlement ends delivery uncertainty,
 but retains the live allocation. Launched unconfirmed hires are eligible only

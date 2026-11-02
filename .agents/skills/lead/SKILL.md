@@ -175,6 +175,11 @@ working other tasks while close-out holds. Built-in lead Done needs the landed
 commit or merged pull-request link on the issue; today's workspace HEAD is not
 the job's landing proof. `main_red` names the commit, run and failing jobs in
 the fleet round; `main_pending` and `main_unknown` keep incomplete proof open.
+A repository with no checkpoint jobs in its 20 recent main push runs has none
+to wait for. Workers that authored no commits beyond their recorded hire/base
+or Git fork point have no merge to account for. Shared connection-scoped CI
+and bug caches last three minutes; a newly filed bug is observed after expiry.
+Rate limits and unreadable configured checkpoints keep close-out held.
 
 ## Never wait on CI
 

@@ -38,3 +38,24 @@ owner acceptance was performed. The HTTP Actions/issue data in the regression
 proof is controlled fixture data; the Git history and stores are real.
 
 [Raw receipts archive](clankie://evidence/sha256/30c80905db757cd1d8dce73a144998fca967d10e9974de325765ea90b3a75b72) contains the before/after receipts, live observation and implementation patch at proof time. The [manifest](evidence.json) records its upload.
+
+## Lead review corrections
+
+Against `579fc6324`, the added no-checkpoint-repository and research-worktree
+assertions both failed: each received `main_unknown` for an unrelated/missing
+main result. The corrections distinguish repositories with no checkpoint jobs
+in 20 recent main push runs, and skip checkpoint accounting when the worker
+made no commits beyond its hire/worktree base or Git fork point.
+
+The follow-up focused run passes **133 tests in 7 files**, including no-checkpoint
+and no-main-run repositories, actual research worktrees, recorded start bases,
+cache expiry and connection isolation. A 35-pane concurrent sweep makes one
+Actions run observation and five bug-search requests, with no repeat requests
+while cached. A different HEAD resolving to the same merge shares its result.
+A newly filed bug appears after three minutes; HTTP 429 remains unknown and is
+retried only after expiry. These are production HTTP/Git boundary tests with a
+controlled clock, not live GitHub rate-limit exhaustion.
+
+[Review correction receipts](clankie://evidence/sha256/419e0e14389f6bd99f32ca69c947e40da330a0533462d7ba5a9c714067285e6b)
+include the final 22-case verbose regression run, the 133-test result summary,
+focused typecheck reports and implementation patch.

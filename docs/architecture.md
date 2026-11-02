@@ -1146,7 +1146,11 @@ then checks only `landing`, `checkpoint` and `mac`. A completed green descendant
 covers cancelled merge runs; a red run needs a repository issue naming its URL
 or merge SHA. Missing or unreachable proof holds pane close, connector close,
 auto-tidy and lead Done. The work-items service uses the existing GitHub client;
-linked-machine Git reads stay on that machine. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
+linked-machine Git reads stay on that machine. Repos with no checkpoint jobs in
+20 recent main push runs, and workers with no commits beyond their hire/worktree
+base or Git fork point, have no checkpoint to account for. A connection-scoped
+three-minute cache shares merge results, run/merge bug searches and in-flight
+reads across panes, including unknown results after rate limiting. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
 setting on two timers: every five minutes it closes settled local hires whose
 reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
 draft, idle and main-checkpoint checks; kept panes in `pane-keeps.json` are skipped). Fresh

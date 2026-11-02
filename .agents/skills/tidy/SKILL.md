@@ -45,14 +45,19 @@ its old pane id.
 
 ## Closing panes
 
-For a merged GitHub job, close-out also needs main's post-merge checkpoint:
+For a GitHub job with its own landed commits, close-out also needs main's post-merge checkpoint:
 `landing`, `checkpoint` and `mac` must all complete green, or a repository
 issue (open or closed) must name the red run URL or merge SHA. The merge is the
 first main commit containing the worker's landed HEAD. A completed green run
 on a descendant main commit covers it too. Cancelled runs provide no result;
 running, missing or unreachable evidence holds the pane. `main_red`,
 `main_pending` and `main_unknown` explain the hold, with the merge, run URL and
-failing jobs when known. File and link the red-run bug, then retry; an
+failing jobs when known. Repositories whose 20 recent main push runs have none
+of those jobs have no checkpoint to wait for. A worker with no commits beyond
+its recorded hire/worktree base (or Git fork point) is not charged with someone
+else's main commit. CI and bug reads share a three-minute connection-scoped
+cache, so retry after expiry when a bug was just filed. Unreadable or rate-limited
+reads still hold. File and link the red-run bug, then retry; an
 `unlandedReason` never overrides this hold. The same guard covers auto-tidy and
 connector `close_agent`, and the fleet round carries its blocker. See
 [ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md).

@@ -34,7 +34,7 @@ import {
 } from "./owner-credential-recovery.ts";
 import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
-import { hireWorktreeStart } from "@clankie/settings";
+import { hireWorktreeStart, projectPathContains } from "@clankie/settings";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
@@ -2705,7 +2705,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
     );
   };
-  const { hireSeat } = createHiring({
+  const { hireSeat, hireWorktreeBase } = createHiring({
     options,
     deps,
     settings,
@@ -2792,13 +2792,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       if (!paths.size)
         return { reason: "main_unknown", failingJobs: [], detail: "Worker directory unavailable" };
+      const owner = herdrWatches.tidyProvenance(agent);
+      const baseline =
+        !fleet && agent.session && typeof owner === "object"
+          ? seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner)
+          : undefined;
       for (const path of paths) {
+        const startHead =
+          baseline &&
+          projectPathContains(baseline.worktreeRoot, path, process.platform === "win32" ? "windows" : "posix")
+            ? baseline.head
+            : hireWorktreeBase(qualified?.fleet, path);
         const held = await deps.workItems.mainCheckpoint(
           path,
           fleet && shell
             ? async (command, args, cwd) =>
                 shell(remoteProgramCommand(fleet.ssh.shell, command, ["-C", cwd, ...args]), 30_000)
             : undefined,
+          startHead,
         );
         if (held) return held;
       }

@@ -1,4 +1,4 @@
-import { mainCheckpoint, MainCheckpointRefused } from "../main-checkpoint.ts";
+import { mainCheckpoint, MainCheckpointRefused, type MainCheckpointCache } from "../main-checkpoint.ts";
 import {
   WorkItemSchema,
   type WorkItem,
@@ -174,7 +174,11 @@ function numberOf(id: string): number {
 }
 
 export function createGithubBackend(
-  options: { readonly repo: string; readonly scopedWrites?: boolean } & WorkWriteCallbacks &
+  options: {
+    readonly repo: string;
+    readonly scopedWrites?: boolean;
+    readonly checkpointCache?: MainCheckpointCache;
+  } & WorkWriteCallbacks &
     ({ readonly gh: GhRunner } | { readonly api: GithubApi }),
 ): WorkBackend {
   const base = `repos/${options.repo}/issues`;
@@ -274,7 +278,12 @@ export function createGithubBackend(
         if (pull.merged) heads.add(pull.head.sha);
       }
       for (const head of heads) {
-        const held = await mainCheckpoint(github, options.repo, head);
+        const held = await mainCheckpoint(
+          github,
+          options.repo,
+          head,
+          options.checkpointCache ? { cache: options.checkpointCache } : {},
+        );
         if (held) throw new MainCheckpointRefused(held);
       }
     } catch (error) {

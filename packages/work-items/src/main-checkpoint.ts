@@ -48,17 +48,106 @@ const unknown = (detail: string, commit?: string): MainCheckpointHold => ({
   ...(commit ? { commit } : {}),
 });
 
-/** GitHub's compare collection excludes the base's ancestors. Walk its first-parent
- * chain to the first main commit containing head, including head itself on main.
- * No local tracking ref, PR check or cancelled run is evidence about main. */
+/** A connection owns its cache: no results or issue reads cross credentials.
+ * Pending promises coalesce concurrent panes; settled results (including read
+ * failures) expire after three minutes, so filing a bug is observed on retry. */
+export class MainCheckpointCache {
+  private readonly entries = new Map<string, { until: number; promise: Promise<unknown> }>();
+  private readonly now: () => number;
+  constructor(now: () => number = Date.now) {
+    this.now = now;
+  }
+  read<T>(key: string, load: () => Promise<T>): Promise<T> {
+    const prior = this.entries.get(key);
+    if (prior && prior.until > this.now()) return prior.promise as Promise<T>;
+    for (const [key, entry] of this.entries) if (entry.until <= this.now()) this.entries.delete(key);
+    if (this.entries.size >= 512) this.entries.delete(this.entries.keys().next().value!);
+    const entry = { until: Infinity, promise: Promise.resolve() as Promise<unknown> };
+    entry.promise = Promise.resolve()
+      .then(load)
+      .finally(() => {
+        entry.until = this.now() + 3 * 60_000;
+      });
+    this.entries.set(key, entry);
+    return entry.promise as Promise<T>;
+  }
+}
+const connectionCaches = new WeakMap<GithubApi, MainCheckpointCache>();
+
+async function recentRuns(api: GithubApi, repo: string, cache: MainCheckpointCache, page = 1) {
+  return cache.read(
+    `runs:${repo}:${page}`,
+    async () =>
+      (await api.request(
+        "GET",
+        `repos/${repo}/actions/runs?branch=main&event=push&per_page=100&page=${page}`,
+      )) as { workflow_runs: Run[]; total_count: number },
+  );
+}
+async function checkpointJobs(api: GithubApi, repo: string, cache: MainCheckpointCache, runId: number) {
+  return cache.read(`jobs:${repo}:${runId}`, async () => {
+    const all: Job[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const result = (await api.request(
+        "GET",
+        `repos/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100&page=${page}`,
+      )) as { jobs: Job[]; total_count: number };
+      all.push(...result.jobs);
+      if (all.length >= result.total_count) return all;
+      if (!result.jobs.length) break;
+    }
+    throw new Error("Incomplete checkpoint jobs");
+  });
+}
+
 export async function mainCheckpoint(
   api: GithubApi,
   repo: string,
   head: string,
-  options: { ignoreUnlanded?: boolean } = {},
+  options: { ignoreUnlanded?: boolean; cache?: MainCheckpointCache } = {},
 ): Promise<MainCheckpointHold | undefined> {
-  let merge: string | undefined;
-  let observed: MainCheckpointHold | undefined;
+  let cache = options.cache ?? connectionCaches.get(api);
+  if (!cache) {
+    cache = new MainCheckpointCache();
+    connectionCaches.set(api, cache);
+  }
+  const scoped = cache;
+  try {
+    if (!/^[\w.-]+\/[\w.-]+$/u.test(repo) || !/^[a-f0-9]{40,64}$/u.test(head))
+      return unknown("Invalid repository or landed HEAD");
+    // Capability is a repository observation, not a missing result for this job.
+    // Include cancelled/older runs here: their job names still prove a checkpoint
+    // exists, though they cannot prove this merge passed.
+    const configured = await scoped.read(`configured:${repo}`, async () => {
+      const runs = await recentRuns(api, repo, scoped);
+      for (const run of runs.workflow_runs.slice(0, 20)) {
+        if (
+          run.event === "push" &&
+          run.head_branch === "main" &&
+          (await checkpointJobs(api, repo, scoped, run.id)).some((job) => jobsRequired.includes(job.name))
+        )
+          return true;
+      }
+      return false;
+    });
+    if (!configured) return undefined;
+    const merge = await scoped.read(`head:${repo}:${head}`, () => resolveMainMerge(api, repo, head));
+    if (typeof merge !== "string")
+      return options.ignoreUnlanded && merge.detail === "Landed HEAD is not an ancestor of main"
+        ? undefined
+        : merge;
+    return await scoped.read(`merge:${repo}:${merge}`, () => observeCheckpoint(api, repo, merge, scoped));
+  } catch {
+    return unknown("GitHub checkpoint observation unavailable");
+  }
+}
+
+/** Resolve the first main commit containing head, including parallel main work. */
+async function resolveMainMerge(
+  api: GithubApi,
+  repo: string,
+  head: string,
+): Promise<string | MainCheckpointHold> {
   try {
     if (!/^[\w.-]+\/[\w.-]+$/u.test(repo) || !/^[a-f0-9]{40,64}$/u.test(head))
       return unknown("Invalid repository or landed HEAD");
@@ -69,7 +158,7 @@ export async function mainCheckpoint(
       `${base}/compare/${head}...${tip.sha}?per_page=100&page=1`,
     )) as Comparison;
     if (comparison.merge_base_commit.sha !== head || !["ahead", "identical"].includes(comparison.status))
-      return options.ignoreUnlanded ? undefined : unknown("Landed HEAD is not an ancestor of main");
+      return unknown("Landed HEAD is not an ancestor of main");
     const commits = [...comparison.commits];
     if (comparison.total_commits > 2000) return unknown("Main ancestry exceeds observation limit");
     for (let page = 2; commits.length < comparison.total_commits; page++) {
@@ -107,16 +196,27 @@ export async function mainCheckpoint(
       if (contains) low = mid;
       else high = mid - 1;
     }
-    merge = chain[low]!;
+    return chain[low]!;
+  } catch {
+    return unknown("GitHub checkpoint observation unavailable");
+  }
+}
+
+async function observeCheckpoint(
+  api: GithubApi,
+  repo: string,
+  merge: string,
+  cache: MainCheckpointCache,
+): Promise<MainCheckpointHold | undefined> {
+  let observed: MainCheckpointHold | undefined;
+  const base = `repos/${repo}`;
+  try {
     let held: MainCheckpointHold | undefined;
     // Newest attempts first; ignore superseded attempts and cancelled runs. A
     // green descendant can cover a merge whose own run never finished.
     const seen = new Set<string>();
     runs: for (let page = 1; page <= 20; page++) {
-      const response = (await api.request(
-        "GET",
-        `${base}/actions/runs?branch=main&event=push&per_page=100&page=${page}`,
-      )) as { workflow_runs: Run[]; total_count: number };
+      const response = await recentRuns(api, repo, cache, page);
       for (const run of response.workflow_runs) {
         if (run.event !== "push" || run.head_branch !== "main" || run.conclusion === "cancelled") continue;
         const coverage: Comparison | undefined =
@@ -132,16 +232,7 @@ export async function mainCheckpoint(
           (coverage.merge_base_commit.sha !== merge || !["ahead", "identical"].includes(coverage.status))
         )
           continue;
-        const runJobs: Job[] = [];
-        for (let jobPage = 1; jobPage <= 20; jobPage++) {
-          const jobs = (await api.request(
-            "GET",
-            `${base}/actions/runs/${run.id}/jobs?filter=latest&per_page=100&page=${jobPage}`,
-          )) as { jobs: Job[]; total_count: number };
-          runJobs.push(...jobs.jobs);
-          if (runJobs.length >= jobs.total_count) break;
-          if (!jobs.jobs.length || jobPage === 20) throw new Error("Incomplete checkpoint jobs");
-        }
+        const runJobs = await checkpointJobs(api, repo, cache, run.id);
         if (!runJobs.some((job) => jobsRequired.includes(job.name))) continue;
         if (seen.has(run.head_sha)) continue;
         seen.add(run.head_sha);
@@ -167,7 +258,10 @@ export async function mainCheckpoint(
         };
         if (!held) held = candidate;
         observed = held;
-        if (candidate.reason === "main_red" && (await linkedCheckpointBug(api, repo, merge, run.html_url)))
+        if (
+          candidate.reason === "main_red" &&
+          (await linkedCheckpointBug(api, repo, merge, run.html_url, cache))
+        )
           return undefined;
       }
       if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) break;
@@ -187,6 +281,7 @@ async function linkedCheckpointBug(
   repo: string,
   commit: string,
   runUrl: string,
+  cache: MainCheckpointCache,
 ): Promise<boolean> {
   const namesRun = (text: string) =>
     (text.match(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+/gu) ?? []).some(
@@ -195,7 +290,9 @@ async function linkedCheckpointBug(
   for (const term of [runUrl, commit, commit.slice(0, 12), commit.slice(0, 8), commit.slice(0, 7)]) {
     const q = encodeURIComponent(`repo:${repo} is:issue "${term}"`);
     for (let page = 1; page <= 10; page++) {
-      const found = (await api.request("GET", `search/issues?q=${q}&per_page=100&page=${page}`)) as {
+      const found = (await cache.read(`search:${q}:${page}`, () =>
+        api.request("GET", `search/issues?q=${q}&per_page=100&page=${page}`),
+      )) as {
         items: { number: number; title: string; body: string | null; pull_request?: unknown }[];
         total_count: number;
         incomplete_results?: boolean;
@@ -204,7 +301,9 @@ async function linkedCheckpointBug(
       for (const issue of found.items) {
         if (issue.pull_request) continue;
         if (namesRun(`${issue.title}\n${issue.body ?? ""}`)) return true;
-        const comments = (await api.list(`repos/${repo}/issues/${issue.number}/comments?per_page=100`)) as {
+        const comments = (await cache.read(`comments:${repo}:${issue.number}`, () =>
+          api.list(`repos/${repo}/issues/${issue.number}/comments?per_page=100`),
+        )) as {
           body: string;
         }[];
         if (comments.some((comment) => namesRun(comment.body))) return true;

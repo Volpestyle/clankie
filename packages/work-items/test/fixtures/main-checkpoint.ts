@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { githubRestApi } from "../../src/backends/github.ts";
-import { mainCheckpoint } from "../../src/main-checkpoint.ts";
+import { mainCheckpoint, MainCheckpointCache } from "../../src/main-checkpoint.ts";
 
 /** Real Git DAG, HTTP boundary and production GitHub transport. Only the remote
  * Actions/issue service is a controlled fixture; no live job or issue is changed. */
@@ -22,13 +22,16 @@ export async function checkpointFixture() {
     await git("commit", "-m", file);
     return git("rev-parse", "HEAD");
   };
-  await commit("base");
+  const start = await commit("base");
+  await git("update-ref", "refs/remotes/origin/main", start);
   await git("checkout", "-b", "worker");
   const head = await commit("worker");
   await git("checkout", "main");
   const parallel = await commit("parallel-main");
+  await git("update-ref", "refs/remotes/origin/main", parallel);
   await git("merge", "--no-ff", "worker", "-m", "land worker");
   const merge = await git("rev-parse", "HEAD");
+  await git("update-ref", "refs/remotes/origin/main", merge);
   const tip = await commit("later-main");
   await git("update-ref", "refs/remotes/origin/main", tip);
   await git("init", "--bare", join(root, ".git", "fixture-origin.git"));
@@ -37,14 +40,16 @@ export async function checkpointFixture() {
   await git("checkout", "worker");
   const runUrl = "https://github.com/fixture/repo/actions/runs/280";
   let mode = "red";
+  let now = 0;
+  const cache = new MainCheckpointCache(() => now);
   let linked: "sha" | "url" | "comment" | undefined;
   const requests: string[] = [];
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url!, "http://fixture");
       requests.push(url.pathname + url.search);
-      if (mode === "unreachable") {
-        response.writeHead(503).end();
+      if (mode === "unreachable" || mode === "rate-limited") {
+        response.writeHead(mode === "rate-limited" ? 429 : 503).end();
         return;
       }
       let data: unknown;
@@ -106,12 +111,12 @@ export async function checkpointFixture() {
             ? [run(281, tip, "completed", "success"), run(280, merge, "completed", "cancelled")]
             : mode === "red-descendant"
               ? [run(281, tip, "completed", "failure"), run(280, merge, "completed", "failure")]
-              : mode === "unknown"
+              : mode === "no-runs"
                 ? []
                 : [
                     run(
                       280,
-                      mode === "unrelated" ? parallel : merge,
+                      mode === "unrelated" || mode === "unknown" ? parallel : merge,
                       mode === "running" ? "in_progress" : "completed",
                       mode === "cancelled" ? "cancelled" : mode === "green" ? "success" : "failure",
                     ),
@@ -120,7 +125,10 @@ export async function checkpointFixture() {
       } else if (/\/actions\/runs\/\d+\/jobs$/u.test(url.pathname)) {
         const success = mode === "green" || mode === "descendant";
         const jobs = ["landing", "checkpoint", "mac", "check"]
-          .filter((name) => mode !== "missing-job" || name !== "mac")
+          .filter(
+            (name) =>
+              (mode !== "missing-job" || name !== "mac") && (mode !== "no-checkpoint" || name === "check"),
+          )
           .map((name) => ({
             name,
             status: mode === "running" ? "in_progress" : "completed",
@@ -157,6 +165,12 @@ export async function checkpointFixture() {
   const api = githubRestApi({ token: "fixture-only", baseUrl });
   return {
     root,
+    start,
+    cache,
+    clock: () => new Date(now),
+    advance: (ms = 180_001) => {
+      now += ms;
+    },
     head,
     merge,
     tip,
@@ -166,12 +180,13 @@ export async function checkpointFixture() {
     api,
     baseUrl,
     git,
-    check: () => mainCheckpoint(api, "fixture/repo", head),
+    check: () => mainCheckpoint(api, "fixture/repo", head, { cache }),
     mode: (next: string) => {
       mode = next;
     },
-    link: (next: typeof linked) => {
+    link: (next: typeof linked, expire = true) => {
       linked = next;
+      if (expire) now += 180_001;
     },
     close: async () => {
       await new Promise<void>((resolve, reject) =>

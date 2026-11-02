@@ -124,3 +124,22 @@ Built-in lead completion requires an immutable commit or merged PR link on the
 issue, beside its existing independently checked acceptance bundle. The same
 checkpoint reader protects explicit pane retirement, automatic tidy, connector
 close and GitHub issue completion for a merged job.
+
+The guard applies only where a post-merge checkpoint exists. If none of the
+20 recent main push runs has any of the three job names, the repository has
+no checkpoint to wait for. Cancelled runs still identify a repository's job
+names, but cannot supply a result. Unreadable and rate-limited observations
+remain unknown rather than proving the checkpoint absent.
+
+Pane close-out accounts for commits made after the worker's recorded hire
+commit baseline or relocated worktree's initial main SHA. Without that record,
+Git's fork point against `origin/main` is used (with the worktree's initial HEAD
+reflog as a fallback). With no commits beyond that base, there is no job merge
+to check; research and abandoned starts are not charged with another job's red
+main. Existing report, draft and unlanded-work guards still apply.
+
+CI results are shared per merge SHA and bug searches per run URL/merge SHA,
+within the GitHub connection, for three minutes. Concurrent checks share the
+same pending read. Read failures are cached too, so a fleet sweep cannot repeat
+a rate-limited request per pane. A new connection gets a separate cache; a new
+bug is observed after the prior result expires.

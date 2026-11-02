@@ -39,6 +39,14 @@ export class HireWorktrees {
     return this.read()[scope];
   }
 
+  /** Initial main SHA for this exact relocated worktree, on its own machine. */
+  public baseFor(fleet: string | undefined, path: string): string | undefined {
+    return Object.entries(this.read()).find(
+      ([scope, entry]) =>
+        (JSON.parse(scope) as [string, string])[0] === (fleet ?? "local") && entry.path === path,
+    )?.[1].remoteMain;
+  }
+
   /**
    * Records a relocation. An older entry is dropped only once it is past retention and `retained`
    * says its launch no longer needs it, so a fenced launch always keeps its way back.

@@ -50,7 +50,7 @@ it("checks a direct-main worker HEAD at that commit itself", async () => {
 });
 it("GitHub issue Done refuses a merged job's red run until a linked bug exists", async () => {
   const f = await fixture();
-  const backend = createGithubBackend({ repo: "fixture/repo", api: f.api });
+  const backend = createGithubBackend({ repo: "fixture/repo", api: f.api, checkpointCache: f.cache });
   await expect(backend.update("280", { status: "done" })).rejects.toThrow("main_red");
   expect(f.requests.some((path) => path === "/repos/fixture/repo/issues/280/parent")).toBe(false);
   f.link("url");
@@ -72,3 +72,40 @@ it.each(["running", "cancelled"])(
     expect(await f.check()).toMatchObject({ reason: mode === "running" ? "main_pending" : "main_unknown" });
   },
 );
+
+it.each(["no-checkpoint", "no-runs"])("does not hold a %s repository", async (mode) => {
+  const f = await fixture();
+  f.mode(mode);
+  expect(await f.check()).toBeUndefined();
+});
+
+it("coalesces a sweep by merge and run, then refreshes a newly linked bug after three minutes", async () => {
+  const f = await fixture();
+  const results = await Promise.all(Array.from({ length: 35 }, () => f.check()));
+  expect(results.every((result) => result?.reason === "main_red")).toBe(true);
+  expect(f.requests.filter((path) => path.startsWith("/search/issues"))).toHaveLength(5);
+  expect(f.requests.filter((path) => path.includes("/actions/runs?"))).toHaveLength(1);
+  const reads = f.requests.length;
+  await f.check();
+  expect(f.requests).toHaveLength(reads);
+  // A different landed HEAD that resolves to the same merge reuses its result.
+  expect(await mainCheckpoint(f.api, "fixture/repo", f.merge, { cache: f.cache })).toMatchObject({
+    reason: "main_red",
+  });
+  expect(f.requests.filter((path) => path.startsWith("/search/issues"))).toHaveLength(5);
+  f.link("url", false);
+  expect(await f.check()).toMatchObject({ reason: "main_red" });
+  f.advance();
+  expect(await f.check()).toBeUndefined();
+});
+it("caches rate-limited reads as unknown, then retries when the cache expires", async () => {
+  const f = await fixture();
+  f.mode("rate-limited");
+  expect(await f.check()).toMatchObject({ reason: "main_unknown" });
+  const reads = f.requests.length;
+  expect(await f.check()).toMatchObject({ reason: "main_unknown" });
+  expect(f.requests).toHaveLength(reads);
+  f.advance();
+  f.mode("green");
+  expect(await f.check()).toBeUndefined();
+});
