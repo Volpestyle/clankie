@@ -120,12 +120,16 @@ export type MessageSeat = (
     readonly replaces?: boolean;
     /** The event_id of the lead message this answers; proves this conversation received it (VUH-2196). */
     readonly inReplyTo?: string;
+    /** The issue this message hands the seat (#425): recorded as its deliverable once delivered. */
+    readonly deliverable?: string;
   },
 ) => Promise<SeatMessageResult>;
 type SeatMessageResult = {
   readonly deliveryStage?: DeliveryStage;
   /** Whether the answered lead message's own receipt is now acknowledged. */
   readonly inReplyTo?: { readonly messageId: string; readonly acknowledged: boolean };
+  /** Whether a handed-over deliverable was recorded on the seat, and why not. */
+  readonly deliverable?: { readonly recorded: boolean; readonly detail?: string };
 } & (
   | (Extract<FleetSeatDelivery, { outcome: "delivered" }> & {
       readonly seatId: string;

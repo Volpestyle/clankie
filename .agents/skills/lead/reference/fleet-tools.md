@@ -345,7 +345,10 @@ land or decide yourself.
 ## Issue ownership records
 
 Record a follow-up's new `deliverable` with a `fleet_efficiency` review and its
-assignment evidence. When one live session holds several issues (including its
+assignment evidence, or hand it over in the same step with `message_seat` and
+its `deliverable`: once the message is delivered to a seat you lead, the issue is
+recorded as that review would record it, and `deliverable.recorded` in the result
+says whether it was (#425). When one live session holds several issues (including its
 native subagents), review `ownedIssues` with the exact issue keys and the
 evidence that they are live, and clear it with `[]` when they end. Current
 native issue assignments supersede historical hires, newer explicit

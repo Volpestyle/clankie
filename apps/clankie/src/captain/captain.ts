@@ -2994,14 +2994,52 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
     const inReplyTo = messageOptions?.inReplyTo;
-    if (inReplyTo === undefined)
-      return sendSeatMessage(target, message, authority, questionAnswer, messageOptions);
-    const answered = { messageId: inReplyTo, acknowledged: answerLeadMessage(inReplyTo, authority) };
-    return {
-      ...(await sendSeatMessage(target, message, authority, questionAnswer, messageOptions)),
-      inReplyTo: answered,
-    };
+    const sent =
+      inReplyTo === undefined
+        ? await sendSeatMessage(target, message, authority, questionAnswer, messageOptions)
+        : {
+            ...(await sendSeatMessage(target, message, authority, questionAnswer, messageOptions)),
+            inReplyTo: { messageId: inReplyTo, acknowledged: answerLeadMessage(inReplyTo, authority) },
+          };
+    const deliverable = messageOptions?.deliverable;
+    if (deliverable === undefined) return sent;
+    return { ...sent, deliverable: await handOver(sent, deliverable, message, authority) };
   };
+
+  /**
+   * Re-tasking a seat by message (#425): a delivered message that hands it an issue records
+   * that issue as the seat's deliverable, through the same review its lead could record by
+   * hand, so what it holds (in progress, metrics, its work history) stays true. Anything less
+   * than a delivery to a seat this conversation leads records nothing and says why.
+   */
+  async function handOver(
+    sent: Awaited<ReturnType<MessageSeat>>,
+    deliverable: string,
+    message: string,
+    authority: ConversationAuthority,
+  ): Promise<{ recorded: boolean; detail?: string }> {
+    if (sent.outcome !== "delivered" || sent.leadConversationId !== undefined)
+      return {
+        recorded: false,
+        detail:
+          "Not recorded: the message was not delivered to a hire. Record it with a fleet_efficiency review once it is.",
+      };
+    if (sent.ownerConversationId !== undefined)
+      return { recorded: false, detail: "Not recorded: another conversation leads this hire." };
+    try {
+      await efficiencyActions.run(authority, {
+        seatId: sent.seatId,
+        deliverable,
+        evidence: `Handed over by message_seat: ${message.slice(0, 1_500)}`,
+      });
+      return { recorded: true };
+    } catch (error) {
+      return {
+        recorded: false,
+        detail: `Not recorded: ${error instanceof Error ? error.message : String(error)}`.slice(0, 500),
+      };
+    }
+  }
 
   /**
    * A lead answering a lead message by its exact event_id proves its
