@@ -223,7 +223,7 @@ the host takes them out of what he reads and keeps them in the item's details.
   item.
 - From a shell: `clankie feed check --project P "LINE"` asks in the project's
   lead chat; `--conversation ID` names another, `--evidence LINK` adds what to
-  see and `--longer` marks it. Keep the printed `--key` to retry an uncertain
+  see and `--longer` marks it. Keep the printed `--key=KEY` (also safe for keys starting with `-`) to retry an uncertain
   answer; it never asks twice.
 - A worker suggests its check line in its report; you decide whether to ask.
 - Mark `longer: true` (CLI `--longer`) when it honestly takes more than a

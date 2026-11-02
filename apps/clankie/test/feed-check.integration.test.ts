@@ -518,27 +518,38 @@ it("an old key never asks again after the chat's question history lets its answe
   expect((await f.feed()).items.filter((item) => item.kind === "check")).toEqual([]);
 });
 
-it("prints the key the CLI made when the answer is unavailable, so its retry asks nothing new", async () => {
-  const f = await fixture();
-  const line = "Tap the bench: it rocks";
-  f.faults.failNextAsk = true;
-  const lost = await f.cli(["check", "--project", "garden", line]);
-  expect(lost.status).toBe(1);
-  const key = /Retry with --key (\S+): it never asks twice\./u.exec(lost.output)?.[1];
-  expect(key).toBeDefined();
-  const retried = await f.cli(["check", "--project", "garden", "--key", key!, line]);
-  expect(retried.status).toBe(0);
-  expect(retried.output).toContain(`Already asked: ${line}`);
-  expect((await f.feed()).items.filter((item) => item.kind === "check")).toHaveLength(1);
+it.each([undefined, "-already-issued-key-01"])(
+  "retries an unavailable CLI check with its generated or issued key (%s)",
+  async (issuedKey) => {
+    const f = await fixture();
+    const line = "Tap the bench: it rocks";
+    f.faults.failNextAsk = true;
+    const lost = await f.cli([
+      "check",
+      "--project",
+      "garden",
+      ...(issuedKey ? [`--key=${issuedKey}`] : []),
+      line,
+    ]);
+    expect(lost.status).toBe(1);
+    const key = /Retry with --key=(\S+): it never asks twice\./u.exec(lost.output)?.[1];
+    expect(key).toBeDefined();
+    if (issuedKey) expect(key).toBe(issuedKey);
+    else expect(key).toMatch(/^[a-f0-9]{36}$/u);
+    const retried = await f.cli(["check", "--project", "garden", `--key=${key!}`, line]);
+    expect(retried.status).toBe(0);
+    expect(retried.output).toContain(`Already asked: ${line}`);
+    expect((await f.feed()).items.filter((item) => item.kind === "check")).toHaveLength(1);
 
-  // JSON carries the same key.
-  f.faults.failNextAsk = true;
-  const json = await f.cli(["check", "--project", "garden", "--json", "Tap the gate: it swings"]);
-  expect(JSON.parse(json.output)).toMatchObject({
-    outcome: "unavailable",
-    idempotencyKey: expect.any(String),
-  });
-});
+    // JSON carries the same key.
+    f.faults.failNextAsk = true;
+    const json = await f.cli(["check", "--project", "garden", "--json", "Tap the gate: it swings"]);
+    expect(JSON.parse(json.output)).toMatchObject({
+      outcome: "unavailable",
+      idempotencyKey: expect.any(String),
+    });
+  },
+);
 
 it("refuses a check line over 140 characters with a 400 naming the limit, at the API and the ask tool", async () => {
   const f = await fixture();

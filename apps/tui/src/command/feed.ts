@@ -141,7 +141,7 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
   if (paths.length > OPERATOR_CONVERSATION_ATTACHMENTS_MAX)
     throw new Error(`At most ${String(OPERATOR_CONVERSATION_ATTACHMENTS_MAX)} files per drop.`);
   const body = values.stdin === true ? await text(options.stdin ?? process.stdin) : values.body;
-  const key = values.key ?? randomBytes(18).toString("base64url");
+  const key = values.key ?? randomBytes(18).toString("hex");
   const draft = FeedDropRequestSchema.safeParse({
     projectId: values.project,
     idempotencyKey: key,
@@ -174,7 +174,7 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
     result = await client.feedDrop!({ ...draft.data, ...(attachments.length ? { attachments } : {}) });
   } catch (error) {
     throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\nThe drop may or may not be filed. Retry with --key ${key}: it never files twice.`,
+      `${error instanceof Error ? error.message : String(error)}\nThe drop may or may not be filed. Retry with --key=${key}: it never files twice.`,
     );
   }
   const stdout = options.stdout ?? process.stdout;
@@ -183,7 +183,7 @@ async function runFeedDropCommand(args: readonly string[], options: FeedCommandO
   if (values.json) outputJson(stdout, retry === undefined ? result : { ...result, idempotencyKey: retry });
   else
     stdout.write(
-      `${formatFeedDrop(result)}${retry === undefined ? "" : `\nRetry with --key ${retry}: it never files twice.`}\n`,
+      `${formatFeedDrop(result)}${retry === undefined ? "" : `\nRetry with --key=${retry}: it never files twice.`}\n`,
     );
   return result.outcome === "filed" ? 0 : 1;
 }
@@ -208,7 +208,7 @@ async function runFeedCheckCommand(args: readonly string[], options: FeedCommand
     },
   });
   if (positionals.length !== 1) throw new Error(FEED_USAGE);
-  const key = values.key ?? randomBytes(18).toString("base64url");
+  const key = values.key ?? randomBytes(18).toString("hex");
   const draft = FeedCheckRequestSchema.refine(feedCheckHasOneSource, FEED_CHECK_ONE_SOURCE).safeParse({
     idempotencyKey: key,
     check: positionals[0],
@@ -225,7 +225,7 @@ async function runFeedCheckCommand(args: readonly string[], options: FeedCommand
     result = await client.feedCheck!(draft.data);
   } catch (error) {
     throw new Error(
-      `${error instanceof Error ? error.message : String(error)}\nThe check may or may not be asked. Retry with --key ${key}: it never asks twice.`,
+      `${error instanceof Error ? error.message : String(error)}\nThe check may or may not be asked. Retry with --key=${key}: it never asks twice.`,
     );
   }
   const stdout = options.stdout ?? process.stdout;
@@ -234,7 +234,7 @@ async function runFeedCheckCommand(args: readonly string[], options: FeedCommand
   if (values.json) outputJson(stdout, retry === undefined ? result : { ...result, idempotencyKey: retry });
   else
     stdout.write(
-      `${formatFeedCheck(result)}${retry === undefined ? "" : `\nRetry with --key ${retry}: it never asks twice.`}\n`,
+      `${formatFeedCheck(result)}${retry === undefined ? "" : `\nRetry with --key=${retry}: it never asks twice.`}\n`,
     );
   return result.outcome === "raised" ? 0 : 1;
 }
@@ -294,7 +294,7 @@ export function feedDropConsoleCommand(client: OperatorConversationServiceClient
     const match = /^\s*(?:--key\s+([\w-]{16,128})\s+)?(\S+)\s+([\s\S]*\S)\s*$/u.exec(argument);
     if (!match || match[2] === "--key") throw new Error("Usage: /drop [--key KEY] PROJECT_ID TEXT");
     if (!client.feedDrop) throw new Error("Drops are unavailable");
-    const key = match[1] ?? randomBytes(18).toString("base64url");
+    const key = match[1] ?? randomBytes(18).toString("hex");
     const [projectId, body] = [match[2]!, match[3]!];
     const retry = `Retry with /drop --key ${key} ${projectId} ${body}: it never files twice.`;
     let result: FeedDropResult;

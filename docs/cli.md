@@ -9006,7 +9006,8 @@ clankie feed check --project garden --longer "Read the onboarding copy aloud: do
   its project so the feed files it there.
 - **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
   caller's; the CLI makes one and, when an answer is lost or `unavailable`,
-  prints it (`idempotencyKey` in `--json`) for `--key`. The same key and check
+  prints it (`idempotencyKey` in `--json`) for `--key=KEY`, which also accepts
+  already-issued keys starting with `-`. The same key and check
   answer with the same check and `duplicate: true`; the same key with another
   check is refused as `idempotency_conflict`. Each key's check is its own ask,
   even when another key asks the same words. The host keeps a receipt for every
@@ -9063,7 +9064,7 @@ answer prints the `/drop --key` line that retries it without filing twice.
   `.clankie/work`. `clankie evidence fetch` with that link downloads it.
 - **Retries.** `idempotencyKey` (16–128 letters, digits, `_` or `-`) is the
   client's. The CLI makes one and, when an answer is lost or `unavailable`,
-  prints it (`idempotencyKey` in `--json`) so `--key KEY` can retry. The same key and request answer with the same item and
+  prints it (`idempotencyKey` in `--json`) so `--key=KEY` can retry, including an already-issued key starting with `-`. The same key and request answer with the same item and
   `duplicate: true`, write nothing and wake no one; the same key with another
   request is refused as `idempotency_conflict`.
 - **The wake.** The lead is the project's lead chat as tracker work routes it:
