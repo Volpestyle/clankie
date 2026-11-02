@@ -129,6 +129,17 @@ checks:
 - the same delivery replays its saved result, a changed request is refused, and a later clean restart replays it with no model call;
 - a grant changed while the service was down fails the resumed turn closed, with no model or tool step.
 
+[`durable-pi-room-delivery.integration.test.ts`](../../apps/discord-bridge/test/durable-pi-room-delivery.integration.test.ts)
+carries the same kill through the bridge. The bridge's real SQLite inbox, text
+ingress and presence session submit an owner DM. The service is killed mid-shell and
+started again, and the bridge reopens its inbox. The reply then leaves through the
+bridge's bot presence runtime and discord.js REST, exactly once and threaded to the
+original message. A later bridge pass over that message posts nothing and asks the
+model nothing. The test loads the runtime from a fixture module that skips the
+credential broker, and its Discord is a loopback REST fixture. It therefore proves the
+service-to-bridge-to-REST hop, not Discord's API or gateway, and not a crash between
+Discord's send and its receipt.
+
 Before enabling more lanes:
 
 1. Obtain an approved private Discord test destination and prove the full mouth
