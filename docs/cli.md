@@ -10181,6 +10181,14 @@ Prime keeps that server list in worker memory only, but code in the same
 session can read it back. The server list is lost if the worker restarts;
 `--resume` reapplies it. See [ADR 0263](adr/0262-prime-agent-operator-seat-is-a-resident-daemon-session.md).
 
+Desktop Codex workers (`herdr-core/t…`) can receive messages after a service
+restart through their surviving dedicated native socket. Reconnection checks the
+service-owned terminal record, current process and socket, and exact thread.
+The native server supplies the transcript path for receipt reconciliation, even
+when the worker uses a different Codex home. A readable exact transcript with no
+original message and an idle recipient permits a different message after the
+five-minute settlement bound; the uncertain original is retained and never replayed.
+
 ### Delivery receipt stages
 
 Delivery results add `deliveryStage` while retaining native outcome, queue state,
