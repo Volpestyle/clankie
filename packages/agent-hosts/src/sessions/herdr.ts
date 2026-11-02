@@ -278,7 +278,16 @@ export function createHerdrSessionSource(
         ...(leaveUnlanded === undefined ? {} : { unlandedReason: leaveUnlanded }),
       });
       if (result.op !== "close_seat") throw new Error("Clankie answered with something else.");
-      if (result.closed) return { id, status: "closed", detail: "Its pane is closed." };
+      if (result.closed) {
+        const tree = result.worktree;
+        const cleanup =
+          tree === undefined
+            ? ""
+            : tree.outcome === "removed"
+              ? ` Worktree ${tree.path} removed; estimated ${tree.freedBytes ?? 0} bytes freed.${tree.evidencePath ? ` Evidence: ${tree.evidencePath}.` : ""}`
+              : ` Worktree ${tree.path} left on disk (${tree.reason ?? tree.outcome}).${tree.left ? ` Left: ${JSON.stringify(tree.left)}.` : ""}${tree.evidencePath ? ` Evidence: ${tree.evidencePath}.` : ""}`;
+        return { id, status: "closed", detail: `Its pane is closed.${cleanup}` };
+      }
       const refusal = result.refusal;
       if (refusal === undefined)
         return {

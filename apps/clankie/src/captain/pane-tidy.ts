@@ -20,7 +20,7 @@ import {
   type UnreconciledWorktree,
   type WorktreeReconciliation,
 } from "@clankie/protocol";
-import { checkoutGit, projectPathContains, reconcileWorktree } from "@clankie/settings";
+import { checkoutGit, ownerCheckout, projectPathContains, reconcileWorktree } from "@clankie/settings";
 import { redactSensitiveText } from "@clankie/observability";
 import {
   ConversationOwnerSchema,
@@ -444,6 +444,39 @@ export class PaneTidy {
     await this.authority(authority);
     if (!this.ports.pruneMany) throw Error("Worktree pruning unavailable");
     return this.ports.pruneMany(repository, paths, () => this.authority(authority));
+  }
+  /** Capture only this hire's checkout before its native process disappears. Never inspect remote paths locally. */
+  async worktreeForClose(
+    agent: HerdrAgentSnapshot,
+  ): Promise<{ path: string; repository?: string; reason?: string } | undefined> {
+    const owner = this.ports.provenance(agent);
+    if (owner === "unknown" || owner === "owner_interactive" || !owner.hired || !agent.workingDirectory)
+      return undefined;
+    const cwd = agent.foregroundWorkingDirectory ?? agent.workingDirectory;
+    if (splitFleetQualified(agent.paneId)) return { path: cwd, reason: "remote_worktree" };
+    try {
+      const path = realpathSync((await checkoutGit(cwd, ["rev-parse", "--show-toplevel"])).trim());
+      return { path, repository: await ownerCheckout(path) };
+    } catch (error) {
+      return { path: cwd, reason: errorText(error) };
+    }
+  }
+  /** Post-close cleanup has its own authority guard: the pane being gone is now expected. */
+  async pruneClosedWorktree(
+    target: { path: string; repository?: string; reason?: string },
+    guard: () => Promise<void>,
+    leaveUnlanded = false,
+  ): Promise<import("./prune-worktree.ts").PruneWorktreeResult> {
+    if (leaveUnlanded) return { outcome: "kept", path: target.path, reason: "leave_unlanded" };
+    if (!target.repository)
+      return { outcome: "unavailable", path: target.path, reason: target.reason ?? "repository_unknown" };
+    try {
+      await guard();
+      if (!this.ports.prune) throw Error("Worktree pruning unavailable");
+      return await this.ports.prune(target.repository, target.path, guard);
+    } catch (error) {
+      return { outcome: "unavailable", path: target.path, reason: errorText(error) };
+    }
   }
   private now(): number {
     return this.ports.now?.() ?? Date.now();
@@ -883,6 +916,7 @@ export class PaneTidy {
           return refuse("pane_kept");
       };
       await guard();
+      const closeWorktree = input.nativeOnly ? undefined : await this.worktreeForClose(agent);
       const closedAt = this.now();
       entry = EntrySchema.parse({
         id: randomUUID(),
@@ -957,6 +991,18 @@ export class PaneTidy {
       }
       if (!closed) return fail("close_unconfirmed");
       this.ports.untrack(agent.terminalId);
+      if (closeWorktree) {
+        entry.worktree = await this.pruneClosedWorktree(
+          closeWorktree,
+          () => this.authority(authority),
+          unlandedReason !== undefined,
+        );
+        try {
+          this.save();
+        } catch {
+          /* The pane is closed; cleanup history persistence cannot reverse it. */
+        }
+      }
       return { outcome: "closed", entry: leadEntry(entry) };
     } catch (error) {
       if (entry?.state === "closing") {

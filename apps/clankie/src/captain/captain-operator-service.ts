@@ -1266,6 +1266,8 @@ export function createOperatorService(
           refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
         };
       }
+      const closingAgent = await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined);
+      const closeWorktree = closingAgent ? await tidy?.worktreeForClose?.(closingAgent) : undefined;
       const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
         await refuseWhileWatching();
         if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
@@ -1277,6 +1279,14 @@ export function createOperatorService(
         )
           throw new Error("busy");
       });
+      const worktree =
+        closed && closeWorktree
+          ? await tidy?.pruneClosedWorktree(
+              closeWorktree,
+              refuseWhileWatching,
+              request.unlandedReason !== undefined,
+            )
+          : undefined;
       if (app !== undefined) logAppClose(closed);
       if (closed && held.length && request.unlandedReason !== undefined)
         try {
@@ -1306,6 +1316,7 @@ export function createOperatorService(
         schemaVersion: 1,
         seatId: request.seatId,
         closed,
+        ...(worktree ? { worktree } : {}),
       };
     }
     if (request.op === "spawn_seat") {

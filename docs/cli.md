@@ -10724,6 +10724,19 @@ last. Unknown or changing install evidence stays `install_unverified` or is refu
 one landed, clean, inactive linked worktree in an enrolled worktree root:
 merged, on main by content, or decided `safe_to_drop` for that exact HEAD. A
 decided drop keeps its commits under `refs/clankie/dropped-worktrees/SHA`. The
+Closing a finished hire with `close_worker_pane`, `close_agent`, or the operator's
+`close_seat` also runs this guarded prune for that hire's exact local worktree,
+after the pane confirms closed. Clean trees landed on `origin/main` by ancestry,
+content, or a `safe_to_drop` decision qualify immediately, including auto-tidy
+pane closes; the orphan sweep's 24-hour idle window does not apply. Another live
+pane or process using the tree, the main checkout, and managed runtime trees
+still hold removal. `leave_unlanded` / `--unlanded-reason` always leaves the tree.
+The close result's `worktree` reports `removed`, `kept`, or `unavailable`, the
+reason, preserved evidence and estimated `freedBytes`. Shared filesystem blocks
+may free less physical disk; discarded caches are swept asynchronously. Cleanup
+failure leaves the close successful and reports what remains. A removed tree
+cannot be reopened by Undo; the saved session/output and evidence remain.
+
 Tidy up skill uses the equivalent `prune_tidy_worktree` tool after preserving
 its result. Repeat `--path` (API `paths`, up to 64) to prune a batch: one fetch
 and one admission listing, deepest trees first, and a fresh check of each tree

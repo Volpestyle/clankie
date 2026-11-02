@@ -28,6 +28,8 @@ import type { HerdrWatchRunner } from "./herdr-watch.ts";
 export interface PruneWorktreeResult {
   outcome: "removed" | "kept" | "unavailable";
   path: string;
+  /** Estimated allocated bytes removed, excluding retained evidence; APFS shared blocks may free less. */
+  freedBytes?: number;
   reason?: string;
   evidencePath?: string;
   branchDeleted?: boolean;
@@ -41,6 +43,28 @@ export interface PruneWorktreeResult {
   evidenceCopied?: boolean;
   /** After a failed removal: what is left of the tree and where its `.local` is. */
   left?: { registered: boolean; directory: boolean; evidence: "restored" | "kept" | "none" } | "unknown";
+}
+
+/** Bounded, no-follow allocation estimate; a failed measurement never holds cleanup. */
+async function allocatedBytes(root: string): Promise<number | undefined> {
+  const deadline = Date.now() + 60_000;
+  const seen = new Set<string>();
+  const visit = async (path: string, depth: number): Promise<number> => {
+    if (depth > 80 || Date.now() > deadline) throw Error("allocation_estimate_limit");
+    const info = await lstat(path);
+    const key = `${info.dev}:${info.ino}`;
+    if (seen.has(key)) return 0;
+    seen.add(key);
+    let bytes = typeof info.blocks === "number" ? info.blocks * 512 : info.size;
+    if (info.isDirectory())
+      for await (const entry of await opendir(path)) bytes += await visit(join(path, entry.name), depth + 1);
+    return bytes;
+  };
+  try {
+    return await visit(root, 0);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Installs and build caches: regenerable, so never kept as evidence (VUH-2932). */
@@ -306,6 +330,7 @@ export async function pruneTidyWorktree(
     );
     if (fresh.outcome !== "listed" || !current) return { outcome: "kept", path, reason: "inventory_changed" };
     await guard();
+    const beforeBytes = await allocatedBytes(path);
     const keptRef =
       candidate.landedBy === "decision"
         ? `refs/clankie/dropped-worktrees/${candidate.sha}`
@@ -409,9 +434,13 @@ export async function pruneTidyWorktree(
         /* A changed, checked-out or independently tracked branch stays. */
       }
     }
+    const retainedBytes = moved ? await allocatedBytes(moved.evidencePath) : 0;
     return {
       outcome: "removed",
       path,
+      ...(beforeBytes !== undefined && retainedBytes !== undefined
+        ? { freedBytes: Math.max(0, beforeBytes - retainedBytes) }
+        : {}),
       branchDeleted,
       ...(moved ? { evidencePath: moved.evidencePath } : {}),
       ...(moved?.copied ? { evidenceCopied: true } : {}),

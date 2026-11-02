@@ -76,3 +76,33 @@ export const CheckoutSyncResultSchema = z
     ),
   })
   .strict();
+
+/** Best-effort cleanup after a confirmed close; failure never reverses the close. */
+export const ClosedWorktreeSchema = z
+  .object({
+    outcome: z.enum(["removed", "kept", "unavailable"]),
+    path: z.string(),
+    reason: z.string().optional(),
+    /** Estimated allocated bytes reclaimed; shared filesystem blocks may free less. */
+    freedBytes: z.number().nonnegative().optional(),
+    evidencePath: z.string().optional(),
+    branchDeleted: z.boolean().optional(),
+    keptRef: z.string().optional(),
+    discarded: z.array(z.string()).optional(),
+    discardFailed: z.string().optional(),
+    evidenceCopied: z.boolean().optional(),
+    left: z
+      .union([
+        z
+          .object({
+            registered: z.boolean(),
+            directory: z.boolean(),
+            evidence: z.enum(["restored", "kept", "none"]),
+          })
+          .strict(),
+        z.literal("unknown"),
+      ])
+      .optional(),
+  })
+  .strict();
+export type ClosedWorktree = z.infer<typeof ClosedWorktreeSchema>;

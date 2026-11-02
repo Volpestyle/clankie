@@ -2,7 +2,7 @@ import { WorkHandoffIntentSchema } from "./work-handoff.ts";
 import { TurnModelUsageSchema } from "./model-keys.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
-import { CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
+import { ClosedWorktreeSchema, CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema } from "./seat-efficiency.ts";
 import { WorkerReportSummarySchema } from "./worker-reports.ts";
 import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
@@ -1078,6 +1078,7 @@ export const ClosedWorkerPaneSchema = z
     undoUntil: z.string().datetime(),
     state: z.enum(["closing", "closed", "close_unconfirmed", "undoing", "reopened"]),
     resumedSeatId: z.string().optional(),
+    worktree: ClosedWorktreeSchema.optional(),
     /** Unlanded work the lead chose to leave behind, with its recorded reason (VUH-1814). */
     unlanded: z
       .object({
