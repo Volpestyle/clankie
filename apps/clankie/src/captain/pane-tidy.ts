@@ -1,3 +1,4 @@
+import type { MainCheckpointHold } from "@clankie/work-items";
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -84,6 +85,7 @@ export const PaneTidyStateSchema = z
   .strict();
 type Entry = z.infer<typeof EntrySchema>;
 export type TidyFailure =
+  | ({ outcome: "refused" } & MainCheckpointHold)
   | { outcome: "refused"; reason: "owner_interactive" | "results_not_kept" | "pane_kept" }
   /** The native input line holds typed text; it is returned verbatim so nothing is lost. */
   | { outcome: "refused"; reason: "unsent_draft"; draft?: string }
@@ -125,7 +127,7 @@ const fail = (reason: Extract<TidyFailure, { outcome: "failed" }>["reason"], det
 const refuse = (
   reason: Exclude<
     Extract<TidyFailure, { outcome: "refused" }>["reason"],
-    "not_owner" | "unlanded_work" | "unsent_draft"
+    "not_owner" | "unlanded_work" | "unsent_draft" | MainCheckpointHold["reason"]
   >,
 ): never => {
   throw new Failure({ outcome: "refused", reason });
@@ -212,6 +214,7 @@ export class PaneTidy {
     ): Promise<{ results: import("./prune-worktree.ts").PruneWorktreeResult[] }>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     retirementGuard?(agent: HerdrAgentSnapshot): Promise<RetirementGuard>;
+    mainCheckpoint?(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined>;
     worktreeHold?(
       agent: HerdrAgentSnapshot,
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
@@ -773,6 +776,13 @@ export class PaneTidy {
     }
     return { held, handoffs };
   }
+  async mainCheckpointHold(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined> {
+    try {
+      return await this.ports.mainCheckpoint?.(agent);
+    } catch {
+      return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint observation unavailable" };
+    }
+  }
   async close(
     input: {
       pane: string;
@@ -865,6 +875,10 @@ export class PaneTidy {
           held.some((work) => work.state === "unknown" || work.dirtyFiles !== 0))
       )
         throw new Failure({ outcome: "refused", reason: "unlanded_work", worktrees: held });
+      if (checkWorktrees) {
+        const checkpoint = await this.mainCheckpointHold(agent);
+        if (checkpoint) throw new Failure({ outcome: "refused", ...checkpoint });
+      }
       const raw = await this.ports.runner
         .readPane?.(agent.paneId, "recent-unwrapped", "text")
         .catch(() => undefined);
@@ -914,6 +928,10 @@ export class PaneTidy {
               entry.unlanded = { reason: unlandedReason, worktrees: checked.held.slice(0, 8) };
             else delete entry.unlanded;
           }
+        }
+        if (checkWorktrees) {
+          const checkpoint = await this.mainCheckpointHold(latest);
+          if (checkpoint) throw new Failure({ outcome: "refused", ...checkpoint });
         }
         await this.authority(authority);
         if (input.automatic && (this.keptPane(latest) || this.keepVersion(latest) !== keepVersion))

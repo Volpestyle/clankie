@@ -1,3 +1,4 @@
+import { checkpointFixture } from "../../../packages/work-items/test/fixtures/main-checkpoint.ts";
 import { fleetRosterAction } from "../src/captain/fleet-roster-actions.ts";
 import { FleetRoster } from "../src/captain/fleet-roster.ts";
 import { createClankieApp } from "../src/app.ts";
@@ -1993,15 +1994,67 @@ it.each(["removed", "safe_to_drop", "shared", "leave_unlanded", "prune_failed"])
   30_000,
 );
 
-
 it("holds a landed worker when main's checkpoint is red and unfiled (#280 repro)", async () => {
-  const f = await fixture();
-  const ports = { ...f.ports, mainCheckpoint: async () => ({
-    reason: "main_red" as const, commit: "733bcdbb", runUrl: "https://github.com/Volpestyle/clankie/actions/runs/41382090318", failingJobs: ["landing", "checkpoint", "mac"],
-  }) };
+  const checkpoint = await checkpointFixture();
+  socketCleanups.push(checkpoint.close);
+  const f = await fixture({ cwd: checkpoint.root });
+  const ports = { ...f.ports, mainCheckpoint: checkpoint.check };
   const tidy = new PaneTidy(f.path, ports);
-  const result = await tidy.close({ pane: "w1:p1", reason: "Work landed", reportPath: f.reportPath }, authority);
-  expect(result).toMatchObject({ outcome: "refused", reason: "main_red" });
+  const close = () =>
+    tidy.close({ pane: "w1:p1", reason: "Work landed", reportPath: f.reportPath }, authority);
+  expect(await close()).toMatchObject({
+    outcome: "refused",
+    reason: "main_red",
+    commit: checkpoint.merge,
+    runUrl: checkpoint.runUrl,
+  });
   expect(f.closes()).toBe(0);
+  checkpoint.link("url");
+  expect(await close()).toMatchObject({ outcome: "closed" });
+  expect(f.closes()).toBe(1);
+  f.watch.close();
+});
+
+it("auto-tidy keeps a red-main hire and names its checkpoint in the lead round", async () => {
+  const checkpoint = await checkpointFixture();
+  socketCleanups.push(checkpoint.close);
+  const f = await fixture({ cwd: checkpoint.root });
+  f.setStatus("done");
+  const tidy = new PaneTidy(f.path, { ...f.ports, mainCheckpoint: checkpoint.check });
+  tidy.keepReport(await f.ports.runner.get("w1:p1"), "Merged result and acceptance evidence kept.");
+  let clock = 0;
+  const auto = createAutoTidy({
+    setting: async () => "1h",
+    runner: f.ports.runner,
+    tidy,
+    provenance: (agent) => f.watch.tidyProvenance(agent),
+    unreadReports: () => 0,
+    ownerValid: async () => true,
+    closed: async () => {},
+    checkouts: async () => [],
+    prune: async () => {
+      throw new Error("No worktree sweep");
+    },
+    stopped: () => false,
+    now: () => clock,
+  });
+  await auto.panes();
+  clock += 3_600_001;
+  await auto.panes();
+  expect(auto.held("lead")).toMatchObject([
+    {
+      blocker: "main_red",
+      checkpoint: {
+        commit: checkpoint.merge,
+        runUrl: checkpoint.runUrl,
+        failingJobs: ["landing", "checkpoint", "mac"],
+      },
+    },
+  ]);
+  expect(f.closes()).toBe(0);
+  checkpoint.link("url");
+  clock += 3_600_001;
+  await auto.panes();
+  expect(f.closes()).toBe(1);
   f.watch.close();
 });

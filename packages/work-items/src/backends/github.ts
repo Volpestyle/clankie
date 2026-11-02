@@ -1,3 +1,4 @@
+import { mainCheckpoint, MainCheckpointRefused } from "../main-checkpoint.ts";
 import {
   WorkItemSchema,
   type WorkItem,
@@ -248,6 +249,44 @@ export function createGithubBackend(
     }
   };
 
+  const checkMergedJob = async (number: number) => {
+    try {
+      const timeline = (await github.list(`${base}/${number}/timeline?per_page=100`)) as {
+        event: string;
+        commit_id?: string | null;
+        source?: { issue?: { pull_request?: { url: string } } };
+      }[];
+      const heads = new Set<string>();
+      for (const event of timeline) {
+        if (event.event === "closed" && event.commit_id) heads.add(event.commit_id);
+        const url = event.source?.issue?.pull_request?.url;
+        const prefix = `https://api.github.com/repos/${options.repo}/pulls/`;
+        if (
+          event.event !== "cross-referenced" ||
+          !url?.startsWith(prefix) ||
+          !/^\d+$/u.test(url.slice(prefix.length))
+        )
+          continue;
+        const pull = (await github.request(
+          "GET",
+          `repos/${options.repo}/pulls/${url.slice(prefix.length)}`,
+        )) as { merged: boolean; head: { sha: string } };
+        if (pull.merged) heads.add(pull.head.sha);
+      }
+      for (const head of heads) {
+        const held = await mainCheckpoint(github, options.repo, head);
+        if (held) throw new MainCheckpointRefused(held);
+      }
+    } catch (error) {
+      if (error instanceof MainCheckpointRefused) throw error;
+      throw new MainCheckpointRefused({
+        reason: "main_unknown",
+        failingJobs: [],
+        detail: "GitHub merged-job checkpoint observation unavailable",
+      });
+    }
+  };
+
   const statusFields = (issue: Issue | undefined, status: WorkItemStatus) => {
     const keep = (issue === undefined ? [] : labelNames(issue)).filter(
       (name) => !Object.values(STATUS_LABELS).includes(name),
@@ -339,6 +378,7 @@ export function createGithubBackend(
     async update(id, patch: WorkItemPatch) {
       const issue = await fetchIssue(id);
       const current = toItem(issue);
+      if (patch.status === "done") await checkMergedJob(issue.number);
       if (
         options.scopedWrites &&
         [...(patch.labels ?? []), ...(patch.addLabels ?? []), ...(patch.removeLabels ?? [])].some(

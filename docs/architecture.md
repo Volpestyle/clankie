@@ -1140,10 +1140,16 @@ the same safe sync, including catch-up on startup. Blocking edits and ages
 go to the structured log only, never the owner's chat (VUH-2586); `clankie doctor`
 names a checkout left behind. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
-and Git inventories. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
+and Git inventories. The shared `work-items/main-checkpoint.ts` reader resolves
+the first main commit containing a landed worker HEAD through GitHub ancestry,
+then checks only `landing`, `checkpoint` and `mac`. A completed green descendant
+covers cancelled merge runs; a red run needs a repository issue naming its URL
+or merge SHA. Missing or unreachable proof holds pane close, connector close,
+auto-tidy and lead Done. The work-items service uses the existing GitHub client;
+linked-machine Git reads stay on that machine. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
 setting on two timers: every five minutes it closes settled local hires whose
 reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
-draft and idle checks; kept panes in `pane-keeps.json` are skipped). Fresh
+draft, idle and main-checkpoint checks; kept panes in `pane-keeps.json` are skipped). Fresh
 `agent get` lifecycle counters restart the idle window when they change, so
 short turns between sweeps are retained; exact-occupant reports and progress
 also extend it, including reports already acknowledged. First it

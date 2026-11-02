@@ -44,3 +44,4 @@ export {
   type ReviewPatchFile,
   type ReviewPatchLimits,
 } from "./review-patch.ts";
+export { mainCheckpoint, MainCheckpointRefused, type MainCheckpointHold } from "./main-checkpoint.ts";

@@ -84,7 +84,9 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type ComputerUseHarness } from "../computer-use-harnesses.ts";
 import {
+  DESKTOP_SEAT_FLEET,
   nativeProofLocation,
+  remoteProgramCommand,
   splitFleetQualified,
   type FleetShellRun,
   type HerdrFleet,
@@ -2766,6 +2768,41 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         original.restoredHire ? { restoredHire: original.restoredHire } : {},
       );
+    },
+    mainCheckpoint: async (agent) => {
+      if (!deps.workItems?.mainCheckpoint)
+        return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint reader unavailable" };
+      const qualified = splitFleetQualified(agent.paneId);
+      await refreshFleets();
+      const fleet = qualified && remoteFleets.find((entry) => entry.id === qualified.fleet);
+      if (
+        qualified &&
+        !fleet &&
+        qualified.fleet !== DESKTOP_SEAT_FLEET &&
+        !namedLocal.some((entry) => entry.id === qualified.fleet)
+      )
+        return { reason: "main_unknown", failingJobs: [], detail: "Worker machine unavailable" };
+      const shell = fleet && deps.fleets?.shell?.(fleet);
+      if (fleet && !shell)
+        return { reason: "main_unknown", failingJobs: [], detail: "Remote Git observation unavailable" };
+      const paths = new Set(
+        [agent.workingDirectory, agent.foregroundWorkingDirectory].filter(
+          (path): path is string => path !== undefined,
+        ),
+      );
+      if (!paths.size)
+        return { reason: "main_unknown", failingJobs: [], detail: "Worker directory unavailable" };
+      for (const path of paths) {
+        const held = await deps.workItems.mainCheckpoint(
+          path,
+          fleet && shell
+            ? async (command, args, cwd) =>
+                shell(remoteProgramCommand(fleet.ssh.shell, command, ["-C", cwd, ...args]), 30_000)
+            : undefined,
+        );
+        if (held) return held;
+      }
+      return undefined;
     },
     worktreeHold: async (agent, options) => {
       const qualified = splitFleetQualified(agent.paneId);

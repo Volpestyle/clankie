@@ -54,6 +54,9 @@ import {
   WorkInitDecisionRequired,
   WorkInitInvalid,
   type CommandRunner,
+  mainCheckpoint,
+  MainCheckpointRefused,
+  type MainCheckpointHold,
   githubRestApi,
   ghCliApi,
   type GhRunner,
@@ -715,10 +718,77 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  const checkpointApi = async (path: string) => {
+    const token = await options.githubToken?.();
+    if (token)
+      return githubRestApi({
+        token,
+        ...(options.githubApiBase ? { baseUrl: options.githubApiBase } : {}),
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+    if (options.hosted) throw new Error("GitHub connection unavailable");
+    return ghCliApi(options.gh ?? defaultGh(path));
+  };
+  const checkpointUnknown = (detail: string): MainCheckpointHold => ({
+    reason: "main_unknown",
+    failingJobs: [],
+    detail,
+  });
+  const checkpointForCheckout = async (
+    path: string,
+    gitRun: CommandRunner = run,
+  ): Promise<MainCheckpointHold | undefined> => {
+    try {
+      const remote = (await gitRun("git", ["remote", "get-url", "origin"], path)).trim();
+      const repo =
+        /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
+          remote,
+        )?.[1];
+      if (!repo) return undefined; // Another forge has no GitHub main checkpoint.
+      const head = (await gitRun("git", ["rev-parse", "HEAD"], path)).trim();
+      return await mainCheckpoint(await checkpointApi(path), repo, head, { ignoreUnlanded: true });
+    } catch {
+      return checkpointUnknown("Worker repository or GitHub checkpoint unavailable");
+    }
+  };
+  const checkIssueCheckpoint = async (issue: Readonly<Record<string, unknown>>) => {
+    const links = issue.links as { url: string }[] | undefined;
+    const references = (links ?? []).flatMap((link) => {
+      const match =
+        /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(commit|pull)\/([a-f0-9]+)(?:[/?#].*)?$/u.exec(link.url);
+      return match ? [{ repo: match[1]!, kind: match[2]!, value: match[3]! }] : [];
+    });
+    if (!references.length) {
+      throw new MainCheckpointRefused(
+        checkpointUnknown("Attach an immutable landed commit or pull request before Done"),
+      );
+    }
+    for (const reference of references) {
+      try {
+        const api = await checkpointApi(options.stateDirectory);
+        let head = reference.value;
+        if (reference.kind === "pull") {
+          const pull = (await api.request("GET", `repos/${reference.repo}/pulls/${reference.value}`)) as {
+            head: { sha: string };
+            merged: boolean;
+          };
+          if (!pull.merged) throw new MainCheckpointRefused(checkpointUnknown("Pull request has not merged"));
+          head = pull.head.sha;
+        }
+        const held = await mainCheckpoint(api, reference.repo, head);
+        if (held) throw new MainCheckpointRefused(held);
+      } catch (error) {
+        if (error instanceof MainCheckpointRefused) throw error;
+        throw new MainCheckpointRefused(checkpointUnknown("GitHub checkpoint observation unavailable"));
+      }
+    }
+  };
+
   const openBuiltIn =
     options.builtInTracker ??
     ((assertIssueWrite?: (issue: Readonly<Record<string, unknown>>) => void) =>
       createLocalTracker({
+        checkMainCheckpoint: checkIssueCheckpoint,
         directory: options.globalTrackerDirectory ?? join(options.stateDirectory, "tracker"),
         ...(options.projects === undefined
           ? {}
@@ -1610,6 +1680,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
 
   return {
+    mainCheckpoint: checkpointForCheckout,
+    checkIssueCheckpoint,
     handleOwnerWrite,
     /**
      * Resolve existing local identities without enrolling a repo or opening a tracker backend.

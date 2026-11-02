@@ -856,7 +856,7 @@ export const TRACKER_TOOLS: readonly TrackerToolDescriptor[] = [
   ),
   tool(
     "post_issue_event",
-    'Built-in tracker only. Report progress on an issue as a typed event; its state is derived from these rather than set by hand. ack accepts the work; blocked, ask and error flag it until the next ack/plan/action/result. stage advances delivery: accepted, landed (merged), delivered (released). Only the owner verifies (owner-verified) or sends an item back. Under effective lead closure, the host-authorized scoped lead may set Done after landing and an independent acceptance bundle check; this preserves delivery stage and records leadCompletion separately. Owner closure raises a "check it works" ask on landing; lead closure does not create automatic verification asks.',
+    'Built-in tracker only. Report progress on an issue as a typed event; its state is derived from these rather than set by hand. ack accepts the work; blocked, ask and error flag it until the next ack/plan/action/result. stage advances delivery: accepted, landed (merged), delivered (released). Only the owner verifies (owner-verified) or sends an item back. Under effective lead closure, the host-authorized scoped lead may set Done after landing, main checkpoint coverage (green or a linked red-run bug), and an independent acceptance bundle check; this preserves delivery stage and records leadCompletion separately. Owner closure raises a "check it works" ask on landing; lead closure does not create automatic verification asks.',
     {
       issueId: { ...string, minLength: 1 },
       type: { type: "string", enum: [...ISSUE_EVENT_TYPES] },

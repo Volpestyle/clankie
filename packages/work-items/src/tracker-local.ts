@@ -1,3 +1,4 @@
+import { MainCheckpointRefused } from "./main-checkpoint.ts";
 import { readCheckpointFile, readCheckpointBytes, type CheckpointRead } from "./tracker-checkpoint.ts";
 import {
   captureGuidedReview,
@@ -459,6 +460,7 @@ interface WriteContext {
   readonly via?: string;
   readonly authorizeLeadClosure?: TrackerToolCallOptions["authorizeLeadClosure"];
   readonly ownerApp?: TrackerToolCallOptions["ownerApp"];
+  readonly checkMainCheckpoint?: LocalTrackerOptions["checkMainCheckpoint"];
   readonly closureFences?: (() => void)[];
 }
 
@@ -594,6 +596,8 @@ export interface ReleaseSyncResult {
 export interface LocalTrackerOptions {
   /** Service state or an explicit in-repo location. Never inferred from cwd. */
   readonly directory: string;
+  /** Host checks the landed job’s main checkpoint before lead completion. */
+  readonly checkMainCheckpoint?: (issue: Readonly<Record<string, unknown>>) => Promise<void>;
   readonly clock?: () => Date;
   /** Names seed the first store only; persisted identities win on subsequent opens. */
   readonly team?: string;
@@ -1216,6 +1220,18 @@ async function recordIssueChanges(
               "bundle_check_required",
               "lead closure requires an independent bundle check of acceptance evidence",
             );
+          if (!context.checkMainCheckpoint)
+            throw new TrackerWriteRefused(
+              "main_unknown",
+              "Main checkpoint reader unavailable; obtain positive landing evidence before Done",
+            );
+          await context
+            .checkMainCheckpoint(issue as unknown as Readonly<Record<string, unknown>>)
+            .catch((error: unknown) => {
+              if (error instanceof MainCheckpointRefused)
+                throw new TrackerWriteRefused(error.hold.reason, error.message);
+              throw error;
+            });
           issue.leadCompletion = { actor: context.actor, at: now, bundleId: bundle.id };
           appendEvent(store, context, now, issue, {
             type: "state",
@@ -5301,6 +5317,7 @@ export function createLocalTracker(options: LocalTrackerOptions): LocalTrackerBa
         ? {}
         : { authorizeLeadClosure: callOptions.authorizeLeadClosure }),
       ...(callOptions?.ownerApp === undefined ? {} : { ownerApp: callOptions.ownerApp }),
+      ...(options.checkMainCheckpoint ? { checkMainCheckpoint: options.checkMainCheckpoint } : {}),
       closureFences: [],
     };
     const firstEvent = (store.events?.length ?? 0) + 1;

@@ -1267,11 +1267,31 @@ export function createOperatorService(
         };
       }
       const closingAgent = await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined);
+      const checkpoint = closingAgent ? await tidy?.mainCheckpointHold(closingAgent) : undefined;
+      if (checkpoint) {
+        if (app !== undefined) logAppClose(false, checkpoint.reason);
+        return {
+          op: "close_seat",
+          schemaVersion: 1,
+          seatId: request.seatId,
+          closed: false,
+          refusal: { ...checkpoint, failingJobs: [...checkpoint.failingJobs] },
+        };
+      }
       const closeWorktree = closingAgent ? await tidy?.worktreeForClose?.(closingAgent) : undefined;
+      let checkpointAtExit: Awaited<ReturnType<NonNullable<typeof tidy>["mainCheckpointHold"]>>;
       const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
         await refuseWhileWatching();
         if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
           throw new Error("unlanded_work");
+        const latestAgent = await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined);
+        const latestCheckpoint = latestAgent ? await tidy?.mainCheckpointHold(latestAgent) : undefined;
+        if (latestCheckpoint) {
+          checkpointAtExit = latestCheckpoint;
+          throw new Error(
+            `${latestCheckpoint.reason}: ${latestCheckpoint.commit ?? ""} ${latestCheckpoint.runUrl ?? ""}`,
+          );
+        }
         // Read again just before the exit: a turn that started meanwhile keeps its pane.
         if (
           app !== undefined &&
@@ -1287,7 +1307,7 @@ export function createOperatorService(
               request.unlandedReason !== undefined,
             )
           : undefined;
-      if (app !== undefined) logAppClose(closed);
+      if (app !== undefined) logAppClose(closed, checkpointAtExit?.reason);
       if (closed && held.length && request.unlandedReason !== undefined)
         try {
           tidy?.recordLeftBehind(
@@ -1316,6 +1336,9 @@ export function createOperatorService(
         schemaVersion: 1,
         seatId: request.seatId,
         closed,
+        ...(!closed && checkpointAtExit
+          ? { refusal: { ...checkpointAtExit, failingJobs: [...checkpointAtExit.failingJobs] } }
+          : {}),
         ...(worktree ? { worktree } : {}),
       };
     }

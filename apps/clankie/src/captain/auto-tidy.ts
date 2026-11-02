@@ -1,3 +1,4 @@
+import type { MainCheckpointHold } from "@clankie/work-items";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { FLEET_AUTO_TIDY_MS, type FleetAutoTidy } from "@clankie/protocol/fleet-settings";
@@ -33,6 +34,7 @@ export interface AutoTidyHeld {
   readonly idleSince: string;
   readonly window: string;
   /** reports_unread, results_not_kept, adoption_refused, or the close's own refusal. */
+  readonly checkpoint?: MainCheckpointHold;
   readonly blocker: "reports_unread" | "results_not_kept" | "adoption_refused" | TidyFailure["reason"];
   readonly unreadReports?: number;
 }
@@ -185,7 +187,11 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         held.delete(key);
         continue;
       }
-      const hold = (blocker: AutoTidyHeld["blocker"], unreadReports?: number) =>
+      const hold = (
+        blocker: AutoTidyHeld["blocker"],
+        unreadReports?: number,
+        checkpoint?: MainCheckpointHold,
+      ) =>
         held.set(key, {
           owner: owner.conversationId,
           row: {
@@ -196,6 +202,7 @@ export function createAutoTidy(ports: AutoTidyPorts) {
             idleSince: new Date(since).toISOString(),
             window: setting,
             blocker,
+            ...(checkpoint ? { checkpoint } : {}),
             ...(unreadReports === undefined ? {} : { unreadReports }),
           },
         });
@@ -254,7 +261,7 @@ export function createAutoTidy(ports: AutoTidyPorts) {
         { owner, current: () => !ports.stopped(), authorize },
       );
       if (result.outcome !== "closed") {
-        hold(result.reason);
+        hold(result.reason, undefined, "failingJobs" in result ? result : undefined);
         retryAt.set(key, at + delay);
         continue;
       }

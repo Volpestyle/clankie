@@ -99,3 +99,28 @@ comparison for test failures. Building that offer is a follow-up.
   takes one, for its real-app run.
 - Amends [ADR 0240](0240-changes-land-directly-on-main.md) for pull requests:
   the gate is the same; when it runs is new.
+
+## Amendment: merged-job close-out accounts for main's checkpoint (#280)
+
+Merging and continuing work keep the policy above. Retiring a merged job's
+worker or marking its issue Done requires positive post-merge evidence: the
+`landing`, `checkpoint` and `mac` jobs all completed successfully, or an issue
+in that repository names the failing run URL or merge SHA. Issue state does not
+matter; the filed bug carries the follow-up. This does not require fixing main
+before other changes can proceed.
+
+The merge is the first commit on main's first-parent history containing the
+worker's landed HEAD. A completed green push run on any descendant main commit
+also covers it: cancel-in-progress can prevent the merge's own run finishing.
+Cancelled runs do not count as results. Running, missing or unreachable evidence
+holds close-out; PR checks and unrelated jobs cannot supply main's proof.
+
+The tracker’s existing GitHub account connection or local `gh` route supplies
+these read-only observations. `main_red`, `main_pending` and `main_unknown`
+are typed close refusals, including the merge, run URL and failing jobs when
+known. Auto-tidy passes the same blocker to the lead round. A linked repository
+bug releases a red hold without new credentials or an override setting.
+Built-in lead completion requires an immutable commit or merged PR link on the
+issue, beside its existing independently checked acceptance bundle. The same
+checkpoint reader protects explicit pane retirement, automatic tidy, connector
+close and GitHub issue completion for a merged job.

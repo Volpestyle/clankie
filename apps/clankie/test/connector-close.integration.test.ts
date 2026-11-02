@@ -1,3 +1,6 @@
+import { createHerdrSessionSource } from "../../../packages/agent-hosts/src/sessions/herdr.ts";
+import { checkpointFixture } from "../../../packages/work-items/test/fixtures/main-checkpoint.ts";
+import type { MainCheckpointHold } from "@clankie/work-items";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +34,7 @@ async function service(
     status: string;
     live?: string;
   }[],
+  mainCheckpointHold: () => Promise<MainCheckpointHold | undefined> = async () => undefined,
 ) {
   const root = await mkdtemp(join(tmpdir(), "clankie-connector-close-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
@@ -78,6 +82,7 @@ async function service(
     },
     herdrWatches: {
       tidy: {
+        mainCheckpointHold,
         seatWorktreeHold: async (seatId: string) => held.get(seatId) ?? [],
         recordLeftBehind: (entry: { reason: string }) => left.push(entry.reason),
       },
@@ -232,4 +237,39 @@ it("the owner's own close is unchanged: it closes their panes, busy or not, and 
   expect(
     info.mock.calls.some(([fields]) => (fields as { event?: string }).event === "connector.close_agent"),
   ).toBe(false);
+});
+
+it("connector close_agent holds red main and returns the typed checkpoint blocker until its bug is linked", async () => {
+  const checkpoint = await checkpointFixture();
+  cleanups.push(checkpoint.close);
+  const f = await service(
+    [{ seatId: "worker", hired: true, starter: { kind: "clankie" }, status: "done" }],
+    checkpoint.check,
+  );
+  expect(await f.close("worker", { appDeviceId: "app" })).toMatchObject({
+    closed: false,
+    refusal: {
+      reason: "main_red",
+      commit: checkpoint.merge,
+      runUrl: checkpoint.runUrl,
+      failingJobs: ["landing", "checkpoint", "mac"],
+    },
+  });
+  const source = createHerdrSessionSource(
+    {
+      dispatch: async () => f.close("worker", { appDeviceId: "app" }),
+      terminalTail: async () => {
+        throw new Error("No screen read in close proof");
+      },
+      tailRefusal: async () => new Error("No tail in close proof"),
+    },
+    { surfaceClientId: "close-proof" },
+  );
+  expect(await source.close!("worker")).toMatchObject({
+    status: "refused",
+    detail: expect.stringContaining(checkpoint.runUrl),
+  });
+  expect(f.exits).toEqual([]);
+  checkpoint.link("url");
+  expect(await f.close("worker", { appDeviceId: "app" })).toMatchObject({ closed: true });
 });
