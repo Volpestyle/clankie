@@ -521,6 +521,13 @@ export class DurablePiTurns {
     const joined = this.joined(deliveryId);
     return joined !== undefined && joined.result === undefined;
   }
+  /**
+   * Whether a delivery's Pi work was journaled, settled or not. A settled journal
+   * still answers its redelivery when the service died before the receipt did.
+   */
+  recorded(deliveryId: string): boolean {
+    return this.read(deliveryId) !== undefined || this.joined(deliveryId) !== undefined;
+  }
   /** Written before the steer, so a restart always finds which turn a follow-up joined. */
   link(deliveryId: string, parent: string): void {
     writeDurably(this.joinedPath(deliveryId), { parent });

@@ -4208,7 +4208,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       return discord.ownerUserId === request.trigger.actorId;
     },
-    canResumeDiscordTurn: (request) => durablePiTurns.unsettled(request.deliveryId),
+    canResumeDiscordTurn: (request) => durablePiTurns.recorded(request.deliveryId),
     async submitDiscordTurn(
       request: DiscordPresenceChannelTurnRequest,
       authority?: { readonly verifiedOwner: boolean; readonly sourceCurrent?: () => boolean },

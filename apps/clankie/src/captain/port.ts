@@ -184,7 +184,7 @@ export type FleetHealthAlertDelivery =
 export interface CaptainPort {
   /** Retain the full request so a durable turn can resume it (ADR 0284); grants no authority. */
   retainsDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
-  /** A durable turn (or a follow-up it absorbed) left unsettled by an earlier process. */
+  /** A durable turn (or a follow-up it joined) was journaled, settled or not, so it answers from its journal (ADR 0284). */
   canResumeDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   fleetRoster?(options?: {
     includeWork?: boolean;
