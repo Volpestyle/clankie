@@ -1248,10 +1248,10 @@ export class ConversationStore {
     return meta === undefined ? undefined : publicConversation(meta);
   }
 
-  /** Open conversations with exactly this scope, as the `list` op returns them. */
-  public listConversations(scope: OperatorConversationScope): OperatorConversation[] {
+  /** Open conversations, with exactly this scope when one is given, as the `list` op returns them. */
+  public listConversations(scope?: OperatorConversationScope): OperatorConversation[] {
     return [...this.metas.values()]
-      .filter((meta) => sameScope(meta.scope, scope))
+      .filter((meta) => scope === undefined || sameScope(meta.scope, scope))
       .map((meta) => publicConversation(meta));
   }
 

@@ -33,7 +33,6 @@ import { assertConversationAuthority, type ConversationAuthority } from "./conve
 import type { ConversationStore } from "./conversations.ts";
 import type { FleetRoomRecord } from "./fleet-room.ts";
 import type { createWorkerAccountsReader } from "./harness-accounts.ts";
-import type { LeadChat } from "./lead-roster.ts";
 import { ProjectMirrors } from "./project-mirrors.ts";
 import { readRepositoryChurn } from "./repository-churn.ts";
 
@@ -59,7 +58,8 @@ export interface AutoRoundsContext {
   /** Read at call time: the captain reassigns its named local fleets (ADR 0325). */
   readonly namedLocal: ReadonlyArray<{ id: string }>;
   readonly refreshFleet: () => Promise<readonly OperatorFleetSeat[]>;
-  readonly leadChats: () => Promise<readonly LeadChat[]>;
+  /** The leads Auto routing chooses among (ADR 0264); see the captain's autoRoutingLeads. */
+  readonly autoRoutingLeads: () => Promise<Parameters<typeof autoProjectRounds>[2]>;
   readonly readWorkerAccounts: ReturnType<typeof createWorkerAccountsReader>;
   readonly wakeConversation: WakeConversation;
   readonly noteFleetRoom: (record: FleetRoomRecord) => void;
@@ -78,7 +78,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
     unansweredFleetSources,
     pendingFleetSources,
     refreshFleet,
-    leadChats,
+    autoRoutingLeads,
     readWorkerAccounts,
     wakeConversation,
     noteFleetRoom,
@@ -153,7 +153,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
     return autoProjectRounds(
       current.projects.projects,
       workerCounts,
-      await leadChats(),
+      await autoRoutingLeads(),
       conversations.defaultGlobalConversationId(),
     );
   };
