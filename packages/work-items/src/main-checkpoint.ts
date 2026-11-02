@@ -211,14 +211,16 @@ async function observeCheckpoint(
   let observed: MainCheckpointHold | undefined;
   const base = `repos/${repo}`;
   try {
-    let held: MainCheckpointHold | undefined;
-    // Newest attempts first; ignore superseded attempts and cancelled runs. A
-    // green descendant can cover a merge whose own run never finished.
-    const seen = new Set<string>();
+    // Prefer this merge's newest checkpoint, even while it is running. Only a
+    // cancelled own run permits coverage by a descendant; unrelated workflows
+    // and older green runs cannot discharge its red result.
+    let own: { run: Run; jobs: Job[] } | undefined;
+    let descendant: { run: Run; jobs: Job[] } | undefined;
+    let scanned = false;
     runs: for (let page = 1; page <= 20; page++) {
       const response = await recentRuns(api, repo, cache, page);
       for (const run of response.workflow_runs) {
-        if (run.event !== "push" || run.head_branch !== "main" || run.conclusion === "cancelled") continue;
+        if (run.event !== "push" || run.head_branch !== "main") continue;
         const coverage: Comparison | undefined =
           run.head_sha === merge
             ? undefined
@@ -226,47 +228,59 @@ async function observeCheckpoint(
                 "GET",
                 `${base}/compare/${merge}...${run.head_sha}?per_page=1`,
               )) as Comparison);
-        if (coverage?.status === "behind" && coverage.merge_base_commit.sha === run.head_sha) break runs;
+        if (coverage?.status === "behind" && coverage.merge_base_commit.sha === run.head_sha) {
+          scanned = true;
+          break runs;
+        }
         if (
           coverage &&
           (coverage.merge_base_commit.sha !== merge || !["ahead", "identical"].includes(coverage.status))
         )
           continue;
-        const runJobs = await checkpointJobs(api, repo, cache, run.id);
-        if (!runJobs.some((job) => jobsRequired.includes(job.name))) continue;
-        if (seen.has(run.head_sha)) continue;
-        seen.add(run.head_sha);
-        const selected = jobsRequired.map((name) => runJobs.find((job) => job.name === name));
-        const failingJobs = selected
-          .filter(
-            (job): job is Job =>
-              job !== undefined &&
-              job.status === "completed" &&
-              ["failure", "timed_out", "action_required", "startup_failure"].includes(job.conclusion ?? ""),
-          )
-          .map((job) => job.name);
-        if (
-          run.status === "completed" &&
-          selected.every((job) => job?.status === "completed" && job.conclusion === "success")
-        )
-          return undefined;
-        const candidate: MainCheckpointHold = {
-          reason: run.status === "completed" && failingJobs.length ? "main_red" : "main_pending",
-          commit: merge,
-          runUrl: run.html_url,
-          failingJobs,
-        };
-        if (!held) held = candidate;
-        observed = held;
-        if (
-          candidate.reason === "main_red" &&
-          (await linkedCheckpointBug(api, repo, merge, run.html_url, cache))
-        )
-          return undefined;
+        const jobs = await checkpointJobs(api, repo, cache, run.id);
+        if (!jobs.some((job) => jobsRequired.includes(job.name))) continue;
+        if (run.head_sha === merge) {
+          own = { run, jobs };
+          break runs;
+        }
+        if (!descendant && run.conclusion !== "cancelled") descendant = { run, jobs };
       }
-      if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) break;
+      if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) {
+        scanned = true;
+        break;
+      }
     }
-    return held ?? unknown("No completed post-merge checkpoint result", merge);
+    if (!own)
+      return unknown(scanned ? "No merge checkpoint result" : "Checkpoint observation limit reached", merge);
+    const chosen = own.run.conclusion === "cancelled" ? descendant : own;
+    if (!chosen) return unknown("No completed post-merge checkpoint result", merge);
+    const { run, jobs } = chosen;
+    const selected = jobsRequired.map((name) => jobs.find((job) => job.name === name));
+    const failingJobs = selected
+      .filter(
+        (job): job is Job =>
+          job !== undefined &&
+          job.status === "completed" &&
+          ["failure", "timed_out", "action_required", "startup_failure"].includes(job.conclusion ?? ""),
+      )
+      .map((job) => job.name);
+    if (
+      run.status === "completed" &&
+      selected.every((job) => job?.status === "completed" && job.conclusion === "success")
+    )
+      return undefined;
+    observed = {
+      reason: run.status === "completed" && failingJobs.length ? "main_red" : "main_pending",
+      commit: merge,
+      runUrl: run.html_url,
+      failingJobs,
+    };
+    if (
+      observed.reason === "main_red" &&
+      (await linkedCheckpointBug(api, repo, run.head_sha, run.html_url, failingJobs, cache))
+    )
+      return undefined;
+    return observed;
   } catch {
     return observed
       ? { ...observed, reason: "main_unknown", detail: "GitHub checkpoint observation unavailable" }
@@ -281,12 +295,15 @@ async function linkedCheckpointBug(
   repo: string,
   commit: string,
   runUrl: string,
+  failingJobs: readonly string[],
   cache: MainCheckpointCache,
 ): Promise<boolean> {
   const namesRun = (text: string) =>
     (text.match(/https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/actions\/runs\/\d+/gu) ?? []).some(
       (url) => url === runUrl,
-    ) || (text.match(/\b[a-f0-9]{7,64}\b/giu) ?? []).some((sha) => commit.startsWith(sha.toLowerCase()));
+    ) ||
+    ((text.match(/\b[a-f0-9]{7,64}\b/giu) ?? []).some((sha) => commit.startsWith(sha.toLowerCase())) &&
+      failingJobs.every((name) => (text.match(/\b[\w-]+\b/gu) ?? []).includes(name)));
   for (const term of [runUrl, commit, commit.slice(0, 12), commit.slice(0, 8), commit.slice(0, 7)]) {
     const q = encodeURIComponent(`repo:${repo} is:issue "${term}"`);
     for (let page = 1; page <= 10; page++) {

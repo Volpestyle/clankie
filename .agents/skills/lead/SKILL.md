@@ -168,8 +168,10 @@ bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
 silently (`tidy`). Before closing a merged job's pane or setting Done, obtain
 main's checkpoint for the first main commit containing its landed HEAD. All
 three post-merge jobs (`landing`, `checkpoint`, `mac`) must complete green, or
-file and link a repository issue naming the red run URL or merge SHA (open or
-closed issues count). A green descendant main run covers a cancelled merge run;
+file and link a repository issue or comment naming the red run URL, or its
+SHA together with all failing job names (open or closed issues count). A bare
+SHA reference is not failure evidence. Use the merge's own checkpoint when it
+has one; only a cancelled own run permits a descendant checkpoint to cover it;
 cancelled, running and unavailable observations themselves never pass. Keep
 working other tasks while close-out holds. Built-in lead Done needs the landed
 commit or merged pull-request link on the issue; today's workspace HEAD is not
