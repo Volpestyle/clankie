@@ -13,6 +13,9 @@ it; none takes precedence over another.
   ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
   Screen work goes to a Codex computer-use seat: `harness: "codex"` with
   `mcpServers: ["node_repl"]`, briefed to stay in background windows.
+  Give each hire a `name`, a few words saying its job ("Worker names"): the
+  owner sees it as its project and that ("clankie · Worker names") in their app
+  and Herdr. Left out, the brief's first line names it.
   Do the work yourself
   when that fits better: planning, research, reading, writing that needs no
   checkout.
@@ -22,6 +25,12 @@ it; none takes precedence over another.
   ([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)).
   If a desktop hire doesn't come up or can't be messaged, tell the owner rather
   than hiring into a TUI pane.
+- **Keep a pending start’s receipt.** Send the task as `prompt`. A hire returns
+  `pending` within five seconds, with `startId` and its agent ID once a pane
+  exists. Call `start_agent` with only that `startId` for progress; the service
+  keeps delivering the original brief after an HTTP disconnect. Never repeat
+  the hire to check it. Receipts belong to the hiring app and the current service
+  lifetime; after a restart, inspect `list_agents` before a new hire.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
@@ -58,6 +67,15 @@ it; none takes precedence over another.
   are green, and a local review by any model is advisory, with its findings
   filed as follow-up issues
   ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+  There, brief each worker to rebase its branch onto `origin/main` once, right
+  before merging, instead of merging `main` in repeatedly; to push with
+  `--force-with-lease` to its own branch only; and to stop and tell you if the
+  rebase conflicts in files it didn't touch. Use no landing queue: not
+  `clankie integrate`, not GitHub's merge queue
+  ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+- **Keep workers off the same files.** Don't put two workers on the same files at
+  once. Sequence them, or give the shared file one owner, and route a conflict a
+  worker flags in someone else's files to whoever owns them.
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
   goes to the owner.

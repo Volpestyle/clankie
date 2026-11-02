@@ -128,7 +128,12 @@ and next action, and who may change scope. **Done stays fixed**: a handoff or
 ticket split cannot add a gate; only the scope owner changes scope, in the same
 brief. Give each shared dependency one producer and one integration boundary,
 and search real callers before an interface changes; workers never stub or edit
-another owner's files to get past a dependency.
+another owner's files to get past a dependency. Don't put two workers on the
+same files at once: sequence them or give the shared file one owner. Brief each
+to land by the repo's own rule; in Clankie's own repositories that is one
+rebase onto `origin/main` right before merging, and a stop to flag a conflict
+in files the worker didn't touch
+([ADR 0345](../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 
 Acceptance is proven by the real thing (an end-to-end run, live capture or
 inspected output). Name any test that must exist; otherwise workers add none.

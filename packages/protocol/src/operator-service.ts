@@ -834,6 +834,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      /** Read an accepted start; never launches or replays a brief. */
+      startId: z.string().uuid().optional(),
       notify: WorkerNotifySchema.optional(),
       /** Relay-authenticated hiring app; callers cannot stamp themselves. */
       appDeviceId: z.string().min(1).max(256).optional(),
@@ -862,6 +864,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
         .min(1)
         .max(32)
         .optional(),
+      /**
+       * A few words naming the job, such as "Worker names". The agent is called after its
+       * project and this ("clankie · Worker names"); absent, the brief's first line names it.
+       * A display name only: no routing, session or authority.
+       */
+      name: z.string().trim().min(1).max(48).optional(),
       /** The first thing the agent is asked; information from the caller, delivered as its brief. */
       prompt: z.string().trim().min(1).max(8_000).optional(),
     })
@@ -1616,11 +1624,13 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
     .object({
       op: z.literal("start_agent"),
       schemaVersion: z.literal(1),
+      /** Read an accepted start; never launches or replays a brief. */
+      startId: z.string().uuid().optional(),
       notify: WorkerNotifySchema.optional(),
       /** Relay-authenticated hiring app; callers cannot stamp themselves. */
       appDeviceId: z.string().min(1).max(256).optional(),
-      /** `places` lists where it can start; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
-      status: z.enum(["places", "started", "refused"]),
+      /** `places` lists where it can start; `pending` retains the start and original brief under startId; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
+      status: z.enum(["places", "pending", "started", "refused"]),
       places: z.array(StartAgentPlaceSchema).max(256),
       seatId: z.string().max(OPERATOR_CONVERSATION_REF_MAX).optional(),
       detail: z.string().max(1200).optional(),

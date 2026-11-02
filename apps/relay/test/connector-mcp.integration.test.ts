@@ -332,6 +332,16 @@ async function startConnectorRelay(
             workingDirectory: "C:\\code\\kh2",
           },
         ];
+        if (request.startId !== undefined)
+          return {
+            op: "start_agent",
+            schemaVersion: 1,
+            status: "pending",
+            places,
+            startId: request.startId,
+            seatId: "pc1/term_pending",
+            detail: "Original brief retained.",
+          };
         if (request.machine === undefined || request.workingDirectory === undefined)
           return {
             op: "start_agent",
@@ -849,6 +859,39 @@ describe("Claude connector MCP endpoint", () => {
     await Promise.all([first.close(), second.close()]);
   });
 
+  it("rejects unknown connector arguments before dispatch, including a misspelled hire brief", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    try {
+      const before = relay.seen.length;
+      const misspelled = await client.callTool({
+        name: "start_agent",
+        arguments: { machine: "volpe@pc1", workingDirectory: "C:\\code\\kh2", brief: "fix the desync" },
+      });
+      expect(misspelled.isError).toBe(true);
+      expect(textOf(misspelled)).toContain('Unknown arguments for start_agent: "brief"');
+      expect(textOf(misspelled)).toContain("Use prompt");
+      expect(relay.seen).toHaveLength(before);
+      for (const [name, args, field] of [
+        ["post_note", { text: "do not send", typo: true }, "typo"],
+        ["list_agents", { machin: "pc1" }, "machin"],
+        ["start_agent", { notify: { lead: "grok", ref: "thread", typo: true } }, "notify.typo"],
+        [
+          "answer_prompt",
+          { agent: "herdr:term-loose", expect: "ready", steps: [{ key: "enter", typo: true }] },
+          "steps[0].typo",
+        ],
+      ] as const) {
+        const result = await client.callTool({ name, arguments: args });
+        expect(result.isError).toBe(true);
+        expect(textOf(result)).toContain(JSON.stringify(field));
+        expect(relay.seen).toHaveLength(before);
+      }
+    } finally {
+      await client.close();
+    }
+  });
+
   it("starts an agent only in a known project's place, through the connector's own allowlist", async () => {
     const relay = await startConnectorRelay();
     const client = await connect(relay.url);
@@ -885,6 +928,7 @@ describe("Claude connector MCP endpoint", () => {
             machine: "volpe@pc1",
             workingDirectory: "C:\\code\\kh2",
             harness: "codex",
+            name: "Netcode desync",
             prompt: "fix the netcode desync",
           },
         }),
@@ -901,6 +945,8 @@ describe("Claude connector MCP endpoint", () => {
       machine: "volpe@pc1",
       workingDirectory: "C:\\code\\kh2",
       harness: "codex",
+      // The app names the job, so the owner's app shows the hire as "kh2 · Netcode desync".
+      name: "Netcode desync",
       prompt: "fix the netcode desync",
     });
     // The app may name the account to hire on, as fleet_capacity names it; Clankie uses it exactly.
@@ -1081,12 +1127,16 @@ describe("Claude connector MCP endpoint", () => {
     expect(empty.notes).toEqual([]);
     expect(empty.about).toContain("not instructions");
 
-    // The tool sends only the text: an author the caller names never reaches the board.
+    // An unknown author argument is refused before any write; valid notes carry only text.
     const handover = "  I'm reworking kh2's netcode on PC1; leave pc1/kh2 to me until tonight.  ";
-    const posted = await claude.callTool({
+    const spoofed = await claude.callTool({
       name: "post_note",
       arguments: { text: handover, author: "Clankie" },
     });
+    expect(spoofed.isError).toBe(true);
+    expect(textOf(spoofed)).toContain('Unknown arguments for post_note: "author"');
+    expect((await notes(grok)).notes).toEqual([]);
+    const posted = await claude.callTool({ name: "post_note", arguments: { text: handover } });
     expect(JSON.parse(textOf(posted)).posted).toMatchObject({
       author: "Claude",
       text: handover.trim(),
@@ -1609,5 +1659,24 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { agent: "herdr:pc1/spike", path: "a.png" },
     });
     expect(textOf(unseated)).toContain("isn't one Clankie seats");
+  });
+  it("reads a pending start receipt through MCP without repeating the hire arguments", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    const startId = "019a3c5e-1d2a-7c8b-9e7f-6a5b4c3d2e1f";
+    try {
+      const result = JSON.parse(
+        textOf(await client.callTool({ name: "start_agent", arguments: { startId } })),
+      );
+      expect(result).toMatchObject({ status: "pending", startId, agent: "herdr:pc1/term_pending" });
+      expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+        op: "start_agent",
+        schemaVersion: 1,
+        appDeviceId: connectorDevice.deviceId,
+        startId,
+      });
+    } finally {
+      await client.close();
+    }
   });
 });

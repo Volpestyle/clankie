@@ -669,7 +669,7 @@ export function createCodexSeatAdapter(
           };
         }
       };
-      return Promise.race([startup(), pending]);
+      return view.waitForStartup ? startup() : Promise.race([startup(), pending]);
     },
   };
 }
