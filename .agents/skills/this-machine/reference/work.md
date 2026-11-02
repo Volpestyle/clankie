@@ -45,7 +45,10 @@ repo IDs. Clear the pointer with `clankie work-on clear` when it no longer
 applies. It writes nothing to the tracker, but it is what "in progress" means:
 work reads, `list_issues`, the app's views and `clankie metrics --issues` count an
 open issue as `in_progress` only while a live agent holds it this way (`heldBy`
-names them). An unheld issue the tracker calls in progress reads `todo`, with
+names them). A hire also holds the one issue its brief names (an issue URL,
+`owner/repo#N`, or "Closes #N" in a GitHub checkout) when it was given no
+deliverable, and in work reads an open draft pull request that closes an issue
+holds it too (`heldBy` lists the pull request's URL). An unheld issue the tracker calls in progress reads `todo`, with
 `trackerStatus` showing the tracker's word. Clear it when you stop.
 The pointer follows the native session through a pane move and service restart;
 a new session does not inherit it. Keep transient actions in `clankie stance`

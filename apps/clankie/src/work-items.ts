@@ -99,7 +99,13 @@ import {
   type WorkProjectFence,
 } from "./work-write-target.ts";
 import { deliveryFingerprint } from "./captain/delivery-fence.ts";
-import { trackerStatusesFor, withLiveHolders, type IssueHolder } from "./work-item-holders.ts";
+import {
+  closedIssues,
+  githubIssueOf,
+  trackerStatusesFor,
+  withLiveHolders,
+  type IssueHolder,
+} from "./work-item-holders.ts";
 import {
   assertAdmitted,
   CONNECTED_APP_ACTOR_PREFIX,
@@ -2615,7 +2621,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (request.action === "show") {
         const result = await handleTracker(request, local, posting, destination);
         return "item" in result && "repo" in result
-          ? { ...result, item: withLiveHolders(result.repo.id, result.item, holders) }
+          ? {
+              ...result,
+              item: withLiveHolders(result.repo.id, result.item, [
+                ...holders,
+                ...(await draftPullHolders([result.item])),
+              ]),
+            }
           : result;
       }
       // Filter on the live status: read the tracker statuses it can come from, then filter.
@@ -2627,7 +2639,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         destination,
       );
       if (!("items" in result) || !("repo" in result)) return result;
-      const items = result.items.map((item) => withLiveHolders(result.repo.id, item, holders));
+      const held = [...holders, ...(await draftPullHolders(result.items))];
+      const items = result.items.map((item) => withLiveHolders(result.repo.id, item, held));
       return {
         ...result,
         items: (wanted === undefined ? items : items.filter((item) => wanted.includes(item.status))).slice(
@@ -2637,6 +2650,43 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
   };
+  /**
+   * An open draft pull request that closes an issue holds it (#318): the work is under way
+   * even when the worker that opened it is between turns or gone. Read per GitHub repo the
+   * items live in, through the shared one-minute snapshot; an unreadable repo adds nothing.
+   */
+  async function draftPullHolders(items: readonly WorkItem[]): Promise<IssueHolder[]> {
+    const slugs = new Set(items.flatMap((item) => githubIssueOf(item.location)?.slug ?? []));
+    if (slugs.size === 0) return [];
+    let api: NonNullable<TrackerDeps["github"]>;
+    try {
+      const access = checkpointAccess(await options.githubToken?.());
+      api = cacheGithub(access.api, access.binding);
+    } catch {
+      // allow-swallowed-rejection -- no GitHub connection: live seats alone hold issues.
+      return [];
+    }
+    const found = await Promise.all(
+      [...slugs].map(async (slug) => {
+        try {
+          const pulls = (await api.list(`repos/${slug}/pulls?state=open&per_page=100`)) as {
+            draft?: boolean;
+            body?: string | null;
+            html_url?: string;
+          }[];
+          return pulls.flatMap((pull) =>
+            pull.draft === true && typeof pull.html_url === "string"
+              ? closedIssues(pull.body ?? "", slug).map((itemId) => ({ itemId, seatId: pull.html_url! }))
+              : [],
+          );
+        } catch {
+          // allow-swallowed-rejection -- an unreadable repo's drafts hold nothing; seats still do.
+          return [];
+        }
+      }),
+    );
+    return found.flat();
+  }
   async function handleTracker(
     request: WorkRequest,
     local: boolean,
