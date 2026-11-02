@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { createServer } from "node:net";
 import { join } from "node:path";
@@ -114,4 +114,65 @@ it("unbinds from a watched session once its socket stops answering", async () =>
     setTimeout(() => server.close(), 50);
   });
   expect(server.listening).toBe(false);
+});
+
+it("starts Herdr's server with no Clankie bearer and no .env.local provider key in its environment", async () => {
+  const root = await temporary();
+  const dump = join(root, "server-env");
+  // A stand-in Herdr: `server` records its own environment and stays up;
+  // `api snapshot` answers healthy, as the real one does.
+  const binary = join(root, "fake-herdr");
+  await writeFile(
+    binary,
+    [
+      "#!/bin/sh",
+      'if [ "$1" = server ]; then echo "PID=$$" > "$FAKE_HERDR_DUMP.tmp"; env >> "$FAKE_HERDR_DUMP.tmp"; mv "$FAKE_HERDR_DUMP.tmp" "$FAKE_HERDR_DUMP"; exec sleep 60; fi',
+      'if [ "$1" = api ]; then [ -f "$FAKE_HERDR_DUMP" ] && echo \'{"result":{}}\' || exit 1; exit 0; fi',
+      "exit 1",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    HOME: root,
+    SHELL: "/bin/sh",
+    FAKE_HERDR_DUMP: dump,
+    CLANKIE_CAPTAIN_TOKEN: "clankie_cap_secret",
+    CLANKIE_OPERATOR_TOKEN: "clankie_op_secret",
+    CLANKIE_DISCORD_BRIDGE_TOKEN: "bridge-secret",
+    CLANKIE_GATEWAY_HOST_TOKENS_JSON: "{}",
+    OPENAI_API_KEY: "from-env-local",
+    ANTHROPIC_API_KEY: "the-owner-exported-this",
+    CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT: "2000",
+  };
+  const runtime = await startHerdrRuntime({
+    binary,
+    repoRoot: join(import.meta.dirname, "../../.."),
+    stateRoot: root,
+    env,
+    withheld: ["OPENAI_API_KEY"],
+  });
+  const recorded = (await readFile(dump, "utf8")).split("\n");
+  const pid = Number(recorded.find((line) => line.startsWith("PID="))?.slice(4));
+  try {
+    const names = new Set(recorded.map((line) => line.split("=", 1)[0]));
+    for (const name of [
+      "CLANKIE_CAPTAIN_TOKEN",
+      "CLANKIE_OPERATOR_TOKEN",
+      "CLANKIE_DISCORD_BRIDGE_TOKEN",
+      "CLANKIE_GATEWAY_HOST_TOKENS_JSON",
+      "OPENAI_API_KEY",
+    ])
+      expect(names.has(name), name).toBe(false);
+    expect(recorded.join("\n")).not.toContain("secret");
+    // What the owner exported themselves, and plain settings, still reach panes.
+    expect(names.has("ANTHROPIC_API_KEY")).toBe(true);
+    expect(names.has("CLANKIE_VOICE_POST_INSTRUCTIONS_TOKEN_LIMIT")).toBe(true);
+    // The service keeps its own copy.
+    expect(env.CLANKIE_CAPTAIN_TOKEN).toBe("clankie_cap_secret");
+  } finally {
+    await runtime.close();
+    if (pid > 0) process.kill(pid, "SIGTERM");
+  }
 });

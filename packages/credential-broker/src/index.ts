@@ -184,6 +184,15 @@ export {
   type ResolvedOperatorCredential,
 } from "./operator-credential.ts";
 export { protectedKeychainPath } from "./protected-keychain.ts";
+export {
+  createOwnerCredentialStore,
+  isProtectedCredentialId,
+  loginProtectedIds,
+  PROTECTED_CREDENTIAL_IDS,
+  ProtectedFirstCredentialStore,
+  protectStoredCredentials,
+  type ProtectCredentialsResult,
+} from "./protected-credentials.ts";
 
 export {
   GOOGLE_OAUTH_APP_PROVIDER_ID,

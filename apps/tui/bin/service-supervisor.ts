@@ -155,10 +155,9 @@ export interface ManagedService {
     readonly env: NodeJS.ProcessEnv;
     readonly repoRoot: string;
     /**
-     * The brokered captain bearer, when one is available. Deliberately handed
-     * to each service rather than merged into the shared env: it is a shared
-     * secret between the service and its trusted clients, and the Discord
-     * bridge refuses to start if it sees the variable at all.
+     * The brokered captain bearer, when one is available. No managed service
+     * puts it in a child's environment, which any same-user process can read;
+     * the service and the relay read it from the broker themselves.
      */
     readonly captainToken?: string | undefined;
   }) => NodeJS.ProcessEnv;

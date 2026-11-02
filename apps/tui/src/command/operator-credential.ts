@@ -1,5 +1,6 @@
 import {
   protectOperatorCredential,
+  protectStoredCredentials,
   protectedKeychainPath,
   rotateOperatorCredential,
   type CredentialStore,
@@ -7,6 +8,8 @@ import {
 import { outputJson, type Writable } from "./io.ts";
 
 const OPERATOR_CREDENTIAL_USAGE = "Usage: clankie operator-credential rotate|protect [--json]";
+// `protect` moves the operator credential and every other Clankie bearer
+// (captain, bridges, joined hosts, gateway) into the protected keychain.
 
 export interface OperatorCredentialCommandOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -26,16 +29,31 @@ export async function runOperatorCredentialCommand(
   if (action === "protect") {
     const env = options.env ?? process.env;
     const result = await protectOperatorCredential({ env });
+    // Then every other bearer that grants authority over Clankie: the captain's, the
+    // bridges', joined hosts' and the gateway's. Ids only are reported, never values.
+    const others = await protectStoredCredentials({ env });
     const output = options.stdout ?? process.stdout;
     if (json)
-      outputJson(output, { ok: true, status: result.moved ? "protected" : "already_protected", ...result });
-    else
+      outputJson(output, {
+        ok: others.failed.length === 0,
+        status: result.moved || others.moved.length > 0 ? "protected" : "already_protected",
+        ...result,
+        credentials: { moved: others.moved, failed: others.failed },
+      });
+    else {
       output.write(
         result.moved
           ? `Operator credential moved to ${protectedKeychainPath(env)}; the login-keychain copy is deleted. Hired workers under the worker sandbox can't read it.\n`
           : "Operator credential is already in the protected keychain.\n",
       );
-    return 0;
+      if (others.moved.length > 0)
+        output.write(`Also moved to the protected keychain: ${others.moved.join(", ")}.\n`);
+      if (others.failed.length > 0)
+        output.write(
+          `Did not read back, so their login-keychain copies are kept: ${others.failed.join(", ")}. Run this again.\n`,
+        );
+    }
+    return others.failed.length === 0 ? 0 : 1;
   }
   const credential = await rotateOperatorCredential({
     env: options.env ?? process.env,

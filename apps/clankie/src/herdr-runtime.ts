@@ -87,12 +87,36 @@ export function paneShellScript(owner: NodeJS.ProcessEnv): string {
   ].join("\n");
 }
 
+/** Clankie's own bearers: a service, bridge, joined-host or gateway token in any spelling. */
+export function isClankieBearerName(name: string): boolean {
+  return /^CLANKIE_[A-Z0-9_]*TOKENS?(?:_JSON|_FILE)?$/u.test(name);
+}
+
+/**
+ * The environment Herdr's supervisor and server start with. Herdr hands its own
+ * environment to every pane, and any same-user process can read a live
+ * process's environment, so no bearer and no provider key loaded from the
+ * root `.env.local` (`withheld`) may ride in it. The service keeps both in its
+ * own memory; a pane that needs a credential asks the broker for its own.
+ */
+export function herdrFleetEnvironment(
+  env: NodeJS.ProcessEnv,
+  withheld: Iterable<string> = [],
+): NodeJS.ProcessEnv {
+  const out = { ...env };
+  for (const name of Object.keys(out)) if (isClankieBearerName(name)) delete out[name];
+  for (const name of withheld) delete out[name];
+  return out;
+}
+
 /** A child supervisor loses its IPC channel even if Clankie is killed with SIGKILL. */
 export async function startHerdrRuntime(input: {
   binary?: string;
   repoRoot: string;
   stateRoot: string;
   env: NodeJS.ProcessEnv;
+  /** Names the service loaded from `.env.local`; they stay out of the fleet's environment. */
+  withheld?: readonly string[];
   isolated?: boolean;
 }) {
   const root = resolve(input.stateRoot, "herdr");
@@ -109,7 +133,7 @@ export async function startHerdrRuntime(input: {
   if (input.isolated && listening)
     throw new Error("An OS-bounded fleet must start its own daemon, never adopt one");
   const fleetEnv = {
-    ...input.env,
+    ...herdrFleetEnvironment(input.env, input.withheld),
     XDG_CONFIG_HOME: root,
     XDG_STATE_HOME: root,
     XDG_RUNTIME_DIR: root,
@@ -178,7 +202,12 @@ export async function startHerdrRuntime(input: {
     ["--supervise-herdr", binary, ...(adopt ? ["--adopt"] : [])],
     {
       execArgv: [],
-      env: { ...input.env, XDG_CONFIG_HOME: root, XDG_STATE_HOME: root, XDG_RUNTIME_DIR: root },
+      env: {
+        ...herdrFleetEnvironment(input.env, input.withheld),
+        XDG_CONFIG_HOME: root,
+        XDG_STATE_HOME: root,
+        XDG_RUNTIME_DIR: root,
+      },
       stdio: ["ignore", "inherit", "inherit", "ipc"],
     },
   );

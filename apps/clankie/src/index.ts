@@ -115,6 +115,7 @@ import {
 import { defaultGbaPlayJournalDir } from "@clankie/play";
 import {
   createDefaultCredentialStore,
+  createOwnerCredentialStore,
   LINEAR_WEBHOOK_PROVIDER_ID,
   ensureDiscordBridgeCredential,
   ensureDiscordUserBridgeCredential,
@@ -316,18 +317,19 @@ const onDoorwayChange =
  * through this file; anything the launcher or shell set deliberately wins.
  */
 const repoRoot = resolve(import.meta.dirname, "../../..");
-function loadRepoEnvFile(): void {
+function loadRepoEnvFile(): string[] {
   // Scratch services use their generated environment, never the owner's keys.
-  if (process.env.CLANKIE_SCRATCH === "1") return;
+  if (process.env.CLANKIE_SCRATCH === "1") return [];
   let contents: string;
   try {
     contents = readFileSync(join(repoRoot, ".env.local"), "utf8");
   } catch {
-    return;
+    return [];
   }
-  applyRepoProviderEnvironment(contents, process.env);
+  return applyRepoProviderEnvironment(contents, process.env);
 }
-loadRepoEnvFile();
+// They stay in this process: Herdr and its panes never receive them.
+const repoEnvironmentNames = loadRepoEnvFile();
 
 // Fill the Discord environment from settings.json before anything reads it;
 // existing environment entries win, so a deliberate override still overrides.
@@ -381,6 +383,7 @@ const herdr = await startHerdrConnection({
   repoRoot,
   stateRoot,
   env: process.env,
+  withheld: repoEnvironmentNames,
   warn: (message) => logger.warn({ event: "herdr.unavailable" }, message),
 });
 // Keep the existing on-disk directory so browser profiles survive the process merge.
@@ -397,7 +400,9 @@ const eventLogPath = process.env.CLANKIE_EVENT_LOG?.trim() || join(stateRoot, "e
 const port = Number(process.env.PORT ?? 4310);
 const relayPort = Number(process.env.CLANKIE_RELAY_PORT ?? 4321);
 
-const operatorCredentialStore = createDefaultCredentialStore();
+// Clankie's own bearers read from the protected keychain first once it exists;
+// every other credential stays where it was (`clankie operator-credential protect`).
+const operatorCredentialStore = createOwnerCredentialStore(process.env);
 await ensureOperatorCredential({ env: process.env, store: operatorCredentialStore, protectedFirst: true });
 const discordBodyInLoadout =
   serviceInLoadout("discord-bridge", process.env) || serviceInLoadout("discord-user-session", process.env);

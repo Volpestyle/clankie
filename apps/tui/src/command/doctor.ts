@@ -26,6 +26,7 @@ import {
 } from "@clankie/protocol/tool-catalog";
 import {
   createDefaultCredentialStore,
+  loginProtectedIds,
   resolveOperatorCredential,
   resolveCaptainCredential,
 } from "@clankie/credential-broker";
@@ -150,6 +151,9 @@ function seatBindingSummary(report: InstallDoctorReport): string | undefined {
 function doctorSummary(report: InstallDoctorReport): string {
   if (report.credentialStoreHealth?.state !== undefined && report.credentialStoreHealth.state !== "ready")
     return report.credentialStoreHealth.message ?? "Keychain unavailable";
+  const unprotected = report.unprotectedCredentials;
+  if (unprotected && "ids" in unprotected && unprotected.ids.length > 0)
+    return `${unprotected.ids.length} Clankie credential${unprotected.ids.length === 1 ? " is" : "s are"} still in the login keychain, which any process on this account reads (${unprotected.ids.join(", ")}) — run \`clankie operator-credential protect\`.`;
   const binding = report.operatorSeatBindings;
   // An absent mode is not proof of enforcement. Preparation and unknown-mode
   // observations stay below existing readiness reasons.
@@ -296,10 +300,19 @@ export function formatMachineDoctorSummary(report: Record<string, unknown>): str
 export async function doctorCommand(
   options: InspectInstallOptions & { cwd?: string; host?: string },
 ): Promise<InstallDoctorReport> {
+  const env = options.env ?? process.env;
+  // Clankie's own bearers still in the login keychain, which any same-user process
+  // reads without a prompt. Ids only; checked on the owner's Mac's default store.
+  const unprotectedCredentials =
+    options.credentialStore === undefined && process.platform === "darwin" && !env.CLANKIE_CREDENTIALS_FILE
+      ? loginProtectedIds(undefined, env).then(
+          (ids) => ({ ids }),
+          (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }),
+        )
+      : undefined;
   options = {
     ...options,
-    credentialStore:
-      options.credentialStore ?? createDefaultCredentialStore({ env: options.env ?? process.env }),
+    credentialStore: options.credentialStore ?? createDefaultCredentialStore({ env }),
   };
   const [report, workerObservations, resources, simulators, checkouts, seatBridges, seatDeliveries] =
     await Promise.all([
@@ -529,6 +542,7 @@ export async function doctorCommand(
     ...report,
     connectorRefreshRevocations: await inspectConnectorRefreshRevocations(options),
     ...(options.credentialStore?.health ? { credentialStoreHealth: options.credentialStore.health() } : {}),
+    ...(unprotectedCredentials === undefined ? {} : { unprotectedCredentials: await unprotectedCredentials }),
     machineAccessRefusals: await inspectMachineAccessRefusals({
       ...options,
       ...(options.credentialStore ? { operatorCredentialStore: options.credentialStore } : {}),

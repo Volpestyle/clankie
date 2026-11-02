@@ -1014,6 +1014,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.op === "evidence_fetch" ||
       serviceRequest.op === "fleet_room" ||
       ownerNoteRead ||
+      // Typing into a terminal goes on the device's own identity, never the relay's bearer.
+      serviceRequest.op === "terminal_control" ||
+      serviceRequest.op === "terminal_input" ||
       (serviceRequest.op === "send" && currentAuthorization.device.grants.terminalControl);
     try {
       if (abort.signal.aborted) return true;
@@ -1053,6 +1056,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "input_cancel" ||
           serviceRequest.op === "autonomy" ||
           serviceRequest.op === "lead" ||
+          serviceRequest.op === "terminal_control" ||
+          serviceRequest.op === "terminal_input" ||
           serviceRequest.op === "send")
           ? options.deviceDispatch!(
               serviceRequest,

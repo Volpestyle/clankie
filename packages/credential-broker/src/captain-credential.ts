@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { createOwnerCredentialStore } from "./protected-credentials.ts";
 
 /**
  * The captain's local bearer, brokered rather than hand-exported.
@@ -121,6 +122,7 @@ async function readStoredToken(store: CredentialStore): Promise<string | undefin
   return credential.key;
 }
 
+/** Protected keychain first once it exists (`clankie operator-credential protect`). */
 function defaultStore(env: NodeJS.ProcessEnv | undefined): CredentialStore {
-  return createDefaultCredentialStore(env === undefined ? {} : { env });
+  return createOwnerCredentialStore(env);
 }
