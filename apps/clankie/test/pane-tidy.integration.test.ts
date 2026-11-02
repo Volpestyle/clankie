@@ -1992,3 +1992,16 @@ it.each(["removed", "safe_to_drop", "shared", "leave_unlanded", "prune_failed"])
   },
   30_000,
 );
+
+
+it("holds a landed worker when main's checkpoint is red and unfiled (#280 repro)", async () => {
+  const f = await fixture();
+  const ports = { ...f.ports, mainCheckpoint: async () => ({
+    reason: "main_red" as const, commit: "733bcdbb", runUrl: "https://github.com/Volpestyle/clankie/actions/runs/41382090318", failingJobs: ["landing", "checkpoint", "mac"],
+  }) };
+  const tidy = new PaneTidy(f.path, ports);
+  const result = await tidy.close({ pane: "w1:p1", reason: "Work landed", reportPath: f.reportPath }, authority);
+  expect(result).toMatchObject({ outcome: "refused", reason: "main_red" });
+  expect(f.closes()).toBe(0);
+  f.watch.close();
+});

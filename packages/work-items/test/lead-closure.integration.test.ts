@@ -32,13 +32,14 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-async function fixture() {
+async function fixture(checkMainCheckpoint?: () => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "tracker-lead-closure-"));
   roots.push(root);
   const directory = join(root, "tracker");
   const evidence = EvidenceStore.local(join(root, "evidence"));
   const options = {
     directory,
+    checkMainCheckpoint,
     async validateEvidence(_issueKey: string, references: readonly EvidenceReference[]) {
       for (const reference of references) {
         const record = await evidence.record(reference.recordId);
@@ -324,4 +325,12 @@ it("rejects late fixture revocation before atomic publication without committing
   expect(await f.storeBytes()).toBe(before);
   expect(await f.events()).toEqual(priorEvents);
   expect(await f.reopenStore().call("get_issue", { id: f.issue.id })).not.toHaveProperty("leadCompletion");
+});
+
+
+it("holds lead Done for a red, unfiled post-merge checkpoint (#280 repro)", async () => {
+  const f = await fixture(async () => { throw new Error("main_red: 733bcdbb https://github.com/Volpestyle/clankie/actions/runs/41382090318 landing, checkpoint, mac"); });
+  await f.ready();
+  await expect(f.close()).rejects.toThrow("main_red");
+  expect(await f.read()).not.toHaveProperty("leadCompletion");
 });
