@@ -6,6 +6,8 @@ import {
   type CheckoutSyncResult,
 } from "@clankie/settings";
 import type { createLogger } from "@clankie/observability";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 
 /**
  * The service's report of each sync (VUH-2586). A blocked or unavailable sync is
@@ -22,9 +24,30 @@ export function ownerCheckoutSyncReport(logger: Pick<ReturnType<typeof createLog
   };
 }
 
+/**
+ * What can move `origin/main` in an owner checkout: its loose ref and `packed-refs`, by
+ * identity and timestamps. Undefined when its git directory isn't a plain `.git`
+ * directory; then every tick asks git, as before (#360).
+ */
+async function mainRefSignature(owner: string): Promise<string | undefined> {
+  const git = join(owner, ".git");
+  const directory = await stat(git, { bigint: true, throwIfNoEntry: false });
+  if (!directory?.isDirectory()) return undefined;
+  const parts = await Promise.all(
+    [join(git, "refs", "remotes", "origin", "main"), join(git, "packed-refs")].map(async (path) => {
+      const info = await stat(path, { bigint: true, throwIfNoEntry: false });
+      return info ? `${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}` : "-";
+    }),
+  );
+  return parts.join("|");
+}
+
 /** Git updates the shared remote-tracking ref only after a successful push.
  * Observe that ref across linked worktrees; periodically fetch for other clones.
  * No hooks, shell interception, or agent turn is needed.
+ *
+ * A quiet tick spawns no git (#360): each path's owner checkout is remembered until the
+ * next fetch, and `origin/main` is re-read only when its ref files changed.
  */
 export function startOwnerCheckoutSync(options: {
   repositories(): Promise<string[]>;
@@ -33,6 +56,10 @@ export function startOwnerCheckoutSync(options: {
   fetchIntervalMs?: number;
 }) {
   const observed = new Map<string, string>();
+  /** The ref signature `observed` was read at; a match means main hasn't moved. */
+  const observedRef = new Map<string, string>();
+  /** Each path's owner checkout, kept until that owner's next fetch or an error. */
+  const owners = new Map<string, string>();
   const fetched = new Map<string, number>();
   const warnings = new Map<string, string>();
   let closed = false;
@@ -41,22 +68,41 @@ export function startOwnerCheckoutSync(options: {
     if (closed) return Promise.resolve();
     if (running) return running;
     running = (async () => {
-      const owners = new Set<string>();
-      for (const repository of await options.repositories()) {
+      const seen = new Set<string>();
+      const fetchDue = (owner: string) =>
+        Date.now() - (fetched.get(owner) ?? 0) >= (options.fetchIntervalMs ?? 60_000);
+      const repositories = await options.repositories();
+      for (const repository of owners.keys())
+        if (!repositories.includes(repository)) owners.delete(repository);
+      for (const repository of repositories) {
         if (closed) break;
         try {
-          const owner = await ownerCheckout(repository);
-          if (owners.has(owner)) continue;
-          owners.add(owner);
-          if (Date.now() - (fetched.get(owner) ?? 0) >= (options.fetchIntervalMs ?? 60_000)) {
+          let owner = owners.get(repository);
+          if (owner === undefined || fetchDue(owner)) {
+            owner = await ownerCheckout(repository);
+            owners.set(repository, owner);
+          }
+          if (seen.has(owner)) continue;
+          seen.add(owner);
+          if (fetchDue(owner)) {
             await fetchCheckoutMain(owner);
             fetched.set(owner, Date.now());
           }
+          const signature = await mainRefSignature(owner);
+          if (signature !== undefined && observed.has(owner) && observedRef.get(owner) === signature)
+            continue;
           const main = (await checkoutGit(owner, ["rev-parse", "--verify", "origin/main^{commit}"])).trim();
-          if (closed || observed.get(owner) === main) continue;
+          if (closed) continue;
+          if (observed.get(owner) === main) {
+            if (signature !== undefined) observedRef.set(owner, signature);
+            continue;
+          }
           const result = await syncOwnerCheckout(owner);
           // Refusal retries on each new landing; transient observation failures retry next tick.
-          if (result.outcome !== "unavailable") observed.set(owner, result.after ?? main);
+          if (result.outcome !== "unavailable") {
+            observed.set(owner, result.after ?? main);
+            if (signature !== undefined) observedRef.set(owner, signature);
+          }
           if (result.outcome === "blocked" || result.outcome === "unavailable") {
             const fingerprint = JSON.stringify([
               main,
@@ -70,6 +116,7 @@ export function startOwnerCheckoutSync(options: {
             if (result.outcome === "updated") options.report(result);
           }
         } catch (error) {
+          owners.delete(repository);
           const reason = error instanceof Error ? error.message : String(error);
           if (warnings.get(repository) !== reason)
             options.report({ path: repository, outcome: "unavailable", reason, blockers: [] });
@@ -77,8 +124,9 @@ export function startOwnerCheckoutSync(options: {
         }
       }
       for (const owner of observed.keys())
-        if (!owners.has(owner)) {
+        if (!seen.has(owner)) {
           observed.delete(owner);
+          observedRef.delete(owner);
           fetched.delete(owner);
           warnings.delete(owner);
         }
