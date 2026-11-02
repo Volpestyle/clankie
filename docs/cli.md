@@ -4491,7 +4491,9 @@ A command that can't start fails at once, before any slot is requested:
 executable exits 126. A bare name is looked up on `PATH` and a path is taken
 from the current directory. The runner reports the same if the command
 disappears after that check. `Fleet resource native boundary unavailable` is
-kept for faults in the governor itself.
+kept for faults in the governor itself; it names the failed native step in
+parentheses (its mode, the error type and an errno or the governor's own fixed
+reason), never paths, arguments or tokens.
 
 `heavy` sizes each command itself. A focused check — Vitest naming up to eight
 test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
