@@ -12,7 +12,7 @@ import { SettingsStore } from "@clankie/settings";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
 import { AutonomyStore } from "../src/captain/autonomy.ts";
 import { createConversationRunner } from "../src/captain/captain-conversation-runner.ts";
@@ -492,8 +492,8 @@ async function fixture(
 
 async function wake(f: Awaited<ReturnType<typeof fixture>>, id: string, raw: string) {
   expect((await f.post(raw)).status).toBe(200);
-  await new Promise((resolve) => setTimeout(resolve, 1_600));
-  const events = await f.poll(id, 3_000);
+  // The long poll returns once the routed wake lands, however long routing takes under load.
+  const events = await f.poll(id, 10_000);
   expect(events).toHaveLength(1);
   return events[0]!;
 }
@@ -774,9 +774,16 @@ it("refuses consumption of an offered native wake before the mailbox takes it", 
   f.notifications.push(e.notification);
   await f.poll("global-default", 1);
   expect((await f.post(e.raw)).status).toBe(200);
-  await new Promise((resolve) => setTimeout(resolve, 1_600));
-  const offered = (await f.deliveries()).deliveries.find((item: { native?: unknown }) => item.native);
-  expect(offered).toBeDefined();
+  // Wait for the native offer itself (a read-only listing), not a fixed time.
+  let offered: { wakeId: string } | undefined;
+  await vi.waitFor(
+    async () => {
+      offered = (await f.deliveries()).deliveries.find((item: { native?: unknown }) => item.native);
+      expect(offered).toBeDefined();
+    },
+    { timeout: 10_000, interval: 50 },
+  );
+  if (!offered) throw new Error("No native wake offer");
   await expect(f.confirm("global-default", offered.wakeId)).rejects.toThrow("recipient or receipt");
   expect(f.marks).toEqual([]);
   const taken = await f.poll();
