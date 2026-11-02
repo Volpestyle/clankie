@@ -513,17 +513,22 @@ const invocation = { name: "linear_save_issue", arguments: { id: "VUH-FIXTURE", 
 async function receiptRows(path: string): Promise<Record<string, unknown>[]> {
   const root = JSON.parse(await readFile(path, "utf8"));
   if (Array.isArray(root)) return root;
-  expect(root.format).toBe("clankie-receipts-v1");
+  expect(root.format).toBe("clankie-receipts-v2");
   const rows = await Promise.all(
     Object.values(root.shards).map(
       async (file) =>
         JSON.parse(await readFile(join(`${path}.d`, String(file)), "utf8")) as Record<string, unknown>[],
     ),
   );
-  return rows.flat();
+  // The log's lines apply over the shards in order, the newest write of each receipt winning.
+  const byId = new Map(rows.flat().map((row) => [row.id, row]));
+  const log = await readFile(join(`${path}.d`, String(root.log)), "utf8");
+  for (const line of log.split("\n").filter(Boolean))
+    for (const row of (JSON.parse(line) as { r: Record<string, unknown>[] }).r) byId.set(row.id, row);
+  return [...byId.values()];
 }
 
-it("migrates a large legacy connected-call ledger, changes one bucket, and preserves recovery across restart", async () => {
+it("migrates a large legacy connected-call ledger, then appends each call to its log, and preserves recovery across restart", async () => {
   const f = await fixture();
   f.release.release();
   let session = await f.initialize();
@@ -549,12 +554,16 @@ it("migrates a large legacy connected-call ledger, changes one bucket, and prese
   const settledId = randomUUID();
   expect(await f.call(invocation, session, undefined, settledId)).toMatchObject({ outcome: "ok" });
   const after = JSON.parse(await readFile(journal, "utf8"));
-  const changed = Object.values(after.shards).filter((file) => !Object.values(before.shards).includes(file));
-  expect(changed).toHaveLength(1);
-  const changedBytes =
-    (await stat(journal)).size + (await stat(join(`${journal}.d`, String(changed[0])))).size;
-  expect(changedBytes).toBeLessThan(legacyBytes / 20);
-  expect(await readdir(`${journal}.d`)).toHaveLength(Object.keys(after.shards).length);
+  // After the migration's checkpoint a call rewrites no shard and no manifest: its
+  // begin, dispatch and settle are three appended log lines.
+  expect(after).toEqual(before);
+  const log = join(`${journal}.d`, String(after.log));
+  const lines = (await readFile(log, "utf8")).split("\n").filter(Boolean);
+  // The migrating call's begin went into the checkpoint; its dispatch and settle, then this call's three.
+  expect(lines).toHaveLength(5);
+  expect(lines.slice(2).every((line) => line.includes(settledId))).toBe(true);
+  expect(Buffer.byteLength(lines.slice(2).join("\n"))).toBeLessThan(legacyBytes / 20);
+  expect(await readdir(`${journal}.d`)).toHaveLength(Object.keys(after.shards).length + 1);
   const identity = await stat(journal, { bigint: true });
   const unchanged = spawnSync(
     process.execPath,
@@ -616,17 +625,32 @@ it("recovers only committed connected admissions after a real process crash, nev
   const admitted = randomUUID();
   const crashed = run("after", admitted);
   expect(crashed.signal).toBe("SIGKILL");
+  // The append path: a failed write and a torn line never admit; a line that
+  // reached fsync does, even though its process died before using it.
+  const unwritten = randomUUID();
+  const refused = run("append-before", unwritten);
+  expect(refused.status).toBe(1);
+  expect(refused.stderr).toContain("fixture log append failure");
+  const torn = randomUUID();
+  expect(run("append-torn", torn).signal).toBe("SIGKILL");
+  const appended = randomUUID();
+  expect(run("append-after", appended).signal).toBe("SIGKILL");
   await f.restartWorker();
   session = await f.initialize();
-  expect(await f.call(invocation, session, undefined, admitted)).toMatchObject({
-    outcome: "uncertain",
-    receiptId: admitted,
-  });
+  for (const receiptId of [admitted, appended])
+    expect(await f.call(invocation, session, undefined, receiptId)).toMatchObject({
+      outcome: "uncertain",
+      receiptId,
+    });
   expect(f.effects).toHaveLength(1);
-  expect((await receiptRows(journal)).some((row) => row.id === admitted && row.state === "uncertain")).toBe(
-    true,
-  );
-  expect((await receiptRows(journal)).some((row) => row.id === uncommitted)).toBe(false);
+  const rows = await receiptRows(journal);
+  for (const receiptId of [admitted, appended])
+    expect(rows.some((row) => row.id === receiptId && row.state === "uncertain")).toBe(true);
+  for (const receiptId of [uncommitted, unwritten, torn])
+    expect(rows.some((row) => row.id === receiptId)).toBe(false);
+  // The torn line was cut away, and the journal still admits new calls.
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({ outcome: "ok" });
+  expect(f.effects).toHaveLength(2);
 });
 
 it("refuses connected dispatch when a committed shard is corrupt or missing, including a warmed receipt cache", async () => {
@@ -639,7 +663,7 @@ it("refuses connected dispatch when a committed shard is corrupt or missing, inc
   const manifest = JSON.parse(await readFile(journal, "utf8"));
   const path = join(`${journal}.d`, String(Object.values(manifest.shards)[0]));
   const body = await readFile(path, "utf8");
-  await writeFile(path, body.replace('"settled"', '"unknown"'));
+  await writeFile(path, `${body} `);
   expect(await f.call(invocation, session, undefined, id)).toMatchObject({
     outcome: "refused",
     detail: expect.stringContaining("receipts are unreadable"),
@@ -653,6 +677,26 @@ it("refuses connected dispatch when a committed shard is corrupt or missing, inc
   await writeFile(path, body);
   expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
   expect(f.effects).toHaveLength(1);
+  // A changed log line breaks its digest chain and refuses every call.
+  const log = join(`${journal}.d`, String(manifest.log));
+  const lines = await readFile(log, "utf8");
+  await writeFile(log, lines.replace('"settled"', '"uncertain"'));
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({
+    outcome: "refused",
+    detail: expect.stringContaining("receipts are unreadable"),
+  });
+  await writeFile(log, lines.split("\n").filter(Boolean).slice(1).join("\n") + "\n");
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({
+    outcome: "refused",
+    detail: expect.stringContaining("receipts are unreadable"),
+  });
+  // A torn final append, its newline never written, is dropped and cut away.
+  await writeFile(log, `${lines}{"d":"ab`);
+  expect(await f.call(invocation, session, undefined, id)).toMatchObject({ outcome: "ok" });
+  expect(await f.call(invocation, session, undefined, randomUUID())).toMatchObject({ outcome: "ok" });
+  expect((await readFile(log, "utf8")).startsWith(lines)).toBe(true);
+  expect((await readFile(log, "utf8")).includes('{"d":"ab')).toBe(false);
+  expect(f.effects).toHaveLength(2);
 });
 
 it("a manual grant revoked after its read recheck refuses dispatch without a provider effect", async () => {

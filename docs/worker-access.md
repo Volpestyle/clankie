@@ -557,10 +557,18 @@ forwarding, preserving reconciliation when the HTTP response is lost.
 
 Connected-call receipts live under `~/.clankie/worker-grants/receipts/`.
 `connected-calls.json` commits a small manifest of immutable, content-addressed
-buckets in `connected-calls.json.d/`. A receipt change rewrites its bucket and
-the manifest, rather than the whole retained ledger. Legacy array journals
-migrate on their next save. Shards are synced before the manifest is committed;
-missing or changed committed shards refuse dispatch. All uncertain records and
+buckets in `connected-calls.json.d/` and names an append-only log beside them.
+Each receipt transition (admission, dispatch, settlement) appends one line to
+that log and syncs it once, so a call costs three syncs rather than twelve
+([#476](https://github.com/Volpestyle/clankie/issues/476)). Each line chains the
+digest of the one before. Past 768 lines or 8 MiB, the log is folded into new
+buckets and a fresh log, the manifest committing both. Legacy array and v1
+manifest journals migrate on their next save. Shards and the new empty log are
+synced before the manifest is committed. Missing or changed committed shards, or
+a log line whose digest no longer chains, refuse dispatch. Only a final line
+without its newline, a torn append whose sync never returned, is dropped. An
+older Clankie reading this v2 journal refuses connected dispatch rather than
+guess. All uncertain records and
 identity tombstones survive retention; only older settled response bodies and
 optional recovery detail are trimmed. Never delete these files to retry a call.
 
