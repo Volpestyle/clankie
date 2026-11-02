@@ -2019,6 +2019,19 @@ sign-in waits with that code, or `already_decided`. Approve only a code you see
 on a page you opened. An approved connector is a device in `clankie devices`
 with `scope: "connector"`; `clankie devices revoke ID` disconnects it.
 
+Refresh tokens rotate on use and expire after 90 idle days. Presenting a verified
+refresh token older than the device's current binding disconnects that connector
+device and ends every access and refresh token it holds. The `device.revoked`
+event names the device and app (`revokedBy: "connector-refresh-reuse"`); the
+owner's conversation receives the existing service notice, `clankie devices
+--json` shows the revocation, and `clankie doctor` names the disconnected app
+and device (`connectorRefreshRevocations` in JSON). Sign in again to reconnect.
+Malformed tokens, invalid signatures and tokens for another client return
+`invalid_grant` without disconnecting the device. There is no retry grace:
+the access token's random nonce is not stored, so the issued pair cannot be
+reconstructed. Retrying even a just-superseded refresh token returns
+`invalid_grant` and disconnects the device.
+
 The same URL works in Claude Code and Codex, which sign in through a loopback
 callback, and in hosted apps such as Grok, which return to their own https
 address; each shows the same kind of code to approve, and the sign-in names the

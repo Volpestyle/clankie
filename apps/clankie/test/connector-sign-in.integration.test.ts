@@ -11,7 +11,7 @@ import {
   type OperatorConversationServiceResult,
 } from "@clankie/protocol";
 import { expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FleetRoomJournal } from "../src/captain/fleet-room.ts";
@@ -23,6 +23,7 @@ import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../.
 import { createCaptainConversationDispatch } from "../../relay/src/conversation-upstream.ts";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
+import { inspectConnectorRefreshRevocations } from "../../tui/src/command/doctor.ts";
 import { runConnectorCommand } from "../../tui/src/command/connector.ts";
 import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
@@ -101,7 +102,19 @@ async function token(baseUrl: string, form: Record<string, string>) {
 }
 
 it("pairs a connector device on the owner's approval and keeps it to its own narrow door", async () => {
-  const host = await createQaService();
+  const notices: string[] = [];
+  const invalidated: string[] = [];
+  const host = await createQaService({
+    captain: {
+      notifyRuntimeHealthAlert: async (text) => {
+        notices.push(text);
+        return true;
+      },
+      invalidateQuestionPrincipal: (deviceId) => {
+        invalidated.push(deviceId);
+      },
+    },
+  });
   try {
     const metadata = (await (
       await fetch(`${host.baseUrl}/.well-known/oauth-authorization-server`)
@@ -227,7 +240,23 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
         (await fetch(`${host.baseUrl}${path}`, { method, headers: bearer })).status,
       ).toBeGreaterThanOrEqual(401);
 
-    // Refresh rotates: the newer token works, the one it replaced doesn't, across a restart.
+    // Invalid MACs and a valid token under the wrong registered client do not revoke.
+    const { client_id: otherClient } = (await (
+      await register(host.baseUrl, ["https://grok.example/oauth/callback"], "Grok")
+    ).json()) as { client_id: string };
+    for (const form of [
+      { client_id: clientId, refresh_token: `${tokens.refresh_token}x` },
+      { client_id: otherClient, refresh_token: tokens.refresh_token },
+      { client_id: clientId, refresh_token: "not-a-refresh-token" },
+    ]) {
+      expect(await (await token(host.baseUrl, { grant_type: "refresh_token", ...form })).json()).toEqual({
+        error: "invalid_grant",
+      });
+    }
+    expect(notices).toEqual([]);
+    expect(invalidated).toEqual([]);
+
+    // Refresh works, survives replay, then the newer token rotates again.
     host.advance(60_000);
     const refreshed = await token(host.baseUrl, {
       grant_type: "refresh_token",
@@ -238,15 +267,6 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     const rotated = (await refreshed.json()) as { access_token: string; refresh_token: string };
     expect(rotated.refresh_token).not.toBe(tokens.refresh_token);
     await host.restart();
-    expect(
-      await (
-        await token(host.baseUrl, {
-          grant_type: "refresh_token",
-          client_id: clientId,
-          refresh_token: tokens.refresh_token,
-        })
-      ).json(),
-    ).toEqual({ error: "invalid_grant" });
     const afterRestart = await token(host.baseUrl, {
       grant_type: "refresh_token",
       client_id: clientId,
@@ -254,25 +274,77 @@ it("pairs a connector device on the owner's approval and keeps it to its own nar
     });
     expect(afterRestart.status).toBe(200);
     const latest = (await afterRestart.json()) as { access_token: string; refresh_token: string };
+    expect(latest.refresh_token).not.toBe(rotated.refresh_token);
 
-    // Revoking the device in `clankie devices` ends every token it holds.
-    expect((await host.operator(`/v1/devices/${self.deviceId}/revoke`)).status).toBe(200);
+    // The same immediately superseded token, even within 30s, ends the whole device.
+    // The random access-token nonce is not stored, so no retry grace is offered.
+    await host.restart();
+    const reuse = { grant_type: "refresh_token", client_id: clientId, refresh_token: rotated.refresh_token };
+    expect(await (await token(host.baseUrl, reuse)).json()).toEqual({ error: "invalid_grant" });
+    expect(invalidated).toEqual([self.deviceId]);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain('connector app "Claude"');
+    expect(notices[0]).toContain(`device "Claude" (${self.deviceId})`);
+    // The owner apps' device list and doctor's existing operator client see the revocation.
+    const doctor = await inspectConnectorRefreshRevocations({
+      host: host.baseUrl,
+      env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+    });
+    expect(doctor).toMatchObject({
+      devices: [
+        {
+          deviceId: self.deviceId,
+          name: "Claude",
+          status: "revoked",
+          revokedBy: "connector-refresh-reuse",
+        },
+      ],
+    });
+    const events = (await readFile(host.eventLogPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { type: string; data: Record<string, unknown> });
+    expect(events.filter((event) => event.type === "device.revoked")).toMatchObject([
+      {
+        data: {
+          deviceId: self.deviceId,
+          deviceName: "Claude",
+          appName: "Claude",
+          revokedBy: "connector-refresh-reuse",
+        },
+      },
+    ]);
+
+    // Replay preserves revocation: every access token and the newest refresh token fail.
+    await host.restart();
+    for (const accessToken of [tokens.access_token, rotated.access_token, latest.access_token]) {
+      expect(
+        (
+          await fetch(`${host.baseUrl}/v1/devices/self`, {
+            headers: { authorization: `Bearer ${accessToken}` },
+          })
+        ).status,
+      ).toBe(401);
+    }
+    for (const refreshToken of [tokens.refresh_token, rotated.refresh_token, latest.refresh_token]) {
+      expect(
+        await (
+          await token(host.baseUrl, {
+            grant_type: "refresh_token",
+            client_id: clientId,
+            refresh_token: refreshToken,
+          })
+        ).json(),
+      ).toEqual({ error: "invalid_grant" });
+    }
+    expect(notices).toHaveLength(1);
+    expect(invalidated).toEqual([self.deviceId]);
     expect(
-      (
-        await fetch(`${host.baseUrl}/v1/devices/self`, {
-          headers: { authorization: `Bearer ${latest.access_token}` },
-        })
-      ).status,
-    ).toBe(401);
-    expect(
-      await (
-        await token(host.baseUrl, {
-          grant_type: "refresh_token",
-          client_id: clientId,
-          refresh_token: latest.refresh_token,
-        })
-      ).json(),
-    ).toEqual({ error: "invalid_grant" });
+      await inspectConnectorRefreshRevocations({
+        host: host.baseUrl,
+        env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+      }),
+    ).toEqual(doctor);
 
     // A denied sign-in sends Claude back with access_denied and pairs nothing.
     const denied = await startSignIn(host.baseUrl, clientId);

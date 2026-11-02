@@ -542,15 +542,47 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         const record = ctx.devices.get(claims.d);
         const now = ctx.clock();
         const boundAt = record?.lastRefreshAt ?? record?.activatedAt;
-        // Rotation: each refresh moves `lastRefreshAt`, so only the newest token
-        // matches. Revoking the device ends every token it holds.
         if (
           record === undefined ||
           record.scope !== "connector" ||
           record.status !== "active" ||
-          boundAt !== claims.t ||
-          Date.parse(boundAt) + REFRESH_IDLE_MS <= now.getTime()
+          boundAt === undefined
         )
+          return tokenError(context, "invalid_grant");
+        // Only a verified token bound to this client can end the device's chain.
+        // Keep reuse detection and rotation under the same device lock, including
+        // across restart: the binding and revocation both replay from the log.
+        if (Date.parse(claims.t) < Date.parse(boundAt)) {
+          applyDeviceEvent(
+            ctx.devices,
+            ctx.recordEvent("device.revoked", `device:${record.deviceId}`, now.toISOString(), {
+              schemaVersion: 1,
+              deviceId: record.deviceId,
+              revokedBy: "connector-refresh-reuse",
+              deviceName: record.name,
+              appName: registered.name,
+            }),
+          );
+          ctx.dependencies.captain.invalidateQuestionPrincipal?.(record.deviceId);
+          logger.warn(
+            { event: "connector.refresh.reused", deviceId: record.deviceId, appName: registered.name },
+            "connector device revoked after refresh token reuse",
+          );
+          void ctx.dependencies.captain
+            .notifyRuntimeHealthAlert(
+              `Disconnected connector app ${JSON.stringify(registered.name)} on device ` +
+                `${JSON.stringify(record.name)} (${record.deviceId}): a previously rotated refresh token ` +
+                "was used again. All tokens for this device have ended. Sign in again to reconnect.",
+            )
+            .catch((error: unknown) =>
+              logger.warn(
+                { event: "connector.refresh.notice_failed", deviceId: record.deviceId, error },
+                "connector refresh reuse owner notice failed",
+              ),
+            );
+          return tokenError(context, "invalid_grant");
+        }
+        if (boundAt !== claims.t || Date.parse(boundAt) + REFRESH_IDLE_MS <= now.getTime())
           return tokenError(context, "invalid_grant");
         const at = new Date(Math.max(now.getTime(), Date.parse(boundAt) + 1));
         return issueTokens(context, key, claims.d, registered.clientId, "device.session.refreshed", at);
