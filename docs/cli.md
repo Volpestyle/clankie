@@ -4936,8 +4936,11 @@ No shell or Herdr connection is opened by these resource API/UI paths.
 
 `--seat-restarts on` (the default) enables fresh-session restarts for idle
 hired seats at 450K context tokens in their own panes with the original brief,
-work item and a fresh handoff brief. `--seat-restarts off`
-leaves those sessions alone. This is independent of `--lead-restarts`, which
+work item and a fresh handoff brief. A hire's own lead can also ask for one
+session's fresh restart at any context size with its `restart_seat` tool, to
+clear a worker it keeps on its area (#425); the same handoff and guards apply,
+and the row shows `requested`. `--seat-restarts off`
+leaves those sessions alone and refuses those requests. This is independent of `--lead-restarts`, which
 controls the default lead seat. Both settings are also available in `/fleet`.
 
 `fleet status` reads `seatRestarts` from `GET /v1/fleet/seat-restarts`: each exact

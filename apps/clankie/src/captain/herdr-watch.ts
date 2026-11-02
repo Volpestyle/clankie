@@ -410,6 +410,12 @@ export type HerdrWatchArmResult =
       readonly status: string;
     };
 
+/** A lead's on-demand fresh restart of one hire (#425). */
+export type RestartSeat = (
+  seatId: string,
+  authority: ConversationAuthority,
+) => Promise<{ outcome: "scheduled" } | { outcome: "refused"; reason: string }>;
+
 export interface HerdrWatchPort {
   settleHireReceipt?: HerdrWatchStore["settleHireReceipt"];
   tidy?: import("./pane-tidy.ts").PaneTidy;
@@ -423,6 +429,8 @@ export interface HerdrWatchPort {
   /** The standing review gate (ADR 0287). */
   reviews?: import("./review-gate.ts").ReviewGate;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
+  /** A lead asks for one hire's fresh restart now, at any context size (#425). */
+  restartSeat?: RestartSeat;
   /** This conversation's routines, managed as its lead (ADR 0265). */
   routines?: (
     command: import("@clankie/protocol").RoutineCommand,
@@ -1031,6 +1039,7 @@ function settleOriginalFirst(receiptIds: readonly string[]): string {
 
 export class HerdrWatchStore implements HerdrWatchPort {
   public efficiency?: import("./fleet-efficiency-tools.ts").FleetEfficiencyActions;
+  public restartSeat?: RestartSeat;
   public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   public huddles?: import("./port.ts").HuddleService;
   /** The standing review gate (ADR 0287), for the lead's waiver tool. */

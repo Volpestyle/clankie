@@ -301,6 +301,7 @@ export function captainTools(
             lane === "operator" && turn.hireReceiptOperator === true,
           ),
           ...(herdrWatches.readoptSeat === undefined ? [] : [readoptSeatTool(herdrWatches, turn)]),
+          ...(herdrWatches.restartSeat === undefined ? [] : [restartSeatTool(herdrWatches, turn)]),
           ...(herdrWatches.efficiency === undefined
             ? []
             : fleetEfficiencyTools(herdrWatches.efficiency, turn)),
@@ -962,6 +963,24 @@ function workerAccountsTool(report: NonNullable<HerdrWatchPort["workerAccountsRe
     }),
     executionMode: "sequential",
     execute: async (_id, params: { fleet?: string }) => json(await report(params.fleet)),
+  });
+}
+
+function restartSeatTool(watches: HerdrWatchPort, turn: TurnContext): ToolDefinition {
+  return defineTool({
+    name: "restart_seat",
+    label: "Clear a worker's context",
+    description:
+      "Restart one worker you hired fresh in its own pane, keeping its persona, worktree, work history and assignment and dropping its context (#425). Use it when a worker you want to keep on its area has a context that is bloated or no longer applies. " +
+      "It runs the same protocol as the automatic 450K restart: the worker writes a handoff to its worktree and its work item, then a fresh session starts with its original brief and that handoff. Every guard still holds (owner quiet, idle, resources, your authority), and nothing is repeated after an uncertain step. " +
+      "It needs the hire's original brief and work item; the owner's seat-restart setting must be on. Outcomes: scheduled, or refused with a reason (not_your_hire, not_a_hired_seat, seat_restarts_off, original_brief_or_work_item_unavailable, original_receipt_pending, already_restarted). Follow progress with `clankie fleet status`.",
+    parameters: Type.Object({ seatId: Type.String({ minLength: 1, maxLength: 256 }) }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      return json({ seatId: input.seatId, ...(await watches.restartSeat!(input.seatId, authority)) });
+    },
   });
 }
 

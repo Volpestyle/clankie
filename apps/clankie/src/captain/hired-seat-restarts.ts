@@ -260,9 +260,11 @@ export function createHiredSeatRestarts(deps: {
             at: new Date(now()).toISOString(),
             ...(observed.contextTokens === undefined ? {} : { contextTokens: observed.contextTokens }),
           };
-          if (observed.contextTokens === undefined)
+          // A lead's request (#425) restarts this session at any context size, under every guard.
+          const asked = row.requested !== undefined;
+          if (observed.contextTokens === undefined && !asked)
             throw new RestartRefusal("usage_unreadable", observed.detail);
-          if (observed.contextTokens < 450_000) {
+          if (!asked && observed.contextTokens! < 450_000) {
             delete row.waiting;
             save();
             continue;
@@ -293,7 +295,9 @@ export function createHiredSeatRestarts(deps: {
           save(); // An interrupted send is an uncertain original, never a second request.
           const result = await candidate.requestHandoff(
             [
-              "Scheduled fresh restart (ADR 0293): this hired session reached 450K context tokens. Finish only this handoff turn; the original native controller will restart you fresh in this same pane when every guard holds.",
+              asked
+                ? "Fresh restart your lead asked for (ADR 0293, #425): it wants this work to continue in a fresh session. Finish only this handoff turn; the original native controller will restart you fresh in this same pane when every guard holds."
+                : "Scheduled fresh restart (ADR 0293): this hired session reached 450K context tokens. Finish only this handoff turn; the original native controller will restart you fresh in this same pane when every guard holds.",
               `Write your current decisions, completed work, exact next actions, checks, open receipts and unresolved gaps to ${path}. Include handoff ID ${id}.`,
               `Save the same durable result on your existing work item ${candidate.workItem}, including handoff ID ${id}. Do not close it or change its acceptance.`,
               `Reply with your handoff brief including handoff ID ${id} after both writes confirm. Preserve every uncertain receipt; do not repeat an uncertain write. The successor receives your original assignment, this handoff and its saved work item.`,
@@ -350,8 +354,47 @@ export function createHiredSeatRestarts(deps: {
       running = false;
     }
   }
+  /**
+   * A lead asks for one hire's fresh restart now, whatever its context size (#425): the
+   * same handoff, guards and never-repeat rules as a 450K restart, on the next tick. Only
+   * the hire's own lead may ask, only while the owner's seat restarts are on, and only for
+   * the session in the pane now.
+   */
+  async function request(
+    paneId: string,
+    sessionId: string,
+    owner: ConversationOwner,
+  ): Promise<{ outcome: "scheduled" } | { outcome: "refused"; reason: string }> {
+    const refuse = (reason: string) => ({ outcome: "refused" as const, reason });
+    if (!(await deps.enabled())) return refuse("seat_restarts_off");
+    const candidate = (await deps.candidates()).find(
+      (entry) => entry.agent.paneId === paneId && entry.agent.session?.value === sessionId,
+    );
+    if (candidate === undefined) return refuse("not_a_hired_seat");
+    if (candidate.owner.conversationId !== owner.conversationId) return refuse("not_your_hire");
+    if (candidate.unavailableReason) return refuse(candidate.unavailableReason);
+    if (
+      !candidate.originalBrief ||
+      !candidate.workItem ||
+      !candidate.name ||
+      !/^[a-zA-Z0-9_-]+$/u.test(candidate.name)
+    )
+      return refuse("original_brief_or_work_item_unavailable");
+    let row = seats.find((entry) => entry.paneId === paneId && entry.sessionId === sessionId);
+    if (row?.handoff)
+      return refuse(row.handoff.state === "restarted" ? "already_restarted" : "original_receipt_pending");
+    if (!row) {
+      row = { paneId, sessionId };
+      seats.push(row);
+    }
+    row.requested = { at: new Date(now()).toISOString(), by: owner.conversationId };
+    save();
+    return { outcome: "scheduled" };
+  }
+
   return {
     tick,
+    request,
     async status(): Promise<SeatRestartStatus> {
       return SeatRestartStatusSchema.parse({
         schemaVersion: 1,
