@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
+  ftruncateSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
   rmSync,
   statSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -22,12 +24,33 @@ interface DurableReceipt {
 }
 
 const SETTLED_BODY_LIMIT = 1_000;
-const ShardsSchema = z.strictObject({
-  format: z.literal("clankie-receipts-v1"),
-  shards: z.record(z.string().regex(/^[a-f0-9]{2}$/u), z.string().regex(/^[a-f0-9]{2}-[a-f0-9]{64}\.json$/u)),
-});
+const ShardRecord = z.record(
+  z.string().regex(/^[a-f0-9]{2}$/u),
+  z.string().regex(/^[a-f0-9]{2}-[a-f0-9]{64}\.json$/u),
+);
+/**
+ * v1 is immutable shards behind an atomic manifest. v2 adds an append-only log of
+ * changes since those shards, so a transition costs one fsync rather than four.
+ */
+const ShardsSchema = z.union([
+  z.strictObject({ format: z.literal("clankie-receipts-v1"), shards: ShardRecord }),
+  z.strictObject({
+    format: z.literal("clankie-receipts-v2"),
+    shards: ShardRecord,
+    log: z.string().regex(/^log-[a-f0-9-]{36}\.jsonl$/u),
+  }),
+]);
+/** Fold the log back into shards past either bound, so boot replay stays short. */
+const LOG_LINES_MAX = 768;
+const LOG_BYTES_MAX = 8 * 1024 * 1024;
+const LogLine = z.strictObject({ d: z.string().regex(/^[a-f0-9]{64}$/u), r: z.unknown() });
+function chain(previous: string, line: string): string {
+  return createHash("sha256").update(previous).update("\n").update(line).digest("hex");
+}
 type Shards = z.infer<typeof ShardsSchema>;
 type Bucket<Record> = { file: string; version: string; records: Map<string, Record> };
+/** The committed log: its file, last chained digest, size and length. */
+type Log = { file: string; digest: string; bytes: number; lines: number };
 function generation(path: string): string {
   const info = statSync(path, { bigint: true });
   return `${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`;
@@ -69,6 +92,7 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
   private readonly sharded: boolean;
   private buckets = new Map<string, Bucket<Record>>();
   private manifest: Shards | undefined;
+  private log: Log | undefined;
   private validated: { version: string; records: Map<string, Record> } | undefined;
   private readonly path: string | undefined;
   private readonly schema: z.ZodType<Record[]>;
@@ -102,11 +126,10 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
   public read(id: string): Record | undefined {
     if (this.sharded && this.path && this.manifest && this.validated) {
       try {
-        if (generation(this.path) === this.validated.version) {
+        if (this.version() === this.validated.version) {
           const bucket = this.buckets.get(prefix(id));
-          if (!bucket) return undefined;
-          if (generation(join(`${this.path}.d`, bucket.file)) === bucket.version) {
-            const record = bucket.records.get(id);
+          if (!bucket || generation(join(`${this.path}.d`, bucket.file)) === bucket.version) {
+            const record = this.validated.records.get(id);
             return record === undefined ? undefined : copyJson(record);
           }
         }
@@ -124,9 +147,10 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
   private snapshot(): Map<string, Record> {
     if (this.path === undefined) return this.records;
     try {
-      const version = generation(this.path);
       // Immutable shard names are not permission to trust changed disk contents.
-      if (this.validated?.version === version && this.shardsCurrent()) return this.validated.records;
+      if (this.validated !== undefined && this.validated.version === this.version() && this.shardsCurrent())
+        return this.validated.records;
+      let version = generation(this.path);
       this.validated = undefined;
       const value: unknown = JSON.parse(readFileSync(this.path, "utf8"));
       let records: Map<string, Record>;
@@ -154,11 +178,14 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
         }
         this.buckets = buckets;
         this.manifest = manifest;
+        this.log = manifest.format === "clankie-receipts-v2" ? this.replay(manifest.log, records) : undefined;
+        version = this.version();
       } else {
         const values = this.schema.parse(value);
         records = new Map(values.map((record) => [record.id, record]));
         this.buckets.clear();
         this.manifest = undefined;
+        this.log = undefined;
       }
       // Never retain the map handed to a caller, which may mutate it before save().
       this.validated = { version, records };
@@ -176,6 +203,7 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
             this.records.clear();
             this.buckets.clear();
             this.manifest = undefined;
+            this.log = undefined;
             return this.records;
           }
         }
@@ -185,6 +213,7 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
   }
 
   public save(): void {
+    const committed = this.validated?.records;
     // Even a failed write must not leave an earlier validation covering caller edits.
     this.validated = undefined;
     // Keep identity tombstones and every uncertain record; bound only settled result bodies.
@@ -198,12 +227,93 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
     if (this.path === undefined) return;
     mkdirSync(dirname(this.path), { recursive: true });
     if (this.sharded) {
-      this.saveShards();
+      if (!this.append(committed)) this.saveShards();
       return;
     }
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(temporary, `${JSON.stringify([...this.records.values()])}\n`, { mode: 0o600 });
     renameSync(temporary, this.path);
+  }
+
+  /** The root manifest's generation and, when it names one, its log's. */
+  private version(): string {
+    const root = generation(this.path!);
+    return this.log === undefined ? root : `${root}|${generation(join(`${this.path}.d`, this.log.file))}`;
+  }
+
+  /**
+   * Apply the committed log over its shards. Every line chains the previous one's
+   * digest, so an edited, reordered or missing line refuses the journal. Only a
+   * final line without its newline is a torn append whose fsync never returned:
+   * its caller never proceeded, so it is dropped and cut before the next append.
+   */
+  private replay(file: string, records: Map<string, Record>): Log {
+    const path = join(`${this.path}.d`, file);
+    const body = readFileSync(path);
+    let digest = file;
+    let offset = 0;
+    let lines = 0;
+    while (offset < body.length) {
+      const end = body.indexOf(0x0a, offset);
+      if (end === -1) {
+        const descriptor = openSync(path, "r+");
+        try {
+          ftruncateSync(descriptor, offset);
+          fsyncSync(descriptor);
+        } finally {
+          closeSync(descriptor);
+        }
+        break;
+      }
+      const line = LogLine.parse(JSON.parse(body.subarray(offset, end).toString("utf8")));
+      const changed = this.schema.parse(line.r);
+      if (chain(digest, JSON.stringify(line.r)) !== line.d) throw new Error("Receipt log digest changed");
+      for (const record of changed) records.set(record.id, record);
+      digest = line.d;
+      lines += 1;
+      offset = end + 1;
+    }
+    return { file, digest, bytes: offset, lines };
+  }
+
+  /**
+   * One transition is one appended line and one fsync. Returns false when a
+   * checkpoint is needed instead: no log yet (a new or v1 journal), a removed
+   * record, an unknown committed state, or a log past its bounds.
+   */
+  private append(committed: Map<string, Record> | undefined): boolean {
+    const log = this.log;
+    if (
+      log === undefined ||
+      committed === undefined ||
+      this.manifest?.format !== "clankie-receipts-v2" ||
+      log.lines >= LOG_LINES_MAX ||
+      log.bytes >= LOG_BYTES_MAX
+    )
+      return false;
+    for (const id of committed.keys()) if (!this.records.has(id)) return false;
+    const changed = [...this.records.values()].filter(
+      (record) => !isDeepStrictEqual(committed.get(record.id), record),
+    );
+    if (changed.length === 0) {
+      this.validated = { version: this.version(), records: committed };
+      return true;
+    }
+    const payload = JSON.stringify(changed);
+    const digest = chain(log.digest, payload);
+    const line = `${JSON.stringify({ d: digest, r: changed })}\n`;
+    const descriptor = openSync(join(`${this.path}.d`, log.file), "a", 0o600);
+    try {
+      writeSync(descriptor, line);
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+    this.log = { file: log.file, digest, bytes: log.bytes + Buffer.byteLength(line), lines: log.lines + 1 };
+    const records = new Map(committed);
+    for (const record of changed) records.set(record.id, copyJson(record));
+    this.validated = { version: this.version(), records };
+    return true;
   }
 
   private shardsCurrent(): boolean {
@@ -239,7 +349,12 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
       next.set(key, bucket);
       shards[key] = bucket.file;
     }
-    const manifest: Shards = { format: "clankie-receipts-v1", shards };
+    // Every checkpoint starts an empty log, durable before the manifest names it.
+    const log = `log-${randomUUID()}.jsonl`;
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeDurable(join(directory, log), "");
+    changed = true;
+    const manifest: Shards = { format: "clankie-receipts-v2", shards, log };
     if (changed) syncDirectory(directory);
     if (!isDeepStrictEqual(this.manifest, manifest)) {
       // All shards reach disk before admission can become visible in the root.
@@ -247,14 +362,22 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
       syncDirectory(dirname(path));
     }
     const old = this.buckets;
+    const oldLog = this.log;
     this.buckets = next;
     this.manifest = manifest;
+    this.log = { file: log, digest: log, bytes: 0, lines: 0 };
     this.validated = {
-      version: generation(path),
+      version: this.version(),
       records: new Map([...next.values()].flatMap((bucket) => [...bucket.records])),
     };
     // Only obsolete shards of our previously committed generation are collected.
     // Failed preparations remain unreferenced and cannot admit or replay a call.
+    if (oldLog !== undefined)
+      try {
+        rmSync(join(directory, oldLog.file), { force: true });
+      } catch (error) {
+        console.warn("Receipt log cleanup unavailable", error);
+      }
     const retained = new Set(Object.values(shards));
     for (const bucket of old.values())
       if (!retained.has(bucket.file)) {
