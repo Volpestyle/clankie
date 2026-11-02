@@ -621,7 +621,9 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       rejectedAllocations.every((a: any) => a.started === false && a.gone === true && a.pane === undefined),
     ).toBe(true);
     // Real transport fault after a successful mutation: preserve the uncertain
-    // hire receipt across a new store instance, never start/retry a harness.
+    // hire receipt across a new store instance and never retry while the original
+    // could still be starting. A recorded pane that holds only its shell can't be
+    // running the original, so the next hire settles it and starts fresh (ADR 0331).
     const uncertainty: unknown[] = [];
     for (const fault of ["tab-reply", "pane-label", "workspace-create"] as const) {
       const faultCwd = fault === "workspace-create" ? join(root, "uncertain-new-workspace") : plain;
@@ -650,6 +652,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         workingDirectory: faultCwd,
       });
       const paneCount = (await snapshot()).panes.length;
+      const startsBefore = calls.filter((c) => c.args[0] === "agent" && c.args[1] === "start").length;
       const store = new HerdrWatchStore(path, { runner: faultRunner });
       let firstResult;
       try {
@@ -666,18 +669,23 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       let retry;
       try {
         retry = await recreated.spawnSeat(hire);
+        // Only the label fault recorded the original's pane; the others keep it fenced.
+        const settled = fault === "pane-label";
         expect(retry).toMatchObject({
           outcome: "failed",
-          reason: "delivery_unconfirmed",
+          reason: settled ? "start_unconfirmed" : "delivery_unconfirmed",
           deliveryStage: "uncertain",
         });
+        const starts = calls.filter((c) => c.args[0] === "agent" && c.args[1] === "start").length;
+        expect(starts - startsBefore).toBe(settled ? 1 : 0);
       } finally {
         recreated.close();
       }
-      expect((await snapshot()).panes.length).toBe(paneCount + 1);
+      expect((await snapshot()).panes.length).toBe(paneCount + (fault === "pane-label" ? 2 : 1));
       uncertainty.push({ fault, firstResult, retry });
     }
-    expect(calls.some((c) => c.args[0] === "agent" && c.args[1] === "start")).toBe(false);
+    // The settled label fault's fresh hire is the journey's only harness start.
+    expect(calls.filter((c) => c.args[0] === "agent" && c.args[1] === "start")).toHaveLength(1);
     const final = await snapshot();
     expect(final.focused_pane_id).toBe(before.focused_pane_id);
     const untouched = final.panes.find((p: any) => p.pane_id === original.root_pane.pane_id);
