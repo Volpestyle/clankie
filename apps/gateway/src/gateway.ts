@@ -773,10 +773,22 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       const capacity = bootstrap ? 32 : 512;
       const perSecond = bootstrap ? 0.2 : 256;
       const peer = clientAddress(request, options.trustedProxy);
+      // Four immediate starts and at most five more during a ticket's five-minute
+      // life leave room in the 32-ticket pool for other clients. Never use
+      // caller-supplied forwarding headers unless the socket proxy is trusted.
       if (
-        !takeBudget(joinBudgets, `${category}:peer:${peer}`, capacity, perSecond) ||
-        !takeBudget(joinBudgets, `${category}:host:${hostRoute.hostId}`, capacity, perSecond)
+        !takeBudget(
+          joinBudgets,
+          `${category}:peer:${peer}`,
+          bootstrap ? 4 : capacity,
+          bootstrap ? 1 / 60 : perSecond,
+        )
       ) {
+        response.setHeader("retry-after", bootstrap ? "60" : "1");
+        sendJson(response, 429, { error: "machine_join_rate_limited" });
+        return null;
+      }
+      if (!takeBudget(joinBudgets, `${category}:host:${hostRoute.hostId}`, capacity, perSecond)) {
         response.setHeader("retry-after", bootstrap ? "5" : "1");
         sendJson(response, 429, { error: "machine_join_rate_limited" });
         return null;

@@ -18,6 +18,7 @@ export function createMachineJoinRoutes(
 ): Hono {
   const app = new Hono();
   const paths = [
+    "/v1/machine-joins/settings",
     MACHINE_JOIN_START_PATH,
     MACHINE_JOIN_STATUS_PATH,
     MACHINE_JOIN_APPROVE_PATH,
@@ -36,10 +37,37 @@ export function createMachineJoinRoutes(
     );
   const bearer = (request: Request) =>
     /^Bearer ([A-Za-z0-9_-]{1,128})$/u.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
+  app.on(["GET", "PATCH"], "/v1/machine-joins/settings", async (context) => {
+    const allowed = await authorizeOwner(context.req.raw);
+    if (allowed !== true) return context.json({ error: allowed }, allowed === "forbidden" ? 403 : 401);
+    if (!joins) return context.json({ error: "join_unavailable" }, 503);
+    if (context.req.method === "PATCH") {
+      let body;
+      try {
+        body = await context.req.json();
+        if (!body || Object.keys(body).length !== 1 || typeof body.enabled !== "boolean")
+          throw Error("malformed");
+      } catch {
+        return context.json({ error: "malformed" }, 400);
+      }
+      await joins.setLegacyJoinsEnabled(body.enabled);
+    }
+    return context.json({ enabled: await joins.legacyJoinsEnabled() });
+  });
   app.post(MACHINE_JOIN_START_PATH, async (context) => {
     if (!joins) return context.json({ error: "join_unavailable" }, 503);
     try {
-      return context.json(joins.start(await context.req.json()));
+      const input = await context.req.json();
+      if (!(await joins.legacyJoinsEnabled()))
+        return context.json(
+          {
+            error: "legacy_joins_disabled",
+            detail:
+              "New legacy machine joins are disabled on the home Mac. Enable them with clankie machines legacy-joins on.",
+          },
+          403,
+        );
+      return context.json(joins.start(input));
     } catch {
       return context.json({ error: "join_refused" }, 400);
     }

@@ -50,6 +50,7 @@ Configure through these headless commands; never write Keychain entries, `~/.con
 | Public doorway                              | `clankie gateway status`, `clankie gateway set --url URL --host-id ID`                                                                                             |
 | Browser app origins                         | `clankie http show`, `clankie http allow-origins ORIGIN...` (see below)                                                                                            |
 | Pick up model/provider config               | `clankie restart`                                                                                                                                                  |
+| Legacy join admission (Advanced)            | `clankie machines legacy-joins [on\|off]` (home Mac; default on; existing joins retained)                                                                          |
 | Machine access                              | `clankie machines access NAME portal\|workers\|shell\|screen`                                                                                                      |
 | Machines / discovery / sessions             | `clankie machines --json`, `clankie machines discover --json`, `clankie machines sessions NAME --json`                                                             |
 | Pair a device / list / revoke               | `clankie pair --json`, `clankie devices --json`, `clankie devices revoke <id> --json`                                                                              |

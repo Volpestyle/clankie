@@ -813,6 +813,7 @@ export const ClankieSettingsSchema = z
       )
       .max(64)
       .default([]),
+    legacyMachineJoins: z.boolean().default(true),
     machineAccess: MachineAccessSettingsSchema,
     machines: z
       .array(

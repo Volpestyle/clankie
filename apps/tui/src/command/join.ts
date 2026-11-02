@@ -106,7 +106,14 @@ export async function runJoinCommand(
         redirect: "error",
         signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
       });
-      if (!response.ok) throw Error("join_unavailable");
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        if (result?.error === "legacy_joins_disabled")
+          throw Error(
+            "New legacy machine joins are disabled on the home Mac. Enable them with clankie machines legacy-joins on.",
+          );
+        throw Error("join_unavailable");
+      }
       return response.json();
     };
     if (action === "approve") {

@@ -99,6 +99,40 @@ export const flows: readonly Flow[] = [
       }),
   },
   {
+    name: "legacy-join-admission",
+    proves: "the owner can disable new legacy joins through the CLI and restore admission",
+    run: (stack) =>
+      Effect.gen(function* () {
+        const initial = yield* stack.cliJson("machines", "legacy-joins");
+        yield* check(initial.enabled === true, "legacy joins default on", initial);
+        const unauthorized = yield* stack.http("/v1/machine-joins/settings", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ enabled: false }),
+        });
+        yield* check(unauthorized.status === 401, "only the owner changes admission", {
+          status: unauthorized.status,
+        });
+        const disabled = yield* stack.cliJson("machines", "legacy-joins", "off");
+        yield* check(disabled.enabled === false, "the CLI disables new starts", disabled);
+        const read = yield* stack.cliJson("machines", "legacy-joins");
+        yield* check(read.enabled === false, "the service retains the setting", read);
+        const refused = yield* stack.http("/v1/machine-joins/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        const refusal = yield* Effect.tryPromise(() => refused.json());
+        yield* check(
+          refused.status === 403 && refusal.error === "legacy_joins_disabled",
+          "the home clearly refuses starts",
+          refusal,
+        );
+        const enabled = yield* stack.cliJson("machines", "legacy-joins", "on");
+        yield* check(enabled.enabled === true, "the owner restores admission", enabled);
+      }),
+  },
+  {
     name: "status",
     proves: "`clankie status` and `clankie seat show` read the live service",
     run: (stack) =>

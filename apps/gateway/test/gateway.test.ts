@@ -497,11 +497,12 @@ describe("public gateway", () => {
       };
       // Direct peers cannot rotate claimed addresses; trusted proxy clients still
       // share the destination-host budget and cannot amplify bootstrap admission.
-      for (let index = 0; index < 32; index++) expect((await attempt()).status).toBe(400);
+      for (let index = 0; index < (trustedProxy ? 32 : 4); index++)
+        expect((await attempt()).status).toBe(400);
       const throttled = await attempt();
       expect(throttled.status).toBe(429);
-      expect(throttled.headers.get("retry-after")).toBe("5");
-      now += 5000;
+      expect(throttled.headers.get("retry-after")).toBe(trustedProxy ? "5" : "60");
+      now += trustedProxy ? 5000 : 60_000;
       expect((await attempt()).status).toBe(400);
       // Bootstrap exhaustion does not spend the encrypted-machine transport bucket.
       const challenge = await fetch(`${origin}/h/${hostId}/v1/joined-machines/challenge`, {
