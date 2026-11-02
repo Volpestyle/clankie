@@ -1,6 +1,7 @@
 # ADR 0295: A self-hosted bot admits its own Activity viewers
 
-Status: accepted (VUH-2833, 2026-10-25). Extends ADR 0233.
+Status: accepted (VUH-2833, 2026-10-25), amended 2026-11-02 so a viewer who
+leaves loses media within about 15 seconds (#373). Extends ADR 0233.
 
 VUH-2594 closed the anonymous legacy `/frames` stream to everything except
 direct loopback. A self-hosted official bot's `/activity` launch reaches the
