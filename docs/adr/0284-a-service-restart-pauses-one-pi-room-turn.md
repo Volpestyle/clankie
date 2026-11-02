@@ -269,7 +269,40 @@ compacted shape and that the receipt drops its request. It then ages the journal
 just inside and then past the window: the directory is removed only past it, and
 the redelivery still answers from the receipt without a model call. The second test
 shows that an unsettled journal twice the window's age survives and resumes.
-Durable retry and backoff for unavailable providers remain open.
+
+### Provider outages (2026-11-02)
+
+Pi retries a retryable provider error (overload, rate limit, 5xx, network) three
+times in-process, over about fourteen seconds. When a durable turn's last step is
+still such an error after those retries, the turn is not failed. Instead:
+
+- the journal drops the trailing failed attempts, so the turn ends at its last good
+  step;
+- the journal records when the outage began and counts the attempts;
+- the turn stays unsettled, and its handoff keeps running.
+
+The route answers the body's poll with 502 uncertain, and the bridge's inbox retries
+the message with its own backoff (30 seconds, doubling to 10 minutes). Each
+redelivery resumes the turn in this process or after a restart: completed steps
+replay, and only the failed model request is asked again. A follow-up joined to the
+turn stays joined, as it does across a shutdown.
+
+The wait is bounded by `PROVIDER_OUTAGE_WAIT_MS` (one hour from the first deferral).
+Past it, the turn settles failed once, and later redeliveries answer from the
+receipt. No timer in the service retries anything: the body's redelivery is the only
+trigger, so nothing loops while the body is away. Errors Pi does not retry, such as
+quota, billing and context overflow, fail the turn as before.
+
+[`durable-pi-provider-outage.integration.test.ts`](../../apps/clankie/test/durable-pi-provider-outage.integration.test.ts)
+runs the real service against a model that answers 503. It covers three cases:
+
+- a deferral, a redelivery while still down, then the answer once the provider is
+  back, with the memory write never repeated;
+- a deferral that survives a SIGKILL restart;
+- an outage aged past the wait, which fails once and then answers from the receipt
+  without asking the model.
+
+A follow-up joined during an outage is not covered by a test.
 
 Before enabling more lanes:
 
@@ -279,8 +312,7 @@ Before enabling more lanes:
    media capture and changed/revoked room grants with real dependencies. Preserve
    corrupted/missing-state refusals. Audit connected reads individually rather
    than broadly blessing a transport.
-3. Add durable retry/backoff for unavailable providers (retention and
-   compaction above). Keep the original request and uncertain intents until
+3. Done: retention and compaction, and provider outages (above). Keep the original request and uncertain intents until
    reconciled. Recovery happens on the body's redelivery; a failed recovery
    settles once and does not create an unbounded automatic retry loop.
 4. Extend the same admission/step/outcome contract to linked-main service execution, mixed rooms, voice handoffs, operator turns, hosted encrypted ingress,

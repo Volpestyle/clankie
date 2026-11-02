@@ -98,6 +98,11 @@ export class RoomHandoffCoordinator<T> {
     return result;
   }
 
+  /** A finished delivery left unsettled for its redelivery runs again when it returns. */
+  public forget(id: string): void {
+    if (this.deliveries.get(id)?.settled === true) this.deliveries.delete(id);
+  }
+
   public async close(): Promise<void> {
     await Promise.allSettled(this.running);
   }

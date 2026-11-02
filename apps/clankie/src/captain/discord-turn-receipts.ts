@@ -140,6 +140,14 @@ export class DiscordTurnReceipts {
     return sentAt !== undefined && now.getTime() - sentAt > LEGACY_ABANDONED_AFTER_MS;
   }
 
+  /**
+   * Begun by this process, which holds no running turn for it: a durable turn
+   * left unsettled for its redelivery (ADR 0284).
+   */
+  public beganHere(receipt: Receipt): boolean {
+    return receipt.settled === undefined && receipt.beganBy?.instanceId === this.instanceId;
+  }
+
   public settleWrite(id: string, fingerprint: string, result: DiscordPresenceWriteResult): void {
     const receipt = this.get(id);
     if (
