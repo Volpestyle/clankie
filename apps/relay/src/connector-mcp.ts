@@ -1136,7 +1136,7 @@ function connectorServer(
           about: INBOX_ABOUT,
           held: [] as Array<(typeof items)[number] & { readMore?: { item: number; offset: number } }>,
           next: after ?? 0,
-          more: more === true || items.length > 0,
+          more: false,
         };
         for (const report of unreadReports.slice(reportsAfter as number)) {
           page.unreadReports.push(report);

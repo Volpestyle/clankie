@@ -154,7 +154,7 @@ window, the last hour's tokens per local Claude session, permits, tracker
 budgets and live context; a missing number is `"unknown"`), `post_note`
 (`text`, up to 2,000 characters),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
-`read_inbox` (`after` optional), `read_reports` (`thread`, optional `agent`, `ref`, `newest` and `waitSeconds`), `acknowledge_reports`
+`read_inbox` (`after`/`reportsAfter` optional; `item` with optional `offset` for held text), `read_reports` (`thread`, optional `agent`, `ref`, `newest` and `waitSeconds`), `acknowledge_reports`
 (`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`
 optional), `read_issue` (`project`, `issue`), `save_issue` (`project`;
 `issue` to update; `title`, `description`, `status`, `priority`, `labels`,
