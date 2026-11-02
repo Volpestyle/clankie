@@ -1476,7 +1476,12 @@ export function createResourceGovernor(
         let nativeAncestor = false;
         let pid = entry.process.pid;
         for (let depth = 0; pid > 1 && depth < 64; depth++) {
-          const current = await processIdentity(pid);
+          // The native observer cannot read another user's process (a shell
+          // under Terminal's root-owned `login`); that ends the walk at the uid
+          // boundary like a readable foreign uid, instead of failing the proof
+          // (#389). An unreadable start leaves an empty chain, which grants nothing.
+          // allow-swallowed-rejection -- an unreadable ancestor is a boundary, not evidence.
+          const current = await processIdentity(pid).catch(() => undefined);
           if (!current || current.uid !== entry.process.uid || chain.some((row) => row.pid === pid)) break;
           if (depth === 0 && current.startTime !== entry.process.startTime) break;
           chain.push(current);
