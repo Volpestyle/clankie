@@ -5271,7 +5271,11 @@ is refused while the desktop app isn't running. `herdr` keeps them in panes, and
 proven. Other harnesses stay in Herdr panes for now, and hires already running
 stay where they are. A surviving Codex hire in the desktop app keeps its report and tool
 admission across service restarts: Clankie re-proves its service-owned seat,
-original view PID, native session and dedicated server socket. New Codex hires explicitly select their
+original view PID, native session and dedicated server socket. A membership refusal
+stops the bridge's automatic polling. Its next explicit report or original receipt
+lookup checks the service again and can recover once the service admits that exact
+seat; it never replays an uncertain send. Already-running older bridges keep their
+loaded code until a native plugin refresh or fresh hire. New Codex hires explicitly select their
 prepared checkout with `--cd`; startup refuses a different or missing pane cwd,
 and briefed hires also verify the native thread cwd before sending the brief.
 

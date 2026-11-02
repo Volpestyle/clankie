@@ -46,6 +46,12 @@ any decision needed.
   jobs, local paths) in `.local/HANDOFF-<name>.md` in your owned worktree and link
   it from the item. [work-items](../work-items/SKILL.md) has the full protocol.
 
+A native admission refusal stops automatic mailbox polling. After Clankie
+restores the seat, an explicit `message_clankie` or original receipt lookup
+checks admission again with the service; it grants no admission itself and
+never replays an uncertain send. Bridges already running older code may need a
+native plugin refresh; changing files on disk does not replace their loaded code.
+
 Keep each send's `deliveryId`; `message_clankie_status` (or `clankie agents
 message-status DELIVERY_ID` in your pane) reads its stage. Use it before retrying
 or doing dependent work. `consumed` means delivery consumption, not task

@@ -1173,7 +1173,11 @@ export function runSeatChannel({
   }
 
   const inboundRequest = async (suffix, init) => {
-    if (membershipStopped) return refusedMembershipResponse();
+    // Explicit reports and their original receipt reads may recheck admission.
+    // A refusal stops background polling, but cannot permanently override a
+    // later service proof after a restart. Refresh the link before the first
+    // attempt; never replay a POST whose response may have been lost.
+    refresh();
     try {
       const deadline = AbortSignal.timeout(Math.min(20_000, requestTimeoutMs));
       return await observeMembership(

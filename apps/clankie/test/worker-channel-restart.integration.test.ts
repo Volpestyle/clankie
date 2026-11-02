@@ -56,6 +56,7 @@ const environment = (root: string) => ({
   HERDR_SOCKET_PATH: join(root, "herdr.sock"),
 });
 interface State {
+  messageRequests: number;
   bound: { sable: boolean; kit: boolean };
   acks: string[];
   ackAttempts: string[];
@@ -246,4 +247,33 @@ it("bounds a permanently mismatched native binding's unknown ACK without replayi
   expect(sable.events.filter((id) => id === `report:${reportId}:stored`)).toHaveLength(1);
   expect(new Set(sable.events).size).toBe(sable.events.length);
   expect((await service.status()).pendingReports).toContain(`report:${reportId}:stored`);
+});
+
+it("rechecks a refused bridge on its next explicit report after restart, while foreign seats remain refused", async () => {
+  const root = await mkdtemp(join(tmpdir(), "worker-refusal-restart-"));
+  roots.push(root);
+  const first = await runtime(root, "refused");
+  const sable = await bridge(root, "sable");
+  await expect.poll(sable.stderr).toContain("Automatic mailbox polling stopped");
+  const send = (worker: Awaited<ReturnType<typeof bridge>>, text: string) =>
+    worker
+      .call("tools/call", {
+        name: "message_clankie",
+        arguments: { text },
+      })
+      .then((reply) => decodeMcpResult((reply as { result: unknown }).result));
+  expect(await send(sable, "While refused")).toMatchObject({ received: false, deliveryStage: "rejected" });
+  const requests = (await first.status()).messageRequests;
+  // No automatic retry loop is revived by an explicit refusal.
+  await new Promise((resolve) => setTimeout(resolve, 1_000));
+  expect((await first.status()).messageRequests).toBe(requests);
+  await stop(first.child);
+  await runtime(root, "normal");
+  expect(await send(sable, "Report after readmission")).toMatchObject({
+    received: true,
+    deliveryStage: "stored",
+  });
+  expect(sable.child.exitCode).toBeNull();
+  const foreign = await bridge(root, "foreign");
+  expect(await send(foreign, "Foreign report")).toMatchObject({ received: false, deliveryStage: "rejected" });
 });

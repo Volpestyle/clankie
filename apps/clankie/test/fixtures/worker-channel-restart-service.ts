@@ -20,6 +20,8 @@ const conversations = new ConversationStore(join(root, "conversations"), async (
 const receipts = new InboundSeatReceipts(join(root, "inbound.json"), conversations);
 const acks: string[] = [];
 const ackAttempts: string[] = [];
+const admitted = mode !== "refused";
+let messageRequests = 0;
 let changedBinding = false;
 const currentBinding = (pane: string) => (pane === "sable" && changedBinding ? "b".repeat(64) : binding);
 let holdAck = mode === "hold-ack" || mode === "lost-ack";
@@ -55,6 +57,8 @@ const server = serve({
   port: 0,
   fetch: async (request) => {
     const path = new URL(request.url).pathname;
+    if (path.includes("/messages")) messageRequests++;
+    if (!admitted) return Response.json({ error: "local_process_membership_required" }, { status: 403 });
     if (mode === "binding-changed" && path.includes("/sable/events/report%3A") && path.endsWith("/ack"))
       changedBinding = true;
     // Interrupt a receipt after its notification was written, optionally after
@@ -94,6 +98,7 @@ process.on("message", async (raw) => {
       });
     } else if (command.action === "status") {
       result = {
+        messageRequests,
         bound: {
           sable: mailbox("sable").boundTo(currentBinding("sable")),
           kit: mailbox("kit").boundTo(currentBinding("kit")),
