@@ -30,10 +30,11 @@ export interface ChatMessage {
   tool_calls?: { function: { name: string } }[];
 }
 
-/** One scripted model step: a single tool call, or a final answer. */
+/** One scripted model step: a single tool call, a final answer, or the provider answering 503. */
 export type ScriptedReply =
   | { readonly call: { readonly name: string; readonly args: object } }
-  | { readonly text: string };
+  | { readonly text: string }
+  | { readonly unavailable: true };
 
 /** The default script: memory write, then a shell call that blocks, then a final answer naming what it saw. */
 function defaultReply(messages: readonly ChatMessage[], requestId: string, script: string): ScriptedReply {
@@ -76,8 +77,13 @@ async function scriptedModel(reply: (messages: readonly ChatMessage[]) => Script
         },
         null,
       ) + sse({}, "tool_calls");
-    response.writeHead(200, { "content-type": "text/event-stream" });
     const next = reply(body.messages);
+    if ("unavailable" in next) {
+      response.writeHead(503, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: "Service Unavailable", type: "server_error" } }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "text/event-stream" });
     const text =
       "call" in next
         ? call(next.call.name, next.call.args)

@@ -949,7 +949,12 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
           await ctx.dependencies.captain.submitDiscordTurn(request),
         );
       } catch (error) {
-        if (error instanceof PiTurnPausedError) throw error;
+        if (error instanceof PiTurnPausedError) {
+          // Unsettled for its redelivery (a provider outage, or shutdown): the next
+          // delivery resumes it here rather than reading this attempt.
+          if (ctx.captainTurnResults.get(deliveryKey) === record) ctx.captainTurnResults.delete(deliveryKey);
+          throw error;
+        }
         // A thrown turn is as final as a failed one; settle it so the bridge
         // stops asking. If even that cannot be recorded, it stays uncertain.
         const failed = settleUnfinishedTurn(
@@ -1016,7 +1021,7 @@ export function registerDiscordRoutes(ctx: RegisterDiscordRoutesContext) {
       record === undefined &&
       receipt?.recoveryRequest !== undefined &&
       ctx.dependencies.captain.canResumeDiscordTurn?.(request) &&
-      ctx.discordTurnReceipts.abandoned(receipt, ctx.clock())
+      (ctx.discordTurnReceipts.abandoned(receipt, ctx.clock()) || ctx.discordTurnReceipts.beganHere(receipt))
     )
       // Only explicitly admitted durable work resumes, and only when its body
       // redelivers it: the room's guards need that body live to reply.

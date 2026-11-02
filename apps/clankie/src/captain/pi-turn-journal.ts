@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, isRetryableAssistantError } from "@earendil-works/pi-ai";
 import type { AssistantMessage, ImageContent, TranscriptContext } from "@earendil-works/pi-ai";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import {
@@ -60,15 +60,29 @@ const RecordSchema = z.strictObject({
   session: z.strictObject({ file: z.string(), leaf: z.string().nullable() }).optional(),
   steps: z.array(Step),
   steers: z.array(Steer).optional(),
+  /** The provider stayed unavailable: the turn waits for its redelivery, from this time. */
+  deferred: z.strictObject({ since: z.number(), attempts: z.number().int() }).optional(),
   result: CaptainChannelTurnResultSchema.optional(),
 });
 type JournalRecord = z.infer<typeof RecordSchema>;
 type ToolOutcome = NonNullable<Awaited<ReturnType<NonNullable<AgentSession["agent"]["afterToolCall"]>>>>;
 
+/** The turn stays unsettled for its delivery to return: a service shutdown or a provider outage. */
 export class PiTurnPausedError extends Error {
-  constructor() {
-    super("pi_turn_paused_for_service_restart");
+  constructor(message = "pi_turn_paused_for_service_restart") {
+    super(message);
   }
+}
+
+/** How long a durable turn waits out an unavailable provider before it fails (ADR 0284). */
+export const PROVIDER_OUTAGE_WAIT_MS = 60 * 60_000;
+
+function retryableModelError(step: z.infer<typeof Step> | undefined): boolean {
+  return (
+    step?.kind === "model" &&
+    step.output !== undefined &&
+    isRetryableAssistantError(step.output as unknown as AssistantMessage)
+  );
 }
 
 /** Exact observations only. Unknown tools and generic dispatchers are never replayed. */
@@ -153,6 +167,7 @@ export class PiTurnJournal {
   private readonly queuedSteers = new Set<string>();
   private releaseSteers: (after: string | undefined) => void = () => {};
   private poisoned = false;
+  private deferral: boolean | undefined;
   readonly record: JournalRecord;
 
   readonly path: string;
@@ -197,6 +212,42 @@ export class PiTurnJournal {
   settle(result: CaptainChannelTurnResult): void {
     this.record.result = CaptainChannelTurnResultSchema.parse(result);
     compact(this.record);
+    this.save();
+  }
+
+  /**
+   * Whether this run, which has ended, waits out its provider instead of failing:
+   * Pi's own retries ended on a retryable provider error, and the outage is
+   * younger than PROVIDER_OUTAGE_WAIT_MS. Decided once, so a joined follow-up and
+   * its turn agree.
+   */
+  defers(now = Date.now()): boolean {
+    this.deferral ??=
+      this.record.result === undefined &&
+      retryableModelError(this.record.steps.at(-1)) &&
+      now - (this.record.deferred?.since ?? now) <= PROVIDER_OUTAGE_WAIT_MS;
+    return this.deferral;
+  }
+
+  /**
+   * Drop the failed attempts, so the redelivery asks the provider again from the
+   * last good step, and record the wait. Steers that arrived during them follow
+   * the step before.
+   */
+  defer(now = Date.now()): void {
+    if (!this.defers(now)) throw new Error("pi_turn_not_deferrable");
+    const dropped = new Set<string>();
+    while (retryableModelError(this.record.steps.at(-1))) dropped.add(this.record.steps.pop()!.key);
+    const last = this.record.steps.at(-1)?.key;
+    for (const steer of this.record.steers ?? [])
+      if (steer.after !== undefined && dropped.has(steer.after)) {
+        if (last === undefined) delete steer.after;
+        else steer.after = last;
+      }
+    this.record.deferred = {
+      since: this.record.deferred?.since ?? now,
+      attempts: (this.record.deferred?.attempts ?? 0) + 1,
+    };
     this.save();
   }
 

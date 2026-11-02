@@ -1352,7 +1352,9 @@ rooms, voice and native children keep their existing interruption behaviour.
 The journals live under `<state>/captain/durable-pi-room/`. A settled turn's
 journal is compacted to its answer and its uncertain effects. Each start removes a
 settled turn's directory, including its Pi session, 30 days after its last write.
-Unsettled turns stay until their delivery returns.
+Unsettled turns stay until their delivery returns. When the model provider stays
+unavailable past Pi's own retries, the turn waits for the body's redelivery, for up
+to an hour, instead of failing.
 
 Run the manual real-model proof from the checkout with an existing API credential
 for the chosen model (no OAuth credential is copied):

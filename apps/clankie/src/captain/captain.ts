@@ -4522,8 +4522,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               doing: `Joined the sender's running request ${liveHandoff.childId}`,
             });
             const outcome = await liveHandoff.settled;
-            // A shutdown leaves it joined; its redelivery reads the resumed turn's journal.
-            if (run.journal !== undefined && shutdown.signal.aborted) throw new PiTurnPausedError();
+            // A shutdown or provider outage leaves it joined; its redelivery reads the resumed turn's journal.
+            if (run.journal !== undefined && (shutdown.signal.aborted || run.journal.defers()))
+              throw new PiTurnPausedError();
             if (
               outcome.unconsumed.includes(heard.prompt) ||
               run.session.getSteeringMessages().includes(heard.prompt)
@@ -5074,9 +5075,24 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     : durable
                       ? durablePiTurns
                           .run(request, key, async (journal) => {
-                            const result = await dispatch(journal);
+                            let result: CaptainChannelTurnResult;
+                            try {
+                              result = await dispatch(journal);
+                            } catch (error) {
+                              if (!shutdown.signal.aborted && journal.defers()) {
+                                journal.defer();
+                                throw new PiTurnPausedError("pi_turn_deferred_provider_unavailable");
+                              }
+                              throw error;
+                            }
                             // A shutdown pauses the turn unsettled, for the next process to resume.
                             if (shutdown.signal.aborted) throw new PiTurnPausedError();
+                            // A provider outage leaves it unsettled too: the body's redelivery,
+                            // with its own backoff, asks the provider again (bounded, ADR 0284).
+                            if (journal.defers()) {
+                              journal.defer();
+                              throw new PiTurnPausedError("pi_turn_deferred_provider_unavailable");
+                            }
                             return result;
                           })
                           .catch((error: unknown) => {
@@ -5150,7 +5166,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         )
         .catch((error: unknown) => {
           burst?.close();
-          if (error instanceof PiTurnPausedError) throw error;
+          if (error instanceof PiTurnPausedError) {
+            // Left unsettled for its redelivery, which runs it again in this process too.
+            roomHandoffs.forget(roomHandoffConversationId(parentId, request.deliveryId));
+            throw error;
+          }
           if (error instanceof Error && error.message === "room_handoff_queue_full")
             return {
               state: "settled",
