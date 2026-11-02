@@ -186,7 +186,9 @@ admitted request, session leaf and model/tool steps, replays completed results,
 and reports interrupted mutations as possibly run. Its handoff stays open across the
 restart and resumes when the bridge redelivers the same message. A follow-up that
 steers its running turn is journaled there first, so the resumed turn hears it at the
-same point. Mixed rooms, voice, native children and linked-main execution retain
+same point. Settled, the journal keeps only its answer and uncertain effects, and a
+start forgets it 30 days later; unsettled work stays until its message returns.
+Mixed rooms, voice, native children and linked-main execution retain
 their existing interruption behavior. Tests prove the hop through the real bridge to a loopback Discord REST;
 Discord itself remains unproven.
 

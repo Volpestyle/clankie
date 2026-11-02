@@ -179,7 +179,8 @@ it("journals the owner's Pi turn in a proven owner-only room, and not in a mixed
     steps: unknown[];
   };
   expect(saved.result).toMatchObject({ state: "settled", response: "Answered." });
-  expect(saved.steps.length).toBeGreaterThan(0);
+  // Settled and compacted: a turn with no uncertain effects keeps only its answer.
+  expect(saved.steps).toEqual([]);
 
   // The same owner in a room others can read: answered as before, with no journal.
   const mixed = f.message("1400000000000000002", MIXED);

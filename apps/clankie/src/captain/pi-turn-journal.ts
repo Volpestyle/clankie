@@ -5,9 +5,11 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,6 +27,7 @@ import type {
   DiscordPresenceChannelTurnRequest,
 } from "@clankie/protocol";
 import { z } from "zod";
+import { OPERATOR_CONVERSATION_RETENTION_MS } from "./conversations/constants.ts";
 
 const Step = z.strictObject({
   kind: z.enum(["model", "tool"]),
@@ -44,6 +47,8 @@ const Steer = z.strictObject({
   images: z.json(),
   after: z.string().optional(),
   withdrawn: z.literal(true).optional(),
+  /** Set when the turn settles, so compaction keeps what the follow-up heard. */
+  consumed: z.literal(true).optional(),
 });
 const RecordSchema = z.strictObject({
   version: z.literal(1),
@@ -94,8 +99,30 @@ function json(value: unknown): z.infer<ReturnType<typeof z.json>> {
 function steerConsumed(record: JournalRecord, deliveryId: string): boolean {
   const steer = record.steers?.find((entry) => entry.deliveryId === deliveryId);
   if (steer === undefined || steer.withdrawn) return false;
+  if (steer.consumed) return true;
   const text = JSON.stringify(steer.prompt);
   return record.steps.some((step) => step.kind === "model" && JSON.stringify(step.input).includes(text));
+}
+
+/**
+ * A settled turn replays nothing, so it keeps only its answer, what each
+ * follow-up heard, and the effects it could not be sure of (ADR 0284). Model
+ * contexts and exact observations were replay inputs; the turn's Pi session
+ * remains its trail.
+ */
+function compact(record: JournalRecord): boolean {
+  let changed = record.prompt !== undefined || record.tools !== undefined;
+  for (const steer of record.steers ?? [])
+    if (steer.consumed === undefined && steerConsumed(record, steer.deliveryId)) {
+      steer.consumed = true;
+      changed = true;
+    }
+  const steps = record.steps.filter((step) => step.kind === "tool" && step.replay === "never");
+  changed ||= steps.length !== record.steps.length;
+  record.steps = steps;
+  delete record.prompt;
+  delete record.tools;
+  return changed;
 }
 
 /** Exclusive temporary file, fsync, rename, then fsync of the directory. */
@@ -169,6 +196,7 @@ export class PiTurnJournal {
 
   settle(result: CaptainChannelTurnResult): void {
     this.record.result = CaptainChannelTurnResultSchema.parse(result);
+    compact(this.record);
     this.save();
   }
 
@@ -403,6 +431,19 @@ export class PiTurnJournal {
   }
 }
 
+/** A saved file, when present: its parsed value and when it was last written. */
+function readSaved<T>(
+  path: string,
+  schema: z.ZodType<T>,
+): { value: T; at: number } | "unreadable" | undefined {
+  if (!existsSync(path)) return undefined;
+  try {
+    return { value: schema.parse(JSON.parse(readFileSync(path, "utf8"))), at: statSync(path).mtimeMs };
+  } catch {
+    return "unreadable";
+  }
+}
+
 /** A follow-up steered into another delivery's journaled turn, and its own answer once given. */
 const JoinedSchema = z.strictObject({
   parent: z.string(),
@@ -422,6 +463,48 @@ export class DurablePiTurns {
   private readonly root: string;
   constructor(root: string) {
     this.root = root;
+    this.sweep(Date.now());
+  }
+  /**
+   * Settled deliveries are forgotten with the room handoffs that ran them;
+   * journals settled before compaction existed are compacted. Unsettled work,
+   * and a turn a follow-up still waits on, stay until their delivery returns.
+   */
+  private sweep(now: number): void {
+    let entries: string[];
+    try {
+      entries = readdirSync(this.root);
+    } catch {
+      return;
+    }
+    const deliveries = entries.map((entry) => ({
+      directory: join(this.root, entry),
+      turn: readSaved(join(this.root, entry, "turn.json"), RecordSchema),
+      joined: readSaved(join(this.root, entry, "joined.json"), JoinedSchema),
+    }));
+    const awaited = new Set(
+      deliveries.flatMap(({ joined }) =>
+        joined !== undefined && joined !== "unreadable" && joined.value.result === undefined
+          ? [join(this.root, digest(joined.value.parent))]
+          : [],
+      ),
+    );
+    for (const { directory, turn, joined } of deliveries) {
+      const saved = [turn, joined].filter((file) => file !== undefined);
+      // Unreadable state is kept for the recovery that refuses it.
+      if (saved.length === 0 || saved.some((file) => file === "unreadable")) continue;
+      const files = saved as { value: { result?: unknown }; at: number }[];
+      if (files.some((file) => file.value.result === undefined)) continue;
+      if (
+        !awaited.has(directory) &&
+        files.every((file) => now - file.at > OPERATOR_CONVERSATION_RETENTION_MS)
+      ) {
+        rmSync(directory, { recursive: true, force: true });
+        continue;
+      }
+      if (turn !== undefined && turn !== "unreadable" && compact(turn.value))
+        writeDurably(join(directory, "turn.json"), turn.value);
+    }
   }
   /** This delivery's Pi dispatch began in an earlier process and never settled. */
   resumable(request: DiscordPresenceChannelTurnRequest): boolean {

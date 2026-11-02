@@ -19,7 +19,7 @@ const ReceiptSchema = z
     beganBy: z.strictObject({ instanceId: z.string().min(1), pid: z.number().int() }).optional(),
     lane: z.enum(["discord_text", "discord_voice"]),
     settled: CaptainChannelTurnResultSchema.optional(),
-    /** Only the explicitly selected durable Pi prototype lane retains its input. */
+    /** A durable Pi turn's input, kept until it settles (ADR 0284). */
     recoveryRequest: DiscordPresenceChannelTurnRequestSchema.optional(),
     bodyConversationId: z.string().optional(),
     writeResult: DiscordPresenceWriteResultSchema.optional(),
@@ -121,7 +121,9 @@ export class DiscordTurnReceipts {
     const receipt = this.get(id);
     if (receipt === undefined || receipt.fingerprint !== fingerprint)
       throw new Error("Discord receipt mismatch");
-    this.records.set(id, { ...receipt, settled: CaptainChannelTurnResultSchema.parse(result) });
+    // A settled delivery answers from its result; the request kept for recovery goes.
+    const { recoveryRequest: _recovered, ...kept } = receipt;
+    this.records.set(id, { ...kept, settled: CaptainChannelTurnResultSchema.parse(result) });
     this.save();
   }
 

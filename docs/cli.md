@@ -1349,6 +1349,11 @@ existing channel-turn POST/GET routes and delivery IDs, and grants no room or ma
 authority ([ADR 0284](adr/0284-a-service-restart-pauses-one-pi-room-turn.md)). Mixed
 rooms, voice and native children keep their existing interruption behaviour.
 
+The journals live under `<state>/captain/durable-pi-room/`. A settled turn's
+journal is compacted to its answer and its uncertain effects. Each start removes a
+settled turn's directory, including its Pi session, 30 days after its last write.
+Unsettled turns stay until their delivery returns.
+
 Run the manual real-model proof from the checkout with an existing API credential
 for the chosen model (no OAuth credential is copied):
 
