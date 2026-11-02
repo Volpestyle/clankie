@@ -23,6 +23,13 @@ export const SEAT_LABEL = "clankie.seat";
 /** The agent session Clankie named for a hire, once its harness starts. */
 export const SESSION_LABEL = "clankie.session";
 const CALL_MS = 5_000;
+/**
+ * A history read of an idle full-screen agent (Claude Code, Codex) is answered by
+ * scrolling it: herdr-core stitches for up to its own deadline (`HC_STITCH_MS`, 15 s
+ * by default) and then restores the view. Giving up sooner abandons a read the core
+ * is still making, so a seat with history was unreadable (#243).
+ */
+const HISTORY_READ_MS = 30_000;
 const FOCUS_MS = 5_000;
 const LIST_MAX = 48;
 /** History read above the screen, so an occupant's anchor stays in view as it writes. */
@@ -266,6 +273,8 @@ async function call(socketPath: string, method: string, params: Record<string, u
     inFlight.set(callId, method);
     // How far the call got, so a timeout says whether the socket, the handshake or the method stalled.
     let stage: "connecting" | "hello" | "method" = "connecting";
+    // Connecting and the handshake keep the short budget; only the history read itself waits longer.
+    let budget = CALL_MS;
     // When the event loop last ran a tick during this call: a late timer with no lag means herdr-core
     // itself was slow; a large lag means this service was busy and the answer may have been waiting.
     let lastTick = started;
@@ -281,7 +290,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
       if (error === undefined) resolve(result);
       else reject(error);
     };
-    const timer = setTimeout(() => {
+    const timedOut = () => {
       const now = Date.now();
       logger.warn(
         {
@@ -289,6 +298,7 @@ async function call(socketPath: string, method: string, params: Record<string, u
           method,
           stage,
           elapsedMs: now - started,
+          budgetMs: budget,
           eventLoopGapMs: now - lastTick,
           bufferedBytes: buffered.length,
           ...(typeof params.terminal === "string" ? { terminal: params.terminal.slice(0, 64) } : {}),
@@ -302,7 +312,8 @@ async function call(socketPath: string, method: string, params: Record<string, u
         "A herdr-core call timed out",
       );
       finish(new HerdrCoreError(`herdr-core didn't answer ${method} in time (stuck at ${stage}).`));
-    }, CALL_MS);
+    };
+    let timer = setTimeout(timedOut, budget);
     connection.on("error", (error: NodeJS.ErrnoException) =>
       finish(
         error.code === "ENOENT" || error.code === "ECONNREFUSED"
@@ -348,6 +359,11 @@ async function call(socketPath: string, method: string, params: Record<string, u
           if (!Array.isArray(methods) || !methods.includes(method))
             return finish(new HerdrCoreError(`This herdr-core doesn't offer ${method}.`));
           stage = "method";
+          if (method === "terminal.read" && typeof params.lines === "number" && params.lines > 0) {
+            budget = HISTORY_READ_MS;
+            clearTimeout(timer);
+            timer = setTimeout(timedOut, budget - (Date.now() - started));
+          }
           connection.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method, params })}\n`);
         } else if (message.id === 2) return finish(undefined, message.result ?? {});
       }

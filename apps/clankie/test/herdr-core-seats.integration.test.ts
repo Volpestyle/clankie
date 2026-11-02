@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { realpath } from "node:fs/promises";
@@ -41,6 +42,8 @@ const env: NodeJS.ProcessEnv = {
     ),
   ),
   HC_SESSION: session,
+  // The core's own stitch deadline, longer than the 5 s every other core call gets (#243).
+  HC_STITCH_MS: "8000",
   HERDR_PANE_ID: "w9:p9",
   HERDR_SOCKET_PATH: "/nowhere/herdr.sock",
 };
@@ -435,4 +438,30 @@ coreIt(
     }
     await runner.closePane(address);
   },
+);
+
+coreIt(
+  "a history read of an idle full-screen agent waits out the core's stitch instead of timing out (#243)",
+  async () => {
+    const seats = createHerdrCoreSeats({ env });
+    const address = await seats.start({
+      argv: [process.execPath, fileURLToPath(new URL("./fixtures/stitched-tui.mjs", import.meta.url))],
+      cwd,
+      env: {},
+      seat: "scroller",
+    });
+    await until(async () => (await seats.read(address, 0)).includes("history line 1999"));
+    // The core scrolls the app to read its history; with an 8 s stitch deadline that
+    // takes longer than the 5 s every core call used to get, and the read still answers.
+    const started = Date.now();
+    const text = await seats.read(address, 2_000);
+    expect(Date.now() - started).toBeGreaterThan(5_000);
+    expect(text).toContain("history line 1999");
+    // Every other call keeps its short budget and answers at once.
+    const screenStarted = Date.now();
+    expect(await seats.read(address, 0)).toContain("history line 1999");
+    expect(Date.now() - screenStarted).toBeLessThan(2_000);
+    await seats.kill(address);
+  },
+  60_000,
 );
