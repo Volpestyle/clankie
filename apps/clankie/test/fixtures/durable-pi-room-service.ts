@@ -24,14 +24,27 @@ export const DM = "99999000002";
 /** Teardown for everything started here; a test drains it in afterEach. */
 export const cleanups: (() => Promise<void>)[] = [];
 
-interface ChatMessage {
+export interface ChatMessage {
   role: string;
   content?: unknown;
   tool_calls?: { function: { name: string } }[];
 }
 
-/** Scripted model: memory write, then a shell call that blocks, then a final answer naming what it saw. */
-async function scriptedModel(requestId: string, script: string) {
+/** One scripted model step: a single tool call, or a final answer. */
+export type ScriptedReply =
+  | { readonly call: { readonly name: string; readonly args: object } }
+  | { readonly text: string };
+
+/** The default script: memory write, then a shell call that blocks, then a final answer naming what it saw. */
+function defaultReply(messages: readonly ChatMessage[], requestId: string, script: string): ScriptedReply {
+  const tools = messages.filter((message) => message.role === "tool");
+  if (tools.length === 0) return { call: { name: "memory", args: { action: "write", text: requestId } } };
+  if (tools.length === 1) return { call: { name: "bash", args: { command: `exec node '${script}'` } } };
+  const last = JSON.stringify(tools.at(-1)?.content ?? "");
+  return { text: `${requestId} recovered: ${last.includes("possibly ran") ? "possibly ran" : "completed"}` };
+}
+
+async function scriptedModel(reply: (messages: readonly ChatMessage[]) => ScriptedReply) {
   const seen: ChatMessage[][] = [];
   const server: Server = createServer(async (incoming, response) => {
     const chunks: Buffer[] = [];
@@ -39,7 +52,6 @@ async function scriptedModel(requestId: string, script: string) {
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { messages: ChatMessage[] };
     seen.push(body.messages);
     const tools = body.messages.filter((message) => message.role === "tool");
-    const last = tools.at(-1);
     const sse = (delta: object, finish: string | null) =>
       `data: ${JSON.stringify({
         id: "fixture",
@@ -65,18 +77,11 @@ async function scriptedModel(requestId: string, script: string) {
         null,
       ) + sse({}, "tool_calls");
     response.writeHead(200, { "content-type": "text/event-stream" });
+    const next = reply(body.messages);
     const text =
-      tools.length === 0
-        ? call("memory", { action: "write", text: requestId })
-        : tools.length === 1
-          ? call("bash", { command: `exec node '${script}'` })
-          : sse(
-              {
-                role: "assistant",
-                content: `${requestId} recovered: ${JSON.stringify(last?.content ?? "").includes("possibly ran") ? "possibly ran" : "completed"}`,
-              },
-              null,
-            ) + sse({}, "stop");
+      "call" in next
+        ? call(next.call.name, next.call.args)
+        : sse({ role: "assistant", content: next.text }, null) + sse({}, "stop");
     response.end(`${text}data: [DONE]\n\n`);
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -93,7 +98,17 @@ async function scriptedModel(requestId: string, script: string) {
  * `env` adds to the child's environment, e.g. a Discord presence runtime
  * module. `requestId` is the delivery ID; a bridge uses the Discord message ID.
  */
-export async function privateService(options: { env?: NodeJS.ProcessEnv; requestId?: string } = {}) {
+export async function privateService(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    requestId?: string;
+    /** Replaces the default script; `root` is this service's scratch root, `script` its blocking effect. */
+    reply?: (
+      messages: readonly ChatMessage[],
+      context: { requestId: string; script: string; root: string },
+    ) => ScriptedReply;
+  } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "durable-pi-restart-"));
   const requestId = options.requestId ?? `durable-${randomUUID()}`;
   const effect = join(root, "effect.txt");
@@ -107,7 +122,11 @@ appendFileSync(${JSON.stringify(effect)}, ${JSON.stringify(`${requestId}\n`)});
 setTimeout(() => {}, 300000);
 `,
   );
-  const model = await scriptedModel(requestId, script);
+  const model = await scriptedModel((messages) =>
+    options.reply === undefined
+      ? defaultReply(messages, requestId, script)
+      : options.reply(messages, { requestId, script, root }),
+  );
   execFileSync(process.execPath, [join(repo, "scripts/scratch-stack.mjs"), root], { cwd: repo });
   const preset = parseEnv(await readFile(join(root, "stack.env"), "utf8"));
   const settings = new SettingsStore(preset.CLANKIE_SETTINGS_FILE!);
@@ -244,9 +263,9 @@ setTimeout(() => {}, 300000);
       headers: { authorization, "content-type": "application/json", prefer: "respond-async" },
       body: JSON.stringify(value),
     });
-  const settled = () =>
+  const settled = (deliveryId = requestId) =>
     until(async () => {
-      const response = await fetch(`${url}/v1/captain/channel-turns/${requestId}`, {
+      const response = await fetch(`${url}/v1/captain/channel-turns/${deliveryId}`, {
         headers: { authorization },
       });
       if (response.status === 202) return undefined;
@@ -266,7 +285,8 @@ setTimeout(() => {}, 300000);
       ),
     ) as {
       result?: unknown;
-      steps: { kind: string; replay?: string; input: { name?: string }; output?: unknown }[];
+      steps: { kind: string; key: string; replay?: string; input: { name?: string }; output?: unknown }[];
+      steers?: { deliveryId: string; after?: string; withdrawn?: true }[];
     };
   const effects = async () => (await readFile(effect, "utf8").catch(() => "")).split("\n").filter(Boolean);
   const memories = async () => {
@@ -278,7 +298,7 @@ setTimeout(() => {}, 300000);
       .filter((line) => (JSON.parse(line) as { summary?: string }).summary === requestId);
   };
   /** The room handoff records the service keeps for this delivery, as the room's handoff view reads them. */
-  const handoffs = async () => {
+  const handoffs = async (deliveryId = requestId) => {
     const directory = join(root, "state/captain/conversations");
     const entries = (await readdir(directory).catch(() => [] as string[])).filter((name) =>
       name.startsWith("handoff-"),
@@ -294,7 +314,7 @@ setTimeout(() => {}, 300000);
       )
     )
       .map((meta) => meta.roomHandoff)
-      .filter((handoff) => handoff.deliveryId === requestId);
+      .filter((handoff) => handoff.deliveryId === deliveryId);
   };
   /** Admits the turn, waits until the shell effect is in flight, then SIGKILLs the service and its tool. */
   const killMidShell = async (signal: NodeJS.Signals = "SIGKILL") => {

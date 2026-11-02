@@ -1,10 +1,13 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { PiTurnJournal } from "./pi-turn-journal.ts";
 import type { NormalizedDiscordTurn } from "./room-turns.ts";
 import type { TurnContext } from "./tools.ts";
 
 export interface LiveRoomRun {
   readonly session: AgentSession;
   readonly capture: TurnContext;
+  /** A durable room's turn (ADR 0284): a steer is journaled here before Pi sees it. */
+  readonly journal?: PiTurnJournal;
 }
 
 export interface LiveRoomHandoff {
@@ -64,7 +67,8 @@ export class RoomHandoffBursts {
     return {
       handoff,
       liveRun: {
-        started: (session, capture) => started({ session, capture }),
+        started: (session, capture, journal) =>
+          started({ session, capture, ...(journal === undefined ? {} : { journal }) }),
         settled: (completed, unconsumed) => {
           remove();
           started(undefined);

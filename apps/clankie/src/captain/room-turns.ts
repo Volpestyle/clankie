@@ -51,7 +51,7 @@ export interface NormalizedDiscordTurn {
    * under the same grant so a burst steers it rather than starting siblings.
    */
   readonly liveRun?: {
-    readonly started: (session: AgentSession, capture: TurnContext) => void;
+    readonly started: (session: AgentSession, capture: TurnContext, journal?: PiTurnJournal) => void;
     /** `unconsumed` are steering messages the run ended without reading. */
     readonly settled: (completed: boolean, unconsumed: readonly string[]) => void;
   };

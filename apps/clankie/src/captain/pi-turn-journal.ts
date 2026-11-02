@@ -7,11 +7,12 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
-import type { AssistantMessage, TranscriptContext } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, TranscriptContext } from "@earendil-works/pi-ai";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   CaptainChannelTurnResultSchema,
@@ -33,6 +34,17 @@ const Step = z.strictObject({
   output: z.json().optional(),
   media: CaptainTurnMediaSchema.optional(),
 });
+/**
+ * A follow-up steered into the running turn (ADR 0118). `after` is the last
+ * journaled step when it arrived; replay queues it again once that step is served.
+ */
+const Steer = z.strictObject({
+  deliveryId: z.string(),
+  prompt: z.string(),
+  images: z.json(),
+  after: z.string().optional(),
+  withdrawn: z.literal(true).optional(),
+});
 const RecordSchema = z.strictObject({
   version: z.literal(1),
   request: DiscordPresenceChannelTurnRequestSchema,
@@ -42,6 +54,7 @@ const RecordSchema = z.strictObject({
   tools: z.string().optional(),
   session: z.strictObject({ file: z.string(), leaf: z.string().nullable() }).optional(),
   steps: z.array(Step),
+  steers: z.array(Steer).optional(),
   result: CaptainChannelTurnResultSchema.optional(),
 });
 type JournalRecord = z.infer<typeof RecordSchema>;
@@ -77,10 +90,41 @@ function json(value: unknown): z.infer<ReturnType<typeof z.json>> {
   return JSON.parse(JSON.stringify(value)) as z.infer<ReturnType<typeof z.json>>;
 }
 
+/** A journaled model request carried the follow-up, so this turn's answer covers it. */
+function steerConsumed(record: JournalRecord, deliveryId: string): boolean {
+  const steer = record.steers?.find((entry) => entry.deliveryId === deliveryId);
+  if (steer === undefined || steer.withdrawn) return false;
+  const text = JSON.stringify(steer.prompt);
+  return record.steps.some((step) => step.kind === "model" && JSON.stringify(step.input).includes(text));
+}
+
+/** Exclusive temporary file, fsync, rename, then fsync of the directory. */
+function writeDurably(path: string, value: unknown): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  const file = openSync(temporary, "wx", 0o600);
+  try {
+    writeFileSync(file, `${JSON.stringify(value)}\n`);
+    fsyncSync(file);
+  } finally {
+    closeSync(file);
+  }
+  renameSync(temporary, path);
+  const directory = openSync(dirname(path), "r");
+  try {
+    fsyncSync(directory);
+  } finally {
+    closeSync(directory);
+  }
+}
+
 /** One delivery's private journal. Every write is durable before the next effect. */
 export class PiTurnJournal {
   private modelIndex = 0;
   private readonly replayedTools = new Map<string, ToolOutcome>();
+  /** Steers already queued into this process's session. */
+  private readonly queuedSteers = new Set<string>();
+  private releaseSteers: (after: string | undefined) => void = () => {};
   private poisoned = false;
   readonly record: JournalRecord;
 
@@ -100,22 +144,7 @@ export class PiTurnJournal {
   private save(): void {
     this.assertHealthy();
     try {
-      mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
-      const file = openSync(temporary, "wx", 0o600);
-      try {
-        writeFileSync(file, `${JSON.stringify(this.record)}\n`);
-        fsyncSync(file);
-      } finally {
-        closeSync(file);
-      }
-      renameSync(temporary, this.path);
-      const directory = openSync(dirname(this.path), "r");
-      try {
-        fsyncSync(directory);
-      } finally {
-        closeSync(directory);
-      }
+      writeDurably(this.path, this.record);
     } catch (error) {
       this.poisoned = true;
       throw error;
@@ -141,6 +170,28 @@ export class PiTurnJournal {
   settle(result: CaptainChannelTurnResult): void {
     this.record.result = CaptainChannelTurnResultSchema.parse(result);
     this.save();
+  }
+
+  /** Durable before Pi sees it, so a resumed turn hears the follow-up at the same point. */
+  steer(deliveryId: string, prompt: string, images: readonly ImageContent[]): void {
+    const steers = (this.record.steers ??= []);
+    if (steers.some((entry) => entry.deliveryId === deliveryId)) return;
+    const after = this.record.steps.at(-1)?.key;
+    steers.push({ deliveryId, prompt, images: json(images), ...(after === undefined ? {} : { after }) });
+    this.queuedSteers.add(deliveryId);
+    this.save();
+  }
+
+  /** The turn ended before reading it; the follow-up becomes its own handoff and is never replayed here. */
+  withdraw(deliveryId: string): void {
+    const steer = this.record.steers?.find((entry) => entry.deliveryId === deliveryId);
+    if (steer === undefined || steer.withdrawn || this.consumed(deliveryId)) return;
+    steer.withdrawn = true;
+    this.save();
+  }
+
+  consumed(deliveryId: string): boolean {
+    return steerConsumed(this.record, deliveryId);
   }
 
   prompt(value: string): string {
@@ -169,6 +220,15 @@ export class PiTurnJournal {
       leaf: session.sessionManager.getLeafId(),
     };
     this.save();
+    this.releaseSteers = (after) => {
+      for (const steer of this.record.steers ?? []) {
+        if (steer.withdrawn || steer.after !== after || this.queuedSteers.has(steer.deliveryId)) continue;
+        this.queuedSteers.add(steer.deliveryId);
+        session.steer(steer.prompt, steer.images as unknown as ImageContent[]).catch(() => {
+          this.poisoned = true;
+        });
+      }
+    };
     const agent = session.agent;
     const stream = agent.streamFunction;
     const before = agent.beforeToolCall;
@@ -178,6 +238,8 @@ export class PiTurnJournal {
     agent.streamFunction = async (model, context, options) => {
       this.assertHealthy();
       await validate?.();
+      // A follow-up that arrived before the turn's first step; the session is streaming now.
+      if (this.modelIndex === 0) this.releaseSteers(undefined);
       const key = `model:${this.modelIndex++}`;
       let step = this.record.steps.find((entry) => entry.key === key);
       if (step === undefined) {
@@ -196,6 +258,7 @@ export class PiTurnJournal {
           output.push({ type: "error", reason: message.stopReason, error: message });
         else output.push({ type: "done", reason: message.stopReason, message });
         output.end(message);
+        this.releaseSteers(key);
         return output;
       }
       // An interrupted request uses the committed context, with fresh credentials/cancellation.
@@ -281,9 +344,13 @@ export class PiTurnJournal {
           this.assertHealthy();
           await validate?.();
           const replayed = this.replayedTools.get(id);
-          return replayed === undefined
-            ? execute(id, args, toolSignal, update)
-            : { ...replayed, content: replayed.content ?? [], details: replayed.details };
+          try {
+            return replayed === undefined
+              ? await execute(id, args, toolSignal, update)
+              : { ...replayed, content: replayed.content ?? [], details: replayed.details };
+          } finally {
+            this.releaseSteers(`tool:${id}`);
+          }
         };
       }
       if (step === undefined) {
@@ -325,6 +392,7 @@ export class PiTurnJournal {
       return override;
     };
     return () => {
+      this.releaseSteers = () => {};
       agent.streamFunction = stream;
       if (before) agent.beforeToolCall = before;
       else delete agent.beforeToolCall;
@@ -335,14 +403,21 @@ export class PiTurnJournal {
   }
 }
 
+/** A follow-up steered into another delivery's journaled turn, and its own answer once given. */
+const JoinedSchema = z.strictObject({
+  parent: z.string(),
+  result: CaptainChannelTurnResultSchema.optional(),
+});
+
 /**
  * One opt-in room, serialized deliveries. Its turns run through the normal room
- * handoff; the journal covers only their Pi dispatch, and the room opens no
- * steering burst, so no steering can escape a turn's journal.
+ * handoff; the journal covers only their Pi dispatch. A follow-up that steers a
+ * running turn is journaled in that turn first, so no steering escapes it.
  */
 export class DurablePiRoom {
   private tail: Promise<unknown> = Promise.resolve();
   private readonly running = new Map<string, Promise<CaptainChannelTurnResult>>();
+  private readonly runningByDelivery = new Map<string, Promise<CaptainChannelTurnResult>>();
   private readonly root: string;
   readonly target: string | undefined;
   constructor(root: string, target: string | undefined) {
@@ -362,11 +437,64 @@ export class DurablePiRoom {
     const record = this.read(request.deliveryId);
     return record !== undefined && record.fingerprint === digest(request) && record.result === undefined;
   }
-  /** Whether a delivery's journal exists without a result, before its request is known. */
+  /**
+   * Whether a delivery still has durable work, before its request is known: its
+   * own journal has no result, or it steered a turn and was not yet answered.
+   */
   unsettled(deliveryId: string): boolean {
     if (this.target === undefined) return false;
     const record = this.read(deliveryId);
-    return record !== undefined && record.result === undefined;
+    if (record !== undefined) return record.result === undefined;
+    const joined = this.joined(deliveryId);
+    return joined !== undefined && joined.result === undefined;
+  }
+  /** Written before the steer, so a restart always finds which turn a follow-up joined. */
+  link(deliveryId: string, parent: string): void {
+    writeDurably(this.joinedPath(deliveryId), { parent });
+  }
+  joined(deliveryId: string): z.infer<typeof JoinedSchema> | undefined {
+    try {
+      return JoinedSchema.parse(JSON.parse(readFileSync(this.joinedPath(deliveryId), "utf8")));
+    } catch {
+      return undefined;
+    }
+  }
+  /** The follow-up was answered (absorbed or failed), or it left to become its own handoff. */
+  settleJoined(deliveryId: string, result?: CaptainChannelTurnResult): void {
+    const joined = this.joined(deliveryId);
+    if (joined === undefined) return;
+    if (result === undefined) rmSync(this.joinedPath(deliveryId), { force: true });
+    else writeDurably(this.joinedPath(deliveryId), { ...joined, result });
+  }
+  /**
+   * Where a joined follow-up stands in its parent's journal: whether the parent has
+   * settled, and whether a journaled model request carried the follow-up.
+   */
+  parentOf(deliveryId: string):
+    | {
+        readonly parent: string;
+        readonly request: DiscordPresenceChannelTurnRequest;
+        readonly result?: CaptainChannelTurnResult;
+        readonly consumed: boolean;
+      }
+    | undefined {
+    const joined = this.joined(deliveryId);
+    if (joined === undefined) return undefined;
+    const record = this.read(joined.parent);
+    if (record?.steers?.some((steer) => steer.deliveryId === deliveryId) !== true) return undefined;
+    return {
+      parent: joined.parent,
+      request: record.request,
+      ...(record.result === undefined ? {} : { result: record.result }),
+      consumed: steerConsumed(record, deliveryId),
+    };
+  }
+  /** The parent's resumed run, when this process is running it. */
+  runningFor(deliveryId: string): Promise<CaptainChannelTurnResult> | undefined {
+    return this.runningByDelivery.get(deliveryId);
+  }
+  private joinedPath(deliveryId: string): string {
+    return join(this.root, digest(deliveryId), "joined.json");
   }
   /** An unreadable journal resumes nothing; the turn's own recovery reports it. */
   private read(deliveryId: string): JournalRecord | undefined {
@@ -400,9 +528,16 @@ export class DurablePiRoom {
         return result;
       });
     this.running.set(key, result);
+    this.runningByDelivery.set(request.deliveryId, result);
     this.tail = result;
     // allow-swallowed-rejection -- only cleanup's derived promise is dropped; the original result is returned.
-    void result.finally(() => this.running.delete(key)).catch(() => undefined);
+    void result
+      .finally(() => {
+        this.running.delete(key);
+        if (this.runningByDelivery.get(request.deliveryId) === result)
+          this.runningByDelivery.delete(request.deliveryId);
+      })
+      .catch(() => undefined);
     return result;
   }
 }
