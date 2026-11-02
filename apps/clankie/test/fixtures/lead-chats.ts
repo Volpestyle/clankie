@@ -47,6 +47,7 @@ export async function leadChatFixture(
     defaultLead?: boolean;
     beforeOpen?: (sessionId: string) => Promise<void>;
     projectHireIdentity?: CaptainOptions["projectHireIdentity"];
+    projectHirePaneGone?: CaptainOptions["projectHirePaneGone"];
     paneReadFails?: () => boolean;
     /** Herdr detection (ADR 0312). Absent leaves lead rebind off. */
     connectorSessionDetection?: () => boolean;
@@ -259,6 +260,9 @@ export async function leadChatFixture(
       ...(options.projectHireIdentity === undefined
         ? {}
         : { projectHireIdentity: options.projectHireIdentity }),
+      ...(options.projectHirePaneGone === undefined
+        ? {}
+        : { projectHirePaneGone: options.projectHirePaneGone }),
       ...(options.connectorSessionDetection === undefined
         ? {}
         : { connectorSessionDetection: options.connectorSessionDetection }),

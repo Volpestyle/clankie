@@ -73,6 +73,11 @@ export interface CaptainOptions {
   ) => Promise<ProjectHireProcessProof | undefined>;
   /** Why the last process proof for a pane was refused, in fixed words, when its observer says. */
   readonly projectHireRefusal?: (pane: string) => string | undefined;
+  /**
+   * True only when the native host positively reports this pane gone (#376). A lead
+   * conversation whose remembered pane is gone then hires as one with no native source.
+   */
+  readonly projectHirePaneGone?: (fleet: string, pane: string) => Promise<boolean>;
   /** Fresh same-call display attribution only; individual steering still revalidates. */
   readonly projectHireIdentityBatch?: (
     fleet: string,
