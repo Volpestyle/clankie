@@ -239,7 +239,7 @@ export async function readGithubOriginSlug(cwd: string): Promise<string | undefi
 
 /** Capture before native work begins; a primary checkout cannot own this signal. */
 /** Where a change lives: `apps/clankie`, `packages/protocol`, `docs`, or a root file. */
-export function changeArea(path: string): string {
+function changeArea(path: string): string {
   const parts = path.split("/");
   return parts.length > 2 && ["apps", "packages", "integrations"].includes(parts[0]!)
     ? `${parts[0]}/${parts[1]}`
