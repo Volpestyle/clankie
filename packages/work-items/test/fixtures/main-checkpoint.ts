@@ -42,7 +42,15 @@ export async function checkpointFixture() {
   let mode = "red";
   let now = 0;
   const cache = new MainCheckpointCache(() => now);
-  let linked: "sha" | "sha-jobs" | "sha-partial" | "sha-comment" | "url" | "comment" | "descendant-url" | undefined;
+  let linked:
+    | "sha"
+    | "sha-jobs"
+    | "sha-partial"
+    | "sha-comment"
+    | "url"
+    | "comment"
+    | "descendant-url"
+    | undefined;
   const requests: string[] = [];
   const server = createServer(async (request, response) => {
     try {
@@ -107,11 +115,31 @@ export async function checkpointFixture() {
           head_branch: "main",
         });
         const runs =
-          (mode === "descendant" || mode === "missing-own")
-            ? [run(281, tip, "completed", "success"), ...(mode === "missing-own" ? [] : [run(280, merge, "completed", "cancelled")])]
-            : ["red-descendant", "green-descendant-red-own", "red-descendant-green-own", "green-descendant-running-own", "red-descendant-cancelled-own"].includes(mode)
-              ? [run(281, tip, "completed", mode.startsWith("green-descendant") ? "success" : "failure"),
-                 run(280, merge, mode.endsWith("running-own") ? "in_progress" : "completed", mode.endsWith("green-own") ? "success" : mode.endsWith("cancelled-own") ? "cancelled" : "failure")]
+          mode === "descendant" || mode === "missing-own"
+            ? [
+                run(281, tip, "completed", "success"),
+                ...(mode === "missing-own" ? [] : [run(280, merge, "completed", "cancelled")]),
+              ]
+            : [
+                  "red-descendant",
+                  "green-descendant-red-own",
+                  "red-descendant-green-own",
+                  "green-descendant-running-own",
+                  "red-descendant-cancelled-own",
+                ].includes(mode)
+              ? [
+                  run(281, tip, "completed", mode.startsWith("green-descendant") ? "success" : "failure"),
+                  run(
+                    280,
+                    merge,
+                    mode.endsWith("running-own") ? "in_progress" : "completed",
+                    mode.endsWith("green-own")
+                      ? "success"
+                      : mode.endsWith("cancelled-own")
+                        ? "cancelled"
+                        : "failure",
+                  ),
+                ]
               : mode === "no-runs"
                 ? []
                 : [
@@ -125,7 +153,10 @@ export async function checkpointFixture() {
         data = { workflow_runs: runs, total_count: runs.length };
       } else if (/\/actions\/runs\/\d+\/jobs$/u.test(url.pathname)) {
         const own = url.pathname.includes("/runs/280/");
-        const success = mode === "green" || mode === "descendant" || mode === "missing-own" ||
+        const success =
+          mode === "green" ||
+          mode === "descendant" ||
+          mode === "missing-own" ||
           (own ? mode === "red-descendant-green-own" : mode.startsWith("green-descendant"));
         const running = mode === "running" || (own && mode.endsWith("running-own"));
         const jobs = ["landing", "checkpoint", "mac", "check"]
@@ -147,19 +178,34 @@ export async function checkpointFixture() {
                 {
                   number: 286,
                   title: "Checkpoint regression",
-                  body: linked === "sha" ? `Restart failure, base ${merge.slice(0, 8)}` :
-                    linked === "sha-jobs" ? `${merge.slice(0, 8)}: landing, checkpoint, mac` :
-                    linked === "sha-partial" ? `${merge.slice(0, 8)}: checkpoint` :
-                    linked === "url" ? runUrl :
-                    linked === "descendant-url" ? runUrl.replace("280", "281") : "See comments",
+                  body:
+                    linked === "sha"
+                      ? `Restart failure, base ${merge.slice(0, 8)}`
+                      : linked === "sha-jobs"
+                        ? `${merge.slice(0, 8)}: landing, checkpoint, mac`
+                        : linked === "sha-partial"
+                          ? `${merge.slice(0, 8)}: checkpoint`
+                          : linked === "url"
+                            ? runUrl
+                            : linked === "descendant-url"
+                              ? runUrl.replace("280", "281")
+                              : "See comments",
                   state: "closed",
                 },
               ]
             : [],
         };
       } else if (url.pathname === "/repos/fixture/repo/issues/286/comments")
-        data = [{ body: linked === "comment" ? runUrl :
-          linked === "sha-comment" ? `Restart failure, base ${merge}` : "unrelated" }];
+        data = [
+          {
+            body:
+              linked === "comment"
+                ? runUrl
+                : linked === "sha-comment"
+                  ? `Restart failure, base ${merge}`
+                  : "unrelated",
+          },
+        ];
       else throw new Error(`Unexpected fixture request ${url.pathname}`);
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify(data));

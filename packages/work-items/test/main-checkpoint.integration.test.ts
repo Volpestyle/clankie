@@ -110,7 +110,6 @@ it("caches rate-limited reads as unknown, then retries when the cache expires", 
   expect(await f.check()).toBeUndefined();
 });
 
-
 it.each(["sha", "sha-comment", "sha-partial"] as const)(
   "keeps red held when %s evidence does not account for all failing jobs",
   async (link) => {

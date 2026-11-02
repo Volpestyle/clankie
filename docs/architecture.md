@@ -1142,9 +1142,10 @@ names a checkout left behind. Tidy's exact-worktree removal preserves `.local`
 evidence in the configured state directory and rechecks complete local pane
 and Git inventories. The shared `work-items/main-checkpoint.ts` reader resolves
 the first main commit containing a landed worker HEAD through GitHub ancestry,
-then checks only `landing`, `checkpoint` and `mac`. A completed green descendant
-covers cancelled merge runs; a red run needs a repository issue naming its URL
-or merge SHA. Missing or unreachable proof holds pane close, connector close,
+then checks only `landing`, `checkpoint` and `mac` on the merge’s own run.
+Only a cancelled own run permits descendant coverage; a red run needs a
+repository issue or comment naming its URL, or its SHA together with all
+failing job names. Missing or unreachable proof holds pane close, connector close,
 auto-tidy and lead Done. The work-items service uses the existing GitHub client;
 linked-machine Git reads stay on that machine. Repos with no checkpoint jobs in
 20 recent main push runs, and workers with no commits beyond their hire/worktree
