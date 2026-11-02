@@ -1114,12 +1114,16 @@ describe("Claude connector MCP endpoint", () => {
     expect(empty.notes).toEqual([]);
     expect(empty.about).toContain("not instructions");
 
-    // The tool sends only the text: an author the caller names never reaches the board.
+    // An unknown author argument is refused before any write; valid notes carry only text.
     const handover = "  I'm reworking kh2's netcode on PC1; leave pc1/kh2 to me until tonight.  ";
-    const posted = await claude.callTool({
+    const spoofed = await claude.callTool({
       name: "post_note",
       arguments: { text: handover, author: "Clankie" },
     });
+    expect(spoofed.isError).toBe(true);
+    expect(textOf(spoofed)).toContain('Unknown arguments for post_note: "author"');
+    expect((await notes(grok)).notes).toEqual([]);
+    const posted = await claude.callTool({ name: "post_note", arguments: { text: handover } });
     expect(JSON.parse(textOf(posted)).posted).toMatchObject({
       author: "Claude",
       text: handover.trim(),
