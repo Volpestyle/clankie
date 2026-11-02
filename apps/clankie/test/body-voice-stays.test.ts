@@ -300,3 +300,17 @@ it("health matches exact persisted audio source without treating its owning thre
   voice.finish(stay, acquired.incarnation);
   expect(voice.observesAudioSource(proof)).toBe(false);
 });
+it("names the joining conversation once, when finish records the stay's end (#371)", async () => {
+  const { voice, stay } = fixture();
+  const claim = await voice.claim(stay, identity("room"));
+  if (claim.outcome !== "acquired") throw new Error("claim");
+  const finished: string[] = [];
+  expect(
+    voice.finish({ ...stay, generation: 2 }, claim.incarnation, (id) => finished.push(id)),
+  ).toMatchObject({
+    outcome: "rejected",
+  });
+  expect(voice.finish(stay, claim.incarnation, (id) => finished.push(id))).toEqual({ outcome: "released" });
+  expect(voice.finish(stay, claim.incarnation, (id) => finished.push(id))).toEqual({ outcome: "released" });
+  expect(finished).toEqual(["room"]);
+});

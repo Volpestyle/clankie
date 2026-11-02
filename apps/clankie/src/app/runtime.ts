@@ -2103,7 +2103,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             })
           : input.action === "heartbeat"
             ? await voice.heartbeat(input.stay, input.incarnation, identity)
-            : voice.finish(input.stay, input.incarnation);
+            : voice.finish(input.stay, input.incarnation, (conversationId) =>
+                recordUnrequestedVoiceLeave(
+                  dependencies.captain,
+                  conversationId,
+                  target.channelId,
+                  input.reason,
+                ),
+              );
       return context.json(result, result.outcome === "rejected" || result.outcome === "busy" ? 409 : 200);
     } catch {
       return context.json({ outcome: "rejected", reason: "store_unavailable" }, 503);
@@ -2702,4 +2709,34 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       await Promise.allSettled(closing);
     },
   };
+}
+
+/** Leave codes that mean someone asked him to go; any other code is a drop he must hear about (#371). */
+const REQUESTED_VOICE_LEAVES = new Set([
+  "owner_voice_leave",
+  "self_decided",
+  "authorized_body_reconciliation",
+  "session_leave",
+]);
+
+/**
+ * Tell the conversation that joined when Discord, the transport or the body ended the call on its own,
+ * so he stops speaking as if still in the room. A body too old to send a reason stays silent.
+ */
+function recordUnrequestedVoiceLeave(
+  captain: { recordConversationNotice(conversationId: string, text: string): boolean },
+  conversationId: string,
+  channelId: string,
+  reason: string | undefined,
+): void {
+  if (reason === undefined || REQUESTED_VOICE_LEAVES.has(reason)) return;
+  try {
+    captain.recordConversationNotice(
+      conversationId,
+      `You were dropped from Discord voice channel ${channelId} (${reason}) at ${new Date().toISOString()}. ` +
+        "You are not in that call and hear no one there now; check voice presence before saying you can hear anyone.",
+    );
+  } catch {
+    // The stay's end is already persisted; a failed notice must not turn the body's finish into a retry loop.
+  }
 }

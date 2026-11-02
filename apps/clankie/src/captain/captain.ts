@@ -5832,6 +5832,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     recordRuntimeHealthNotice: (text: string) =>
       conversations.recordServiceNotice(conversations.defaultGlobalConversationId(), text),
+    recordConversationNotice: (conversationId: string, text: string) =>
+      conversations.recordServiceNotice(conversationId, text),
 
     seatRestartStatus: () => hiredSeatRestarts.status(),
     async leadRestartStatus() {

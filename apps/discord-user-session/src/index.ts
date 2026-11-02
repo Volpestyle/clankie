@@ -683,6 +683,7 @@ async function executeCaptainVoicePresenceNow(
       action: "joined",
       channelId: target.channelId,
       actorCanBeHeard: voiceSession.canHear(target.actorId),
+      capturing: voiceSession.capturing(),
       transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
     };
   }
@@ -717,6 +718,7 @@ async function executeCaptainVoicePresenceNow(
     action: "joined",
     channelId: target.channelId,
     actorCanBeHeard: voiceSession.canHear(target.actorId),
+    capturing: voiceSession.capturing(),
     transcriptLoggingEnabled: voiceTranscriptLoggingEnabled,
   };
 }
@@ -951,7 +953,7 @@ async function leaveVoiceConfirmed(guildId: string): Promise<boolean> {
 async function recordConfirmedVoiceLeave(guildId: string): Promise<void> {
   const evidence = pendingLeftEvidence;
   if (evidence === undefined || evidence.guildId !== guildId) return;
-  if (evidence.stayId !== undefined) await voiceBodyLease.confirmedLeave(evidence.stayId);
+  if (evidence.stayId !== undefined) await voiceBodyLease.confirmedLeave(evidence.stayId, evidence.reason);
   pendingLeftEvidence = undefined;
   await recordReceipt(voiceEvidenceReceiptType(evidence), {
     ...voiceEvidenceReceiptData(evidence),

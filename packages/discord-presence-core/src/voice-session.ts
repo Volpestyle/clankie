@@ -1737,6 +1737,21 @@ export class DiscordVoiceSession {
     });
   }
 
+  /**
+   * Whether he is receiving voice now: the transport is up and at least one
+   * person in the channel can be heard under the consent policy. Joining alone
+   * is not hearing (#371).
+   */
+  public capturing(): boolean {
+    const guildId = this.guildId;
+    const channelId = this.channelId;
+    if (!this.voiceReady || guildId === undefined || channelId === undefined) return false;
+    const people = (this.options.channelOccupants?.(guildId, channelId) ?? [])
+      .filter((occupant) => occupant.isBot !== true)
+      .map((occupant) => occupant.userId);
+    return this.consent.permitted(guildId, channelId, people).length > 0;
+  }
+
   public canHear(userId: string): boolean {
     return (
       this.guildId !== undefined &&

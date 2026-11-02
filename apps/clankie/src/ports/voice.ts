@@ -88,7 +88,12 @@ export interface BodyVoiceStaysPort {
     incarnation: string,
     routeIdentity: BodyConversationIdentity,
   ): Promise<BodyLeaseResult>;
-  finish(stay: BodyVoiceStay, incarnation: string): BodyLeaseResult;
+  /** `onFinished` hears the joining conversation once, when this call records the stay's end (#371). */
+  finish(
+    stay: BodyVoiceStay,
+    incarnation: string,
+    onFinished?: (conversationId: string) => void,
+  ): BodyLeaseResult;
   observesAudioSource(input: {
     stayId: string;
     guildId: string;

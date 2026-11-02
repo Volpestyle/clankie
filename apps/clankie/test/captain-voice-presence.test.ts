@@ -54,7 +54,11 @@ describe("captain voice presence tools", () => {
       // The situation: what consent blocks, and that telling the room is the
       // owner's settled arrangement (ADR 0071), not an arrival announcement.
       expect(description).toContain("/clankie voice-consent opt-in");
-      expect(description).toContain("you are transcribing them");
+      // Consent is policy, not reception (#371): only `capturing` says he hears anyone.
+      expect(description).not.toContain("you are transcribing them");
+      expect(description).toContain("it is not proof that anything is arriving");
+      expect(description).toContain("Joining is not hearing");
+      expect(description).toContain("check voice presence before claiming you can hear anyone");
       expect(description).toContain("owner chose presence as consent and handles telling people");
       expect(description).toContain("None of it is news you owe on arrival");
       expect(description).toContain("text reply after joining is optional");

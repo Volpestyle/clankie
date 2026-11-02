@@ -35,7 +35,11 @@ export function discordCaptainTools(
  */
 const VOICE_JOIN_CONSENT_STATE =
   "When actorCanBeHeard is false, nothing they say reaches you at all until they run /clankie voice-consent opt-in. " +
-  "When it is true, you are transcribing them from the moment you arrive. When transcriptLoggingEnabled is true, " +
+  "When it is true, their policy permits hearing them; it is not proof that anything is arriving. capturing says " +
+  "whether you are actually receiving voice now: the voice connection is up and someone in the room can be heard. " +
+  "Joining is not hearing; if capturing is false or absent, say you are not hearing anyone yet. If Discord drops " +
+  "you, a notice arrives in this conversation; check voice presence before claiming you can hear anyone. " +
+  "When transcriptLoggingEnabled is true, " +
   "exact consented speech and speaker attribution are also retained in the owner's private local development log; " +
   "when false, exact speech is not retained locally. Both are the owner's own settings, and so is who tells the " +
   "room: people either opted in themselves through the slash command, which told them, or are in a room whose " +
