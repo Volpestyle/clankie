@@ -1113,8 +1113,13 @@ export async function startCodexAppServerSeat(options: {
               continue;
             }
             // Codex reports a not-yet-persisted rollout as either "no rollout
-            // found" or, since 0.159, a present-but-empty rollout file.
-            if (!/no rollout found|rollout at .* is empty/u.test(String(error))) throw error;
+            // found" or, since 0.159, a present-but-empty rollout file. 0.166
+            // briefly answers "list_turns is not supported yet" as a fresh
+            // thread's first turn starts (#427).
+            if (
+              !/no rollout found|rollout at .* is empty|list_turns is not supported yet/u.test(String(error))
+            )
+              throw error;
             if (!waitForRollout) return;
             if (Date.now() >= deadline) throw error;
             await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1346,7 +1351,13 @@ export async function startCodexAppServerSeat(options: {
           dispatchCompletions = undefined;
           completions?.clear();
         }
-        await subscribe();
+        try {
+          await subscribe();
+        } catch (error) {
+          // The turn RPC already returned this turn's identity: delivery stands.
+          // An unsubscribed client is retried on the next send (#427).
+          console.warn("Codex subscription after an accepted turn failed:", threadId, String(error));
+        }
         return { turnId, state: steering ? ("steered" as const) : ("started" as const) };
       };
       const next = sending.then(async () => {
