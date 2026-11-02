@@ -5761,16 +5761,24 @@ pins that original level and directory consent. Access may be lowered or
 restored within that ceiling; raising it beyond consent requires leaving and
 joining with a new owner approval. Keep `join`
 running in its terminal. `join status` reports the locally stored registration;
-`join resume` restores its outbound channel. `join leave` revokes registration
-and removes its broker credential. `machines remove join-UUID` also revokes it;
+`join resume` restores its outbound channel. `join leave` stops local dispatch
+and removes its broker credential before trying to notify the home. It works
+offline and says plainly when the home was not told; remove the machine at the
+home when reachable. `machines remove join-UUID` also revokes it;
 the old capability cannot reconnect, including after service restart. A new
 join needs a new code, owner approval and machine identity. Interrupting the
 foreground command disconnects it without revoking approval. A running `join`
 rides out a home restart or network loss: it says on stderr that Clankie is
 unreachable, retries with backoff up to 30 seconds and says when it reconnects.
 Its `--json` stdout events are unchanged. A request whose delivery was lost
-fails at the home and is never replayed. Leave, removal, or a home that sends
-another machine's identity or a duplicate request ends the command. Every other
+fails at the home and is never replayed. Only a home-authenticated sealed
+revocation erases the local lease and records a revocation refusal. An outer
+HTTP 403 with `error: "revoked"` is an outage: keep the credential, print one
+stderr notice per outage, and retry with the same backoff. The home retains the
+removed machine's broker key only to authenticate requests and seal refusals;
+the removed registration cannot authorize work, including after a restart.
+Leave, authenticated removal, or a home that sends another machine's identity
+or a duplicate request ends the command. Every other
 failure, including a home that is gone for good, keeps it retrying after one
 notice. A joined seat refused by the machine's level names the machine, its
 level and the level required, inside the encrypted response.
@@ -10741,10 +10749,14 @@ running, not that permissions or consent have been granted. `held` and
 
 `join status --json` is finite and reads local registration only: `{configured:
 false}` or `{configured: true, machineId, origin}`. It does not prove screen
-readiness. `join leave --json` is finite: it revokes the encrypted transport,
-then deletes the local broker credential and reports `{ok: true, left: true}`.
-A failure has a nonzero exit status; uncertain removal is never reported as
-success. Revoke alone is not proof that an outstanding screen effect stopped.
+readiness. `join leave --json` is finite: it first stops local dispatch and
+deletes the local broker credential and refusal, then tries to notify the home.
+It reports `{ok: true, left: true, homeNotified: true|false}`; `left` confirms
+local cleanup only. If a configured home was not told, stderr says so and asks
+for removal at the home when reachable. Running channels check local credentials
+every 250 ms, including while reconnecting. A local cleanup failure
+has a nonzero exit status. Leave alone is not proof that an outstanding screen
+effect stopped.
 
 `clankie machines access-refusals --json` reads durable access-level refusals
 with the machine, selected and required levels, observation time and owner fix.

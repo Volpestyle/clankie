@@ -17,6 +17,7 @@ import {
   MACHINE_JOIN_CHALLENGE_PATH,
   MachineJoinChallengeSchema,
   MachineJoinPayloadSchema,
+  MachineJoinRevokedSchema,
   machineJoinExchangeAad,
   MACHINE_JOIN_LEAVE_PATH,
   JoinedMachineBatchSchema,
@@ -241,6 +242,7 @@ export function createJoinedMachineShell(timeoutMs = 30_000): NonNullable<Joined
 export const joinedMachineShell = createJoinedMachineShell();
 
 class JoinedMachineRevoked extends Error {}
+const localChannels = new Map<string, Set<AbortController>>();
 /** A fresh one-use challenge binds each encrypted request and independently keyed response. */
 export async function exchangeJoinedMachine(
   credential: JoinedMachineCredential,
@@ -260,7 +262,6 @@ export async function exchangeJoinedMachine(
       signal,
     });
     const value = await response.json();
-    if (response.status === 403 && value.error === "revoked") throw new JoinedMachineRevoked("revoked");
     if (!response.ok) throw Error("join_channel_unavailable");
     return value;
   };
@@ -287,9 +288,11 @@ export async function exchangeJoinedMachine(
         ),
       }),
     );
-  return JSON.parse(
+  const result: unknown = JSON.parse(
     openGatewayValue(machineJoinKey(responseSecret), response.sealedResponse, aad("response")),
   );
+  if (MachineJoinRevokedSchema.safeParse(result).success) throw new JoinedMachineRevoked("revoked");
+  return result;
 }
 
 /**
@@ -315,28 +318,46 @@ export async function runJoinedMachineChannel(
   },
 ): Promise<"left" | "revoked"> {
   machineJoinOrigin(credential.origin);
+  const localStop = new AbortController();
+  const signal = AbortSignal.any([options.signal, localStop.signal]);
+  const channels = localChannels.get(credential.lease.token) ?? new Set<AbortController>();
+  channels.add(localStop);
+  localChannels.set(credential.lease.token, channels);
+  const credentialCurrent = async () => {
+    const current = await readJoinedMachineCredential(options.store, { allowRevoked: true });
+    if (current?.lease.token !== credential.lease.token) {
+      localStop.abort();
+      return false;
+    }
+    return !signal.aborted;
+  };
   const active = new Map<string, { request: JoinedMachineRequest; abort: AbortController }>();
   let results: JoinedMachineResult[] = [];
   const fetcher = options.fetchImpl ?? fetch;
   const pause = (ms: number) =>
     new Promise<void>((resolve) => {
+      if (signal.aborted) return resolve();
       const done = () => {
         clearTimeout(timer);
-        options.signal.removeEventListener("abort", done);
+        signal.removeEventListener("abort", done);
         resolve();
       };
       const timer = setTimeout(done, ms);
-      options.signal.addEventListener("abort", done, { once: true });
+      signal.addEventListener("abort", done, { once: true });
     });
   let retryMs = 0;
   let connected = false;
   let currentScreen = false;
   let policyAt = 0;
   const ports = options.ports ?? { shell: joinedMachineShell };
-  const freshScreen = () => currentScreen && performance.now() - policyAt < 2000;
-  const staleTimer = setInterval(() => ports.screenPolicy?.(freshScreen()), 250);
+  const freshScreen = () => !signal.aborted && currentScreen && performance.now() - policyAt < 2000;
+  const staleTimer = setInterval(() => {
+    ports.screenPolicy?.(freshScreen());
+    // Observe a separate "join leave" even during a network timeout or backoff.
+    void credentialCurrent().catch(() => localStop.abort());
+  }, 250);
   try {
-    while (!options.signal.aborted) {
+    while (await credentialCurrent()) {
       const outgoing: JoinedMachineResult[] = [];
       let bytes = 0;
       while (results.length && outgoing.length < 16) {
@@ -353,12 +374,12 @@ export async function runJoinedMachineChannel(
             credential,
             { op: "poll", results: outgoing },
             fetcher,
-            AbortSignal.any([options.signal, AbortSignal.timeout(10_000)]),
+            AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
           ),
         );
       } catch (error) {
         if (!(error instanceof JoinedMachineRevoked)) {
-          if (options.signal.aborted) throw error;
+          if (signal.aborted) throw error;
           // Resent results settle at most once at the home; unknown ones are ignored.
           results = [...outgoing, ...results];
           if (retryMs === 0) options.onDisconnected?.();
@@ -369,12 +390,21 @@ export async function runJoinedMachineChannel(
         // Erase the lease, but retain a secret-free refusal until explicit leave
         // or rejoin. An absent lease must not fall back to a local operator.
         if (!options.store.updateMany) throw Error("join_credential_atomic_update_unavailable");
-        await options.store.updateMany([JOINED_MACHINE_REVOCATION, JOINED_MACHINE_CREDENTIAL], async () => ({
-          [JOINED_MACHINE_CREDENTIAL]: undefined,
-          [JOINED_MACHINE_REVOCATION]: { type: "api", key: "revoked" },
-        }));
+        await options.store.updateMany(
+          [JOINED_MACHINE_REVOCATION, JOINED_MACHINE_CREDENTIAL],
+          async (current) => {
+            // Explicit leave or a new join wins a race with an old channel response.
+            const saved = current[JOINED_MACHINE_CREDENTIAL];
+            if (saved?.type !== "api" || saved.key !== JSON.stringify(credential)) return current;
+            return {
+              [JOINED_MACHINE_CREDENTIAL]: undefined,
+              [JOINED_MACHINE_REVOCATION]: { type: "api", key: "revoked" },
+            };
+          },
+        );
         return "revoked";
       }
+      if (!(await credentialCurrent())) break;
       if (batch.policy.machineId !== credential.lease.machineId) throw Error("join_identity_refused");
       if (retryMs !== 0) {
         retryMs = 0;
@@ -413,9 +443,9 @@ export async function runJoinedMachineChannel(
           credential.localDirectories,
           credential.lease.directories,
           ports,
-          AbortSignal.any([options.signal, abort.signal]),
+          AbortSignal.any([signal, abort.signal]),
           () => {
-            if (options.signal.aborted || abort.signal.aborted || !freshScreen())
+            if (signal.aborted || abort.signal.aborted || !freshScreen())
               throw Error("screen_policy_unavailable");
           },
           credential.lease.accessLevel === "screen",
@@ -428,8 +458,10 @@ export async function runJoinedMachineChannel(
       await pause(options.intervalMs ?? 500);
     }
   } catch (error) {
-    if (!options.signal.aborted) throw error;
+    if (!signal.aborted) throw error;
   } finally {
+    channels.delete(localStop);
+    if (channels.size === 0) localChannels.delete(credential.lease.token);
     clearInterval(staleTimer);
     currentScreen = false;
     ports.screenPolicy?.(false);
@@ -442,18 +474,21 @@ export async function leaveJoinedMachine(
   credential: JoinedMachineCredential | undefined,
   store: CredentialStore,
   fetcher: typeof fetch = fetch,
-): Promise<void> {
-  try {
-    if (credential)
-      z.object({ ok: z.literal(true) })
-        .strict()
-        .parse(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, fetcher));
-  } catch (error) {
-    if (!(error instanceof JoinedMachineRevoked)) throw error;
-  }
+): Promise<{ homeNotified: boolean }> {
+  if (credential) for (const channel of localChannels.get(credential.lease.token) ?? []) channel.abort();
   if (!store.updateMany) throw Error("join_credential_atomic_update_unavailable");
   await store.updateMany([JOINED_MACHINE_CREDENTIAL, JOINED_MACHINE_REVOCATION], async () => ({
     [JOINED_MACHINE_CREDENTIAL]: undefined,
     [JOINED_MACHINE_REVOCATION]: undefined,
   }));
+  if (!credential) return { homeNotified: false };
+  try {
+    z.object({ ok: z.literal(true) })
+      .strict()
+      .parse(await exchangeJoinedMachine(credential, { op: "leave", results: [] }, fetcher));
+    return { homeNotified: true };
+  } catch (error) {
+    // A sealed revoked reply also confirms the home no longer permits this machine.
+    return { homeNotified: error instanceof JoinedMachineRevoked };
+  }
 }

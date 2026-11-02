@@ -187,6 +187,9 @@ export type JoinedMachineOperation = z.infer<typeof JoinedMachineOperationSchema
 export type JoinedMachineRequest = z.infer<typeof JoinedMachineRequestSchema>;
 export type JoinedMachineResult = z.infer<typeof JoinedMachineResultSchema>;
 
+/** Valid only inside the response sealed with MachineJoinPayload.responseSecret. */
+export const MachineJoinRevokedSchema = z.strictObject({ error: z.literal("revoked") });
+
 export const MachineJoinChallengeSchema = z.object({ challenge: MachineJoinSecretSchema }).strict();
 export const MachineJoinEnvelopeSchema = z
   .object({
