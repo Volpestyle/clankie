@@ -7,6 +7,7 @@ import { createMachineAccessRoutes } from "../machine-access-routes.ts";
 import { isDeepStrictEqual } from "node:util";
 import { roomForkIdOf } from "../captain/room-turns.ts";
 import { createWorkerAccountHoldsRoutes } from "../worker-account-holds-routes.ts";
+import { createWorkerAccountBudgetsRoutes } from "../worker-account-budgets-routes.ts";
 import { createUsageRoutes } from "../usage-routes.ts";
 import { createHuddleRoutes } from "../huddle-routes.ts";
 import { createFleetSettingsRoutes } from "../fleet-settings-routes.ts";
@@ -1066,6 +1067,14 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   app.route(
     "/",
     createWorkerAccountHoldsRoutes(
+      authorizeOwnerSecrets,
+      settingsSource,
+      dependencies.captain.resolveWorkerAccountLabel,
+    ),
+  );
+  app.route(
+    "/",
+    createWorkerAccountBudgetsRoutes(
       authorizeOwnerSecrets,
       settingsSource,
       dependencies.captain.resolveWorkerAccountLabel,

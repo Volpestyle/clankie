@@ -10,6 +10,17 @@ function hirePlanKey(account: WorkerAccountStatus): string | undefined {
   return tier === undefined ? undefined : `${account.harness}:${tier}`;
 }
 
+/**
+ * The owner's budget replaces the fixed reserve (#603): hires stop once the
+ * tightest all-model window reaches it. The owner's per-hire override still
+ * reaches past it while any capacity remains.
+ */
+function budgetRefusal(stopAtPercent: number, remaining: number, overrideUsage: boolean): string | undefined {
+  const used = (1 - remaining) * 100;
+  if (used + 1e-9 < stopAtPercent || (overrideUsage && remaining > 0)) return undefined;
+  return `usage budget reached (${Math.round(used)}% used; the owner stops new hires at ${stopAtPercent}%)`;
+}
+
 /** Observations, not a caller's claimed balance, decide admission. Existing seats are unaffected. */
 export function hireAdmissionReport(
   report: MachineWorkerAccounts,
@@ -47,9 +58,11 @@ export function hireAdmissionReport(
                   ? "usage observation is stale or unavailable"
                   : measured?.remaining == null
                     ? "remaining plan usage was not observed"
-                    : measured.remaining <= HIRE_PLAN_RESERVE && !(overrideUsage && measured.remaining > 0)
-                      ? `plan is near its limit (${Math.round(measured.remaining * 100)}% remaining; 10% reserved for running work)`
-                      : undefined;
+                    : account.budget !== undefined
+                      ? budgetRefusal(account.budget.stopAtPercent, measured.remaining, overrideUsage)
+                      : measured.remaining <= HIRE_PLAN_RESERVE && !(overrideUsage && measured.remaining > 0)
+                        ? `plan is near its limit (${Math.round(measured.remaining * 100)}% remaining; 10% reserved for running work)`
+                        : undefined;
     return reason === undefined ? account : { ...account, usable: false, reason };
   });
   const filtered = { ...report, accounts };

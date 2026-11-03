@@ -7,6 +7,7 @@ import { z } from "zod";
  */
 export const WORKER_ACCOUNTS_PATH = "/v1/worker-accounts";
 export const WORKER_ACCOUNT_HOLDS_PATH = "/v1/worker-accounts/holds";
+export const WORKER_ACCOUNT_BUDGETS_PATH = "/v1/worker-accounts/budgets";
 
 export const WorkerAccountHarnessSchema = z.enum(["claude", "codex", "pi"]);
 export type WorkerAccountHarness = z.infer<typeof WorkerAccountHarnessSchema>;
@@ -131,6 +132,8 @@ export const WorkerAccountStatusSchema = z.object({
   usage: AccountUsageSchema.optional(),
   workerPlugin: z.boolean().optional(),
   held: z.object({ reason: z.string().optional() }).optional(),
+  /** The owner's usage budget for this account (#603): hires stop at this percent of its plan. */
+  budget: z.object({ stopAtPercent: z.number().int().min(1).max(100) }).optional(),
   /** Whether Clankie would hire on it now, and why not. */
   usable: z.boolean(),
   /** Pi: verified models in this native profile, not credentials. */
@@ -259,6 +262,34 @@ export const WorkerAccountHoldsSchema = z.object({
   holds: z.array(WorkerAccountHoldSchema).max(64),
 });
 export type WorkerAccountHolds = z.infer<typeof WorkerAccountHoldsSchema>;
+
+/** Budgets cover the subscription harnesses whose plan usage Clankie reads. */
+export const WorkerAccountBudgetSchema = z
+  .object({
+    machine: WorkerAccountMachineSchema,
+    harness: z.enum(["claude", "codex"]),
+    label: WorkerAccountLabelSchema,
+    stopAtPercent: z.number().int().min(1).max(100),
+  })
+  .strict();
+export type WorkerAccountBudget = z.infer<typeof WorkerAccountBudgetSchema>;
+
+/** `POST /v1/worker-accounts/budgets`: set one account's budget, or clear it with `stopAtPercent: null`. */
+export const WorkerAccountBudgetRequestSchema = z
+  .object({
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/u),
+    machine: WorkerAccountMachineSchema.default("local"),
+    harness: z.enum(["claude", "codex"]),
+    label: WorkerAccountLabelSchema,
+    stopAtPercent: z.number().int().min(1).max(100).nullable(),
+  })
+  .strict();
+export type WorkerAccountBudgetRequest = z.input<typeof WorkerAccountBudgetRequestSchema>;
+export const WorkerAccountBudgetsSchema = z.object({
+  revision: z.string().regex(/^[a-f0-9]{64}$/u),
+  budgets: z.array(WorkerAccountBudgetSchema).max(64),
+});
+export type WorkerAccountBudgets = z.infer<typeof WorkerAccountBudgetsSchema>;
 
 /** Shared wording for the TUI, app and dashboard, in the owner's words. */
 export const WORKER_ACCOUNTS_WORDING = {

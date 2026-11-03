@@ -94,6 +94,8 @@ export interface WorkerAccountStatus {
   readonly workerPlugin?: boolean;
   /** The owner set this account aside from automatic choice. */
   readonly held?: { readonly reason?: string };
+  /** The owner's usage budget (#603): new hires on it stop at this percent of its plan. */
+  readonly budget?: { readonly stopAtPercent: number };
   /** Whether Clankie would hire on it now, and why not. */
   readonly usable: boolean;
   readonly models?: readonly string[];
@@ -812,7 +814,10 @@ export function createWorkerAccountsReader(options: {
   readonly identityPath?: string;
   readonly notifyIdentityChange?: (text: string) => boolean;
   readonly settings: () => Promise<
-    Pick<ClankieSettings, "claudeAccounts" | "codexAccounts" | "workerAccountHolds" | "execution">
+    Pick<
+      ClankieSettings,
+      "claudeAccounts" | "codexAccounts" | "workerAccountHolds" | "workerAccountBudgets" | "execution"
+    >
   >;
   readonly localFleet?: (id: string) => boolean;
   readonly piStatus?: () => Promise<WorkerAccountStatus>;
@@ -907,9 +912,18 @@ export function createWorkerAccountsReader(options: {
     const read = await readAccounts(fleetId, harnesses);
     options.signal?.throwIfAborted();
     registry.deliver(options.notifyIdentityChange);
+    const current = await options.settings();
+    const connection = current.execution.connections.find((entry) => entry.id === fleetId);
+    const names = new Set([fleetId ?? "local", ...(connection?.machine ? [connection.machine] : [])]);
+    const budgets = (current.workerAccountBudgets ?? []).filter((budget) => names.has(budget.machine));
     const report = {
       ...read,
-      accounts: read.accounts.map(({ chatgptAccountId: _id, ...account }) => account),
+      accounts: read.accounts.map(({ chatgptAccountId: _id, ...account }) => {
+        const budget = budgets.find(
+          (entry) => entry.harness === account.harness && entry.label === account.label,
+        );
+        return budget === undefined ? account : { ...account, budget: { stopAtPercent: budget.stopAtPercent } };
+      }),
     };
     return { ...report, allocation: allocateAccounts(report) };
   };

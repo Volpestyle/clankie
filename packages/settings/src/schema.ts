@@ -808,6 +808,25 @@ export const ClankieSettingsSchema = z
       )
       .max(64)
       .default([]),
+    /**
+     * Per-account usage budgets (#603): at `stopAtPercent` of the account's
+     * tightest all-model plan window, new hires on it stop and its leads hear
+     * that running work on it should pause; ten points earlier they are warned.
+     * An account without one keeps the fixed 90% hire reserve.
+     */
+    workerAccountBudgets: z
+      .array(
+        z
+          .object({
+            machine: z.string().regex(/^[a-z][a-z0-9-]{0,63}$/u),
+            harness: z.enum(["claude", "codex"]),
+            label: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u),
+            stopAtPercent: z.number().int().min(1).max(100),
+          })
+          .strict(),
+      )
+      .max(64)
+      .default([]),
     legacyMachineJoins: z.boolean().default(true),
     machineAccess: MachineAccessSettingsSchema,
     machines: z

@@ -356,3 +356,103 @@ export function accountCapacityLines(report: MachineWorkerAccounts, now = Date.n
     ),
   ];
 }
+
+export interface BudgetNotice {
+  /** Stable per account, budget, stage and window reset, so each is told once. */
+  readonly key: string;
+  readonly stage: "approaching" | "reached" | "resumed";
+  readonly machine: string;
+  readonly harness: string;
+  readonly label: string;
+  readonly stopAtPercent: number;
+  readonly usedPercent: number;
+  readonly window: string;
+  readonly resetsAt?: string;
+  readonly text: string;
+}
+
+/** The fullest all-model window that has not reset at its observation, if any was read. */
+function bindingWindow(account: WorkerAccountStatus) {
+  const observedAt = Date.parse(account.usage?.observedAt ?? "");
+  return (account.usage?.windows ?? [])
+    .filter((window) => !window.id.includes(":"))
+    .filter((window) => !window.resetsAt || Date.parse(window.resetsAt) > observedAt)
+    .sort((a, b) => b.usedPercent - a.usedPercent)[0];
+}
+
+/**
+ * One lead's usage-budget notices (#603), fed by the existing account reader.
+ * Ten points before an account's budget it is warned; at the budget, new hires
+ * on it are already refused and the lead hears that running work on it should
+ * pause; once a later reading is back under the budget, the lead hears that
+ * hires and paused work can resume.
+ */
+export class AccountBudgetNotices {
+  private readonly told = new Set<string>();
+  private readonly reached = new Map<string, BudgetNotice>();
+
+  pending(report: MachineWorkerAccounts): BudgetNotice[] {
+    const notices: BudgetNotice[] = [];
+    for (const account of report.accounts) {
+      const budget = account.budget;
+      const window = bindingWindow(account);
+      const id = `${report.machine}:${account.harness}:${account.label}`;
+      if (budget === undefined || window === undefined || account.held || account.signedIn !== true) continue;
+      const noun = account.harness === "claude" ? "Claude" : "Codex";
+      const used = Math.round(window.usedPercent);
+      const where = `${noun} account ${account.label}${account.identity ? ` (${account.identity})` : ""} on ${report.machine}`;
+      const reset = window.resetsAt ? `, which resets at ${window.resetsAt}` : "";
+      const previous = this.reached.get(id);
+      const base = {
+        machine: report.machine,
+        harness: account.harness,
+        label: account.label,
+        stopAtPercent: budget.stopAtPercent,
+        usedPercent: used,
+        window: window.id,
+        ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
+      };
+      if (window.usedPercent >= budget.stopAtPercent) {
+        notices.push({
+          ...base,
+          key: `reached|${id}|${budget.stopAtPercent}|${window.id}|${window.resetsAt ?? ""}`,
+          stage: "reached",
+          text:
+            `Usage budget reached: ${where} is at ${used}% of its ${window.label}${reset}; the owner's budget stops it at ${budget.stopAtPercent}%. ` +
+            "New hires on it are refused until the window resets or the owner raises the budget (clankie accounts budget). " +
+            "Running work on it should pause: ask each seat below to stop at its next safe point (commit or hand off what it has) and report blocked, budget reached. " +
+            "Route remaining work to an account with room (clankie usage --json).",
+        });
+      } else if (previous !== undefined) {
+        notices.push({
+          ...base,
+          key: `resumed|${previous.key}`,
+          stage: "resumed",
+          text:
+            `Usage budget clear again: ${where} is at ${used}% of its ${window.label}, under the owner's ${budget.stopAtPercent}% budget. ` +
+            "New hires on it are admitted again, and work paused for its budget can resume.",
+        });
+      } else if (window.usedPercent >= Math.max(0, budget.stopAtPercent - 10)) {
+        notices.push({
+          ...base,
+          key: `approaching|${id}|${budget.stopAtPercent}|${window.id}|${window.resetsAt ?? ""}`,
+          stage: "approaching",
+          text:
+            `Usage budget warning: ${where} is at ${used}% of its ${window.label}${reset}; the owner's budget stops new hires on it at ${budget.stopAtPercent}%. ` +
+            "Prefer another account for new hires, and plan safe stopping points for long-running work on it.",
+        });
+      }
+    }
+    return notices.filter((notice) => !this.told.has(notice.key));
+  }
+
+  delivered(notices: readonly BudgetNotice[]): void {
+    for (const notice of notices) {
+      this.told.add(notice.key);
+      const id = `${notice.machine}:${notice.harness}:${notice.label}`;
+      if (notice.stage === "reached") this.reached.set(id, notice);
+      if (notice.stage === "resumed") this.reached.delete(id);
+    }
+    while (this.told.size > 512) this.told.delete(this.told.values().next().value!);
+  }
+}

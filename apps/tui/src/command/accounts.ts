@@ -1,5 +1,10 @@
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
-import { WORKER_ACCOUNT_HOLDS_PATH, WorkerAccountHoldsSchema } from "@clankie/protocol/worker-accounts";
+import {
+  WORKER_ACCOUNT_BUDGETS_PATH,
+  WORKER_ACCOUNT_HOLDS_PATH,
+  WorkerAccountBudgetsSchema,
+  WorkerAccountHoldsSchema,
+} from "@clankie/protocol/worker-accounts";
 import type { machineSetupContext } from "./machine-setup.ts";
 import { runClaudeAccountsCommand } from "./claude-accounts.ts";
 import { runCodexAccountsCommand } from "./codex-accounts.ts";
@@ -30,7 +35,44 @@ const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const WORKER_ACCOUNTS_USAGE =
-  "Usage: clankie accounts workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID]";
+  "Usage: clankie accounts workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID] | budget [claude|codex LABEL PERCENT|off [--machine ID]]";
+
+/**
+ * The owner's per-account usage budget (#603): new hires on the account stop
+ * at PERCENT of its plan, and its leads hear when running work should pause.
+ * With no account it lists the budgets; `off` clears one.
+ */
+async function runWorkerAccountBudget(
+  args: readonly string[],
+  options: NonNullable<Parameters<typeof machineSetupContext>[1]> & OwnerSettingsApiOptions,
+) {
+  const api = await ownerSettingsApi(options);
+  const current = await api.get(WORKER_ACCOUNT_BUDGETS_PATH, WorkerAccountBudgetsSchema);
+  if (args.length === 1) return { ok: true, ...current };
+  const [, harness, label, value, flag, machine, ...extra] = args;
+  if (
+    (harness !== "claude" && harness !== "codex") ||
+    !label ||
+    !/^[a-z][a-z0-9_-]{0,63}$/u.test(label) ||
+    !value ||
+    !(value === "off" || /^(100|[1-9][0-9]?)%?$/u.test(value)) ||
+    (flag !== undefined && (flag !== "--machine" || !machine)) ||
+    extra.length
+  )
+    throw new Error(WORKER_ACCOUNTS_USAGE);
+  const updated = await api.write(
+    WORKER_ACCOUNT_BUDGETS_PATH,
+    {
+      expectedRevision: current.revision,
+      machine: machine ?? "local",
+      harness,
+      label,
+      stopAtPercent: value === "off" ? null : Number(value.replace("%", "")),
+    },
+    WorkerAccountBudgetsSchema,
+  );
+  return { ok: true, ...updated };
+}
 
 /**
  * The owner sets a worker account aside from Clankie's automatic choice, or
@@ -113,6 +155,7 @@ export async function runAccountsCommand(
     return runCodexAccountsCommand(args.slice(1), options);
   }
   if (args[0] === "hold" || args[0] === "release") return runWorkerAccountHold(args, options);
+  if (args[0] === "budget") return runWorkerAccountBudget(args, options);
   const env = options.env ?? process.env;
   const request =
     options.request ??
