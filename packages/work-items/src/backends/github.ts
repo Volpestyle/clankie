@@ -461,6 +461,10 @@ export function createGithubBackend(
       }
       return readItem(updated);
     },
+    async comment(id, body) {
+      const issue = await fetchIssue(id);
+      await api("POST", `${base}/${String(issue.number)}/comments`, { body });
+    },
     async attach(id, evidence) {
       const issue = await fetchIssue(id);
       const current = toItem(issue);

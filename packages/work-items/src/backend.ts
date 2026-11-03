@@ -100,6 +100,8 @@ export interface WorkBackend {
   get(id: string): Promise<WorkItem | undefined>;
   create(draft: WorkItemDraft): Promise<WorkItem>;
   update(id: string, patch: WorkItemPatch): Promise<WorkItem>;
+  /** Posts a comment on the item; absent where the tracker takes none this way (#541). */
+  comment?(id: string, body: string): Promise<void>;
   attach(id: string, evidence: WorkEvidence): Promise<WorkItem>;
   /** The item's comments and state changes, oldest first; absent where the tracker keeps none. */
   activity?(id: string): Promise<WorkActivityEntry[]>;

@@ -50,6 +50,7 @@ import {
   backendFor,
   trackerToolsFor,
   type WorkItemPatch,
+  type WorkBackend,
   initializeConvention,
   WorkInitDecisionRequired,
   WorkInitInvalid,
@@ -215,6 +216,8 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       check: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       uncheck: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       addCriteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+      /** Posted on the issue with the change, in the same write; GitHub issues only (#541). */
+      comment: z.string().trim().min(1).max(65_536).optional(),
     })
     .strict(),
   z
@@ -430,6 +433,30 @@ const workPatch = (request: Extract<WorkRequest, { action: "update" }>): WorkIte
   ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
   ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
 });
+
+/**
+ * A work update's comment goes in the same admitted write, after the change it explains.
+ * Only trackers that take a comment this way (GitHub issues so far) accept one; the rest
+ * refuse before anything is written (#541).
+ */
+const assertCommentSupported = (
+  request: Extract<WorkRequest, { action: "update" }>,
+  backend: WorkBackend,
+) => {
+  if (request.comment !== undefined && backend.comment === undefined)
+    throw new WorkRequestError(
+      "invalid",
+      `A comment with a work update is supported only for GitHub issues, not ${backend.kind}. Nothing was changed.`,
+    );
+};
+const updateWithComment = async (
+  backend: WorkBackend,
+  request: Extract<WorkRequest, { action: "update" }>,
+) => {
+  const item = await backend.update(request.id, workPatch(request));
+  if (request.comment !== undefined) await backend.comment!(item.id, request.comment);
+  return item;
+};
 
 export class WorkRequestError extends Error {
   readonly code:
@@ -2698,7 +2725,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           ...holders,
           ...(await draftPullHolders([result.item])),
         ]);
-        noteDraftHolds(request.repo, local, [item]);
+        noteDraftHolds(request.repo, [item]);
         return { ...result, item };
       }
       // Filter on the live status: read the tracker statuses it can come from, then filter.
@@ -2712,7 +2739,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (!("items" in result) || !("repo" in result)) return result;
       const held = [...holders, ...(await draftPullHolders(result.items))];
       const items = result.items.map((item) => withLiveHolders(result.repo.id, item, held));
-      noteDraftHolds(request.repo, local, items);
+      noteDraftHolds(request.repo, items);
       return {
         ...result,
         items: (wanted === undefined ? items : items.filter((item) => wanted.includes(item.status))).slice(
@@ -2723,10 +2750,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     },
   };
   /** Remembers which draft pull requests held which items, to notice when one closes (#541). */
-  function noteDraftHolds(repo: string, local: boolean, items: readonly WorkItem[]): void {
+  function noteDraftHolds(repo: string, items: readonly WorkItem[]): void {
     for (const item of items)
       for (const holder of item.heldBy ?? [])
-        if (githubPullOf(holder) !== undefined) draftHolds.note(holder, { repo, local, id: item.id });
+        if (githubPullOf(holder) !== undefined) draftHolds.note(holder, { repo, id: item.id });
   }
 
   /**
@@ -2791,7 +2818,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     hold: DraftPullHold,
     live: readonly IssueHolder[],
   ): Promise<DraftHoldSettlement> {
-    const shown = await handleTracker({ action: "show", repo: hold.repo, id: hold.id }, hold.local);
+    // The host's own read and write, whichever device's read noted the hold.
+    const shown = await handleTracker({ action: "show", repo: hold.repo, id: hold.id }, true);
     if (!("item" in shown) || !("repo" in shown))
       return { pull: url, issue: hold.id, outcome: "unavailable", detail: "The issue could not be read." };
     if (shown.item.status !== "in_progress")
@@ -2809,7 +2837,16 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (heldBy.length > 0)
       return { pull: url, issue: hold.id, outcome: "unchanged", detail: `Held by ${heldBy.join(", ")}.` };
     try {
-      await handleTracker({ action: "update", repo: hold.repo, id: hold.id, status: "todo" }, hold.local);
+      await handleTracker(
+        {
+          action: "update",
+          repo: hold.repo,
+          id: hold.id,
+          status: "todo",
+          comment: `The draft pull request that held this issue (${url}) closed without merging, and no one else holds it, so it is back in the queue (it was In Progress).`,
+        },
+        true,
+      );
     } catch (error) {
       if (
         error instanceof WorkRequestError &&
@@ -2914,7 +2951,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             case "activity":
               return { repo, itemId: request.id, entries: await backend.activity!(request.id) };
             case "update":
-              return { repo, item: await backend.update(request.id, workPatch(request)) };
+              assertCommentSupported(request, backend);
+              return { repo, item: await updateWithComment(backend, request) };
             case "attach":
               return { repo, item: await backend.attach(request.id, request.evidence) };
           }
@@ -3111,11 +3149,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
+          assertCommentSupported(request, backend);
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
               repo: await describe(entry),
-              item: await backend.update(request.id, workPatch(request)),
+              item: await updateWithComment(backend, request),
             };
           } catch (error) {
             if (error instanceof Error && error.name === "WorkItemNotFoundError")

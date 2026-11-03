@@ -81,6 +81,7 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
     ]),
   );
   const patches: { issue: number; body: Record<string, unknown> }[] = [];
+  const comments: { issue: number; body: string }[] = [];
   const read = async (request: IncomingMessage) => {
     let text = "";
     for await (const chunk of request) text += String(chunk);
@@ -97,6 +98,11 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
         return send([...pulls.values()].filter((pull) => pull.state === "open"));
       const pull = /^\/repos\/fixture\/pond\/pulls\/(\d+)$/u.exec(path);
       if (request.method === "GET" && pull) return send(pulls.get(Number(pull[1])));
+      const comment = /^\/repos\/fixture\/pond\/issues\/(\d+)\/comments$/u.exec(path);
+      if (request.method === "POST" && comment) {
+        comments.push({ issue: Number(comment[1]), body: String((await read(request)).body) });
+        return send({ id: comments.length });
+      }
       const issue = /^\/repos\/fixture\/pond\/issues\/(\d+)$/u.exec(path);
       if (issue && issues.has(Number(issue[1]))) {
         const number = Number(issue[1]);
@@ -183,6 +189,15 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
     // Only #8 was written: its in-progress label is gone, and nothing else changed.
     expect(patches.map((patch) => patch.issue)).toEqual([8]);
     expect(patches[0]!.body.labels).not.toContain(IN_PROGRESS);
+    // With a comment on the issue saying why, in the same write.
+    expect(comments).toEqual([
+      {
+        issue: 8,
+        body: expect.stringContaining(
+          "draft pull request that held this issue (https://github.com/fixture/pond/pull/20) closed without merging",
+        ),
+      },
+    ]);
     expect(await status(after)).toMatchObject({
       "Issue 8": "todo",
       "Issue 9": ["https://github.com/fixture/pond/pull/21"],
@@ -207,8 +222,34 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       }),
     ]);
     expect(patches).toHaveLength(1);
+    expect(comments).toHaveLength(1);
   } finally {
     posting.close();
     await new Promise<void>((done) => github.close(() => done()));
   }
 }, 30_000);
+
+it("refuses a comment with a work update on a tracker other than GitHub, changing nothing", async () => {
+  const root = scratch("clankie-update-comment-");
+  const checkout = scratch("clankie-update-comment-repo-");
+  const work = createWorkItemsService({
+    stateDirectory: join(root, "work"),
+    workspace: () => root,
+    run: async () => {
+      throw new Error("no git here");
+    },
+  });
+  const created = await work.handle(
+    { action: "create", repo: checkout, title: "Local", status: "in_progress" },
+    true,
+  );
+  if (!("item" in created)) throw new Error("Expected an item");
+  await expect(
+    work.handle(
+      { action: "update", repo: checkout, id: created.item.id, status: "todo", comment: "Why" },
+      true,
+    ),
+  ).rejects.toMatchObject({ code: "invalid", message: expect.stringContaining("only for GitHub issues") });
+  const shown = await work.handle({ action: "show", repo: checkout, id: created.item.id }, true);
+  expect(shown).toMatchObject({ item: { status: "in_progress" } });
+});

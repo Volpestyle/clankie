@@ -13,7 +13,6 @@ const KEPT = 500;
 const HoldSchema = z.strictObject({
   /** The repo as the read named it, so the write goes where the read came from. */
   repo: z.string().min(1),
-  local: z.boolean(),
   /** The item's id in its tracker. */
   id: z.string().min(1),
 });
