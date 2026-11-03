@@ -12,7 +12,9 @@ type Channel = {
   guild_id: string;
   type?: number;
   parent_id?: string;
-  permission_overwrites: Overwrite[];
+  permission_overwrites?: Overwrite[];
+  thread_metadata?: Record<string, unknown>;
+  [field: string]: unknown;
 };
 
 let state: { channels: Record<string, Channel>; everyone: string; afterRead?: (path: string) => void };
@@ -88,12 +90,50 @@ it("refuses a channel any overwrite hides from some members, of any kind", async
   expect(await proves([text([deny("200", 0, HISTORY)])])).toBe(false); // history hidden
 });
 
-it("refuses a public thread whose parent hides it from some members", async () => {
-  const parent = text([deny("200", 0, VIEW)], { id: "500", type: 15 });
-  expect(await proves([text([], { id: "600", type: 11, parent_id: "500" }), parent])).toBe(false);
+// GET /channels/{thread.id} as Discord returns it: a thread carries thread metadata and
+// no permission_overwrites of its own, because it inherits its parent's.
+const thread = (type: number, extra: Partial<Channel> = {}): Channel => ({
+  id: "600",
+  guild_id: GUILD,
+  parent_id: "500",
+  owner_id: "400",
+  name: "Friday plans",
+  type,
+  last_message_id: "601",
+  message_count: 3,
+  member_count: 2,
+  rate_limit_per_user: 0,
+  flags: 0,
+  total_message_sent: 3,
+  applied_tags: [],
+  thread_metadata: {
+    archived: false,
+    auto_archive_duration: 4320,
+    archive_timestamp: "2026-11-01T18:00:00.000000+00:00",
+    locked: false,
+    create_timestamp: "2026-11-01T18:00:00.000000+00:00",
+  },
+  ...extra,
+});
+
+it("judges a public thread, which carries no overwrites of its own, by its parent", async () => {
   const open = text([], { id: "500", type: 15 });
-  expect(await proves([text([], { id: "600", type: 11, parent_id: "500" }), open])).toBe(true);
-  expect(await proves([text([], { id: "600", type: 12, parent_id: "500" }), open])).toBe(false); // private thread
+  expect(await proves([thread(11), open])).toBe(true); // forum or text thread
+  expect(await proves([thread(10), text([], { id: "500", type: 5 })])).toBe(true); // announcement thread
+  const hidden = text([deny("200", 0, VIEW)], { id: "500", type: 15 });
+  expect(await proves([thread(11), hidden])).toBe(false);
+  expect(await proves([thread(12), open])).toBe(false); // private thread
+  // Unproven thread shapes still fail closed: missing metadata, or an overwrite that denies.
+  const unmarked = thread(11);
+  delete unmarked.thread_metadata;
+  expect(await proves([unmarked, open])).toBe(false);
+  expect(await proves([thread(11, { permission_overwrites: [deny("200", 0, VIEW)] }), open])).toBe(false);
+});
+
+it("refuses a channel that is not a thread and omits its overwrites", async () => {
+  const bare = text();
+  delete bare.permission_overwrites;
+  expect(await proves([bare])).toBe(false);
 });
 
 it("refuses when everyone cannot view and read history at the server level", async () => {

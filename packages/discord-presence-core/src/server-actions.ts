@@ -385,9 +385,13 @@ const READ_BACK = 1024n | 65536n;
  * it later (#340). It is not a permission evaluator: it holds only when the
  * channel type is a known readable one, `@everyone` may view channels and read
  * history at the server level (or is an administrator), and no overwrite of any
- * kind on the channel, or a thread's parent, denies either. Everything is read
- * twice, and both reads must agree, so no mix of states from different moments
- * passes. Anything unreadable, unknown or changing fails closed.
+ * kind on the channel, or a thread's parent, denies either. A public thread
+ * carries no overwrites of its own in Discord's payload (it inherits its
+ * parent's), so it must show its thread metadata and is judged by its parent.
+ * Everything is read twice and both reads must agree: that shows the same state
+ * at both ends of the check and catches a single change during it, though not a
+ * change that is undone before the second read. Anything unreadable, unknown or
+ * changing fails closed.
  */
 export async function discordEveryoneCanRead(
   guildId: string,
@@ -401,6 +405,8 @@ export async function discordEveryoneCanRead(
     const type = channel.type;
     if (typeof type !== "number") return undefined;
     if (PUBLIC_THREAD_TYPES.has(type)) {
+      const metadata = record(channel.thread_metadata);
+      if (typeof metadata?.archived !== "boolean" || typeof metadata.locked !== "boolean") return undefined;
       if (typeof channel.parent_id !== "string") return undefined;
       const parent = record(await request({ method: "GET", path: `/channels/${channel.parent_id}` }));
       if (parent?.guild_id !== guildId || typeof parent.type !== "number") return undefined;
@@ -416,7 +422,11 @@ export async function discordEveryoneCanRead(
         id: entry.id,
         type: entry.type,
         parent: entry.parent_id,
-        overwrites: entry.permission_overwrites,
+        // A public thread omits its own overwrites; any it does carry are still checked.
+        overwrites:
+          entry === channel && PUBLIC_THREAD_TYPES.has(type)
+            ? (entry.permission_overwrites ?? [])
+            : entry.permission_overwrites,
       })),
       everyone: everyone.permissions,
     };
@@ -434,7 +444,7 @@ export async function discordEveryoneCanRead(
         if ((BigInt(entry.deny) & READ_BACK) !== 0n) return false;
       }
     }
-    // Both reads span the moment between the first read's end and the second's start.
+    // Matching reads show the same state at both ends; a change undone in between goes unseen.
     return JSON.stringify(await read()) === JSON.stringify(seen);
   } catch {
     return false;

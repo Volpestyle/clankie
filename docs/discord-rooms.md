@@ -376,8 +376,10 @@ evaluator: the channel type must be a known readable one (text, voice text
 chat, announcement, stage, forum or media, or a public thread under one),
 `@everyone` must have View Channel and Read Message History at the server level
 (or be an administrator), no overwrite of any kind on the channel or a thread's
-parent may deny either, and a closing re-read of the channel, parent and roles
-must match what was evaluated. Anything else, including a failed or unavailable
+parent may deny either (a public thread carries no overwrites of its own and
+must show its thread metadata), and a closing re-read of the channel, parent and
+roles must match what was evaluated; that catches a change during the check,
+though not one undone before the re-read. Anything else, including a failed or unavailable
 lookup, a DM, a private thread and every voice transcript, records `private`. A turn without
 private context reads only `room` entries, so an owner-only exchange never
 reaches a channel after its audience widens, and entries logged before
