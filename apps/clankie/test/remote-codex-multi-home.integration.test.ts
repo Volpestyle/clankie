@@ -22,19 +22,26 @@ const HOMES = ["/home/volpe/.codex", "/home/volpe/.codex-james"] as const;
 const LABELS = ["default", "james"] as const;
 
 type Home = { signedIn: boolean | null; identity?: string };
-const probe = (homes: readonly Home[]) =>
+/** One entry per home, in HOMES order; `undefined` leaves that home out of the answer. */
+const probe = (homes: readonly (Home | undefined)[]) =>
   JSON.stringify({
     schemaVersion: 1,
-    accounts: homes.map((home, index) => ({
-      harness: "codex",
-      label: LABELS[index],
-      home: HOMES[index],
-      signedIn: home.signedIn,
-      ...(index === 0 ? { nativeDefault: true } : {}),
-      ...(home.identity === undefined
-        ? {}
-        : { identity: home.identity, identityId: `user-${home.identity}`, plan: "pro" }),
-    })),
+    accounts: homes.flatMap((home, index) =>
+      home === undefined
+        ? []
+        : [
+            {
+              harness: "codex",
+              label: LABELS[index],
+              home: HOMES[index],
+              signedIn: home.signedIn,
+              ...(index === 0 ? { nativeDefault: true } : {}),
+              ...(home.identity === undefined
+                ? {}
+                : { identity: home.identity, identityId: `user-${home.identity}`, plan: "pro" }),
+            },
+          ],
+    ),
   });
 const both = probe([
   { signedIn: true, identity: "owner@example.com" },
@@ -127,3 +134,16 @@ it("a home signed out during startup still refuses before any Herdr effect", asy
   expect(JSON.stringify(result)).toContain("changed sign-in");
   expect(reachedPc(herdr)).toBe(false);
 });
+
+it.each([
+  ["answers with no accounts", JSON.stringify({ schemaVersion: 1, accounts: [] })],
+  ["no longer lists the chosen home", probe([undefined, { signedIn: true, identity: "owner@example.com" }])],
+  ["reports Codex missing", JSON.stringify({ schemaVersion: 1, accounts: [], missing: ["codex"] })],
+])(
+  "a re-read that %s has no verified sign-in for the chosen home and refuses before any Herdr effect",
+  async (_case, reread) => {
+    const { result, herdr } = await hireOnPc([both, reread]);
+    expect(JSON.stringify(result)).toContain("changed sign-in");
+    expect(reachedPc(herdr)).toBe(false);
+  },
+);

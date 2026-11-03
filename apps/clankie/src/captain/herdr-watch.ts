@@ -7407,31 +7407,26 @@ function thisMachineReceiptFleet(fleet: string | undefined): boolean {
 }
 
 /**
- * Whether a startup re-read still holds the identity a hire chose. `changed` needs
- * evidence: the chosen home signed out, or signed in to another identity. A machine
- * that didn't answer, or a home whose own read timed out (it then stands alone,
- * signed-in unknown), is `unknown`.
+ * Whether a startup re-read still holds the identity a hire chose. Only a read with no
+ * evidence is `unknown`: the machine never answered, or the chosen home's own read
+ * timed out (it then stands alone, signed-in unknown). A read that answered without
+ * the chosen home, or shows it signed out, signed in without a readable identity, or
+ * in another identity, is `changed`.
  */
 function startupSignIn(
   report: MachineWorkerAccounts | undefined,
   chosen: import("./harness-accounts.ts").WorkerAccountStatus,
 ): "same" | "changed" | "unknown" {
+  if (report === undefined || report.unanswered) return "unknown";
   const holds = (entry: import("./harness-accounts.ts").WorkerAccountStatus) =>
+    entry.harness === chosen.harness &&
     (entry.homes ?? [{ home: entry.home }]).some((home) => home.home === chosen.home);
-  if (report === undefined) return "unknown";
   if (
     report.accounts.some(
       (entry) => entry.accountKey === chosen.accountKey && entry.label === chosen.label && holds(entry),
     )
   )
     return "same";
-  return report.accounts.some(
-    (entry) =>
-      entry.harness === chosen.harness &&
-      holds(entry) &&
-      (entry.signedIn === false ||
-        (entry.accountKey !== undefined && entry.accountKey !== chosen.accountKey)),
-  )
-    ? "changed"
-    : "unknown";
+  const own = report.accounts.filter(holds);
+  return own.length > 0 && own.every((entry) => entry.signedIn === null) ? "unknown" : "changed";
 }

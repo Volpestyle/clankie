@@ -122,6 +122,8 @@ export interface MachineWorkerAccounts {
   readonly accountAliases?: Readonly<Record<string, string>>;
   /** A harness the machine could not answer for, with why. */
   readonly unavailable?: Partial<Record<WorkerAccountHarness, string>>;
+  /** The machine never answered the probe: no evidence about any home (#326). Not served. */
+  readonly unanswered?: true;
   /** How Clankie would spread hires over these accounts now (VUH-1974). */
   readonly allocation?: MachineAllocation;
 }
@@ -431,6 +433,7 @@ export async function readMachineWorkerAccounts(
       shell: fleet.ssh.shell,
       observedAt: new Date(now).toISOString(),
       accounts: [],
+      unanswered: true,
       // Only Claude and Codex are probed; Pi and Prime answer for themselves.
       unavailable: Object.fromEntries(
         harnesses

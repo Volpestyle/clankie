@@ -6271,9 +6271,10 @@ as a backup and keeping file ownership and symlink checks.
 
 The selected home reaches the pane and native harness as `CLAUDE_CONFIG_DIR` /
 `CODEX_HOME`. Its identity is checked again before a new pane starts: a home that
-signed out or into another identity refuses. A re-read the machine didn't answer, or a
-home whose own read timed out, is no evidence of a change; it is read once more and the
-hire launches on the identity it just verified. Without an
+signed out, into another identity, or that an answering machine no longer lists refuses.
+Only a re-read the machine didn't answer, or a home whose own read timed out, is no
+evidence of a change; it is read once more and the hire launches on the identity it just
+verified. Without an
 account (or with `auto`), Clankie selects a usable, unheld identity by allocation;
 an unavailable discovery refuses instead of silently using a default sign-in.
 A resumed remote session keeps its saved home.
