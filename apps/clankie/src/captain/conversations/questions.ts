@@ -1,4 +1,5 @@
 import { ConversationCommitError } from "./errors.ts";
+import { panePromptAnswerMessage } from "../pane-prompt-asks.ts";
 import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
   ProjectProposalDraftSchema,
@@ -882,7 +883,7 @@ export async function questionOperation(
     return ctx["questionResult"](meta, record, "ready", "answer_in_progress");
   if (record.workerDelivery && !isDeepStrictEqual(record.workerDelivery.answer, answer))
     return ctx["questionResult"](meta, record, "refused", "conflicting_answer");
-  let paneOutcome = "";
+  let paneMessage: string | undefined;
   const pane = ctx["paneAnswer"];
   if (pane?.owns(record.question)) {
     if (answer.kind === "worker") return ctx["questionResult"](meta, record, "refused", "invalid_answer");
@@ -908,7 +909,7 @@ export async function questionOperation(
       return ctx["questionResult"](meta, record, "refused", "pane_prompt_changed");
     }
     if (record.question.status !== "pending") return ctx["questionResult"](meta, record, "resolved");
-    paneOutcome = `\nThe agent's pane prompt answer: ${delivered.outcome}. ${delivered.message} Keys are never pressed again for this ask.`;
+    paneMessage = panePromptAnswerMessage(record.question, answer, delivered);
   } else if (record.question.workerQuestion) {
     if (answer.kind !== "worker" || !ctx["deliverWorkerAnswer"])
       return ctx["questionResult"](meta, record, "refused", "invalid_worker_answer");
@@ -948,11 +949,11 @@ export async function questionOperation(
     return ctx["questionResult"](meta, record, "refused", "invalid_answer");
   if (record.workerDelivery?.state === "uncertain") record.question.reason = "worker_answer_uncertain";
   const message =
+    paneMessage ??
     answerMessage(record.question, answer) +
-    paneOutcome +
-    (record.workerDelivery
-      ? `\nWorker question answer delivery outcome: ${record.workerDelivery.state}; detail: ${JSON.stringify(record.workerDelivery.detail)}. Never replay uncertain native delivery.`
-      : "");
+      (record.workerDelivery
+        ? `\nWorker question answer delivery outcome: ${record.workerDelivery.state}; detail: ${JSON.stringify(record.workerDelivery.detail)}. Never replay uncertain native delivery.`
+        : "");
   try {
     ctx["enqueue"](meta, message, undefined, true, ctx["runner"], {
       origin: "input",
