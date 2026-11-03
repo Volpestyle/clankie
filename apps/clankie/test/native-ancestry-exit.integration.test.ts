@@ -171,6 +171,34 @@ check(
 );
 
 check(
+  "names a claimant that exits during its own check caller_exited even after the budget ends, and a live one's failed read ancestry_unavailable (#526)",
+  async () => {
+    // The claimant really exits at its first ancestry read, then real time passes the
+    // 200 ms scan budget, so the claimant re-read meets an expired budget.
+    const exited = await scheduled("caller-late");
+    // Only the reason is new: the proof still refuses, with the same exit as before.
+    expect(exited.result.code).toBe(1);
+    expect(exited.facts).toHaveLength(1); // only the pre-exit observation emitted facts
+    expect(exited.events).toContainEqual(
+      expect.objectContaining({
+        reason: "caller_exited",
+        ancestryFailure: expect.objectContaining({ chainIndex: 0, claimantStatus: "exited" }),
+      }),
+    );
+    expect(exited.events.some((event) => event.reason === "ancestry_unavailable")).toBe(false);
+    // The same late read on a claimant that is still alive stays ancestry_unavailable.
+    const live = await scheduled("live-late");
+    expect(live.events).toContainEqual(
+      expect.objectContaining({
+        reason: "ancestry_unavailable",
+        ancestryFailure: expect.objectContaining({ claimantStatus: "unavailable" }),
+      }),
+    );
+    expect(live.events.some((event) => event.reason === "caller_exited")).toBe(false);
+  },
+);
+
+check(
   "records the real ESRCH position while the same claimant survives intermediate exit/reparenting",
   async () => {
     for (const [mode, chainIndex] of [
