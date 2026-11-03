@@ -33,11 +33,14 @@ const worker: HerdrAgentSnapshot = {
 };
 
 /** A store whose runner answers each resolve with the next snapshot, repeating the last. */
-function store(snapshots: (HerdrAgentSnapshot | undefined)[]) {
+function store(snapshots: (HerdrAgentSnapshot | undefined)[], onRead?: (reads: number) => void) {
   const root = mkdtempSync(join(tmpdir(), "seat-session-"));
   roots.push(root);
   let reads = 0;
-  const next = async () => snapshots[Math.min(reads++, snapshots.length - 1)];
+  const next = async () => {
+    onRead?.(reads + 1);
+    return snapshots[Math.min(reads++, snapshots.length - 1)];
+  };
   const runner: HerdrWatchRunner = {
     list: async () => [],
     get: async () => (await next())!,
@@ -78,4 +81,30 @@ it("names an empty seat or a shell instead of a missing session", async () => {
   );
   // A shell isn't an agent waiting for its session: it is refused on the first read.
   expect(shell.reads()).toBe(1);
+});
+
+it("refuses when the session that appears on a retry belongs to a different occupant than the one admitted", async () => {
+  const { session: _session, ...unattributed } = worker;
+  const replacement = {
+    ...worker,
+    session: { ...worker.session!, value: "7d1e2f3a-0000-4000-8000-000000000002" },
+  };
+  const f = store([unattributed, worker, replacement]);
+  await expect(f.store.adoptSeat(worker.terminalId, authority)).rejects.toThrow(
+    "The adopted native occupant changed during admission",
+  );
+});
+
+it("refuses a message when the service closes while a missing session is read again", async () => {
+  const { session: _session, ...unattributed } = worker;
+  let opened: HerdrWatchStore | undefined;
+  const f = store([unattributed, unattributed, worker], (read) => {
+    if (read === 2) opened?.close();
+  });
+  opened = f.store;
+  await expect(f.store.adoptSeat(worker.terminalId, authority)).rejects.toThrow(
+    "Native ownership service is unavailable",
+  );
+  // The retries stop once it is closed.
+  expect(f.reads()).toBe(2);
 });

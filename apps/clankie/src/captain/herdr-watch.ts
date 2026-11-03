@@ -2285,7 +2285,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * A seat's live agent, read again briefly while Herdr names no native session for it: a
    * worker that can send reports can be messaged too, even when one snapshot misses its
    * session (#338). A seat with no agent, or no session after the retries, is returned as
-   * read, for the caller's own refusal; nothing is inferred.
+   * read, for the caller's own refusal; nothing is inferred. The retries take up to a second
+   * or so, so callers check again that the service is still open once it returns.
    */
   private async seatWithSession(
     read: () => Promise<HerdrAgentSnapshot | undefined>,
@@ -2293,7 +2294,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     let agent = await read();
     for (
       let attempt = 0;
-      attempt < SEAT_SESSION_RETRIES && isMessageableSeat(agent) && agent.session === undefined;
+      attempt < SEAT_SESSION_RETRIES &&
+      !this.closed &&
+      isMessageableSeat(agent) &&
+      agent.session === undefined;
       attempt++
     ) {
       await new Promise((resolve) => setTimeout(resolve, SEAT_SESSION_RETRY_MS));
@@ -2331,6 +2335,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     await assertConversationAuthority(authority);
     const agent = await this.seatWithSession(() => this.runner.resolveTerminal(seatId));
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     unattributedSeat(seatId, agent);
     this.nativeOwner(agent);
     // Another lead may message a seat Clankie hired, but does not take it over
@@ -2373,6 +2378,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     await assertConversationAuthority(authority);
     const agent = await this.seatWithSession(() => this.runner.resolveTerminal(seatId));
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     unattributedSeat(seatId, agent);
     if (agent.status === "offline" || agent.status === "unknown")
       throw new Error(
@@ -6487,6 +6493,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
           })
         : this.runner.get(target),
     );
+    if (this.closed || this.wake === undefined) throw new Error("Herdr watcher is not running");
+    if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
     if (agent === undefined) throw new Error(`Herdr seat ${target} not found`);
     if (agent.session === undefined) throw new Error(missingSession(target, agent));
     const occupantId = occupantIdForHerdrSession(agent.session);
