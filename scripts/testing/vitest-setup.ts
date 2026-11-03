@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach } from "vitest";
 import { closeNativeProcessObservers } from "../../apps/clankie/src/native-process-transport.ts";
+import { GIT_REPOSITORY_ENVIRONMENT } from "../../packages/settings/src/checkouts.ts";
 
 // Paths only, for the regression's access trap; never open the original stores.
 export const ownerConfigRoots = [
@@ -19,6 +20,10 @@ export const ownerDescriptorPaths = [
       : []),
   ]),
 ];
+
+// A suite run from a git hook or `rebase --exec` in a linked worktree inherits its
+// GIT_DIR; any fixture's `git init` would then mark the owner's checkout bare (#411).
+for (const name of GIT_REPOSITORY_ENVIRONMENT) delete process.env[name];
 
 // Runs before each test file's imports, including package-local and eval runs.
 // Separate roots also keep files from leaking settings into the next suite.

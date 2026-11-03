@@ -4,6 +4,7 @@ import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Project, ProjectWorkspace } from "@clankie/protocol/projects";
+import { withoutGitRepository } from "@clankie/settings";
 
 const run = promisify(execFile);
 
@@ -69,7 +70,8 @@ async function git(repository: string, args: readonly string[], timeout = GIT_TI
     timeout,
     maxBuffer: 4 * 1024 * 1024,
     env: {
-      ...process.env,
+      // An inherited GIT_DIR would point `remote add` and `config` at another checkout (#411).
+      ...withoutGitRepository(),
       GIT_TERMINAL_PROMPT: "0",
       GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes",
     },
