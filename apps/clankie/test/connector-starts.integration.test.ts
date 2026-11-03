@@ -32,7 +32,7 @@ function gate() {
   return { promise, resolve };
 }
 
-async function fixture() {
+async function fixture(failure?: Awaited<ReturnType<HireSeat>>) {
   const root = await mkdtemp(join(tmpdir(), "connector-start-"));
   const native = await codex0160Protocol(root);
   const entered = gate();
@@ -83,6 +83,10 @@ async function fixture() {
       launches++;
       entered.resolve();
       await allocate.promise;
+      if (failure !== undefined) {
+        finished.resolve();
+        return failure;
+      }
       // This is the same authority capture used by createHiring; HTTP cancellation
       // never enters the service-owned authority or its native dispatch guard.
       const authority = captureConversationAuthority(source);
@@ -233,6 +237,40 @@ it("returns a pending receipt within five seconds even before checkout allocatio
     expect(Date.now() - began).toBeLessThan(10_000);
     expect(result).toMatchObject({ status: "pending", startId: expect.any(String) });
     expect(result).not.toHaveProperty("seatId");
+  } finally {
+    await f.close();
+  }
+});
+
+it("an uncertain start names its original receipt even when the service explains it (#326)", async () => {
+  const receiptId = "7bc84098-366b-4058-85e2-f8a2a3f6a375";
+  const f = await fixture({
+    outcome: "failed",
+    reason: "start_unconfirmed",
+    receiptId,
+    detail: "fleet pc: herdr workspace create timed out after 45000 ms",
+  });
+  try {
+    f.allocate.resolve();
+    // A start that settles inside the pending window answers at once; a later one by its startId.
+    const result = await f.dispatch(f.request);
+    if (result.op !== "start_agent") throw Error("unexpected answer");
+    const read: OperatorConversationServiceRequest = {
+      op: "start_agent",
+      schemaVersion: 1,
+      startId: result.startId ?? "",
+      appDeviceId: "connector-proof",
+    };
+    if (result.startId !== undefined)
+      await expect.poll(async () => ((await f.dispatch(read)) as { status: string }).status).toBe("refused");
+    const refused = (result.startId === undefined ? result : await f.dispatch(read)) as {
+      status: string;
+      detail?: string;
+    };
+    expect(refused.status).toBe("refused");
+    expect(refused.detail).toContain("workspace create timed out");
+    expect(refused.detail).toContain(`Inspect original hire receipt ${receiptId}`);
+    expect(f.launches()).toBe(1);
   } finally {
     await f.close();
   }
