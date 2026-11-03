@@ -1,6 +1,9 @@
 # ADR 0332: Clankie's own pull requests merge on green checks
 
-Status: Accepted, 2026-11-01, on James's word that the lead may set up
+Status: Accepted; its merge gate is amended by
+[ADR 0347](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)
+(2026-11-03: local checks plus the quick checks; `real-run` no longer gates).
+Accepted 2026-11-01, on James's word that the lead may set up
 Clankie's own review pipeline however it wants ("you can set up the review
 pipeline however you want", "just for our sdlc of clankie this is how im doing
 it"), and his yes to merges waiting only on the fast checks. Supersedes the

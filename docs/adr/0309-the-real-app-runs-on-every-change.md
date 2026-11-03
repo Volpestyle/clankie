@@ -1,6 +1,9 @@
 # ADR 0309: The real app runs on every change
 
-Status: accepted (James, 2026-10-31).
+Status: accepted (James, 2026-10-31). Amended by
+[ADR 0347](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)
+(2026-11-03): CI runs the real app on `main` after merges, not per pull
+request, and it never gates a merge.
 
 ## Context
 

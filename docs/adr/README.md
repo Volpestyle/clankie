@@ -328,7 +328,7 @@ superseded or retired record in its own status paragraph, starting with
 - [0307: A connector reads only a live agent's own output](0307-a-connector-reads-only-a-live-agents-own-output.md) — Accepted, 2026-10-31.
 - [0308: Watch is the step below Off](0308-watch-is-the-step-below-off.md) — Accepted, 2026-10-31, on James's word approving the plan to make Watch a level below Off and setup three steps ("yes we can use this order").
 - [0309: The real app runs on every change](0309-the-real-app-runs-on-every-change.md) — Accepted (James, 2026-10-31).
-- [0310: CI is a checkpoint, not a wait](0310-ci-is-a-checkpoint-not-a-wait.md) — Accepted, 2026-10-31, on James's word: "we should be constantly pushing, iterating, restarting, finding bugs, and adding those tickets to front of queue based on severity for enabling our current goals, but we have the…
+- [0310: CI is a checkpoint, not a wait](0310-ci-is-a-checkpoint-not-a-wait.md) — Accepted, 2026-10-31; amended by ADR 0347 (2026-11-03: the real-app run moves to `main`, and red background runs become `ci-finding` issues).
 - [0311: The doorway's source is public](0311-the-doorway-source-is-public.md) — Accepted (James, 2026-10-31: "Yes, publish it").
 - [0312: A cleared session is rediscovered, and the connector's detection is the owner's](0312-a-cleared-session-is-rediscovered.md) — Accepted by James, 2026-10-31.
 - [0313: The connector can read what the fleet can afford](0313-the-connector-can-read-what-the-fleet-can-afford.md) — Accepted by James, 2026-10-31.
@@ -350,7 +350,7 @@ superseded or retired record in its own status paragraph, starting with
 - [0329: Codex reviews on the owner's Mac, and builds run in local workers](0329-codex-reviews-on-the-owners-mac.md) — Accepted, 2026-11-01; its review gate and merge rule are superseded by ADR 0332 (the review is advisory and merges wait on green checks only).
 - [0330: Effect rolls out module by module](0330-effect-rolls-out-module-by-module.md) — Accepted, 2026-11-01.
 - [0331: Clankie settles a hire whose agent is gone](0331-clankie-settles-a-hire-whose-agent-is-gone.md) — Accepted, 2026-11-01.
-- [0332: Clankie's own pull requests merge on green checks](0332-clankies-own-pull-requests-merge-on-green-checks.md) — Accepted, 2026-11-01, on James's word that the lead may set up Clankie's own review pipeline however it wants ("you can set up the review pipeline however you want", "just for our sdlc of clankie this is how im doing it…
+- [0332: Clankie's own pull requests merge on green checks](0332-clankies-own-pull-requests-merge-on-green-checks.md) — Accepted; its merge gate is amended by ADR 0347 (2026-11-03: local checks plus the quick checks; `real-run` no longer gates).
 - [0333: OpenCode 2 hires run a private server](0333-opencode-2-hires-run-a-private-server.md) — Accepted, 2026-11-01, for issue #168.
 - [0334: Herdr direct prompting is the fallback for an agent with no channel](0334-herdr-direct-prompting-is-the-fallback.md) — Accepted (James, 2026-11-01).
 - [0335: Connected apps post under "Clankie decides" without waking him](0335-connected-apps-post-under-clankie-decides.md) — Accepted (James, 2026-11-01).
@@ -365,5 +365,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0344: Agents drive Herdr browser panes through Herdr's own commands](0344-agents-drive-herdr-browser-panes-through-herdr.md) — Proposed, 2026-11-02, from James's direction the same day: turn on agent control of Herdr browser panes ("On"), and "develop an agent ergonomic way to control the herdr browsers that herdr devs would agree with".
 - [0345: A pull request rebases onto main once, before it merges](0345-a-pull-request-rebases-onto-main-once-before-it-merges.md) — Accepted, 2026-11-02, on James's approval of the rule Grok proposed on the connected-apps notes board, which he confirmed to Claude Duet ("he left u a note").
 - [0346: The fleet says who is leading](0346-the-fleet-says-who-is-leading.md) — Proposed, 2026-11-02, from James's ask for a hoodie per active lead in the app's World.
+- [0347: A pull request merges on local checks and the quick checks](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md) — Accepted, 2026-11-03, on the owner's decisions relayed by the lead: "i wanna always be running app tests (in sim) and ci pipeline as we're merging work in, but i never wanna gate on it, just keep working, do sensible te…
 
 <!-- adr-index:end -->

@@ -89,12 +89,11 @@ work requires. A subagent profile in your hire brief overrides that. A child's
 result or roster status alone does not prove your deliverable is complete.
 
 Follow the workspace's own landing and test rules and the gate assignment in
-your brief. Run each change's full checks once, in one place, never twice: on
-a pull request that is CI's job when the pull request is marked ready; on a
-change you land straight on the main branch it is the project's local landing
-gate, run once before you push. While you iterate, run only the tests for what
-you changed. Don't run the whole suite or the full typecheck as a habit
-([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
+your brief. While you iterate, run only the tests for what you changed. Don't
+run the whole suite or the full typecheck as a habit
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)). On a
+change you land straight on the main branch, the project's local landing gate
+runs once before you push.
 
 On a pull request in Clankie's own repositories, keep your branch on its base
 while you work and don't merge `main` into it. Right before merging, rebase onto
@@ -103,6 +102,12 @@ to your own branch only. Resolve conflicts in your own files; if the rebase
 conflicts in files you didn't touch, run `git rebase --abort` and tell your lead
 which files, rather than resolving another worker's code
 ([ADR 0345](../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
+It merges once your scoped local checks pass on that rebased head and the quick
+pull request checks are green; say in the pull request which checks you ran.
+The real-app and simulator runs happen on `main` after merges and never gate. A
+change to a security or trust check goes to your lead for an independent review
+before it merges
+([ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
 
 Publish raw captures through `clankie evidence push` as
 [work-items](../work-items/SKILL.md) rule 3 describes, and cite the printed

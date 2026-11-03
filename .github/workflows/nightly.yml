@@ -1,8 +1,8 @@
 name: Nightly
 # The whole suite on main once a night, release-only tests included. Pull
 # requests run only what their change selects (ADR 0310), so this is where a
-# failure nothing selected shows up. A red run is a bug to file at the front of
-# the queue, not a gate.
+# failure nothing selected shows up. A red run files a `ci-finding` issue
+# (scripts/ci-finding.mjs, ADR 0347), not a gate.
 on:
   schedule:
     - cron: "0 8 * * *"
@@ -19,6 +19,9 @@ jobs:
   full-suite:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -86,3 +89,9 @@ jobs:
           include-hidden-files: true
           path: .local/nightly-run.json
           retention-days: 14
+      - name: File a ci-finding
+        if: failure() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/ci-finding.mjs --job nightly --report .local/nightly-run.json

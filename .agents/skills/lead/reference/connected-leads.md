@@ -75,10 +75,15 @@ it; none takes precedence over another.
   to stop at the pull request (or the landing the repo uses).
 - **Merge by the project's own rules.** The owner chooses each project's review
   pipeline, in its settings or its guide; follow it and add no review gate of
-  your own. In Clankie's own repos a ready pull request merges once its checks
-  are green, and a local review by any model is advisory, with its findings
-  filed as follow-up issues
-  ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+  your own. In Clankie's own repos a ready pull request merges once the
+  worker's local checks pass on its rebased head and the quick checks are
+  green; real-app and simulator runs happen on `main`, never gate, and a red
+  one is a `ci-finding` issue. A local review by any model is
+  advisory, with its findings filed as follow-up issues. A change to a security
+  or trust check is the exception: have its head reviewed independently before
+  it merges
+  ([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+  [ADR 0347](../../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
   There, brief each worker to rebase its branch onto `origin/main` once, right
   before merging, instead of merging `main` in repeatedly; to push with
   `--force-with-lease` to its own branch only; and to stop and tell you if the

@@ -1,6 +1,9 @@
 # ADR 0310: CI is a checkpoint, not a wait
 
-Status: Accepted, 2026-10-31, on James's word: "we should be constantly
+Status: Accepted, 2026-10-31; amended by
+[ADR 0347](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)
+(2026-11-03: the real-app run moves to `main`, and red background runs become
+`ci-finding` issues). Accepted on James's word: "we should be constantly
 pushing, iterating, restarting, finding bugs, and adding those tickets to front
 of queue based on severity for enabling our current goals, but we have the ci
 running on the side, just checkpointing really, and fixing things constantly in

@@ -83,10 +83,19 @@ This repository is public. Both neighbors are private and consume
   the owner's machines, in a fresh worktree, led by a Claude Duet thread or
   another connected lead; leads never put two workers on the same files at once,
   and worker questions go to the lead, not the owner. Open the pull request as a
-  draft early: a draft gets the quick checks on every push, and marking it ready
-  runs the real-app run. A ready pull request in this repo, `clankie-app` or
-  `clankie-ops` merges with a plain merge once those are green; nothing else
-  gates it ([ADR 0332](docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+  draft early: it gets the quick checks (`check`, `build`) on every push. Test
+  what you changed, in the moment, through `clankie heavy --`: the tests for
+  your change, typecheck, `pnpm lint`, `pnpm fmt:check`, `pnpm deadcode` and
+  `node scripts/check-doc-links.mjs`. A ready pull request in this repo,
+  `clankie-app` or `clankie-ops` merges with a plain merge once those pass on its
+  final rebased head and the quick checks are green; say in the pull request
+  which local checks you ran. The real-app run and simulator runs never run per
+  pull request and never gate: they run on `main` after merges and nightly, and
+  a red one files a `ci-finding` issue. A change to a security or trust check
+  (admission, auth, read boundaries) reports its head to your lead for an
+  independent review before it merges; nothing else gates a merge
+  ([ADR 0332](docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+  [ADR 0347](docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
   Leave the branch on its base while you work, then rebase it onto a freshly
   fetched `origin/main` once, right before it merges, and push that with
   `git push --force-with-lease` to your own branch; never merge `main` into it.
@@ -96,7 +105,9 @@ This repository is public. Both neighbors are private and consume
   keep iterating while it runs, and while iterating run only the tests for what
   you changed. The import-reached tests and the Mac's tests run on `main` after
   the merge, and the whole suite runs nightly; red there, or a test already failing
-  on `main`, is a bug to file at the front of the queue, not a merge blocker. The
+  on `main`, is a `ci-finding` issue (a workflow files it, deduped by test),
+  ranked by how badly it blocks current goals, not a merge blocker. Leads keep
+  at least one worker on open `ci-finding` issues beside the regular queue. The
   full `pnpm check` runs for releases and on request. A local review (the
   `codex-review` skill or any other model) is advisory; file its findings as
   follow-up issues. In the product, the owner picks their own review pipeline.
