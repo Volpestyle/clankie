@@ -23,7 +23,10 @@ checks `https://herdr.dev/latest.json` on startup and every six hours. It accept
 only stable versions, official `herdrdev/herdr` release asset URLs, and matching
 SHA-256 hashes, with bounded download size/time and atomic installation.
 A verified cache or the checksum-verified official packaged binary supports
-offline startup. No Jev workflow, upstream fork rebase, or source compilation
+offline startup. The startup check has ten seconds (amended 2026-11-03, #609):
+the service answers nothing until its fleet is up, so a slow or unresponsive
+release host starts it on the last verified release instead, and the
+six-hourly check stages the new one. No Jev workflow, upstream fork rebase, or source compilation
 is part of the update path.
 
 Releases are staged under `$CLANKIE_STATE/herdr/releases/<version>/herdr`.

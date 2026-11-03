@@ -27,10 +27,18 @@ function releaseAsset(manifest: unknown): { version: string; url: string; sha256
 /** A failure another attempt may not repeat: a timeout, a dropped connection, 429 or 5xx. */
 class TransientDownloadError extends Error {}
 
-async function downloadOnce(url: string, limit: number, fetchImpl: typeof fetch): Promise<Buffer> {
+async function downloadOnce(
+  url: string,
+  limit: number,
+  fetchImpl: typeof fetch,
+  deadline?: AbortSignal,
+): Promise<Buffer> {
   let response: Response;
+  const timeout = AbortSignal.timeout(60_000);
   try {
-    response = await fetchImpl(url, { signal: AbortSignal.timeout(60_000) });
+    response = await fetchImpl(url, {
+      signal: deadline === undefined ? timeout : AbortSignal.any([timeout, deadline]),
+    });
   } catch (error) {
     throw new TransientDownloadError(error instanceof Error ? error.message : String(error));
   }
@@ -70,13 +78,15 @@ export async function download(
   fetchImpl: typeof fetch = fetch,
   attempts = 1,
   backoffMs = 2_000,
+  /** The caller's own deadline across every attempt; once it passes, nothing is retried. */
+  deadline?: AbortSignal,
 ): Promise<Buffer> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await downloadOnce(url, limit, fetchImpl);
+      return await downloadOnce(url, limit, fetchImpl, deadline);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (!(error instanceof TransientDownloadError) || attempt >= attempts)
+      if (!(error instanceof TransientDownloadError) || attempt >= attempts || deadline?.aborted === true)
         throw new Error(
           `Herdr download of ${url} failed${attempts > 1 ? ` after ${attempt} of ${attempts} attempts` : ""}: ${message}`,
           { cause: error },
@@ -108,11 +118,12 @@ export async function installHerdrRelease(
   /** Builds retry a slow download; the service's own update check tries once. */
   attempts = 1,
   backoffMs?: number,
+  deadline?: AbortSignal,
 ): Promise<string> {
   const asset = releaseAsset(manifest);
   const current = await readFile(destination).catch(() => undefined);
   if (current !== undefined && digest(current) === asset.sha256) return asset.version;
-  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl, attempts, backoffMs);
+  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl, attempts, backoffMs, deadline);
   if (digest(data) !== asset.sha256) throw new Error("Official Herdr checksum mismatch");
   await atomicWrite(destination, data, 0o700);
   return asset.version;
@@ -123,6 +134,12 @@ export async function refreshOfficialHerdr(
   root: string,
   fallback: string,
   fetchImpl: typeof fetch = fetch,
+  /**
+   * Ends the check early: the service's start waits on it, and a slow release host must
+   * not hold Clankie's health past its supervisor's patience (#609). Past it, the last
+   * verified or packaged release serves, and the background check stages the new one.
+   */
+  deadline?: AbortSignal,
 ): Promise<string> {
   const recordPath = join(root, "releases/current.json");
   let cached: { manifest: unknown; checkedAt: number } | undefined;
@@ -142,14 +159,20 @@ export async function refreshOfficialHerdr(
   }
   try {
     const manifest: unknown = JSON.parse(
-      (await download("https://herdr.dev/latest.json", 2 * 1024 * 1024, fetchImpl)).toString("utf8"),
+      (
+        await download("https://herdr.dev/latest.json", 2 * 1024 * 1024, fetchImpl, 1, undefined, deadline)
+      ).toString("utf8"),
     );
     const asset = releaseAsset(manifest);
     const path = join(root, "releases", asset.version, "herdr");
-    await installHerdrRelease(path, manifest, fetchImpl);
+    await installHerdrRelease(path, manifest, fetchImpl, 1, undefined, deadline);
     await atomicWrite(recordPath, JSON.stringify({ manifest, checkedAt: Date.now() }), 0o600);
     return path;
   } catch (error) {
+    if (deadline?.aborted === true)
+      process.stderr.write(
+        "herdr: the release check ran past its startup deadline; starting with the last verified release\n",
+      );
     if (cached !== undefined) return join(root, "releases", releaseAsset(cached.manifest).version, "herdr");
     // Offline first launch can use only the checksum-verified official packaged release.
     const asset = releaseAsset(pin.release);
