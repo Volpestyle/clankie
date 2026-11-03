@@ -7,6 +7,7 @@ import {
   createAutoTidy,
   reviewerSeatIds,
 } from "./auto-tidy.ts";
+import type { FinishedHire } from "./herdr-core-runner.ts";
 import type { createCheckoutMaintenance } from "./captain-checkouts.ts";
 import type { CaptainOptions } from "./captain-types.ts";
 import type { createWorkerReports } from "./captain-worker-reports.ts";
@@ -40,7 +41,7 @@ export interface AutoTidyContext {
     readonly available: () => Promise<boolean>;
     readonly removeFinished: (
       ageMs: number,
-      hired: (hire: { seatId: string; agent: string; session: string }) => boolean,
+      hired: (hire: FinishedHire) => boolean,
     ) => Promise<readonly string[]>;
   };
 }
@@ -71,10 +72,12 @@ export function createCaptainAutoTidy(ctx: AutoTidyContext) {
       ? {}
       : {
           fleets: async () => [undefined, ...((await ctx.desktop!.available()) ? [ctx.desktop!.fleet] : [])],
-          removeFinished: async (ageMs: number) =>
+          removeFinished: async (ageMs: number, eligible: (hire: FinishedHire) => boolean) =>
             (await ctx.desktop!.available())
-              ? ctx.desktop!.removeFinished(ageMs, (hire) =>
-                  herdrWatches.hiredSession(hire.seatId, hire.agent, hire.session),
+              ? ctx.desktop!.removeFinished(
+                  ageMs,
+                  (hire) =>
+                    herdrWatches.hiredSession(hire.seatId, hire.agent, hire.session) && eligible(hire),
                 )
               : [],
         }),

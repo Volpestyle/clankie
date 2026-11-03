@@ -65,3 +65,63 @@ it("closes finished hires in the desktop app's terminals as in Herdr's, past a f
   // Ended terminals go after the same window a settled hire waits.
   expect(removals).toEqual([60 * 60_000, 60 * 60_000]);
 });
+
+it("removes a finished hire's terminal only on the hard lines a settled hire closes on", async () => {
+  const hire = (name: string) => ({ seatId: `herdr-core/t${name}`, agent: "claude", session: `s-${name}` });
+  // Each case breaks exactly one line; `plain` breaks none.
+  const kept = new Set(["s-kept"]);
+  const noReport = new Set(["s-noreport"]);
+  const unread = new Set(["s-unread"]);
+  let verdicts: Record<string, boolean> = {};
+  const auto = createAutoTidy({
+    setting: async () => "1h",
+    runner: { list: async () => [] },
+    removeFinished: async (_ageMs, eligible) => {
+      verdicts = Object.fromEntries(
+        ["plain", "kept", "reviewer", "pane", "noreport", "unread"].map((name) => [
+          name,
+          eligible(hire(name)),
+        ]),
+      );
+      return [];
+    },
+    tidy: {
+      close: async () => {
+        throw new Error("No live hire in a removal proof");
+      },
+      keptPane: (agent) =>
+        kept.has(agent.session?.value ?? "")
+          ? {
+              sessionKey: "k",
+              paneId: agent.paneId,
+              title: "",
+              reason: "kept by the owner",
+              by: "lead",
+              at: "2026-11-03T12:00:00.000Z",
+            }
+          : undefined,
+      keepVersion: () => 0,
+      hasKeptReport: (agent) => !noReport.has(agent.session?.value ?? ""),
+    },
+    // A reviewer may be named by its seat id or by its bare terminal address.
+    reviewerSeats: async () => new Set(["herdr-core/treviewer", "tpane"]),
+    provenance: () => ({ conversationId: "lead" }),
+    unreadReports: (agent) => (unread.has(agent.session?.value ?? "") ? 1 : 0),
+    ownerValid: async () => true,
+    closed: async () => {},
+    checkouts: async () => [],
+    prune: async () => {
+      throw new Error("No prune in a removal proof");
+    },
+    stopped: () => false,
+  });
+  await auto.panes();
+  expect(verdicts).toEqual({
+    plain: true,
+    kept: false,
+    reviewer: false,
+    pane: false,
+    noreport: false,
+    unread: false,
+  });
+});

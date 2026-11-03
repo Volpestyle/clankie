@@ -431,9 +431,11 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
       reported.delete(address);
       if ((await own(address)) === undefined) return;
       await seats.kill(address);
-      // The core keeps an ended terminal in the window until it is removed (#584); one still
-      // ending stays for removeFinished.
-      await seats.remove(address);
+      // The core keeps an ended terminal in the window until it is removed (#584). The program
+      // has ended, so the close stands even if removal fails; auto-tidy's removeFinished retries.
+      await seats.remove(address).catch((error: unknown) => {
+        console.warn("Desktop terminal removal after close unavailable", address, String(error));
+      });
       if (options.seatDirectory !== undefined)
         await rm(recordPath(options.seatDirectory, address), { force: true });
     },

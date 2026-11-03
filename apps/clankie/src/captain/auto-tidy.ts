@@ -5,6 +5,7 @@ import { FLEET_AUTO_TIDY_MS, type FleetAutoTidy } from "@clankie/protocol/fleet-
 import { checkoutGit, projectPathContains } from "@clankie/settings";
 import type { ProjectsSettings } from "@clankie/protocol/projects";
 import type { ConversationOwner } from "./conversation-owner.ts";
+import type { FinishedHire } from "./herdr-core-runner.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import {
   tidySessionKey,
@@ -49,8 +50,14 @@ export interface AutoTidyPorts {
    * doesn't answer never holds back another's closes.
    */
   readonly fleets?: () => Promise<readonly (string | undefined)[]>;
-  /** Takes out finished terminals of Clankie's own, ended at least this long ago (#584). */
-  readonly removeFinished?: (ageMs: number) => Promise<readonly string[]>;
+  /**
+   * Takes out finished terminals of Clankie's own, ended at least this long ago, whose hire
+   * `eligible` lets go (#584).
+   */
+  readonly removeFinished?: (
+    ageMs: number,
+    eligible: (hire: FinishedHire) => boolean,
+  ) => Promise<readonly string[]>;
   /** Latest report/progress from this exact occupant, including acknowledged reports. */
   readonly activityAt?: (agent: HerdrAgentSnapshot) => readonly (string | undefined)[];
   readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "keepVersion" | "hasKeptReport">;
@@ -145,8 +152,28 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[]; adopted: string[] }
     >();
     const reviewers = (await ports.reviewerSeats?.()) ?? new Set<string>();
-    // Nothing runs in a finished terminal, so it goes after the same window a settled hire waits.
-    await ports.removeFinished?.(delay).catch((error: unknown) => {
+    // Nothing runs in a finished terminal, so it goes after the same window a settled hire waits,
+    // and on the same hard lines: a kept pane or a standing reviewer stays, and so does one whose
+    // results were never kept or whose reports are unread, since its last screen may be all there is.
+    const finishedEligible = (hire: FinishedHire): boolean => {
+      const agent: HerdrAgentSnapshot = {
+        paneId: hire.seatId,
+        terminalId: hire.seatId,
+        agent: hire.agent,
+        status: "offline",
+        title: "",
+        session: { source: `herdr:${hire.agent}`, kind: "id", value: hire.session },
+      };
+      const address = hire.seatId.slice(hire.seatId.lastIndexOf("/") + 1);
+      return (
+        ports.tidy.keptPane(agent) === undefined &&
+        !reviewers.has(hire.seatId) &&
+        !reviewers.has(address) &&
+        ports.tidy.hasKeptReport(agent) &&
+        ports.unreadReports(agent) === 0
+      );
+    };
+    await ports.removeFinished?.(delay, finishedEligible).catch((error: unknown) => {
       console.warn("Auto-tidy finished terminal removal unavailable", String(error));
     });
     const inventory: HerdrAgentSnapshot[] = [];
