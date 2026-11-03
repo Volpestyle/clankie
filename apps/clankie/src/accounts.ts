@@ -436,6 +436,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
         scopes: [],
       };
     const connectedAt = connected.metadata?.connectedAt;
+    const installUrl = githubInstallUrl(connected.metadata?.clientId);
     const dead =
       connected.type === "oauth" && githubRefreshDead(connected, now()) && connected.expires <= now();
     return {
@@ -447,6 +448,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
       scopes: scopesOf(connected.metadata?.scopes),
       ...(connectedAt === undefined || Number.isNaN(Date.parse(connectedAt)) ? {} : { connectedAt }),
       ...(manageUrl === undefined ? {} : { manageUrl }),
+      ...(installUrl === undefined ? {} : { installUrl }),
     };
   };
 

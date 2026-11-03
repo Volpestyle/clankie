@@ -27,6 +27,7 @@ import {
   type GoogleAccountProvider,
   type AccountProvider,
 } from "@clankie/protocol/accounts";
+import { safeParseProtocolResponse } from "@clankie/protocol";
 
 /** Never includes a provider response, credential, code or request URL. */
 export class AccountClientError extends Error {
@@ -62,7 +63,7 @@ export function createAccountsClient(options: {
   const fetcher = options.fetchImpl ?? fetch;
   async function request<T>(
     path: string,
-    schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+    schema: Parameters<typeof safeParseProtocolResponse<T>>[0],
     body?: unknown,
   ): Promise<T> {
     const bearer = options.authorization();
@@ -105,7 +106,8 @@ export function createAccountsClient(options: {
         joined.set(chunk, offset);
         offset += chunk.byteLength;
       }
-      const parsed = schema.safeParse(JSON.parse(new TextDecoder().decode(joined)));
+      // A newer body may add optional keys; read the ones this client knows.
+      const parsed = safeParseProtocolResponse(schema, JSON.parse(new TextDecoder().decode(joined)));
       if (!parsed.success) throw new AccountClientError("unavailable", response.status);
       if (
         response.status !== 200 &&

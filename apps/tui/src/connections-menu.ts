@@ -19,6 +19,7 @@ import {
   AccountGoogleCompleteResultSchema,
   GoogleAccountProviderSchema,
 } from "@clankie/protocol/accounts";
+import { safeParseProtocolResponse } from "@clankie/protocol";
 import {
   parseLinearAccountCallback,
   validateLinearAccountStart,
@@ -183,7 +184,7 @@ export async function providerAccountsSection(
   run: NonNullable<ConnectionsMenuServices["accounts"]>,
 ): Promise<void> {
   for (;;) {
-    const parsed = AccountsResponseSchema.safeParse(await run([]));
+    const parsed = safeParseProtocolResponse(AccountsResponseSchema, await run([]));
     if (!parsed.success) throw new Error("Account connections unavailable");
     const choice = await flow.readSelect({
       message: "Account connections",
@@ -297,12 +298,19 @@ export async function providerAccountsSection(
             allowBack: true,
           });
           if (!check) break;
-          const result = AccountGithubPollResultSchema.safeParse(
+          const result = safeParseProtocolResponse(
+            AccountGithubPollResultSchema,
             await run(["poll", "github", "--flow-id", start.data.flowId]),
           );
           if (!result.success || !result.data.ok) throw new Error("GitHub authorization did not complete");
           if (result.data.status === "connected") {
             flow.renderLine("GitHub connected.", "success");
+            // A GitHub App reaches only the repositories it is installed on (#622).
+            if (result.data.connection.installUrl)
+              flow.renderLine(
+                `Install the Clankie GitHub App on the repositories it should reach: ${result.data.connection.installUrl}`,
+                "info",
+              );
             break;
           }
           flow.renderLine(`Still waiting; check again after ${result.data.interval} seconds.`, "info");
