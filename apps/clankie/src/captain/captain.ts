@@ -262,6 +262,7 @@ import {
   remoteCodexQueue,
 } from "./remote-codex-app-server.ts";
 import { captainRequestExtension, promptCacheSalt } from "./request-budget.ts";
+import { captainCompactionExtension } from "./compaction-focus.ts";
 import { guardWatchedRequests } from "./watch-request.ts";
 import { RoomHandoffBursts } from "./room-handoff-bursts.ts";
 import { RoomHandoffCoordinator } from "./room-handoff-coordinator.ts";
@@ -2005,6 +2006,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   captainMemoryExtension(deps.memory, lane),
                   captainModelExtension(async () => (await resolveRoute(purpose)).selection),
                 ]),
+          captainCompactionExtension(),
           captainRequestExtension({
             lane,
             cacheSalt,

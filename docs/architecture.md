@@ -1049,6 +1049,13 @@ Clankie uses pi's `ModelRuntime` and `createAgentSession` for Clankie's
 models, sessions, tools, skills, and compaction. The agent runtime, HTTP surface, and
 play host share one service
 ([ADR 0101](adr/0101-pi-owns-the-captain-model-runtime.md)).
+Every compaction of his lanes keeps people, commitments, decisions and who
+asked for what: [compaction-focus](../apps/clankie/src/captain/compaction-focus.ts)
+hands Pi those instructions through `session_before_compact`, which Clankie's Pi
+patch (`patches/@earendil-works__pi-coding-agent@1.0.0.patch`) lets return
+`customInstructions` for threshold, overflow and manual compactions alike (#542).
+The service lane's latest summary also travels with each driver switch
+([ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md)).
 The repo's tracker or task files hold work and results. The service exposes one
 Linear-shaped tracker tool surface to Clankie and workers, using the connected
 owner account or durable local storage when disconnected; repository conventions
