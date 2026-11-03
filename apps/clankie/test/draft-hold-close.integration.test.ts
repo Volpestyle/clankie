@@ -44,7 +44,7 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
 
   // The stand-in forge: issues the tracker calls in progress, and the drafts closing them.
   const issues = new Map(
-    [8, 9, 11, 12, 13].map((number) => [
+    [8, 9, 11, 12, 13, 14].map((number) => [
       number,
       {
         id: 9000 + number,
@@ -70,6 +70,8 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       { number: 24, body: "Closes #12" },
       // An outsider's draft from a fork names #13: it must never hold it, nor requeue it.
       { number: 25, body: "Closes #13", fork: "outsider/pond", association: "NONE" },
+      // A collaborator's draft from a fork is still not the repo's own branch.
+      { number: 26, body: "Closes #14", fork: "helper/pond", association: "COLLABORATOR" },
     ].map(({ number, body, fork, association }) => [
       number,
       {
@@ -168,6 +170,7 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       "Issue 12": ["https://github.com/fixture/pond/pull/24"],
       // The tracker says in progress, but no one with a say in the repo holds it.
       "Issue 13": "todo",
+      "Issue 14": "todo",
     });
     // Still drafts: a round changes nothing.
     expect(await before.reconcileDraftHolds()).toEqual([]);
