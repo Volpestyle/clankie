@@ -373,7 +373,7 @@ it("ends retries at the bound and never settles an issue its seat came back to",
   expect(await a.bytes()).toBe(untouched);
 });
 
-it("settles past an unattributed seat on another tracker's key, and keeps status when no outcome is stated", async () => {
+it("settles past an unattributed seat on another tracker's key, and puts an unheld issue back in the queue when no outcome is stated", async () => {
   const { keeper, project } = await setup();
   const a = await project("a");
   const stated = await a.hire("Odile", "LOCAL-VUH-4");
@@ -386,15 +386,16 @@ it("settles past an unattributed seat on another tracker's key, and keeps status
     await keeper.closed({ seatId: stated.live.seatId, reason: "paused at a handoff", outcome: "paused" }),
   ).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", intended: "Paused", status: "Todo" });
   expect(await a.issue(4)).toMatchObject({ status: "Todo" });
-  // Auto-tidy and owner closes state no outcome: the status stays and the reason is recorded.
-  const kept = await keeper.closed({ seatId: tidied.live.seatId, reason: "auto-tidy: idle and landed" });
-  expect(kept).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-3", status: "In Progress" });
-  expect(kept).not.toHaveProperty("intended");
-  expect(kept).not.toHaveProperty("retryUntil");
-  expect(await a.issue(3)).toMatchObject({ status: "In Progress" });
+  // Auto-tidy and owner closes state no outcome: with no one else on it, the issue is no
+  // longer being worked, so it goes back to the queue and the reason is recorded (#318, #462).
+  const requeued = await keeper.closed({ seatId: tidied.live.seatId, reason: "auto-tidy: idle and landed" });
+  expect(requeued).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-3", status: "Todo" });
+  expect(requeued).not.toHaveProperty("intended");
+  expect(requeued).not.toHaveProperty("retryUntil");
+  expect(await a.issue(3)).toMatchObject({ status: "Todo" });
   expect(await a.comments(3)).toEqual([
     expect.stringContaining(
-      "Tidied left: auto-tidy: idle and landed. Status kept: In Progress (no outcome stated).",
+      "Tidied left: auto-tidy: idle and landed. Status: Todo (back in the queue; no outcome stated and no one else holds it).",
     ),
   ]);
 });
@@ -425,7 +426,7 @@ it("a seat closed while a roster round runs is neither its own successor nor ret
   // That round still lists the exiting seat; with its process gone, the capture can't prove the occupant.
   const stale = await keeper.observe([closing.refused], censusAt);
   release();
-  expect(await close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "In Progress" });
+  expect(await close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "Todo" });
   expect(await close).not.toHaveProperty("retryUntil");
   expect(stale).toEqual([]);
   // A capture taken before the close still confirms the seat; it is not tracked again.
@@ -434,9 +435,11 @@ it("a seat closed while a roster round runs is neither its own successor nor ret
   advance(120_000);
   expect(await keeper.observe([])).toEqual([]);
   expect(await a.comments(4)).toEqual([
-    expect.stringContaining("Piers left: work landed. Status kept: In Progress (no outcome stated)."),
+    expect.stringContaining(
+      "Piers left: work landed. Status: Todo (back in the queue; no outcome stated and no one else holds it).",
+    ),
   ]);
-  expect(await a.issue(4)).toMatchObject({ status: "In Progress" });
+  expect(await a.issue(4)).toMatchObject({ status: "Todo" });
 });
 
 // From Corvin's review: the close lands while the round waits on the seat's tracker, as a Linear read can.
@@ -467,14 +470,16 @@ for (const capture of ["live", "refused"] as const)
     advance(1_000);
     const close = await keeper.closed({ seatId: closing.live.seatId, reason: "work landed" });
     release();
-    expect(close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "In Progress" });
+    expect(close).toMatchObject({ outcome: "updated", issue: "LOCAL-VUH-4", status: "Todo" });
     // A refused capture is the exit, not a failure; a live one does not track the seat again.
     expect(await round).toEqual([]);
     expect(await keeper.observe([])).toEqual([]);
     advance(120_000);
     expect(await keeper.observe([])).toEqual([]);
     expect(await a.comments(4)).toEqual([
-      expect.stringContaining("Piers left: work landed. Status kept: In Progress (no outcome stated)."),
+      expect.stringContaining(
+        "Piers left: work landed. Status: Todo (back in the queue; no outcome stated and no one else holds it).",
+      ),
     ]);
-    expect(await a.issue(4)).toMatchObject({ status: "In Progress" });
+    expect(await a.issue(4)).toMatchObject({ status: "Todo" });
   });

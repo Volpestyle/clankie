@@ -334,8 +334,11 @@ lead closes it: on another lead's hire `close_worker_pane` returns `not_owner`.
 After a close, the seat's `deliverable` issue moves to `issueStatus` (`done`
 needs `evidence`, else it becomes `verifying`), or stays In Progress when
 another live seat holds the same key. Without `issueStatus`, as in auto-tidy
-and owner closes, its status stays and the reason is commented. An item in
-review or verifying never moves back, and built-in delivery stages are kept.
+and owner closes, an issue still In Progress that no other live seat holds goes
+back to Todo, since no agent is working on it (#318, #462); any other status
+stays. The reason is commented either way. An item in review or verifying never
+moves back, and built-in delivery stages are kept. Pass `issueStatus` when the
+work landed, so a Linear issue isn't left in the queue.
 Hire a successor on the same `deliverable` first to keep it In Progress. A seat that exits without a close is
 paused after ten minutes, and a daily check wakes you with every In Progress
 issue no live seat owns. Doctor lists unreconciled worktrees by owner and age;
