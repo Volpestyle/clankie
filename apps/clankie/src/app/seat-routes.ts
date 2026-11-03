@@ -7,6 +7,8 @@ import {
 import { SeatTranscriptUploadSchema } from "@clankie/agent-transcript";
 import {
   CaptainSessionLaneV2Schema,
+  FLEET_SIMULATORS_PATH,
+  FleetSimulatorRequestSchema,
   FLEET_EVIDENCE_UPLOADS_PATH,
   FLEET_PEER_MESSAGES_PATH,
   FLEET_PEER_SEATS_PATH,
@@ -61,6 +63,7 @@ import {
 } from "@clankie/protocol/reviews";
 import { reviewRefusalStatus } from "../review-routes.ts";
 import { EvidenceRefusal } from "../evidence-store.ts";
+import { createFleetResourceRoutes } from "../fleet-resource-routes.ts";
 
 /**
  * A seat bridge talking to a service that is shutting down gets a 503 and a
@@ -557,6 +560,43 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         ctx.dependencies.fleetLinks?.identity?.(context.req.raw),
       context.req.param("paneId"),
     );
+  // A worker may lease only for its proven pane. Reuse the simulator's native
+  // holder proof, revocation checks and queue semantics; never mint owner authority.
+  ctx.app.on(
+    ["GET", "POST"],
+    "/v1/fleet/seats/:paneId/simulators",
+    bodyLimit({ maxSize: 16 * 1024 }),
+    async (context) => {
+      const authority = await peerSeatAuthority(context);
+      if (!authority) return context.json({ error: "native_seat_required" }, 403);
+      const proof = authority.proof;
+      if (proof.fleet !== "default" && proof.fleet !== "herdr-core")
+        return context.json({ error: "local_seat_required" }, 403);
+      const pane = proof.fleet === "default" ? proof.pane : `${proof.fleet}/${proof.pane}`;
+      let body: string | undefined;
+      if (context.req.method === "POST") {
+        const parsed = FleetSimulatorRequestSchema.safeParse(await context.req.json().catch(() => null));
+        if (!parsed.success) return context.json({ error: "malformed_simulator_request" }, 400);
+        if (
+          parsed.data.seatId !== pane ||
+          (parsed.data.fleet !== undefined && parsed.data.fleet !== proof.fleet)
+        )
+          return context.json({ error: "simulator_seat_mismatch" }, 403);
+        body = JSON.stringify(parsed.data);
+      }
+      const routes = createFleetResourceRoutes(
+        async () => ((await authority.validate()) ? true : "forbidden"),
+        ctx.dependencies.fleetResources,
+      );
+      return routes.fetch(
+        new Request(new URL(FLEET_SIMULATORS_PATH, context.req.url), {
+          method: context.req.method,
+          ...(body === undefined ? {} : { body, headers: { "content-type": "application/json" } }),
+          signal: context.req.raw.signal,
+        }),
+      );
+    },
+  );
   ctx.app.get(FLEET_PEER_SEATS_PATH, async (context) => {
     context.header("cache-control", "no-store");
     const authority = await peerSeatAuthority(context);

@@ -32,12 +32,14 @@ import {
   inside,
   posix,
   pushEvidence,
+  linkEvidenceClient,
   refusal,
   repoRootOf,
   sha256File,
   type EvidencePushInput,
 } from "../../../../integrations/claude-plugin/worker/bin/evidence-push.mjs";
 import { commandHost } from "./io.ts";
+import { workerLink } from "./worker-link.ts";
 
 export { evidenceRoots };
 
@@ -206,11 +208,16 @@ async function readManifest(path: string): Promise<EvidenceManifest | undefined>
   return EvidenceManifestSchema.parse(JSON.parse(text));
 }
 
-/** Push through the operator credential; the shared walk infers keys with the protocol's rules. */
+/** The same walk, over the worker's own link or the owner's authenticated client. */
 function evidencePush(input: EvidencePushInput, options: EvidenceOptions = {}) {
   return pushEvidence(input, {
     cwd: options.cwd ?? process.cwd(),
-    client: () => EvidenceClient.connect(options),
+    client: async () => {
+      const link = workerLink(options);
+      return link
+        ? linkEvidenceClient({ ...link, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) })
+        : EvidenceClient.connect(options);
+    },
     issueKeys: {
       teams: evidenceKeyTeams,
       fromText: evidenceIssueKeys,

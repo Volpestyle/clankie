@@ -3958,9 +3958,19 @@ running it again moves nothing and changes no value. `clankie doctor` names any
 that are still in the login keychain. JSON:
 `{ "ok", "status": "protected"|"already_protected", "created", "moved", "credentials": { "moved": [ids], "failed": [ids] } }`;
 it exits 1 when a copy did not read back, keeping that login copy.
-Refused from a hired worker pane. Run it only once worker CLI commands no
-longer need the bearer (VUH-2837); until then a worker's `evidence push`,
-`simulator` and `work` stop working after protection.
+Refused from a hired worker pane. Worker CLI commands never resolve the owner
+or captain bearer, even if one was inherited in the environment. `evidence push`
+and `agents message-status` use that pane's fleet link. Local `simulator` commands
+use the same link, with native holder proof and only the caller's own seat.
+`work list|show|activity|create|update|attach` and `work call TOOL --json ARGS`
+use the worker's native tracker tools, role and original call receipts. A missing
+link refuses without a bearer fallback. Owner-only commands, including tracker
+setup/import/cutover, `work owner`, `--repo` overrides, owner-seat launch/resume,
+seat-delivery settlement and review waivers, refuse from a worker pane.
+Worker work results retain the native tool receipt, including an uncertain
+outcome; inspect its original receipt instead of resending. Legacy criterion
+updates use `work call save_issue` with an atomic description patch; a create
+without a saved team uses that same native call with an explicit team and title.
 
 ### `play status`
 

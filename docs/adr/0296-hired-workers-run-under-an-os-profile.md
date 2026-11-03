@@ -58,8 +58,11 @@ Probed on macOS 27 with throwaway keychains:
 
 This first slice denies reads only. Until VUH-2836, a confined worker can still
 escape through unconfined helpers: the Herdr server, launchd, Apple Events. It can
-also write code that the owner or service runs later. Worker CLI commands move to
-the pane link in VUH-2837, and the bearer should be protected only after that. The
+also write code that the owner or service runs later. The first slice left worker
+CLI commands on the operator bearer. The security rollout now moves evidence,
+message-status, local simulator and role-checked work calls to the pane link;
+owner-only commands refuse before reading either bearer. It leaves the live
+sandbox toggle unchanged. The
 remaining secrets, argv exposure and non-maximum-trust modes are VUH-2838–2840.
 
 Proof: `apps/clankie/test/worker-sandbox.integration.test.ts`, and

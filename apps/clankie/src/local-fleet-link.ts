@@ -27,6 +27,7 @@ export interface LocalFleetProofRequestContext {
     | "review-verdicts"
     | "tool-catalog"
     | "evidence-uploads"
+    | "simulators"
     | "fixture-admissions"
     | "receipt";
   readonly method: "GET" | "POST" | "other";
@@ -115,7 +116,7 @@ export class LocalFleetLink {
     return async (request: Request, env: HttpBindings | Http2Bindings): Promise<Response> => {
       const path = new URL(request.url).pathname;
       const seatRoute =
-        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog|evidence-uploads)$/u.exec(
+        /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog|evidence-uploads|simulators)$/u.exec(
           path,
         ) ||
         // A review candidate's read is its author's or reviewer's own (ADR 0287).

@@ -107,7 +107,10 @@ gitignored root `.env.local`; an existing shell value wins. Discord account
 tokens, bridge identities, the activity producer, and play voice do not use
 that fallback and reject their forbidden environment names.
 `CLANKIE_OPERATOR_TOKEN` and `CLANKIE_CAPTAIN_TOKEN` remain explicit test/CI
-overrides.
+overrides outside hired worker panes. Resolving either bearer in a pane marked
+`CLANKIE_WORKER_PANE=1` refuses before consulting an environment override or
+opening a credential store. Worker commands use the native pane link instead;
+the OS sandbox remains the boundary protecting stores from arbitrary file reads.
 
 ## Local operator credential
 

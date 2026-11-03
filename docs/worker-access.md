@@ -748,14 +748,20 @@ Limits until the follow-ups land:
 - **Escapes:** a confined worker can still ask the unconfined Herdr server for a
   new pane, submit a launchd job, drive another app with Apple Events, or write
   code the owner or service runs later (VUH-2836).
-- **Worker commands:** `evidence push`, `simulator` and `work` still use the
-  operator bearer until VUH-2837, so protect the bearer only after that lands.
+- **Worker commands:** `evidence push`, `agents message-status`, local simulator
+  commands and role-checked tracker calls now use the pane link. Worker panes
+  refuse owner and captain credential resolution before reading any store.
+  Owner conversation seats, delivery settlement, tracker administration and
+  review waivers stay owner-only. The [CLI guide](cli.md#operator-credential-protect---json)
+  describes native tracker receipts and legacy-command limits. This rollout
+  does not enable the live worker sandbox.
 - **Other secrets:** the remaining broker items, `~/.config/clankie`, `~/.ssh`,
   `~/.config/gh` and provider keys aren't covered yet (VUH-2838, VUH-2839, VUH-2840).
 
 ## Owner-authorized work-item gestures
 
-Workers keep using `clankie work` for the repo’s recorded tracker. Paired devices
+Workers use `clankie work call` and their native tracker tools for the hire's
+recorded tracker and role. Paired devices
 with `terminalControl` can assign work metadata, add or remove a role label,
 and append a blocker through the narrow `work_item_write` operator operation.
 This authority stays with the original owner identity through the relay;

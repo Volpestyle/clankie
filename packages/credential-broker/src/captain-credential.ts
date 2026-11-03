@@ -29,6 +29,7 @@ export type CaptainCredentialErrorCode =
   | "invalid_environment_override"
   | "invalid_stored_credential"
   | "missing"
+  | "worker_pane"
   | "store_unavailable";
 
 export class CaptainCredentialError extends Error {
@@ -63,7 +64,13 @@ export function mintCaptainToken(random: (size: number) => Buffer = randomBytes)
 export async function resolveCaptainCredential(
   options: CaptainCredentialOptions = {},
 ): Promise<ResolvedCaptainCredential | undefined> {
-  const envToken = readEnvironmentToken(options.env ?? process.env);
+  const env = options.env ?? process.env;
+  if (env.CLANKIE_WORKER_PANE === "1")
+    throw new CaptainCredentialError(
+      "worker_pane",
+      "Hired workers cannot use owner conversation commands or read the captain credential. Use your pane tools or ask your lead.",
+    );
+  const envToken = readEnvironmentToken(env);
   if (envToken !== undefined) return { token: envToken, source: "env" };
   const storedToken = await readStoredToken(options.store ?? defaultStore(options.env));
   return storedToken === undefined ? undefined : { token: storedToken, source: "store" };
@@ -99,8 +106,6 @@ export async function ensureCaptainCredential(
 function readEnvironmentToken(env: NodeJS.ProcessEnv): string | undefined {
   const token = env.CLANKIE_CAPTAIN_TOKEN;
   if (token === undefined) return undefined;
-  // A hired pane's environment blanks bearers it may have inherited from Herdr's server (VUH-2592).
-  if (token.length === 0 && env.CLANKIE_WORKER_PANE === "1") return undefined;
   if (token.length === 0) {
     throw new CaptainCredentialError(
       "invalid_environment_override",

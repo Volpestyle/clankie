@@ -114,6 +114,7 @@ export async function resolveOperatorCredential(
   options: OperatorCredentialOptions = {},
 ): Promise<ResolvedOperatorCredential | undefined> {
   const env = options.env ?? process.env;
+  if (inWorkerPane(env)) throw workerPaneError();
   const envToken = readEnvironmentToken(env);
   if (envToken !== undefined) {
     return {
@@ -123,14 +124,7 @@ export async function resolveOperatorCredential(
     };
   }
   for (const store of operatorStores(options)) {
-    let storedToken: string | undefined;
-    try {
-      storedToken = await readStoredToken(store);
-    } catch (error) {
-      // A worker's sandbox denies the protected store; that is the boundary, not a fault.
-      if (inWorkerPane(env)) continue;
-      throw error;
-    }
+    const storedToken = await readStoredToken(store);
     if (storedToken !== undefined) {
       return {
         token: storedToken,
@@ -139,7 +133,6 @@ export async function resolveOperatorCredential(
       };
     }
   }
-  if (inWorkerPane(env)) throw workerPaneError();
   return undefined;
 }
 
@@ -206,7 +199,9 @@ export async function rotateOperatorCredential(
 export async function inspectOperatorCredential(
   options: OperatorCredentialOptions = {},
 ): Promise<OperatorCredentialStatus> {
-  const envToken = readEnvironmentToken(options.env ?? process.env);
+  const env = options.env ?? process.env;
+  if (inWorkerPane(env)) throw workerPaneError();
+  const envToken = readEnvironmentToken(env);
   let storedToken: string | undefined;
   for (const store of operatorStores(options)) {
     storedToken = await readStoredToken(store);

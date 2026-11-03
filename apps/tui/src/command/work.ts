@@ -9,7 +9,15 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
-import { readReviewDiff, readReviewPatch, ReviewDiffError, ReviewPatchError } from "@clankie/work-items";
+import {
+  readReviewDiff,
+  readReviewPatch,
+  ReviewDiffError,
+  ReviewPatchError,
+  readConvention,
+  mainCheckoutOf,
+  patchBody,
+} from "@clankie/work-items";
 import {
   WorkItemPrioritySchema,
   WorkInboxListSchema,
@@ -23,6 +31,7 @@ import {
   type TrackerRequestBudgetReport,
 } from "@clankie/protocol/tracker-request-budget";
 import { commandHost } from "./io.ts";
+import { workerLink, workerTrackerCall } from "./worker-link.ts";
 import { TRACKER_POSTS_PATH, TrackerPostsRequestSchema } from "@clankie/protocol/tracker-posting";
 
 const WORK_USAGE = [
@@ -710,6 +719,7 @@ export async function runWorkCommand(
     readonly env?: NodeJS.ProcessEnv;
     readonly fetchImpl?: typeof fetch;
     readonly cwd?: string;
+    readonly repoRoot?: string;
   } = {},
 ): Promise<{ readonly ok: boolean; readonly body: unknown }> {
   const env = options.env ?? process.env;
@@ -748,6 +758,84 @@ export async function runWorkCommand(
   }
   const tracker = trackerRequest(withoutRepo, repo);
   const request = tracker === undefined ? workRequest(withoutRepo, repo) : tracker.body;
+  const link = workerLink({ env, ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}) });
+  if (link) {
+    if (parsed.flags.has("--repo"))
+      throw new Error("Worker tracker calls use the hire's bound repository; --repo is owner-only.");
+    const call = (name: string, args: Record<string, unknown>) => {
+      if (args.repo !== undefined)
+        throw new Error(
+          "Worker tracker calls use the hire's bound repository; repo overrides are owner-only.",
+        );
+      return workerTrackerCall(name, args, options);
+    };
+    if (tracker) {
+      if (tracker.path !== "/v1/tracker/call")
+        throw new Error(
+          "This work operation requires the owner. Workers use work call and their role's tracker tools.",
+        );
+      return call(String(tracker.body.name), tracker.body.arguments as Record<string, unknown>);
+    }
+    if (request.project !== undefined)
+      throw new Error(
+        "Worker commands use the hire's bound tracker scope; use work call for native issue identifiers.",
+      );
+    if (request.action === "show") return call("get_issue", { id: request.id });
+    if (request.action === "activity") return call("list_comments", { issueId: request.id });
+    if (request.action === "list") {
+      const states = request.status as string[] | undefined;
+      if (states && states.length !== 1)
+        throw new Error(
+          "Worker lists accept one state; use work call list_issues for native tracker filters.",
+        );
+      return call("list_issues", {
+        ...(states ? { state: states[0] } : {}),
+        ...(request.owner === undefined ? {} : { assignee: request.owner }),
+        ...(request.label === undefined ? {} : { label: request.label }),
+      });
+    }
+    if (request.action === "create") {
+      const convention = await readConvention(mainCheckoutOf(repo));
+      const scope =
+        convention && ["linear", "builtin"].includes(convention.backend) ? convention.linear : undefined;
+      if (!scope?.team)
+        throw new Error(
+          "This tracker needs an explicit team: use work call save_issue --json with team and title.",
+        );
+      return call("save_issue", {
+        team: scope.team,
+        ...(scope.project ? { project: scope.project } : {}),
+        ...(scope.label ? { labels: [scope.label] } : {}),
+        title: request.title,
+        description: patchBody(String(request.summary ?? ""), {
+          criteria: ((request.criteria ?? []) as string[]).map((text) => ({ text, done: false })),
+        }),
+        ...(request.status === undefined ? {} : { state: request.status }),
+        ...(request.priority === undefined ? {} : { priority: request.priority }),
+        ...(request.owner === undefined ? {} : { assignee: request.owner }),
+      });
+    }
+    if (request.action === "update") {
+      if (["check", "uncheck", "addCriteria"].some((key) => request[key] !== undefined))
+        throw new Error(
+          "Use work call save_issue --json with an atomic description patch for criterion changes.",
+        );
+      return call("save_issue", {
+        id: request.id,
+        ...(request.title === undefined ? {} : { title: request.title }),
+        ...(request.status === undefined ? {} : { state: request.status }),
+        ...(request.priority === undefined ? {} : { priority: request.priority }),
+        ...(request.owner === undefined ? {} : { assignee: request.owner }),
+      });
+    }
+    if (request.action === "attach") {
+      const evidence = request.evidence as { url: string; caption: string };
+      return call("create_attachment", { issueId: request.id, url: evidence.url, title: evidence.caption });
+    }
+    throw new Error(
+      "This work operation requires the owner. Workers use work call and their role's tracker tools.",
+    );
+  }
   const credential = await resolveOperatorCredential({ env });
   if (!credential) throw new Error("Work tracking needs the operator credential. Run clankie doctor.");
   const fetcher = options.fetchImpl ?? fetch;
