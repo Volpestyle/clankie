@@ -1,4 +1,5 @@
 import { ConversationCommitError } from "./errors.ts";
+import { panePromptAnswerMessage } from "../pane-prompt-asks.ts";
 import type { ConversationQuestionResult } from "@clankie/protocol";
 import {
   ProjectProposalDraftSchema,
@@ -882,7 +883,34 @@ export async function questionOperation(
     return ctx["questionResult"](meta, record, "ready", "answer_in_progress");
   if (record.workerDelivery && !isDeepStrictEqual(record.workerDelivery.answer, answer))
     return ctx["questionResult"](meta, record, "refused", "conflicting_answer");
-  if (record.question.workerQuestion) {
+  let paneMessage: string | undefined;
+  const pane = ctx["paneAnswer"];
+  if (pane?.owns(record.question)) {
+    if (answer.kind === "worker") return ctx["questionResult"](meta, record, "refused", "invalid_answer");
+    const requestId = record.question.requestId;
+    if (ctx["workerAnswerInFlight"].has(requestId))
+      return ctx["questionResult"](meta, record, "ready", "answer_in_progress");
+    ctx["workerAnswerInFlight"].add(requestId);
+    let delivered;
+    try {
+      await authorizeQuestion(authority);
+      delivered = await pane.deliver(record.question, answer);
+    } catch (error) {
+      delivered = {
+        outcome: "uncertain" as const,
+        message: `The answer may or may not have reached the agent: ${String(error).slice(0, 300)}`,
+      };
+    } finally {
+      ctx["workerAnswerInFlight"].delete(requestId);
+    }
+    // Nothing was pressed: the menu asked about is gone, so the ask goes with it.
+    if (delivered.outcome === "refused" || delivered.outcome === "unavailable") {
+      ctx["cancelPendingQuestion"](meta.conversationId, "pane_prompt_changed", undefined, requestId);
+      return ctx["questionResult"](meta, record, "refused", "pane_prompt_changed");
+    }
+    if (record.question.status !== "pending") return ctx["questionResult"](meta, record, "resolved");
+    paneMessage = panePromptAnswerMessage(record.question, answer, delivered);
+  } else if (record.question.workerQuestion) {
     if (answer.kind !== "worker" || !ctx["deliverWorkerAnswer"])
       return ctx["questionResult"](meta, record, "refused", "invalid_worker_answer");
     const ids = record.question.workerQuestion.questions.map((q) => q.id);
@@ -921,10 +949,11 @@ export async function questionOperation(
     return ctx["questionResult"](meta, record, "refused", "invalid_answer");
   if (record.workerDelivery?.state === "uncertain") record.question.reason = "worker_answer_uncertain";
   const message =
+    paneMessage ??
     answerMessage(record.question, answer) +
-    (record.workerDelivery
-      ? `\nWorker question answer delivery outcome: ${record.workerDelivery.state}; detail: ${JSON.stringify(record.workerDelivery.detail)}. Never replay uncertain native delivery.`
-      : "");
+      (record.workerDelivery
+        ? `\nWorker question answer delivery outcome: ${record.workerDelivery.state}; detail: ${JSON.stringify(record.workerDelivery.detail)}. Never replay uncertain native delivery.`
+        : "");
   try {
     ctx["enqueue"](meta, message, undefined, true, ctx["runner"], {
       origin: "input",

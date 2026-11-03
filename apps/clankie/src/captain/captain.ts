@@ -103,6 +103,7 @@ import { createAgentWorkStore } from "./agent-work.ts";
 import { captureDiscordBodyIdentity } from "./body-identity.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { createKeyPresser, createPromptAnswerer } from "./prompt-answer.ts";
+import { createPanePromptAsks, PANE_PROMPT_ORIGIN } from "./pane-prompt-asks.ts";
 import { LeadStore } from "./lead.ts";
 import { countOutsideProjects, projectStatuses } from "./auto-projects.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
@@ -314,6 +315,8 @@ const HEAD_LANE_HOLD_MS = 45_000;
 export const REPORT_ROUND_MS = 10 * 60_000;
 /** How often this Mac's account usage is read for the burn rate (ADR 0324). */
 const USAGE_SAMPLE_MS = 10 * 60_000;
+/** How often blocked panes with no lead are looked at for a question (#149). */
+const PANE_PROMPT_ROUND_MS = 5_000;
 /** The worker's own label for its report (#317), said to the lead ahead of the text. */
 function reportKindLine(kind: import("@clankie/protocol").WorkerReportKind | undefined): string {
   if (kind === "blocked")
@@ -3762,6 +3765,65 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     enrichCheckoutSeats,
   } = fleetProjection;
 
+  // Questions from agents with no lead reach the owner's feed and Watch (#149). Each
+  // round reads the census; only a blocked pane with no lead has its screen read.
+  const panePromptAnswer = createPromptAnswerer({
+    paneAddress: (terminalId) => terminals.paneAddress(terminalId),
+    runner: herdrRunner,
+    // The owner's own ask is the one being answered.
+    ownerAskPending: () => false,
+    record: (app, text) => fleetRoom.postAppNote(app, text),
+    watching: () => watch.watching(),
+  });
+  const bindAgentPane = async (terminalId: string) => {
+    const address = await terminals.paneAddress(terminalId);
+    return address === undefined ? undefined : herdrRunner.bindPane?.(address);
+  };
+  const panePrompts = createPanePromptAsks({
+    agents: async () => {
+      const seats = await refreshFleet();
+      const panes = new Map(liveEdgeSeats.map((edge) => [edge.seatId, edge.paneId]));
+      return seats.flatMap((seat) => {
+        const paneId = panes.get(seat.seatId);
+        if (paneId === undefined) return [];
+        return [
+          {
+            terminalId: seat.seatId,
+            paneId,
+            agent: seat.harness,
+            status: seat.status,
+            name: seat.title || seat.seatId,
+            ...(seat.workingDirectory ? { workingDirectory: seat.workingDirectory } : {}),
+            // A hire, an adoption, or a child pane whose parent's lead hears it.
+            led:
+              seat.owner !== undefined ||
+              seatLeadOwners.has(seat) ||
+              herdrWatches.paneHire(paneId) !== undefined,
+          },
+        ];
+      });
+    },
+    bindPane: bindAgentPane,
+    ask: (draft, origin) =>
+      conversations.requestSurfaceQuestion(conversations.defaultGlobalConversationId(), draft, {
+        current: () => !shutdown.signal.aborted,
+        publicationId: origin,
+        exactPublication: true,
+      }),
+    cancel: (requestId, reason) =>
+      conversations.withdrawAsk(conversations.defaultGlobalConversationId(), requestId, reason),
+    pending: () => conversations.pendingAsks(conversations.defaultGlobalConversationId(), PANE_PROMPT_ORIGIN),
+    answer: (input) => panePromptAnswer({ app: "Your feed", current: () => true, ...input }),
+  });
+  conversations.paneAnswer = panePrompts;
+  const panePromptRounds = setInterval(() => {
+    if (!shutdown.signal.aborted)
+      void panePrompts.sync().catch((error: unknown) => {
+        console.warn("Pane prompt round failed", String(error).slice(0, 300));
+      });
+  }, PANE_PROMPT_ROUND_MS);
+  panePromptRounds.unref?.();
+
   const { observeReportFailureAlerts, notifyFleetHealthAlert, notifyRuntimeHealthAlert } = createHealthAlerts(
     {
       options,
@@ -6940,6 +7002,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     async close(): Promise<void> {
       clearInterval(usageSampler);
+      clearInterval(panePromptRounds);
       deps.leadWakes?.close();
       shutdown.abort(new SeatLinkInterruptedError());
       seatEfficiency.close();

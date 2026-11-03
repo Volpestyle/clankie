@@ -186,6 +186,12 @@ is never blanket-allowed; local Codex keeps its sandbox with on-request
 approvals. Neither a preset name nor a native allow rule proves authority for
 accounts, money, credentials, evals or hard-to-undo effects.
 
+An agent with no lead that waits on a menu in its pane (one the owner opened by
+hand) becomes the owner's ask in your own conversation: his feed and Watch show
+its question and options, and his answer presses the matching keys (#149). You
+hear the answer and whether the keys were sent; there is nothing to retype.
+Leave its screen to him while that ask is open.
+
 When `autonomy.fleet` reserves a worker's decision, escalate the observed
 question with `request_user_input` and `workerQuestion: {seatId, requestId}`;
 the owner's answer returns to the worker through its native channel, so never
