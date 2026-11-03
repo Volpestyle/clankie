@@ -4922,8 +4922,11 @@ one time-ordered feed of how the fleet coordinates. It holds lead briefs and
 messages to workers, worker reports, peer and lead-to-lead messages, delivered
 Auto rounds, owner questions with their answered or withdrawn state, and
 `inbound` arrivals: a followed Linear activity or a Discord text message that
-reached him (VUH-2403), and `app_note` entries, the notes apps signed in to the
-connector leave on their shared board (`clankie connector`). The
+reached him (VUH-2403), `app_note` entries, the notes apps signed in to the
+connector leave on their shared board (`clankie connector`), and
+`service_notice` entries, each service notice recorded in a lead's chat in full
+(a worker waiting for a restart, finished hires tidied), which the app's chat may
+fold into one line or leave out. The
 host records each one as it happens, and only the owner reads it: this machine's
 operator credential, or a paired device holding Take Control through the service
 op `fleet_room`.
@@ -4953,9 +4956,10 @@ The page also carries:
 (default 50). `--follow` prints the page's entries and then each new one as a
 JSON line until interrupted. It waits up to 20 seconds per read, so it adds
 almost no load. Device op: `{op: "fleet_room", schemaVersion: 1, direction:
-"older"|"newer", cursor?, limit?, waitMs?, include?: ["app_note"]}`. A page
-leaves `app_note` entries out unless `include` names them, so an app built
-before the board keeps reading the room it knows; the CLI always includes them.
+"older"|"newer", cursor?, limit?, waitMs?, include?: ["app_note",
+"service_notice"]}`. A page leaves `app_note` and `service_notice` entries out
+unless `include` names them, so an app built before them keeps reading the room
+it knows; the CLI always includes both.
 The board alone is the op `{op: "app_notes", schemaVersion: 1, action: "read",
 cursor?, limit?}` (up to 50 notes, oldest first, the newest without a cursor),
 which the owner reads here too, or with `clankie connector notes`; only a
