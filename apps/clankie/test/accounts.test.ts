@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -138,7 +138,9 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
       }
       const issuePath = /^\/repos\/owner\/repo\/issues\/(\d+)$/u.exec(url.pathname);
       if ((request.method === "GET" || request.method === "PATCH") && issuePath) {
-        if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
+        const bearer = (request.headers.authorization ?? "").replace(/^Bearer /u, "");
+        if (bearer !== TOKEN && !(bearer.startsWith("ghu_") && validTokens.has(bearer)))
+          return json(401, { message: TOKEN });
         const issue = issues.find((entry) => entry.number === Number(issuePath[1]));
         if (issue && request.method === "PATCH") Object.assign(issue, JSON.parse(body));
         return issue ? json(200, issue) : json(404, { message: "Not Found" });
@@ -876,7 +878,7 @@ describe("GitHub App user tokens (#185)", () => {
           entry.path === "/login/oauth/access_token" &&
           new URLSearchParams(entry.body).get("grant_type") === "refresh_token",
       );
-    return { ...context, polled, token, connection, refreshes };
+    return { ...context, polled, github, token, connection, refreshes };
   };
 
   it("connects without the repo scope and keeps the rotating pair on the body", async () => {
@@ -995,5 +997,84 @@ describe("GitHub App user tokens (#185)", () => {
     expect(String((failure as Error).message)).toContain(
       "If the Clankie GitHub App is not installed on this repository, install it: https://github.com/apps/clankie-test/installations/new",
     );
+  });
+
+  it("refuses an owner write when the owner's authority is revoked during any GitHub credential read", async () => {
+    const { dir, store, providers, github } = await connectApp();
+    const repo = join(await realpath(dir), "owner-write");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/repo" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    // Revokes the owner's authority during the Nth read of the GitHub connection.
+    let reads = 0;
+    let revokeAt = Number.POSITIVE_INFINITY;
+    let revoked = false;
+    const counted = {
+      get: async (id: string) => {
+        const value = await store.get(id);
+        if (id === "github" && ++reads === revokeAt) revoked = true;
+        return value;
+      },
+      update: store.update.bind(store),
+    };
+    const service = createWorkItemsService({
+      stateDirectory: join(dir, "owner-state"),
+      workspace: () => repo,
+      githubConnection: () => githubConnection(counted, github),
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+    });
+    await service.handle(
+      { action: "create", repo: "workspace", title: "Owner write", criteria: ["Labelled"] },
+      true,
+    );
+    const authority = {
+      principal: { kind: "operator" as const, id: "owner" },
+      authorize: async () => !revoked,
+      current: () => !revoked,
+    };
+    const writes = () =>
+      providers.seen.filter((entry) => entry.method !== "GET" && entry.path === "/repos/owner/repo/issues/1")
+        .length;
+    const write = (at: number) => {
+      reads = 0;
+      revokeAt = at;
+      revoked = false;
+      return service.handleOwnerWrite(
+        {
+          repoId: "workspace",
+          itemId: "#1",
+          requestId: randomUUID(),
+          command: { action: "add_label", label: `label-${String(at)}` },
+        },
+        authority,
+      );
+    };
+    // Unrevoked, the write lands; it shows how many connection reads one write makes.
+    const applied = await write(Number.POSITIVE_INFINITY);
+    expect(applied.outcome).toBe("applied");
+    expect(writes()).toBe(1);
+    const total = reads;
+    expect(total).toBeGreaterThan(1);
+    for (let at = 1; at <= total; at += 1) {
+      const outcome = await write(at).then(
+        (receipt) => receipt.outcome,
+        () => "threw",
+      );
+      expect({ at, revoked, outcome, writes: writes() }).toEqual({
+        at,
+        revoked: true,
+        outcome: expect.not.stringMatching(/^applied$/u),
+        writes: 1,
+      });
+    }
   });
 });

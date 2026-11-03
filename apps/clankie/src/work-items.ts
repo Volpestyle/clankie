@@ -745,23 +745,25 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     const token = await options.githubToken?.();
     return token ? { token } : undefined;
   };
-  const githubBindingOf = (connection: { readonly token: string; readonly binding?: string }) =>
-    deliveryFingerprint(connection.binding ?? connection.token);
-  // The API writes only while the connection it was built from is still the connected one.
-  const githubWritesAs = (
-    connection: { readonly token: string; readonly binding?: string },
-    api: NonNullable<TrackerDeps["github"]>,
-  ): NonNullable<TrackerDeps["github"]> => ({
-    ...api,
-    async request(method, path, body) {
-      if (method !== "GET") {
-        const current = await githubSnapshot();
-        if (current === undefined || githubBindingOf(current) !== githubBindingOf(connection))
-          throw new Error("Connected GitHub account changed.");
-      }
-      return api.request(method, path, body);
-    },
-  });
+  const connectionBindings = new Set<string>();
+  const githubBindingOf = (connection: { readonly token: string; readonly binding?: string }) => {
+    const binding = deliveryFingerprint(connection.binding ?? connection.token);
+    connectionBindings.add(binding);
+    return binding;
+  };
+  // The account each connected API was built for, so a write can check it without another read.
+  const githubApiBindings = new WeakMap<object, string>();
+  /**
+   * Synchronous: callers check it after their last awaited read and before their
+   * final authority checks, so nothing awaits between those checks and dispatch.
+   * An API from the connection must be the pinned account's; without one, the
+   * pin must not have been a connection.
+   */
+  const assertGithubApiIs = (api: TrackerDeps["github"], account: string) => {
+    const built = api === undefined ? undefined : githubApiBindings.get(api);
+    if (built === undefined ? connectionBindings.has(account) : built !== account)
+      throw new Error("Connected GitHub account changed.");
+  };
   let checkpointConnection:
     | { binding: string; api: NonNullable<TrackerDeps["github"]>; cache: MainCheckpointCache }
     | undefined;
@@ -963,9 +965,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ...(connection === undefined
         ? {}
         : {
-            github: cacheGithub(
-              githubWritesAs(
-                connection,
+            github: (() => {
+              const api = cacheGithub(
                 githubRestApi({
                   token: connection.token,
                   ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
@@ -976,9 +977,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                         refusedWriteHint: `If the Clankie GitHub App is not installed on this repository, install it: ${connection.installUrl}`,
                       }),
                 }),
-              ),
-              createHash("sha256").update(connection.token).digest("hex"),
-            ),
+                createHash("sha256").update(connection.token).digest("hex"),
+              );
+              githubApiBindings.set(api, githubBindingOf(connection));
+              return api;
+            })(),
           }),
       ...(linear === undefined || localTracker ? {} : { linear }),
       clock,
@@ -1410,6 +1413,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                 await free?.guard();
                 if ((await accountBinding("github")) !== account)
                   throw new Error("Connected GitHub account changed.");
+                // No await from here to dispatch: a revocation during the reads above is seen.
+                assertGithubApiIs(dependencies.github, account);
                 beforeWrite();
                 onDispatch();
               }
@@ -2564,18 +2569,21 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       // Delegated tools use the connected account, else the owner's gh login on this
       // machine, bound for the whole call so a switched account stops the write.
       const account = !local && convention.backend === "github" ? await accountBinding("github") : undefined;
-      const assertAccountCurrent = async () => {
-        if (account !== undefined && (await accountBinding("github")) !== account)
-          throw new Error("Connected GitHub account changed.");
-      };
       const dependencies = await deps(path, local);
+      const assertAccountCurrent = async () => {
+        if (account === undefined) return;
+        if ((await accountBinding("github")) !== account)
+          throw new Error("Connected GitHub account changed.");
+        assertGithubApiIs(dependencies.github, account);
+      };
       const beforeWrite = async () => {
+        // The credential read comes first, so the caller's own guards are the last checks.
+        await assertAccountCurrent();
         await validate?.();
         await callbacks.beforeWrite?.();
         // Asked again at the write itself, so a write waiting on the tracker's lock when Watch
         // is chosen changes nothing.
         await refuseWatching();
-        await assertAccountCurrent();
       };
       const scopedDependencies: TrackerDeps = {
         ...dependencies,
