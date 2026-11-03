@@ -109,11 +109,15 @@ export interface LocalFleetProofOptions extends Pick<
   run?: Run;
   platform?: string;
   processHelper?: string;
-  /** Host observation seam; production always uses the fresh native census. */
+  /**
+   * Host observation seam; production always uses the fresh native census. A project
+   * proof passes `report`, which takes the diagnostics a native observation would send.
+   */
   observeSocket?(
     socket: Socket,
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
+    report?: (event: NativeProcessDiagnostic) => void,
   ): Promise<NativeSocketProcess | undefined>;
   /**
    * Host lifetime seam for a proven connection's owner and ancestors; production
@@ -462,7 +466,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     report?: (event: NativeProcessDiagnostic) => void,
   ) =>
     options.observeSocket !== undefined
-      ? options.observeSocket(socket, expected, signal)
+      ? options.observeSocket(socket, expected, signal, report)
       : observeSocketProcess(
           socket,
           options.processHelper ?? fleetProcessHelper(),

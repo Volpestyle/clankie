@@ -466,3 +466,34 @@ it("a desktop-app seat's proof looks once more too, and refuses after that (#613
   expect(await prove(socket(), "herdr-core/t3")).toBeUndefined();
   expect(looks).toBe(2);
 });
+
+it("a desktop-app seat's proof never retries after a terminal native reason (#613)", async () => {
+  let looks = 0;
+  const prove = localProjectProof({
+    herdrBinary: "herdr",
+    platform: "darwin",
+    binding: async () => undefined,
+    coreBinding: async () => ({
+      runtime: "external" as const,
+      session: "herdr-core",
+      socketPath: "/core.sock",
+    }),
+    coreSeat: async () => ({ pid: 4242, agent: "claude", session: "s" }),
+    launcher: async () => ({ executable: "/trusted/claude" }),
+    // The caller exited during its own check: a final answer, not a stall worth a second look.
+    observeSocket: async (_socket, _expected, _signal, report) => {
+      looks += 1;
+      report?.({
+        schemaVersion: 1,
+        stage: "socket_owner",
+        reason: "caller_exited",
+        errno: 3,
+        attempt: 1,
+        retry: false,
+      });
+      return undefined;
+    },
+  });
+  expect(await prove(socket(), "herdr-core/t3")).toBeUndefined();
+  expect(looks).toBe(1);
+});
