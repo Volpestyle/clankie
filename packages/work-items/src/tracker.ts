@@ -441,14 +441,21 @@ export function backendFor(root: string, convention: WorkConvention, deps: Track
   if (convention.backend === "linear" || convention.backend === "builtin")
     return nativeBackendFor(root, convention, deps);
   // Preserve the compatibility callers' eager backend-availability error boundary.
-  nativeBackendFor(root, convention, deps);
+  const native = nativeBackendFor(root, convention, deps);
   const canonical = trackerToolsFor(root, convention, deps);
   const compatibility = createLinearBackend({
     team: "Local",
     workOwnerAsAssignee: true,
     call: (name, args) => canonical.call(name, args),
   });
-  return { ...compatibility, kind: convention.backend };
+  // A comment goes straight to the tracker; the Linear-shaped tools carry none (#541).
+  return {
+    ...compatibility,
+    kind: convention.backend,
+    ...(native.comment === undefined
+      ? {}
+      : { comment: (id: string, body: string) => native.comment!(id, body) }),
+  };
 }
 
 export interface ResolvedTracker {

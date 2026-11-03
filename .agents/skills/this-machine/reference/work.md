@@ -48,7 +48,9 @@ open issue as `in_progress` only while a live agent holds it this way (`heldBy`
 names them). A hire also holds the one issue its brief names (an issue URL,
 `owner/repo#N`, or "Closes #N" in a GitHub checkout) when it was given no
 deliverable, and in work reads an open draft pull request that closes an issue
-holds it too (`heldBy` lists the pull request's URL). An unheld issue the tracker calls in progress reads `todo`, with
+holds it too (`heldBy` lists the pull request's URL). When that draft closes
+unmerged and nothing else holds the issue, Clankie puts the tracker's In Progress
+back to Todo within about ten minutes, as a gated post (#541). An unheld issue the tracker calls in progress reads `todo`, with
 `trackerStatus` showing the tracker's word. Clear it when you stop.
 The pointer follows the native session through a pane move and service restart;
 a new session does not inherit it. Keep transient actions in `clankie stance`

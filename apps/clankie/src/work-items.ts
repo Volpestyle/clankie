@@ -50,6 +50,7 @@ import {
   backendFor,
   trackerToolsFor,
   type WorkItemPatch,
+  type WorkBackend,
   initializeConvention,
   WorkInitDecisionRequired,
   WorkInitInvalid,
@@ -93,6 +94,7 @@ import {
   type WorkItemWriteReceiptRequest,
 } from "@clankie/protocol/work-item-write";
 import { WorkWriteReceipts } from "./work-write-receipts.ts";
+import { DraftPullHolds, githubPullOf, type DraftPullHold } from "./draft-pull-holds.ts";
 import {
   prepareWorkWriteTarget,
   type WorkWriteAuthority,
@@ -214,6 +216,8 @@ export const WorkRequestSchema = z.discriminatedUnion("action", [
       check: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       uncheck: z.array(z.number().int().min(1).max(50)).max(50).optional(),
       addCriteria: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+      /** Posted on the issue with the change, in the same write; GitHub issues only (#541). */
+      comment: z.string().trim().min(1).max(65_536).optional(),
     })
     .strict(),
   z
@@ -335,6 +339,20 @@ interface TrackerProjects {
   ): Promise<WorkResult>;
 }
 
+/** What a look at one remembered draft hold found (#541). */
+export interface DraftHoldSettlement {
+  readonly pull: string;
+  readonly issue?: string;
+  /**
+   * `requeued`: moved to Todo; `held`/`refused`: posting stopped it (ADR 0302, 0308), or
+   * the tracker takes no comment;
+   * `unchanged`: not In Progress or held by someone else; `still_listed` and
+   * `unavailable` are looked at again next round.
+   */
+  readonly outcome: "requeued" | "held" | "refused" | "unchanged" | "still_listed" | "unavailable";
+  readonly detail?: string;
+}
+
 export interface WorkItemsServiceOptions {
   readonly projects?: () => Promise<ProjectsSettings>;
   /**
@@ -416,6 +434,30 @@ const workPatch = (request: Extract<WorkRequest, { action: "update" }>): WorkIte
   ...(request.uncheck === undefined ? {} : { uncheck: request.uncheck }),
   ...(request.addCriteria === undefined ? {} : { addCriteria: request.addCriteria }),
 });
+
+/**
+ * A work update's comment goes in the same admitted write, after the change it explains.
+ * Only trackers that take a comment this way (GitHub issues so far) accept one; the rest
+ * refuse before anything is written (#541).
+ */
+const assertCommentSupported = (
+  request: Extract<WorkRequest, { action: "update" }>,
+  backend: WorkBackend,
+) => {
+  if (request.comment !== undefined && backend.comment === undefined)
+    throw new WorkRequestError(
+      "invalid",
+      `A comment with a work update is supported only for GitHub issues, not ${backend.kind}. Nothing was changed.`,
+    );
+};
+const updateWithComment = async (
+  backend: WorkBackend,
+  request: Extract<WorkRequest, { action: "update" }>,
+) => {
+  const item = await backend.update(request.id, workPatch(request));
+  if (request.comment !== undefined) await backend.comment!(item.id, request.comment);
+  return item;
+};
 
 export class WorkRequestError extends Error {
   readonly code:
@@ -575,6 +617,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   });
   const run = options.run ?? defaultRun;
   const clock = options.clock ?? (() => new Date());
+  const draftHolds = new DraftPullHolds(join(options.stateDirectory, "draft-pull-holds.json"), clock);
 
   const linear: LinearToolCall | undefined =
     options.mcpHost === undefined
@@ -2657,6 +2700,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
       }
     },
+    /** Run each round: puts back issues whose draft pull request closed unmerged (#541). */
+    reconcileDraftHolds,
     async handle(
       request: WorkRequest,
       local: boolean,
@@ -2676,15 +2721,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       if (request.action === "show") {
         const result = await handleTracker(request, local, posting, destination);
-        return "item" in result && "repo" in result
-          ? {
-              ...result,
-              item: withLiveHolders(result.repo.id, result.item, [
-                ...holders,
-                ...(await draftPullHolders([result.item])),
-              ]),
-            }
-          : result;
+        if (!("item" in result) || !("repo" in result)) return result;
+        const item = withLiveHolders(result.repo.id, result.item, [
+          ...holders,
+          ...(await draftPullHolders([result.item])),
+        ]);
+        noteDraftHolds(request.repo, [item]);
+        return { ...result, item };
       }
       // Filter on the live status: read the tracker statuses it can come from, then filter.
       const wanted = request.status;
@@ -2697,6 +2740,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (!("items" in result) || !("repo" in result)) return result;
       const held = [...holders, ...(await draftPullHolders(result.items))];
       const items = result.items.map((item) => withLiveHolders(result.repo.id, item, held));
+      noteDraftHolds(request.repo, items);
       return {
         ...result,
         items: (wanted === undefined ? items : items.filter((item) => wanted.includes(item.status))).slice(
@@ -2706,6 +2750,137 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
   };
+  /**
+   * Only a draft from the repo's own branches, by someone with a say in it, holds an issue.
+   * Anyone can open a draft that says "Closes #N" on a public repo; one from a fork or a
+   * stranger must not mark the issue taken, nor later make Clankie requeue and comment on
+   * it (#541 review).
+   */
+  function trustedDraft(
+    pull: { author_association?: string; head?: { repo?: { full_name?: string } | null } },
+    slug: string,
+  ): boolean {
+    return (
+      pull.head?.repo?.full_name?.toLowerCase() === slug &&
+      ["OWNER", "MEMBER", "COLLABORATOR"].includes(pull.author_association ?? "")
+    );
+  }
+
+  /** Remembers which draft pull requests held which items, to notice when one closes (#541). */
+  function noteDraftHolds(repo: string, items: readonly WorkItem[]): void {
+    for (const item of items)
+      for (const holder of item.heldBy ?? [])
+        if (githubPullOf(holder) !== undefined) draftHolds.note(holder, { repo, id: item.id });
+  }
+
+  /**
+   * Looks again at each draft pull request a read saw holding an issue (#541). One that
+   * closed unmerged puts each issue it held back to Todo when the tracker still says In
+   * Progress and nothing else holds it, through the same gated work update as Clankie's
+   * own (ADR 0302; Watch refuses it, ADR 0308). A merged one needs nothing: GitHub
+   * closes its issues. One still a draft is kept; one now ready for review is in review.
+   */
+  async function reconcileDraftHolds(): Promise<DraftHoldSettlement[]> {
+    const pulls = draftHolds.list();
+    if (pulls.length === 0) return [];
+    let api: NonNullable<TrackerDeps["github"]>;
+    try {
+      api = checkpointAccess((await githubSnapshot())?.token).api;
+    } catch {
+      // allow-swallowed-rejection -- no GitHub connection: the holds wait for the next round.
+      return [];
+    }
+    const settled: DraftHoldSettlement[] = [];
+    for (const pull of pulls) {
+      let read: { state?: string; draft?: boolean; merged?: boolean; merged_at?: string | null };
+      try {
+        read = (await api.request("GET", `repos/${pull.slug}/pulls/${String(pull.number)}`)) as typeof read;
+      } catch (error) {
+        settled.push({ pull: pull.url, outcome: "unavailable", detail: String(error) });
+        continue;
+      }
+      if (read.state === "open" && read.draft === true) continue;
+      if (read.state === "open" || read.merged === true || (read.merged_at ?? null) !== null) {
+        draftHolds.settle(pull.url);
+        continue;
+      }
+      // Closed unmerged. Without a live census nothing proves the issue unheld; try later.
+      let live: readonly IssueHolder[];
+      try {
+        live = (await options.liveHolders?.()) ?? [];
+      } catch {
+        // allow-swallowed-rejection -- without a live census the holds wait for the next round.
+        continue;
+      }
+      const remaining: DraftPullHold[] = [];
+      for (const hold of pull.holds) {
+        const outcome = await requeue(pull.url, hold, live).catch(
+          (error: unknown): DraftHoldSettlement => ({
+            pull: pull.url,
+            issue: hold.id,
+            outcome: "unavailable",
+            detail: String(error),
+          }),
+        );
+        settled.push(outcome);
+        if (outcome.outcome === "unavailable" || outcome.outcome === "still_listed") remaining.push(hold);
+      }
+      draftHolds.settle(pull.url, remaining);
+    }
+    return settled;
+  }
+
+  async function requeue(
+    url: string,
+    hold: DraftPullHold,
+    live: readonly IssueHolder[],
+  ): Promise<DraftHoldSettlement> {
+    // The host's own read and write, whichever device's read noted the hold.
+    const shown = await handleTracker({ action: "show", repo: hold.repo, id: hold.id }, true);
+    if (!("item" in shown) || !("repo" in shown))
+      return { pull: url, issue: hold.id, outcome: "unavailable", detail: "The issue could not be read." };
+    if (shown.item.status !== "in_progress")
+      return {
+        pull: url,
+        issue: hold.id,
+        outcome: "unchanged",
+        detail: `Tracker says ${shown.item.status}.`,
+      };
+    const heldBy =
+      withLiveHolders(shown.repo.id, shown.item, [...live, ...(await draftPullHolders([shown.item]))])
+        .heldBy ?? [];
+    // GitHub's open-pull listing is read through a one-minute snapshot that may still show it.
+    if (heldBy.includes(url)) return { pull: url, issue: hold.id, outcome: "still_listed" };
+    if (heldBy.length > 0)
+      return { pull: url, issue: hold.id, outcome: "unchanged", detail: `Held by ${heldBy.join(", ")}.` };
+    try {
+      await handleTracker(
+        {
+          action: "update",
+          repo: hold.repo,
+          id: hold.id,
+          status: "todo",
+          comment: `The draft pull request that held this issue (${url}) closed without merging, and no one else holds it, so it is back in the queue (it was In Progress).`,
+        },
+        true,
+      );
+    } catch (error) {
+      // A tracker that takes no comment refuses the update as invalid: settled, never retried.
+      if (
+        error instanceof WorkRequestError &&
+        (error.code === "posting_refused" || error.code === "posting_held" || error.code === "invalid")
+      )
+        return {
+          pull: url,
+          issue: hold.id,
+          outcome: error.code === "posting_held" ? "held" : "refused",
+          detail: error.message,
+        };
+      throw error;
+    }
+    return { pull: url, issue: hold.id, outcome: "requeued" };
+  }
+
   /**
    * An open draft pull request that closes an issue holds it (#318): the work is under way
    * even when the worker that opened it is between turns or gone. Read per GitHub repo the
@@ -2729,9 +2904,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             draft?: boolean;
             body?: string | null;
             html_url?: string;
+            author_association?: string;
+            head?: { repo?: { full_name?: string } | null };
           }[];
           return pulls.flatMap((pull) =>
-            pull.draft === true && typeof pull.html_url === "string"
+            pull.draft === true && typeof pull.html_url === "string" && trustedDraft(pull, slug)
               ? closedIssues(pull.body ?? "", slug).map((itemId) => ({ itemId, seatId: pull.html_url! }))
               : [],
           );
@@ -2794,7 +2971,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             case "activity":
               return { repo, itemId: request.id, entries: await backend.activity!(request.id) };
             case "update":
-              return { repo, item: await backend.update(request.id, workPatch(request)) };
+              assertCommentSupported(request, backend);
+              return { repo, item: await updateWithComment(backend, request) };
             case "attach":
               return { repo, item: await backend.attach(request.id, request.evidence) };
           }
@@ -2991,11 +3169,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         case "update": {
           if (!local) throw new WorkRequestError("invalid", "Devices read work items; agents write them");
           const { backend, convention } = await tracker(entry.path, true, false, true, watchedWrite(posting));
+          assertCommentSupported(request, backend);
           await checkWorkPosting(request, convention, entry.path, posting, destination);
           try {
             return {
               repo: await describe(entry),
-              item: await backend.update(request.id, workPatch(request)),
+              item: await updateWithComment(backend, request),
             };
           } catch (error) {
             if (error instanceof Error && error.name === "WorkItemNotFoundError")

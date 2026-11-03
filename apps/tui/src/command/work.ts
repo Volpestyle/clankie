@@ -29,7 +29,7 @@ const WORK_USAGE = [
   "Usage: clankie work [status|discover] | repos | init [--backend default|markdown|github|linear] [--directory D]",
   "  [--github-repo OWNER/NAME] [--linear-team KEY] [--linear-project NAME] [--linear-label LABEL] [--previous linear|none] [--release-source tags|milestones|both] [--release-lane NAME] [--note TEXT]",
   "  | project | project-details | list [--status S,S] [--owner O] [--label L] | show ID [--project P] | activity ID [--project P] | create TITLE [--summary S] [--owner O] [--criterion C]... [--status S] [--priority 0..4|none|urgent|high|medium|low]",
-  "  | update ID [--project P] [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]...",
+  "  | update ID [--project P] [--status S] [--priority P] [--owner O | --no-owner] [--title T] [--check N]... [--uncheck N]... [--add-criterion C]... [--comment TEXT]",
   "  | write ID --owner O|--no-owner|--add-label L|--remove-label L|--add-blocker ID [--request-id UUID] | receipt ID --request-id UUID",
   "  | close ID [--project P] [--canceled] | attach ID [--project P] --url URL --caption TEXT [--kind image|video|log|link]",
   "  | releases [--lane L] [--item KEY] [--limit N] | releases sync | release ID|VERSION",
@@ -221,6 +221,7 @@ export function workRequest(args: readonly string[], repo: string): Record<strin
         ...(many(parsed, "--add-criterion").length === 0
           ? {}
           : { addCriteria: many(parsed, "--add-criterion") }),
+        ...(one(parsed, "--comment") === undefined ? {} : { comment: one(parsed, "--comment") }),
       };
     }
     case "write": {

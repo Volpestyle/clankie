@@ -3377,8 +3377,10 @@ plan|spend|destructive_action|merge|external_write --body TEXT` blocks that run
   `save_issue` descriptions. `work show` and API item reads return it in full;
   provider and transport request limits still apply.
 - `clankie work update ID [--status S] [--owner NAME | --no-owner] [--title T]
-[--priority 0..4] [--check N]... [--uncheck N]... [--add-criterion C]...`; criterion numbers are
-  1-based and may be comma-separated.
+[--priority 0..4] [--check N]... [--uncheck N]... [--add-criterion C]... [--comment TEXT]`; criterion numbers are
+  1-based and may be comma-separated. `--comment` posts TEXT on the issue with the
+  change, in the same write and through the same posting check; only GitHub issues
+  take it so far, and other trackers refuse it without changing anything.
 - `clankie work close ID [--canceled]` sets `done` (or `canceled`).
 - `clankie work attach ID --url URL --caption TEXT [--kind image|video|log|link]`
   appends evidence; the kind is inferred from the URL when omitted.
@@ -10097,7 +10099,12 @@ only while a live agent (not done, stopped or gone) holds it this way. Its
 its brief names: an issue URL, `owner/repo#N`, or "Closes #N" in a checkout whose
 origin is on GitHub. Work reads also count an open draft pull request that closes
 an issue as holding it, with the pull request's URL in `heldBy`; `clankie metrics
---issues` counts only agents. An issue the tracker calls in progress with no live
+--issues` counts only agents. Only a draft from the repo's own branches whose
+author is its owner, a member or a collaborator holds an issue; a fork's or a
+stranger's never does. The service remembers the drafts its reads saw holding
+issues and looks at them again every ten minutes. When one has closed unmerged, each issue
+it held that the tracker still calls in progress, and that nothing else holds, goes back
+to Todo through the same posting check as Clankie's own work updates (#541). An issue the tracker calls in progress with no live
 holder reads `todo`, with `trackerStatus` keeping the tracker's own word. The fleet also
 projects local Codex goals from its native goal store and Clankie's conversation
 goals. Native goal state remains separate from turn activity.
