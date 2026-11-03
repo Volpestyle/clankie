@@ -11,21 +11,22 @@ export const TRANSCRIPT_READ_HARNESSES: ReadonlySet<string> = new Set(["claude",
 export const TRANSCRIPT_READ_DETAIL = "Read from this agent's own session transcript, not its screen.";
 
 /**
- * Heads the screen a blocked agent shows, for a pane only that agent ever wrote to (a hire):
- * its menu or question waits there, not in its transcript.
+ * Heads the screen a blocked agent shows, for a hire launched as its pane's own command, whose
+ * screen nothing else can draw on: its menu or question waits there, not in its transcript.
  */
 export const TRANSCRIPT_WAITING_HEADING = "Waiting on input, on its screen now:";
 
 /**
- * Heads the calls a blocked agent the owner started waits on, from its own session. Its screen
- * is never read: an inline TUI repaints only its own rows after a suspend and `fg`, so the
- * owner's shell work can stand on screen above its menu, and no row says who wrote it.
+ * Heads the calls any other blocked agent waits on, from its own session. Its screen is never
+ * read: an agent with a shell under it can be suspended into that shell, and after `fg` an
+ * inline TUI repaints only its own rows, so shell work can stand on screen above its menu, and
+ * no row says who wrote it.
  */
 export const TRANSCRIPT_WAITING_CALL_HEADING = "Waiting on input, for this call in its session:";
 
-/** Said instead when a blocked agent the owner started has no call waiting in its session. */
+/** Said instead when such an agent has no call waiting in its session. */
 export const TRANSCRIPT_WAITING_UNSHOWN =
-  "Waiting on input its session doesn't record (a menu of its own). The owner started this agent, so its screen isn't read and that prompt's text isn't shown.";
+  "Waiting on input its session doesn't record (a menu of its own). This agent's screen isn't read, so that prompt's text isn't shown.";
 
 export const TRANSCRIPT_READ_REFUSED =
   "This agent's own session transcript can't be read now, and its screen is never shown in its place; read it again once it has written to its session.";
@@ -75,7 +76,7 @@ function transcriptWaitingCalls(entries: readonly HerdrTranscriptEntry[]): strin
 
 /**
  * What a blocked agent waits on, for its transcript read: the rows of its screen when `screen`
- * is given (a hire's pane, only its agent's), else the calls open in its session.
+ * is given (a hire that is its pane's root process), else the calls open in its session.
  */
 export function transcriptWaiting(
   entries: readonly HerdrTranscriptEntry[],

@@ -23,7 +23,7 @@ import {
   type HerdrAgentSnapshot,
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
-import { readFleet, readHerdrSessionCensus } from "../src/captain/herdr-census.ts";
+import { occupantIdForHerdrSession, readFleet, readHerdrSessionCensus } from "../src/captain/herdr-census.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import {
   createOperatorService,
@@ -33,6 +33,7 @@ import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
 import {
   TRANSCRIPT_READ_DETAIL,
   TRANSCRIPT_WAITING_CALL_HEADING,
+  TRANSCRIPT_WAITING_HEADING,
 } from "../src/captain/agent-transcript-read.ts";
 import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
@@ -766,6 +767,105 @@ describe("fleet routing", () => {
     }
     // Not one read of its screen or scrollback, in any of that.
     expect(screenReads).toBe(0);
+  });
+
+  it("shows a blocked hire's screen only when it is its pane's own command, never a hire run under a shell (#328)", async () => {
+    // A PC's Claude Code hire, held by Clankie's claim on this exact occupant, read whole.
+    // Launched as the pane's command it is the pane's root process, and nothing else can draw on
+    // its screen. Run under a shell, it can be suspended into that shell like any agent.
+    let underShell = false;
+    let foreground: number[] = [];
+    let history = " Claude Code\n> fix the build";
+    const run: HerdrFleetRun = async (args) => {
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "blocked")] } });
+      if (args[0] === "pane" && args[1] === "process-info")
+        return underShell
+          ? processInfo("w2:p1J", 400, foreground)
+          : processInfo("w2:p1J", 401, [401], "claude");
+      if (args[0] === "pane" && args[1] === "read") return history;
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const jsonl = [
+      { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "Fix the build" } },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call-edit", name: "Edit", input: { file_path: "build.ts" } }],
+        },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    const transcriptHost: AgentTranscriptHost = {
+      id: "pc",
+      list: async () => [
+        {
+          harness: "claude",
+          path: "C:\\s\\session-term_abc.jsonl",
+          size: Buffer.byteLength(jsonl),
+          mtimeMs: 1,
+        },
+      ],
+      readBytes: async (_path, from, count) => {
+        const bytes = Buffer.from(`${jsonl}\n`);
+        return { bytes: bytes.subarray(from, from + count), size: bytes.length };
+      },
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: { list: [pc], run: () => run, remoteWorkspace: async () => false },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [
+        {
+          seatId: "pc/term_abc",
+          owner: { hired: true },
+          occupantId: occupantIdForHerdrSession({
+            source: "herdr:claude",
+            kind: "id",
+            value: "session-term_abc",
+          }),
+        },
+      ],
+      herdrWatches: { stoppedReason: async () => undefined },
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5, transcriptHost })]]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+    const read = async () =>
+      (
+        (await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" })) as {
+          text?: string;
+        }
+      ).text;
+    const transcript = "› Fix the build\n· Edit";
+
+    // Its pane's own command: the menu's rows from its screen.
+    history += "\nAllow edit to build.ts?\n 1. Yes\n 2. No";
+    expect(await read()).toBe(
+      `${transcript}\n\n${TRANSCRIPT_WAITING_HEADING}\n Claude Code\n> fix the build\nAllow edit to build.ts?\n 1. Yes\n 2. No`,
+    );
+
+    // The same hire under a shell, suspended, shell work run, brought back with `fg`, waiting on
+    // a menu it repainted below that work: the call it waits on, from its session, and no screen.
+    underShell = true;
+    foreground = [401];
+    history +=
+      "\n^Z\n[1]+  Stopped  claude\n$ echo HIRE-SECRET\nHIRE-SECRET\n$ fg\nAllow edit to build.ts?\n 1. Yes\n 2. No";
+    const waiting = await read();
+    expect(waiting).toBe(
+      `${transcript}\n\n${TRANSCRIPT_WAITING_CALL_HEADING}\n· Edit {\n  "file_path": "build.ts"\n}`,
+    );
+    expect(waiting).not.toContain("HIRE-SECRET");
   });
 
   it("refuses a transcript read when Herdr's pane list, read again after it, names another session (#328)", async () => {

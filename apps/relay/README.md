@@ -251,8 +251,9 @@ It answers only for a pane with a live coding agent, and only with what that
 agent showed (ADR 0307); its refusal is final. A Claude Code or Codex agent is
 read from the tail of its own session transcript, never its screen, with a
 `note` saying so, plus what it waits on while it waits on input: for an agent
-the owner started, the tool call it waits on, from that session (its screen is
-never read), and for a hire, its screen's visible rows; when that transcript
+the owner started or a hire run under a shell, the tool call it waits on, from
+that session (its screen is never read), and for a hire launched as its pane's
+own command, its screen's visible rows; when that transcript
 can't be read the read is refused (#328). Other harnesses are read from the screen as follows. A pane Clankie hired into (a
 tab he opened for that hire, on this Mac or a linked PC, still held by the
 hired occupant) is read whole, so a quiet hire still shows its last screen. For

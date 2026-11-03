@@ -101,9 +101,14 @@ agent showed.
   never read, not even through the cut above: after a suspend and `fg` an
   inline TUI repaints only its own rows, so the owner's shell work can stand
   on screen above its menu, written after any anchor, and no row says who
-  wrote it. For a hire read whole, whose pane holds only its agent's rows,
-  the visible rows of its screen are added instead, under "Waiting on input,
-  on its screen now:". When no transcript can be read (no
+  wrote it. The same holds for a hire run under a shell (a hire whose pane
+  started a shell first, or a hired session the owner resumed by hand in
+  their own shell): it can be suspended into that shell like any agent, so
+  its waiting text comes from its session too. Only a hire launched as its
+  pane's own command, the pane's root process with no shell under it, has
+  nothing else drawing on its screen; for it the visible rows of its screen
+  are added instead, under "Waiting on input, on its screen now:". When no
+  transcript can be read (no
   session reported, no file yet, an unreachable host), the read is refused;
   the screen is never shown in its place. Other harnesses keep the screen
   read and its cut, and so do the Herdr desktop app's own terminals

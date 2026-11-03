@@ -946,12 +946,14 @@ export function createOperatorService(
         if (TRANSCRIPT_READ_HARNESSES.has(pane.agent)) {
           const transcript =
             pane.session === undefined ? undefined : await ctx.herdrRunner.transcript?.(pane);
-          // A hire's pane holds only its agent's rows, so the menu it waits on is read from its
-          // screen. An agent the owner started never has its screen read, not even under the
-          // screen cut: after a suspend and `fg` an inline TUI repaints only its own rows, so the
-          // owner's shell work can stand on screen above its menu, written after any anchor.
+          // The menu it waits on is read from its screen only when nothing but the agent can
+          // have drawn there: a hire launched as its pane's own command, with no shell under it
+          // to suspend into. Any other agent's screen is never read, not even under the screen
+          // cut: after a suspend and `fg` an inline TUI repaints only its own rows, so shell work
+          // can stand on screen above its menu, and that holds for a hire run under a shell, or
+          // a hired session the owner resumed by hand, as for one the owner started.
           const screen =
-            whole && transcript !== undefined
+            whole && occupant.root && transcript !== undefined
               ? await ctx.herdrRunner.readPane(pane.paneId, "visible", "text")
               : undefined;
           const now = await unchanged();
