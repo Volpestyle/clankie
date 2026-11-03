@@ -4608,7 +4608,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       if (!owner) throw new Error(`No conversation's hire holds pane ${paneId}`);
       const proof =
         allocation && !allocation.confirmed
-          ? await this.projectPolicy?.proof?.(fleet, paneId).catch(() => undefined)
+          ? // allow-swallowed-rejection -- an unreadable proof is no proof; the adoption below refuses.
+            await this.projectPolicy?.proof?.(fleet, paneId).catch(() => undefined)
           : undefined;
       if (
         allocation &&
