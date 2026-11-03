@@ -330,6 +330,21 @@ jobs:
       - name: Share the machine's heavy-work permits
         run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
       - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
+      # Some tests build Rust fixtures (#652). Install the pinned toolchain in
+      # this runner's own tool cache, once per runner, rather than relying on
+      # the runner user's PATH; it never changes that user's rustup default.
+      - name: Pinned Rust
+        run: |
+          set -euo pipefail
+          version=1.88.0
+          export RUSTUP_HOME="$RUNNER_TOOL_CACHE/rustup" CARGO_HOME="$RUNNER_TOOL_CACHE/cargo"
+          toolchain="$RUSTUP_HOME/toolchains/$version-$(uname -m | sed 's/arm64/aarch64/')-apple-darwin"
+          if ! "$toolchain/bin/cargo" --version >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf --retry 3 https://sh.rustup.rs |
+              sh -s -- -y --no-modify-path --profile minimal --default-toolchain "$version"
+          fi
+          "$toolchain/bin/cargo" --version
+          echo "$toolchain/bin" >> "$GITHUB_PATH"
       # Tests spawn the pinned Herdr by name; activity tests decode media with
       # the Mac's own ffmpeg.
       - name: Pinned Herdr
