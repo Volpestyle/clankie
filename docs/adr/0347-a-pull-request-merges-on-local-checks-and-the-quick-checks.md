@@ -48,7 +48,10 @@ clankie-app and clankie-ops). They are not a product rule.
   `main` or a scheduled run becomes a GitHub issue labelled `ci-finding` that
   links the failing run. A workflow files it, one issue per failing test or
   job, and a repeat failure comments on the open issue instead of filing a new
-  one. The lead ranks each by how badly it blocks current goals.
+  one. A self-hosted job that dies before its checkout, as a broken runner does
+  at "Set up runner", can't file its own; a hosted follow-up job files it, as one
+  finding per broken runner, naming it (#551). The lead ranks each by how badly
+  it blocks current goals.
 - **Two queues, worked in parallel.** A lead keeps some workers on the
   `ci-finding` queue alongside workers on the regular issue queue, so neither
   starves the other. It sizes the split to the queues, with at least one worker
