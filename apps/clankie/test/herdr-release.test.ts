@@ -95,3 +95,36 @@ it("retries a transient release download and names the URL when it gives up (#62
   );
   expect(local).toHaveBeenCalledTimes(3);
 });
+
+it("starts on the last verified release when herdr.dev doesn't answer in time (#609)", async () => {
+  const root = await temporary();
+  // A release verified on an earlier start, now due for its six-hourly check.
+  const cached = join(root, "releases/1.2.3/herdr");
+  await installHerdrRelease(cached, manifest, async () => new Response(bytes));
+  await writeFile(join(root, "releases/current.json"), JSON.stringify({ manifest, checkedAt: 0 }));
+  // The release host takes the request and never answers, as a congested network does.
+  const held: import("node:http").ServerResponse[] = [];
+  const server = createServer((_request, response) => void held.push(response));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const slow = vi.fn<typeof fetch>((_url, init) => fetch(`http://127.0.0.1:${port}/latest.json`, init));
+  try {
+    const started = Date.now();
+    const binary = await prepareHerdrBinary({
+      root,
+      fallback: "/missing",
+      listening: false,
+      answers: async () => false,
+      releaseCheckMs: 300,
+      fetch: slow,
+    });
+    // The start waited out its own deadline, not the 60-second request timeout.
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(slow).toHaveBeenCalledTimes(1);
+    expect(binary).toBe(join(root, "bin/herdr"));
+    expect(await readFile(binary)).toEqual(bytes);
+  } finally {
+    for (const response of held) response.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
