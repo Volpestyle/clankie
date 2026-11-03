@@ -160,6 +160,8 @@ it("a hire whose brief closes an issue, and an open draft pull request that clos
     number,
     draft,
     body,
+    author_association: "MEMBER",
+    head: { repo: { full_name: "fixture/pond" } },
     html_url: `https://github.com/fixture/pond/pull/${String(number)}`,
   });
   const github = createServer((request, response) => {

@@ -344,7 +344,8 @@ export interface DraftHoldSettlement {
   readonly pull: string;
   readonly issue?: string;
   /**
-   * `requeued`: moved to Todo; `held`/`refused`: posting stopped it (ADR 0302, 0308);
+   * `requeued`: moved to Todo; `held`/`refused`: posting stopped it (ADR 0302, 0308), or
+   * the tracker takes no comment;
    * `unchanged`: not In Progress or held by someone else; `still_listed` and
    * `unavailable` are looked at again next round.
    */
@@ -2749,6 +2750,22 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
   };
+  /**
+   * Only a draft from the repo's own branches, by someone with a say in it, holds an issue.
+   * Anyone can open a draft that says "Closes #N" on a public repo; one from a fork or a
+   * stranger must not mark the issue taken, nor later make Clankie requeue and comment on
+   * it (#541 review).
+   */
+  function trustedDraft(
+    pull: { author_association?: string; head?: { repo?: { full_name?: string } | null } },
+    slug: string,
+  ): boolean {
+    return (
+      pull.head?.repo?.full_name?.toLowerCase() === slug &&
+      ["OWNER", "MEMBER", "COLLABORATOR"].includes(pull.author_association ?? "")
+    );
+  }
+
   /** Remembers which draft pull requests held which items, to notice when one closes (#541). */
   function noteDraftHolds(repo: string, items: readonly WorkItem[]): void {
     for (const item of items)
@@ -2848,9 +2865,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         true,
       );
     } catch (error) {
+      // A tracker that takes no comment refuses the update as invalid: settled, never retried.
       if (
         error instanceof WorkRequestError &&
-        (error.code === "posting_refused" || error.code === "posting_held")
+        (error.code === "posting_refused" || error.code === "posting_held" || error.code === "invalid")
       )
         return {
           pull: url,
@@ -2886,9 +2904,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             draft?: boolean;
             body?: string | null;
             html_url?: string;
+            author_association?: string;
+            head?: { repo?: { full_name?: string } | null };
           }[];
           return pulls.flatMap((pull) =>
-            pull.draft === true && typeof pull.html_url === "string"
+            pull.draft === true && typeof pull.html_url === "string" && trustedDraft(pull, slug)
               ? closedIssues(pull.body ?? "", slug).map((itemId) => ({ itemId, seatId: pull.html_url! }))
               : [],
           );

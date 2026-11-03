@@ -10099,7 +10099,9 @@ only while a live agent (not done, stopped or gone) holds it this way. Its
 its brief names: an issue URL, `owner/repo#N`, or "Closes #N" in a checkout whose
 origin is on GitHub. Work reads also count an open draft pull request that closes
 an issue as holding it, with the pull request's URL in `heldBy`; `clankie metrics
---issues` counts only agents. The service remembers the drafts its reads saw holding
+--issues` counts only agents. Only a draft from the repo's own branches whose
+author is its owner, a member or a collaborator holds an issue; a fork's or a
+stranger's never does. The service remembers the drafts its reads saw holding
 issues and looks at them again every ten minutes. When one has closed unmerged, each issue
 it held that the tracker still calls in progress, and that nothing else holds, goes back
 to Todo through the same posting check as Clankie's own work updates (#541). An issue the tracker calls in progress with no live

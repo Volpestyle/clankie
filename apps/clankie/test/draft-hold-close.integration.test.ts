@@ -44,7 +44,7 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
 
   // The stand-in forge: issues the tracker calls in progress, and the drafts closing them.
   const issues = new Map(
-    [8, 9, 11, 12].map((number) => [
+    [8, 9, 11, 12, 13].map((number) => [
       number,
       {
         id: 9000 + number,
@@ -68,7 +68,9 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       { number: 23, body: "Closes #11" },
       // #24 will close unmerged while Watch is on.
       { number: 24, body: "Closes #12" },
-    ].map(({ number, body }) => [
+      // An outsider's draft from a fork names #13: it must never hold it, nor requeue it.
+      { number: 25, body: "Closes #13", fork: "outsider/pond", association: "NONE" },
+    ].map(({ number, body, fork, association }) => [
       number,
       {
         number,
@@ -76,6 +78,8 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
         draft: true,
         state: "open",
         merged: false,
+        author_association: association ?? "MEMBER",
+        head: { repo: { full_name: fork ?? "fixture/pond" } },
         html_url: `https://github.com/fixture/pond/pull/${String(number)}`,
       },
     ]),
@@ -162,6 +166,8 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       "Issue 9": ["https://github.com/fixture/pond/pull/21", "https://github.com/fixture/pond/pull/22"],
       "Issue 11": ["https://github.com/fixture/pond/pull/23"],
       "Issue 12": ["https://github.com/fixture/pond/pull/24"],
+      // The tracker says in progress, but no one with a say in the repo holds it.
+      "Issue 13": "todo",
     });
     // Still drafts: a round changes nothing.
     expect(await before.reconcileDraftHolds()).toEqual([]);
@@ -169,6 +175,7 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
     pulls.set(20, { ...pulls.get(20)!, state: "closed" });
     pulls.set(22, { ...pulls.get(22)!, state: "closed" });
     pulls.set(23, { ...pulls.get(23)!, state: "closed", merged: true });
+    pulls.set(25, { ...pulls.get(25)!, state: "closed" });
     // GitHub's open-pull listing is read through a one-minute snapshot.
     now += 61_000;
 
@@ -186,7 +193,8 @@ it("puts an issue back to Todo when the draft pull request holding it closes unm
       ]),
     );
     expect(settled).toHaveLength(2);
-    // Only #8 was written: its in-progress label is gone, and nothing else changed.
+    // Only #8 was written: its in-progress label is gone, and nothing else changed; the
+    // outsider's closed draft was never noted, so #13 is untouched.
     expect(patches.map((patch) => patch.issue)).toEqual([8]);
     expect(patches[0]!.body.labels).not.toContain(IN_PROGRESS);
     // With a comment on the issue saying why, in the same write.

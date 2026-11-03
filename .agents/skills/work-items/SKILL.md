@@ -32,11 +32,15 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | What happened on it            | `clankie work activity ID` (comments, state changes)          |
 | New item                       | `clankie work create "Title" --criterion "..." --owner NAME`  |
 | Progress                       | `clankie work update ID --status in_progress --check 1`       |
+| Say why, on the issue          | `clankie work update ID --status todo --comment "..."`        |
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
 | Move open items to issue files | `clankie work export --project P --to markdown [--dry-run]`   |
 | Review a local Git change      | `clankie work review-diff BASE HEAD` (read-only, two commits) |
 | Review a supplied patch file   | `clankie work review-patch FILE` (patch claims only, no Git)  |
+
+`--comment` posts publicly on the GitHub issue, through the same posting check
+as the change; other trackers refuse it.
 
 Statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `canceled`.
 Label an item with a role name (`designer`, `builder`, …) to put it on that
