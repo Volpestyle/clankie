@@ -4,6 +4,8 @@ export interface HarnessInstallConsentContext {
   profile: string;
   source: string;
   managed: boolean;
+  /** Projects whose project-scoped copy the removal uninstalls from inside each one. */
+  projects?: readonly string[];
   sourceSetup?: { command: string; args: readonly string[] };
 }
 export interface HarnessInstallResult {
@@ -40,6 +42,9 @@ export function installHarnessBridges(options: {
   prepareSkills?(workerRoot: string): Promise<void>;
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;
+
+/** The opening every old Claude worker copy removal prompt shares. */
+export const OLD_CLAUDE_WORKER_REMOVAL: string;
 
 export function codexSourceSetupCommand(
   script: string,

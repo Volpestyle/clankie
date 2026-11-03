@@ -10359,7 +10359,10 @@ is left alone while that source still sets `enabledPlugins["clankie-worker@clank
 the refusal names that entry, and setup fails if a native step changes that
 file. A source that declares `extraKnownMarketplaces.clankie` (for the operator
 plugin) keeps the marketplace while the worker copy is removed. A project whose
-own `.claude` settings still enable the copy keeps its project-scoped entry. Refusals include each profile's setup result.
+own `.claude` settings still enable the copy keeps its project-scoped entry. The
+consent prompt names every project the removal runs in. `clankie doctor` asks for
+`clankie update` only where it clears a copy; for a copy a settings entry keeps,
+it names that file instead. Refusals include each profile's setup result.
 Preparation uses native plugin installation for
 Codex and preserves managed Codex configuration. A source-managed Codex config needs the owning
 setup script on that remote machine. Select it explicitly; Clankie never writes

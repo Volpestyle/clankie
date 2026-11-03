@@ -1,6 +1,9 @@
 import { parseHerdrAgentList, recoverLocalCodexSession } from "../../clankie/src/captain/herdr-census.ts";
 import { inspectLiveHarnessBridges } from "../../../integrations/claude-plugin/worker/bin/harness-live.mjs";
-import { inspectHarnessProfiles } from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
+import {
+  inspectHarnessProfiles,
+  oldClaudeWorker,
+} from "../../../integrations/claude-plugin/worker/bin/harness-status.mjs";
 import { readFile, realpath, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -295,6 +298,34 @@ export async function inspectHarnessBridges(
   } catch {
     /* OpenCode isn't installed; nothing to message. */
   }
+  // Claude hires load the worker from Clankie's own files (ADR 0317); an older
+  // installed copy still loads in hand-started sessions, so doctor names it. It asks
+  // for `clankie update` only where that clears the copy, and otherwise names the
+  // settings entry whose owner keeps it.
+  const oldClaudeCopies = await Promise.all(
+    profiles.claude
+      .filter((profile) => profile.installed)
+      .map(async (profile) => {
+        const old = await oldClaudeWorker(profile.profile).catch(() => undefined);
+        const update = `clankie update, or clankie harness install --refresh-linked`;
+        const copy = `the old clankie-worker ${profile.version ?? "unknown"} copy`;
+        if (old === undefined) return [`Remove ${copy} from ${profile.profile}: ${update}`];
+        const source = old.keptBy.find((entry) => entry.scope === "profile");
+        if (source)
+          return [
+            `${profile.profile} keeps ${copy} while ${source.settings} enables it: remove enabledPlugins["clankie-worker@clankie"] there through its owner, then ${update}`,
+          ];
+        return [
+          ...(old.worker || old.projects.length > 0
+            ? [`Remove ${copy} from ${profile.profile}: ${update}`]
+            : []),
+          ...old.keptBy.map(
+            (entry) =>
+              `Project ${entry.project} keeps ${copy} from ${profile.profile} while ${entry.settings} enables it: remove enabledPlugins["clankie-worker@clankie"] there, then ${update}`,
+          ),
+        ];
+      }),
+  );
   const openCode2 = openCodeVersion !== undefined && Number(openCodeVersion.split(".")[0]) >= 2;
   const openCode = openCode2 ? await inspectOpenCodeMessaging(env) : undefined;
   return {
@@ -338,15 +369,7 @@ export async function inspectHarnessBridges(
             "Register clankie mcp --fleet through the source that owns Codex configSource; preserve generated configuration symlinks.",
           ]
         : []),
-      // Claude hires load the worker from Clankie's own files (ADR 0317); an older
-      // installed copy still loads in hand-started sessions, so doctor names it.
-      // `clankie update` removes it from every profile; --refresh-linked does the same now.
-      ...profiles.claude
-        .filter((profile) => profile.installed)
-        .map(
-          (profile) =>
-            `Remove the old clankie-worker ${profile.version ?? "unknown"} copy from ${profile.profile}: clankie update, or clankie harness install --refresh-linked`,
-        ),
+      ...oldClaudeCopies.flat(),
       ...(profiles.codex.pluginInstalled && profiles.codex.versionMatches === false
         ? [
             `Update the Codex clankie-worker plugin ${profiles.codex.version ?? "unknown"} to ${profiles.codex.expectedVersion}: clankie harness install`,

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Static registration evidence only. This report never proves a live native occupant.
-import { access, readFile, realpath, readdir, lstat } from "node:fs/promises";
+import { access, readFile, realpath, readdir, lstat, readlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { nativeCodexExecutable } from "./native-codex.mjs";
@@ -17,6 +17,93 @@ const exists = async (path) => {
     return false;
   }
 };
+
+const OLD_WORKER = "clankie-worker@clankie";
+/** A settings file whose header says a generator or another source owns it. */
+const managedSettingsText = (text) =>
+  /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
+/** Whether a settings file still enables the old worker; only its owner may change that. */
+async function declaresOldWorker(path) {
+  const text = await readFile(path, "utf8").catch(() => undefined);
+  if (text === undefined) return false;
+  try {
+    return JSON.parse(text).enabledPlugins?.[OLD_WORKER] !== undefined;
+  } catch {
+    return false;
+  }
+}
+/**
+ * What an older setup left in a Claude profile (ADR 0317): Clankie's installed
+ * worker at user scope and at project scope for each project it was installed
+ * in, and the `clankie` marketplace when no other Clankie plugin comes from it.
+ * `worker`, `projects` and `marketplace` are what the cleanup removes; `keptBy`
+ * names each settings file that keeps a copy until its owner drops the entry.
+ * The cleanup and doctor both read this, so doctor never asks for a removal the
+ * cleanup skips. A missing project directory has nothing left to clear.
+ */
+export async function oldClaudeWorker(profile) {
+  const known = await json(join(profile, "plugins", "known_marketplaces.json")).catch(() => ({}));
+  const installed = await json(join(profile, "plugins", "installed_plugins.json")).catch(() => ({}));
+  const plugins = installed.plugins ?? {};
+  const entries = Array.isArray(plugins[OLD_WORKER]) ? plugins[OLD_WORKER] : [];
+  const worker = entries.some((entry) => entry.scope === "user");
+  const recorded = [
+    ...new Set(
+      entries.flatMap((entry) =>
+        entry.scope === "project" && typeof entry.projectPath === "string" && isAbsolute(entry.projectPath)
+          ? [entry.projectPath]
+          : [],
+      ),
+    ),
+  ];
+  const otherFromClankie = Object.keys(plugins).some((id) => id !== OLD_WORKER && id.endsWith("@clankie"));
+  let marketplace = Boolean(known.clankie) && !otherFromClankie;
+  const found = worker || marketplace || recorded.length > 0;
+  if (!found) return { found, worker, projects: [], marketplace, keptBy: [], settings: undefined };
+  const config = join(profile, "settings.json");
+  // A profile without settings is the only expected miss; anything else fails the reading.
+  const missing = (error) => {
+    if (error?.code === "ENOENT") return undefined;
+    throw error;
+  };
+  const source = await realpath(config).catch(() => config);
+  const text = await readFile(config, "utf8").catch(missing);
+  const wasSymlink = (await lstat(config).catch(missing))?.isSymbolicLink() ?? false;
+  const link = wasSymlink ? await readlink(config) : undefined;
+  const managed = wasSymlink || managedSettingsText(text ?? "");
+  const keptBy = [];
+  if (managed) {
+    let declared = {};
+    try {
+      declared = JSON.parse(text ?? "{}");
+    } catch {
+      /* An unreadable source declares nothing this setup can see. */
+    }
+    if (declared.enabledPlugins?.[OLD_WORKER] !== undefined)
+      keptBy.push({ scope: "profile", settings: source });
+    // A source that still declares the clankie marketplace keeps it (the operator
+    // plugin may come from it); Claude would only register it again.
+    if (declared.extraKnownMarketplaces?.clankie !== undefined) marketplace = false;
+  }
+  const projects = [];
+  for (const project of recorded) {
+    if (!(await lstat(project).catch(() => undefined))?.isDirectory()) continue;
+    const settings = [];
+    for (const name of ["settings.json", "settings.local.json"])
+      if (await declaresOldWorker(join(project, ".claude", name)))
+        settings.push(join(project, ".claude", name));
+    if (settings.length === 0) projects.push(project);
+    else keptBy.push(...settings.map((path) => ({ scope: "project", project, settings: path })));
+  }
+  return {
+    found,
+    worker,
+    projects,
+    marketplace,
+    keptBy,
+    settings: { config, source, text, wasSymlink, link, managed },
+  };
+}
 
 export async function claudeProfileDirectories(env = process.env) {
   const home = env.HOME || env.USERPROFILE || homedir();

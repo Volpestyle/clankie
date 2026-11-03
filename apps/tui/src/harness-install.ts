@@ -3,7 +3,10 @@ import { join } from "node:path";
 import type { HarnessInstallConsentContext } from "../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
 
 export { installHarnessBridges } from "../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
-export { codexSourceSetupCommand } from "../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
+export {
+  codexSourceSetupCommand,
+  OLD_CLAUDE_WORKER_REMOVAL,
+} from "../../../integrations/claude-plugin/worker/bin/harness-install.mjs";
 
 /** Automatic setup may reuse exact prior source consent; it cannot authorize a new source command. */
 export async function automaticCodexConsent(

@@ -1,6 +1,6 @@
 import { nativeCodexExecutable } from "./native-codex.mjs";
 import { prepareWorkerSkill } from "./skill-bundle.mjs";
-import { claudeProfileDirectories, inspectHarnessProfiles } from "./harness-status.mjs";
+import { claudeProfileDirectories, inspectHarnessProfiles, oldClaudeWorker } from "./harness-status.mjs";
 import { execFile } from "node:child_process";
 import {
   appendFile,
@@ -17,8 +17,6 @@ import { homedir } from "node:os";
 import { isAbsolute, join, win32, posix } from "node:path";
 import { promisify } from "node:util";
 const exec = promisify(execFile);
-const managedText = (text) =>
-  /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 async function linkedProfiles(home) {
   const text = await readFile(join(home, ".clankie", "harness-links.jsonl"), "utf8").catch(() => "");
@@ -84,89 +82,39 @@ async function refreshCodexMarketplace(execute, marketplace) {
   await execute("codex", ["plugin", "marketplace", "add", marketplace]);
 }
 const WORKER = "clankie-worker@clankie";
-/**
- * What an older setup left in a Claude profile: Clankie's installed worker (at
- * user scope, and at project scope for each project it was installed in) and,
- * when no other Clankie plugin is installed from it, the `clankie` marketplace.
- * Claude hires load the worker from Clankie's own files (ADR 0317).
- */
-async function legacyClaudeWorker(profile) {
-  const known = await json(join(profile, "plugins", "known_marketplaces.json")).catch(() => ({}));
-  const installed = await json(join(profile, "plugins", "installed_plugins.json")).catch(() => ({}));
-  const plugins = installed.plugins ?? {};
-  const entries = Array.isArray(plugins[WORKER]) ? plugins[WORKER] : [];
-  const worker = entries.some((entry) => entry.scope === "user");
-  const projects = [
-    ...new Set(
-      entries.flatMap((entry) =>
-        entry.scope === "project" && typeof entry.projectPath === "string" && isAbsolute(entry.projectPath)
-          ? [entry.projectPath]
-          : [],
-      ),
-    ),
-  ];
-  const otherFromClankie = Object.keys(plugins).some((id) => id !== WORKER && id.endsWith("@clankie"));
-  return { worker, projects, marketplace: Boolean(known.clankie) && !otherFromClankie };
-}
-/** Settings that declare the old worker, which only their owner may change. */
-async function declaredWorker(path) {
-  const text = await readFile(path, "utf8").catch(() => undefined);
-  if (text === undefined) return false;
-  try {
-    return JSON.parse(text).enabledPlugins?.[WORKER] !== undefined;
-  } catch {
-    return false;
-  }
-}
+/** Every old-copy removal prompt starts with this; the setup command's consent matches it. */
+export const OLD_CLAUDE_WORKER_REMOVAL = `Remove the old ${WORKER} copy`;
 /** Remove the old worker copy from one profile; undefined when there is nothing to remove. */
 async function removeClaudeWorker({ profile, execute, consent }) {
-  const legacy = await legacyClaudeWorker(profile);
-  if (!legacy.worker && !legacy.marketplace && legacy.projects.length === 0) return undefined;
+  const old = await oldClaudeWorker(profile);
+  if (!old.found) return undefined;
   try {
     await execute("claude", ["--version"]);
   } catch {
     return { status: "absent", detail: "Harness executable unavailable on this machine." };
   }
-  const config = join(profile, "settings.json");
-  // A profile without settings is the only expected miss; anything else fails the removal.
+  const { config, source, text: configBefore, wasSymlink, link: linkBefore, managed } = old.settings;
   const missing = (error) => {
     if (error?.code === "ENOENT") return undefined;
     throw error;
   };
-  const source = await realpath(config).catch(() => config);
-  const configBefore = await readFile(config, "utf8").catch(missing);
-  const wasSymlink = (await lstat(config).catch(missing))?.isSymbolicLink() ?? false;
-  const linkBefore = wasSymlink ? await readlink(config) : undefined;
-  const managed = wasSymlink || managedText(configBefore ?? "");
+  if (old.keptBy.some((entry) => entry.scope === "profile"))
+    return {
+      status: "source-manager-required",
+      detail: `source-managed: ${profile} still declares the old worker copy in ${source}. Remove enabledPlugins["${WORKER}"] there through its owner, then run setup again to clear this profile's cached copy; preserve the configuration link. Claude hires load the worker from Clankie's own files (ADR 0317).`,
+    };
+  const { worker, projects, marketplace } = old;
   // Project-scoped copies whose own project settings still declare the worker stay
-  // until that project's owner drops the entry; a missing project has nothing to clear.
-  const projects = [];
-  for (const project of legacy.projects) {
-    if (!(await lstat(project).catch(() => undefined))?.isDirectory()) continue;
-    const declared = await Promise.all(
-      ["settings.json", "settings.local.json"].map((name) => declaredWorker(join(project, ".claude", name))),
-    );
-    if (!declared.some(Boolean)) projects.push(project);
-  }
-  if (managed) {
-    let declared = {};
-    try {
-      declared = JSON.parse(configBefore ?? "{}");
-    } catch {
-      /* An unreadable source declares nothing this setup can see. */
-    }
-    if (declared.enabledPlugins?.[WORKER] !== undefined)
-      return {
-        status: "source-manager-required",
-        detail: `source-managed: ${profile} still declares the old worker copy in ${source}. Remove enabledPlugins["${WORKER}"] there through its owner, then run setup again to clear this profile's cached copy; preserve the configuration link. Claude hires load the worker from Clankie's own files (ADR 0317).`,
-      };
-    // A source that still declares the clankie marketplace keeps it (the operator
-    // plugin may come from it); Claude would only register it again.
-    if (declared.extraKnownMarketplaces?.clankie !== undefined) legacy.marketplace = false;
-  }
-  if (!legacy.worker && !legacy.marketplace && projects.length === 0) return undefined;
-  const detail = `Remove the old ${WORKER} copy${legacy.marketplace ? " and its clankie marketplace" : ""} from profile ${profile}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
-  if (!(await consent("claude", detail, { profile, source, managed }))) return { status: "declined", detail };
+  // until that project's owner drops the entry.
+  const kept = old.keptBy.map((entry) => entry.settings);
+  const keptNote = kept.length
+    ? ` Kept the project copies that ${kept.join(", ")} still enable${kept.length === 1 ? "s" : ""}; remove enabledPlugins["${WORKER}"] there to let setup clear them.`
+    : "";
+  if (!worker && !marketplace && projects.length === 0) return undefined;
+  const where = `profile ${profile}${projects.length ? ` and from project${projects.length === 1 ? "" : "s"} ${projects.join(", ")}` : ""}`;
+  const detail = `${OLD_CLAUDE_WORKER_REMOVAL}${marketplace ? " and its clankie marketplace" : ""} from ${where}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
+  if (!(await consent("claude", detail, { profile, source, managed, projects })))
+    return { status: "declined", detail };
   const unchanged = async () => {
     if (
       managed &&
@@ -180,19 +128,19 @@ async function removeClaudeWorker({ profile, execute, consent }) {
   };
   try {
     await unchanged();
-    if (legacy.worker) await execute("claude", ["plugin", "uninstall", WORKER, "--scope", "user"]);
+    if (worker) await execute("claude", ["plugin", "uninstall", WORKER, "--scope", "user"]);
     await unchanged();
     // Claude removes a project-scoped plugin only from inside that project.
     for (const project of projects) {
       await execute("claude", ["plugin", "uninstall", WORKER, "--scope", "project"], project);
       await unchanged();
     }
-    if (legacy.marketplace) await execute("claude", ["plugin", "marketplace", "remove", "clankie"]);
+    if (marketplace) await execute("claude", ["plugin", "marketplace", "remove", "clankie"]);
     await unchanged();
-    const after = await legacyClaudeWorker(profile);
+    const after = await oldClaudeWorker(profile);
     if (
       after.worker ||
-      (legacy.marketplace && after.marketplace) ||
+      (marketplace && after.marketplace) ||
       projects.some((project) => after.projects.includes(project))
     )
       throw new Error(
@@ -200,8 +148,7 @@ async function removeClaudeWorker({ profile, execute, consent }) {
       );
     return {
       status: "removed",
-      detail:
-        "Removed the old worker copy. Claude hires load the worker from Clankie's own files; a hand-started session drops the old copy when it restarts.",
+      detail: `Removed the old worker copy. Claude hires load the worker from Clankie's own files; a hand-started session drops the old copy when it restarts.${keptNote}`,
     };
   } catch (error) {
     return { status: "failed", detail: error instanceof Error ? error.message : String(error) };

@@ -5,7 +5,12 @@ import { createInterface } from "node:readline/promises";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { refreshLinkedHarnesses, type HarnessRefreshResult } from "../harness-refresh.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
-import { automaticCodexConsent, codexSourceSetupCommand, installHarnessBridges } from "../harness-install.ts";
+import {
+  automaticCodexConsent,
+  codexSourceSetupCommand,
+  installHarnessBridges,
+  OLD_CLAUDE_WORKER_REMOVAL,
+} from "../harness-install.ts";
 import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
@@ -112,11 +117,7 @@ export async function runHarnessCommand(
         (approved || (await automaticCodexConsent(detail, context, marketplace)))
       );
     // Claude needs no install (ADR 0317); setup only removes an older worker copy from the selected profile.
-    return (
-      claudeExists &&
-      context?.profile === claudeProfile &&
-      detail.startsWith("Remove the old clankie-worker@clankie copy")
-    );
+    return claudeExists && context?.profile === claudeProfile && detail.startsWith(OLD_CLAUDE_WORKER_REMOVAL);
   };
   if (refreshLinked) {
     const refreshSettings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env));
