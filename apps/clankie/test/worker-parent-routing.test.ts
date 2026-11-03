@@ -35,6 +35,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
+import { HireOwners } from "../src/captain/hire-owners.ts";
 import { LocalFleetLink, type LocalFleetIdentity } from "../src/local-fleet-link.ts";
 import type { ProjectProcessProof } from "../src/project-process-proof.ts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
@@ -1838,3 +1839,79 @@ it.each([false, true])(
     expect(f.nativeSends).toEqual([]);
   },
 );
+
+it("a lead's message held for its worker's next turn reaches the hook marked as from its lead (#442)", async () => {
+  const f = await fixture({ captainApi: true });
+  const worker = f.rows[1]!;
+  const seatId = f.pane(worker.terminal_id);
+  await hook(f.service, worker);
+  const lead = await conversation(f.service);
+  const tool = (await f.service.captain.laneToolBank("operator", lead)).tools.find(
+    (candidate) => candidate.name === "message_seat",
+  )!;
+  // No channel poll is live, so the message waits for the worker's next prompt.
+  const result = await tool.call({ seat: seatId, message: "Switch to the other issue" });
+  const content = result.content.find((part) => part.type === "text");
+  expect(JSON.parse(content?.type === "text" ? content.text : "null")).toMatchObject({
+    deliveryStage: "stored",
+  });
+  const taken = (await hook(f.service, worker, "UserPromptSubmit")) as { additionalContext?: string };
+  const context = taken.additionalContext ?? "";
+  expect(context).toMatch(/^Message from your lead \(sender="lead", [0-9a-f-]{36}\): "/u);
+  // The body is one JSON string: the lead header and text, with no line of its own.
+  expect(context).not.toContain("\n");
+  expect(JSON.parse(context.slice(context.indexOf(": ") + 2))).toMatch(
+    /^\[Lead message #1 from conversation [^\n]+\]\n\nSwitch to the other issue$/u,
+  );
+});
+
+it("next-turn mail from a conversation that doesn't lead a hired worker carries no lead mark; its own lead's does (#442)", async () => {
+  const f = await fixture({ captainApi: true });
+  const worker = f.rows[1]!;
+  const seatId = f.pane(worker.terminal_id);
+  const lead = await conversation(f.service);
+  const other = await conversation(f.service);
+  // The worker is the lead's own hire, recorded as the hire path records it, then the service restarts.
+  await f.service.close();
+  new HireOwners(join(f.root, "herdr-watches.json.owners.json")).bind(
+    worker.pane_id,
+    { conversationId: lead },
+    worker.terminal_id,
+    undefined,
+    occupantIdForHerdrSession(worker.agent_session),
+    JSON.stringify(["local", "claude", worker.agent_session.value]),
+  );
+  const service = await f.open();
+  await hook(service, worker);
+  // The restarted service knows the seat, and its owner, once its census lists it.
+  await expect
+    .poll(async () => {
+      const roster = OperatorConversationServiceResultSchema.parse(
+        await service.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" }),
+      );
+      if (roster.op !== "roster") throw new Error("Wrong roster result");
+      return roster.seats.find((seat) => seat.seatId === seatId)?.owner;
+    })
+    .toEqual({ conversationId: lead, hired: true });
+  const send = async (conversationId: string, text: string) => {
+    const tool = (await service.captain.laneToolBank("operator", conversationId)).tools.find(
+      (candidate) => candidate.name === "message_seat",
+    )!;
+    const result = await tool.call({ seat: seatId, message: text });
+    const content = result.content.find((part) => part.type === "text");
+    return JSON.parse(content?.type === "text" ? content.text : "null");
+  };
+  const first = await send(other, "Also check the docs");
+  expect(first, JSON.stringify(first)).toMatchObject({
+    deliveryStage: "stored",
+    ownerConversationId: lead,
+  });
+  expect(await send(lead, "Switch to the other issue")).toMatchObject({ deliveryStage: "stored" });
+  const taken = (await hook(service, worker, "UserPromptSubmit")) as { additionalContext?: string };
+  const lines = (taken.additionalContext ?? "").split("\n").filter(Boolean);
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toMatch(/^Message from Clankie \([0-9a-f-]{36}\): "/u);
+  expect(lines[0]).toContain("Also check the docs");
+  expect(lines[1]).toMatch(/^Message from your lead \(sender="lead", [0-9a-f-]{36}\): "/u);
+  expect(lines[1]).toContain("Switch to the other issue");
+});
