@@ -366,7 +366,9 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
           deliveryStage: "rejected",
           detail: "Peer authority changed before mailbox storage; nothing was sent.",
         };
-      let receipt = nextTurnMailboxes.store(seatId, ctx.inboundBinding(agent), message);
+      let receipt = nextTurnMailboxes.store(seatId, ctx.inboundBinding(agent), message, {
+        fromLead: context.fromLead === true,
+      });
       if (receipt.deliveryStage === "stored" && agent?.agent === "claude")
         receipt = {
           ...receipt,

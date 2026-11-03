@@ -22,6 +22,8 @@ const InboxSchema = z
             expiresAt: z.number().int().nonnegative(),
             taken: z.boolean(),
             delivered: z.boolean().optional(),
+            /** Service-proven: the worker's own lead sent it (#442). Never read from the text. */
+            fromLead: z.literal(true).optional(),
           })
           .strict(),
       )
@@ -189,7 +191,12 @@ export class NextTurnMailbox {
     return this.store(seat, binding, text);
   }
 
-  store(seat: string, binding: string | undefined, text: string): FleetSeatDelivery {
+  store(
+    seat: string,
+    binding: string | undefined,
+    text: string,
+    options: { readonly fromLead?: boolean } = {},
+  ): FleetSeatDelivery {
     if (this.unreadable) return this.unreadableReceipt();
     const inbox = this.inboxes[seat];
     if (!binding || inbox?.binding !== binding || inbox.expiresAt <= this.now())
@@ -229,6 +236,7 @@ export class NextTurnMailbox {
       text,
       expiresAt: this.now() + TTL_MS,
       taken: false,
+      ...(options.fromLead === true ? { fromLead: true as const } : {}),
     };
     if (!existing) inbox.mail.push(mail);
     this.save();
@@ -250,8 +258,13 @@ export class NextTurnMailbox {
     for (const mail of pending) mail.taken = true;
     this.save();
     return {
+      // The sender line is the service's; the body is one JSON string, so no text inside it
+      // can start a line of its own and pass for another message's sender (#442).
       additionalContext: pending
-        .map((mail) => `Message from Clankie (${mail.id}):\n${mail.text}`)
+        .map(
+          (mail) =>
+            `${mail.fromLead ? `Message from your lead (sender="lead", ${mail.id})` : `Message from Clankie (${mail.id})`}: ${JSON.stringify(mail.text)}`,
+        )
         .join("\n\n"),
       messageIds: pending.map((mail) => mail.id),
     };

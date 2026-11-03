@@ -1838,3 +1838,28 @@ it.each([false, true])(
     expect(f.nativeSends).toEqual([]);
   },
 );
+
+it("a lead's message held for its worker's next turn reaches the hook marked as from its lead (#442)", async () => {
+  const f = await fixture({ captainApi: true });
+  const worker = f.rows[1]!;
+  const seatId = f.pane(worker.terminal_id);
+  await hook(f.service, worker);
+  const lead = await conversation(f.service);
+  const tool = (await f.service.captain.laneToolBank("operator", lead)).tools.find(
+    (candidate) => candidate.name === "message_seat",
+  )!;
+  // No channel poll is live, so the message waits for the worker's next prompt.
+  const result = await tool.call({ seat: seatId, message: "Switch to the other issue" });
+  const content = result.content.find((part) => part.type === "text");
+  expect(JSON.parse(content?.type === "text" ? content.text : "null")).toMatchObject({
+    deliveryStage: "stored",
+  });
+  const taken = (await hook(f.service, worker, "UserPromptSubmit")) as { additionalContext?: string };
+  const context = taken.additionalContext ?? "";
+  expect(context).toMatch(/^Message from your lead \(sender="lead", [0-9a-f-]{36}\): "/u);
+  // The body is one JSON string: the lead header and text, with no line of its own.
+  expect(context).not.toContain("\n");
+  expect(JSON.parse(context.slice(context.indexOf(": ") + 2))).toMatch(
+    /^\[Lead message #1 from conversation [^\n]+\]\n\nSwitch to the other issue$/u,
+  );
+});
