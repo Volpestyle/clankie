@@ -319,6 +319,20 @@ runs the real service against a model that answers 503. It covers three cases:
 
 A follow-up joined during an outage is not covered by a test.
 
+### Media generation (2026-11-03, [#368](https://github.com/Volpestyle/clankie/issues/368))
+
+`generate_image` and `generate_video` are `never` replays. A picture finished before
+the restart is in the journal with its media capture. The resumed turn takes it from
+there and attaches it to the reply, and the provider is not asked again. A render
+the restart interrupts surfaces as "possibly ran" and is never requested again.
+[`durable-pi-media.integration.test.ts`](../../apps/clankie/test/durable-pi-media.integration.test.ts)
+proves both with the real service killed and started again. Its image provider is a
+loopback stand-in reached through `CLANKIE_TEST_MEDIA_API`, a test seam in
+`media-extension.ts`. The seam is honoured only when both `CLANKIE_SCRATCH=1` and
+`NODE_ENV=test`, and the product code refuses any address that is not plain-http
+loopback. Any other run ignores it. A video render that comes back `pending` keeps
+rendering outside the turn, and that path is not covered.
+
 ### A revoked model credential (2026-11-03, [#368](https://github.com/Volpestyle/clankie/issues/368))
 
 A provider that refuses the credential (401) is not an outage: Pi does not retry it
@@ -340,7 +354,7 @@ Before enabling more lanes:
    API and gateway still need an approved private test destination.
 2. Exercise interrupted model/read, several tools in one round,
    media capture and changed/revoked room grants with real dependencies (changed
-   grants and a revoked model credential are done, above). Preserve
+   grants, a revoked model credential and image capture are done, above). Preserve
    corrupted/missing-state refusals. Audit connected reads individually rather
    than broadly blessing a transport.
 3. Done: retention and compaction, and provider outages (above). Keep the original request and uncertain intents until
