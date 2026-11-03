@@ -23,6 +23,20 @@ const RECENT_DAYS = 7;
 const CLASSIFY_BEFORE_MS = 14 * 24 * 60 * 60_000;
 /** A record never reads further back than this, however old its last milestone. */
 const MAX_READ_MS = 30 * 24 * 60 * 60_000;
+/** A correction made late in the day still gets at least this long before it can be unresolved. */
+const MIN_GRACE_MS = 4 * 60 * 60_000;
+
+/**
+ * When a correction may first be called unresolved (#353): the rest of the local day it was
+ * recorded on, and never less than four hours, so the staffed work has time to land.
+ */
+function correctionGraceUntil(recordedAt: string, timeZone: string): string {
+  const at = Date.parse(recordedAt);
+  const dayEnd = Date.parse(
+    localDays({ since: recordedAt, until: new Date(at + 1).toISOString() }, timeZone)[0]!.end,
+  );
+  return new Date(Math.max(dayEnd, at + MIN_GRACE_MS)).toISOString();
+}
 
 type VelocityDay = ProjectVelocity["days"][number];
 
@@ -306,18 +320,23 @@ export async function measureVelocity(
         `Product churn unknown: ${commits.state === "unknown" ? commits.reason : "correction predates retained measurement range"}`,
       );
     else if (productLines === 0) reasons.push("No product churn landed after the correction");
+    const graceUntil = correctionGraceUntil(correction.recordedAt, timeZone);
+    const state =
+      issueStarted === true && productLines !== null && productLines > 0
+        ? "satisfied"
+        : issueStarted === false || productLines === 0
+          ? until < graceUntil
+            ? "in_progress"
+            : "unresolved"
+          : "unknown";
     correctionCheck = {
       correction,
       checkedAt: until,
       issueStarted,
       productLines,
-      state:
-        issueStarted === true && productLines !== null && productLines > 0
-          ? "satisfied"
-          : issueStarted === false || productLines === 0
-            ? "unresolved"
-            : "unknown",
-      reasons,
+      state,
+      graceUntil,
+      reasons: state === "in_progress" ? [] : reasons,
     };
   }
 

@@ -69,8 +69,11 @@ tool records the decision; it does not start an issue or hire anyone. It accepts
 only Auto projects owned by this conversation and retains exact retries. A new
 choice belongs to a later round.
 
-The next round checks the named issue reached a started state and product churn
-landed after the response. Unresolved means correct course again; unknown means
+Later rounds check the named issue reached a started state and product churn
+landed after the response. Until the end of the day it was recorded (at least
+four hours), a choice without both reads "correction in progress": keep the
+staffed work going, and record nothing new for the drift it answers. Unresolved
+means correct course again; unknown means
 the service could not read a source, not success. Product churn is project-wide
 evidence, not proof that the chosen issue caused it.
 

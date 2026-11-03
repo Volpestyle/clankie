@@ -81,18 +81,47 @@ function driftLine(name: string, detection: DriftDetection): string {
   }
 }
 
+/**
+ * A detection the in-progress correction already answers (#353): drift on a completed day
+ * before the correction was recorded. Over-WIP asks for something else, so it is never covered.
+ */
+function answered(velocity: ProjectVelocity, detection: DriftDetection): boolean {
+  const check = velocity.correctionCheck;
+  return (
+    check?.state === "in_progress" &&
+    detection.signal !== "over_wip" &&
+    detection.day < localDate(check.correction.recordedAt, velocity.timeZone)
+  );
+}
+
 /** The round's drift section; empty when nothing drifts. */
 export function driftSection(velocities: readonly ProjectVelocity[], roundId?: string): string[] {
   const rows = velocities.flatMap((velocity) => [
-    ...(velocity.drift ?? []).map((detection) => `- ${driftLine(velocity.name, detection)}`),
-    ...(velocity.correctionCheck
+    ...(velocity.drift ?? [])
+      .filter((detection) => !answered(velocity, detection))
+      .map((detection) => `- ${driftLine(velocity.name, detection)}`),
+    ...(velocity.correctionCheck?.state === "in_progress"
       ? [
-          `- ${velocity.name}: correction check for ${velocity.correctionCheck.correction.issue}: ${velocity.correctionCheck.state}; issue started ${velocity.correctionCheck.issueStarted === null ? "unknown" : String(velocity.correctionCheck.issueStarted)}; product lines landed after the response ${velocity.correctionCheck.productLines === null ? "unknown" : String(velocity.correctionCheck.productLines)}.${velocity.correctionCheck.reasons.length ? ` ${velocity.correctionCheck.reasons.join("; ")}. Correct course again; keep the next milestone feature staffed.` : ""}`,
+          `- ${velocity.name}: correction in progress: ${velocity.correctionCheck.correction.issue} (recorded ${velocity.correctionCheck.correction.recordedAt.slice(0, 16)}Z) answers ${
+            [
+              ...new Set(
+                (velocity.drift ?? [])
+                  .filter((detection) => answered(velocity, detection))
+                  .map((detection) => `${detection.signal} on ${detection.day}`),
+              ),
+            ].join(", ") || "the earlier drift"
+          }; it has until ${velocity.correctionCheck.graceUntil?.slice(0, 16) ?? "later"}Z to start and land product work. Nothing new to record for it.`,
         ]
-      : []),
+      : velocity.correctionCheck
+        ? [
+            `- ${velocity.name}: correction check for ${velocity.correctionCheck.correction.issue}: ${velocity.correctionCheck.state}; issue started ${velocity.correctionCheck.issueStarted === null ? "unknown" : String(velocity.correctionCheck.issueStarted)}; product lines landed after the response ${velocity.correctionCheck.productLines === null ? "unknown" : String(velocity.correctionCheck.productLines)}.${velocity.correctionCheck.reasons.length ? ` ${velocity.correctionCheck.reasons.join("; ")}. Correct course again; keep the next milestone feature staffed.` : ""}`,
+          ]
+        : []),
     ...(roundId &&
-    ((velocity.drift?.length ?? 0) > 0 ||
-      (velocity.correctionCheck && velocity.correctionCheck.state !== "satisfied"))
+    ((velocity.drift ?? []).some((detection) => !answered(velocity, detection)) ||
+      (velocity.correctionCheck &&
+        velocity.correctionCheck.state !== "satisfied" &&
+        velocity.correctionCheck.state !== "in_progress"))
       ? [
           `- Record the chosen issue and one-line reason with record_drift_correction (projectId ${JSON.stringify(velocity.projectId)}, roundId ${JSON.stringify(roundId)}), then start and staff it.`,
         ]
@@ -112,7 +141,9 @@ export function driftSignals(velocity: ProjectVelocity | undefined): string[] {
   return [
     ...new Set([
       ...(velocity?.drift ?? []).map((detection) => detection.signal),
-      ...(velocity?.correctionCheck && velocity.correctionCheck.state !== "satisfied"
+      ...(velocity?.correctionCheck &&
+      velocity.correctionCheck.state !== "satisfied" &&
+      velocity.correctionCheck.state !== "in_progress"
         ? ["correction_unresolved"]
         : []),
     ]),

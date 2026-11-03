@@ -69,7 +69,13 @@ export const DriftCorrectionCheckSchema = z
     /** Null means the relevant source was unavailable, never a failed correction. */
     issueStarted: z.boolean().nullable(),
     productLines: z.number().int().nonnegative().nullable(),
-    state: z.enum(["satisfied", "unresolved", "unknown"]),
+    /**
+     * `in_progress` while the correction is still in its grace period (#353): staffed work
+     * needs time to land, so it is not called unresolved before `graceUntil`.
+     */
+    state: z.enum(["satisfied", "in_progress", "unresolved", "unknown"]),
+    /** The end of the grace period: the later of the recording local day's end and four hours. */
+    graceUntil: z.string().optional(),
     reasons: z.array(z.string()),
   })
   .strict();

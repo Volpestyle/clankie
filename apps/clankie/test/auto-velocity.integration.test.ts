@@ -426,6 +426,78 @@ it("names drift from completed working days, carries it until a round is deliver
   ).toEqual(next.drift);
 });
 
+it("gives a staffed drift correction the rest of its day before calling it unresolved (#353)", async () => {
+  const { project, deps, product, commit, git, call } = await measuredProject();
+  const root = roots.at(-1)!;
+  await commit("2026-10-12T16:00:00Z", `Menu tests (${product.identifier})`, { "tests/menu.test.ts": 20 });
+  await git("2026-10-13T18:30:00Z", "push", "-q", "origin", "main");
+  await git("2026-10-13T18:30:00Z", "fetch", "-q", "origin");
+  const record = new AutoRoundRecord(join(root, "auto-rounds"));
+  const state: AutoProjectState = { id: "mod", name: "Mod", workers: 0 };
+
+  // 07:42 CDT on 10-14: tooling led on 10-12 and 10-13, and the lead records a correction.
+  const morningAt = new Date("2026-10-14T12:42:00.000Z");
+  const morning = withDrift(await measureVelocity(project, null, deps, morningAt), []);
+  expect(morning.drift!.map((detection) => detection.signal)).toContain("tooling_lead");
+  const roundId = record.measured("lead", [morning], morningAt);
+  record.settled(roundId, true, undefined, morningAt);
+  const feature = (await call("save_issue", {
+    team: "LOCAL",
+    project: project.trackerProjectId,
+    title: "Next playable feature",
+  })) as { identifier: string };
+  const correction = record.recordCorrection(
+    "lead",
+    { projectId: "mod", roundId, issue: feature.identifier, reason: "Ship the next milestone feature" },
+    morningAt,
+  );
+
+  // 08:12 CDT: the same completed days still show tooling_lead and nothing has landed yet.
+  const measure = async (at: string, pending = correction) =>
+    withDrift(
+      await measureVelocity(project, null, { ...deps, correction: pending }, new Date(at)),
+      record.pendingDrift("mod"),
+    );
+  const halfHour = await measure("2026-10-14T13:12:00.000Z");
+  expect(halfHour.correctionCheck).toMatchObject({
+    state: "in_progress",
+    issueStarted: false,
+    productLines: 0,
+    graceUntil: "2026-10-15T05:00:00.000Z",
+    reasons: [],
+  });
+  const section = driftSection([halfHour], "round-2").join("\n");
+  expect(section).toContain(
+    `Mod: correction in progress: ${feature.identifier} (recorded 2026-10-14T12:42Z) answers tooling_lead on 2026-10-13`,
+  );
+  expect(section).toContain("Nothing new to record for it.");
+  expect(section).not.toContain("record_drift_correction");
+  expect(section).not.toContain("Correct course again");
+  expect(section).not.toContain("Stop starting tooling work");
+  // Nothing new for the fingerprint either, so the unchanged detection wakes no round.
+  expect(autoRoundFingerprint([state], () => driftSignals(halfHour))).toBe(
+    autoRoundFingerprint([state], () => driftSignals(morning)),
+  );
+
+  // Past the grace period with nothing started or landed, it is unresolved and asks again.
+  const nextDay = await measure("2026-10-15T14:00:00.000Z");
+  expect(nextDay.correctionCheck).toMatchObject({ state: "unresolved" });
+  const overdue = driftSection([nextDay], "round-3").join("\n");
+  expect(overdue).toContain("Correct course again");
+  expect(overdue).toContain("record_drift_correction");
+  expect(driftSignals(nextDay)).toContain("correction_unresolved");
+
+  // A correction recorded at 23:30 still gets four hours, past midnight.
+  const late = await measure("2026-10-15T06:00:00.000Z", {
+    ...correction,
+    recordedAt: "2026-10-15T04:30:00.000Z",
+  });
+  expect(late.correctionCheck).toMatchObject({
+    state: "in_progress",
+    graceUntil: "2026-10-15T08:30:00.000Z",
+  });
+});
+
 it("applies a configured tracker WIP cap to live velocity and historical replay", async () => {
   const { project, deps, at, call, trackerProject } = await measuredProject();
   await at("2026-10-13T19:00:00Z", () =>
