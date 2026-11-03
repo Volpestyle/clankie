@@ -223,6 +223,17 @@ async function startConnectorRelay(
               agent: "claude",
               ...(request.includeSeatIds === true ? { seatId: "pc1/spike" } : {}),
             },
+            // A terminal in the Herdr desktop app: the owner's devices list it, a connector never does.
+            {
+              terminalId: "herdr-core/t9",
+              runtime: { id: "herdr-core", session: "Herdr app" },
+              label: "zsh · notes",
+              workspace: { id: "sp1", label: "notes", number: 1 },
+              tab: { id: "tb1", label: "1", number: 1 },
+              pane: { id: "herdr-core/t9" },
+              agent: "claude-code",
+              ...(request.includeSeatIds === true ? { seatId: "herdr-core/t9" } : {}),
+            },
             {
               terminalId: "term-loose",
               label: "scratch",
@@ -1394,6 +1405,38 @@ describe("Claude connector MCP endpoint", () => {
       });
       expect(response.status, path).toBe(403);
     }
+  });
+
+  it("keeps the desktop app's terminals out of a connector's catalog and tail", async () => {
+    const relay = await startConnectorRelay();
+    const post = (path: string, body: unknown) =>
+      fetch(new URL(path, relay.url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${CONNECTOR_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const catalog = await post("/operator/v1/dispatch", {
+      op: "terminal_catalog",
+      schemaVersion: 1,
+      includeSeatIds: true,
+    });
+    expect(catalog.status).toBe(200);
+    const listed = (await catalog.json()) as { sessions: { terminalId: string }[] };
+    expect(listed.sessions.map((session) => session.terminalId)).toContain("term-loose");
+    expect(listed.sessions.some((session) => session.terminalId.startsWith("herdr-core/"))).toBe(false);
+    const observation = { schemaVersion: 1, surfaceClientId: "claude-connector" };
+    const desktop = await post("/operator/v1/terminal-tail", {
+      op: "terminal_tail",
+      schemaVersion: 1,
+      observation: { ...observation, terminalId: "herdr-core/t9" },
+    });
+    expect(desktop.status).toBe(403);
+    expect(await desktop.json()).toEqual({ error: "connector_operation_not_allowed" });
+    expect(
+      relay.seen.some(
+        (request) => request.op === "terminal_tail" && request.observation.terminalId === "herdr-core/t9",
+      ),
+    ).toBe(false);
   });
 
   it("answers without a bearer with the 401 that starts Claude's sign-in, and serves the resource metadata", async () => {

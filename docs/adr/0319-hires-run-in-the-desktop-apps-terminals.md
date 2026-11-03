@@ -131,3 +131,30 @@ the rest stay empty. A seat is named by a Herdr pane id when there is one, else 
 the core terminal (`HC_TERMINAL_ID` beside `HC_TERMINAL_SOCKET`); a Herdr socket
 without a pane id no longer names a seat. The worker's link, the CLI's seat identity
 and the tool-catalog hook read it the same way.
+
+## Amendment, 2026-11-03: the owner's terminal catalog lists them
+
+The phone's Terminals tab read only the terminal Herdr's panes, so the desktop
+app's terminals, where Clankie's hires now run, never appeared there.
+`terminal_catalog` now also lists every live terminal in the desktop app's window,
+from the layout the app keeps in the core's `herdr-app` document: its spaces,
+tabs and terminals as workspaces, tabs and panes, in the app's order, under the
+runtime `herdr-core` ("Herdr app"). A space or tab is named as the app names it
+(its own name, else the space part of the terminal's `where` label, else its
+folder; a tab's name, else its place). A pane is named by the seat Clankie gave
+it (`clankie.seat`), else its title, else its program and folder, never a bare
+id. Its id is its seat id, `herdr-core/<address>`, so `terminal_read` reads it
+under the read scope as before (ADR 0307).
+
+`terminal_tail` watches one through a framed `terminal.attach` with `observe`:
+the core's first paint, with up to 1,000 lines of history, is the stream's full
+frame and its output the diffs. `terminal_focus` asks `herdr-app` to show it.
+There is no control lease or input for these terminals: `terminal_control` and
+`terminal_input` answer `herdr_unavailable` (ADR 0207). Terminals of another
+machine the core added are not listed yet.
+
+The desktop app's terminals are the owner's to watch. A connector app (ADR 0301)
+never sees them in the catalog and is refused a tail of one at the relay; it
+reaches the agents there as before, through `herdr_core_list` and
+`terminal_read`. Herdr panes with no name of their own are now labeled by their
+title, else by what runs in them and where, instead of their pane id.

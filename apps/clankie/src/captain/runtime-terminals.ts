@@ -10,6 +10,13 @@ import type {
 } from "@clankie/protocol";
 import { pinHerdrEnvironment, type ExecutionConnections } from "../herdr-session.ts";
 import { focusHerdrTerminal, readTerminalCatalog } from "./herdr-census.ts";
+import { createHerdrCore } from "./herdr-core.ts";
+import {
+  desktopTerminalAddress,
+  readHerdrCoreCatalog,
+  readHerdrCoreGrid,
+  startHerdrCoreObserver,
+} from "./herdr-core-terminals.ts";
 import { HerdrTerminalStore } from "./herdr-terminal.ts";
 import { HerdrTerminalControlStore } from "./herdr-terminal-control.ts";
 
@@ -26,11 +33,15 @@ interface Runtime {
 /** One existing observer/control store per pinned runtime; no terminal bytes enter conversations. */
 export class RuntimeTerminals {
   private readonly runtimes = new Map<string, Runtime>();
+  /** The desktop app's terminals, watched through its core (ADR 0319); only with `desktopSocket`. */
+  private desktop: HerdrTerminalStore | undefined;
   private closed = false;
   private readonly stopChanges: (() => void) | undefined;
   private readonly options: {
     connections?: Pick<ExecutionConnections, "list" | "configuredBinding" | "onChange">;
     defaultAvailable?: () => boolean;
+    /** The Herdr desktop app's core socket; its terminals join the catalog when given. */
+    desktopSocket?: () => string;
   };
   constructor(options: RuntimeTerminals["options"] = {}) {
     this.options = options;
@@ -126,17 +137,37 @@ export class RuntimeTerminals {
       if (ids.includes(id)) continue;
       this.drop(id);
     }
-    return (
-      await Promise.all(
+    const desktopSocket = this.options.desktopSocket;
+    const [herdr, desktop] = await Promise.all([
+      Promise.all(
         ids.map(async (id) => {
           const runtime = await this.runtime(id);
           return runtime ? this.catalogFor(runtime, options.seatIds === true) : [];
         }),
-      )
-    ).flat();
+      ),
+      desktopSocket === undefined || this.closed
+        ? []
+        : readHerdrCoreCatalog(desktopSocket(), { seatIds: options.seatIds === true }),
+    ]);
+    return [...herdr.flat(), ...desktop];
+  }
+
+  /** The store that watches the desktop app's terminals, made on first use. */
+  private desktopStore(): HerdrTerminalStore | undefined {
+    const socket = this.options.desktopSocket;
+    if (socket === undefined || this.closed) return undefined;
+    this.desktop ??= new HerdrTerminalStore({
+      startObserver: (address, columns, rows) => startHerdrCoreObserver(socket(), address, columns, rows),
+      readGrid: (address) => readHerdrCoreGrid(socket(), address),
+      // The first paint carries the terminal's history; there is no separate pane read.
+      readHistory: async () => undefined,
+    });
+    return this.desktop;
   }
 
   private async resolve(terminalId: string) {
+    // A desktop-app terminal is only watched and shown; it has no control lease or input here.
+    if (desktopTerminalAddress(terminalId) !== undefined) return undefined;
     const named = /^rt:([a-z][a-z0-9-]{0,63}):[a-f0-9]{64}$/u.exec(terminalId);
     if (terminalId.startsWith("rt:") && !named) return undefined;
     const runtime = await this.runtime(named?.[1] ?? "default");
@@ -162,6 +193,8 @@ export class RuntimeTerminals {
   }
 
   async tail(request: OperatorTerminalObservationRequest): Promise<OperatorTerminalObservationResult> {
+    const address = desktopTerminalAddress(request.terminalId);
+    if (address !== undefined) return this.tailDesktop(request, address);
     const target = await this.resolveSeat(request.terminalId);
     const unavailable = {
       schemaVersion: 1,
@@ -173,6 +206,29 @@ export class RuntimeTerminals {
     if (!target) return unavailable;
     const result = await target.runtime.terminals.tail({ ...request, terminalId: target.nativeId });
     if (!(await this.current(target.runtime))) return unavailable;
+    return {
+      ...result,
+      terminalId: request.terminalId,
+      ...(result.status === "page"
+        ? { frames: result.frames.map((frame) => ({ ...frame, terminalId: request.terminalId })) }
+        : {}),
+    };
+  }
+
+  private async tailDesktop(
+    request: OperatorTerminalObservationRequest,
+    address: string,
+  ): Promise<OperatorTerminalObservationResult> {
+    const store = this.desktopStore();
+    if (store === undefined)
+      return {
+        schemaVersion: 1,
+        status: "unavailable",
+        terminalId: request.terminalId,
+        surfaceClientId: request.surfaceClientId,
+        reason: "herdr_unavailable",
+      };
+    const result = await store.tail({ ...request, terminalId: address });
     return {
       ...result,
       terminalId: request.terminalId,
@@ -196,6 +252,13 @@ export class RuntimeTerminals {
 
   /** Bring a terminal to the front in its own Herdr; a seat id on a named fleet works as for `tail`. */
   async focus(terminalId: string): Promise<"focused" | "unavailable"> {
+    const address = desktopTerminalAddress(terminalId);
+    const desktopSocket = this.options.desktopSocket;
+    if (address !== undefined) {
+      if (desktopSocket === undefined || this.closed) return "unavailable";
+      const shown = await createHerdrCore({ socketPath: desktopSocket() }).focus(address);
+      return shown.status;
+    }
     const target = await this.resolveSeat(terminalId);
     if (!target) return "unavailable";
     const focused = await focusHerdrTerminal(target.nativeId, { env: target.runtime.env });
@@ -236,6 +299,8 @@ export class RuntimeTerminals {
   close() {
     this.closed = true;
     this.stopChanges?.();
+    this.desktop?.close();
+    this.desktop = undefined;
     for (const id of this.runtimes.keys()) this.drop(id);
   }
 }
