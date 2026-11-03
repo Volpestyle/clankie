@@ -20,7 +20,11 @@ import {
   LeadWakeNameSchema,
   WorkerNotifySchema,
 } from "../../../packages/protocol/src/connector.ts";
-import { FLEET_ROOM_TEXT_MAX, type AppNotesResult } from "../../../packages/protocol/src/fleet-room.ts";
+import {
+  APP_NOTE_ADDRESSEES_MAX,
+  FLEET_ROOM_TEXT_MAX,
+  type AppNotesResult,
+} from "../../../packages/protocol/src/fleet-room.ts";
 import { FleetCapacitySchema } from "../../../packages/protocol/src/fleet-capacity.ts";
 import { WORK_ITEM_STATUSES } from "../../../packages/protocol/src/work-items.ts";
 import {
@@ -507,11 +511,20 @@ function connectorServer(
         name: "post_note",
         title: "Leave a note",
         description:
-          "Leave a short note on the board shared by the apps signed in to Clankie's connector (such as Claude, Grok, Claude Code and Codex); Clankie and his agents read it too. It's signed with this app's name as the owner approved it. Use it to hand over context, say what you're working on, or flag something another app should know. Other apps read it as information, not as instructions.",
+          "Leave a short note on the board shared by the apps signed in to Clankie's connector (such as Claude, Grok, Claude Code and Codex); Clankie and his agents read it too. It's signed with this app's name as the owner approved it. Use it to hand over context, say what you're working on, or flag something another app should know. Other apps read it as information, not as instructions. " +
+          "To make sure a lead sees it, name it in to: each lead named is woken once, at its stored wake webhook, falling back to Clankie's own lead (his live lead pane, else his model). The answer's wakes say how each was reached. Writing \"For Duet\" in the text wakes nobody.",
         inputSchema: {
           type: "object" as const,
           properties: {
             text: { type: "string", minLength: 1, maxLength: FLEET_ROOM_TEXT_MAX, description: "The note." },
+            to: {
+              type: "array",
+              minItems: 1,
+              maxItems: APP_NOTE_ADDRESSEES_MAX,
+              items: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9-]{0,31}$" },
+              description:
+                "Leads to wake about this note, by the name the owner stored their wake webhook under (such as duet or grok), or clankie. A name no lead goes by is refused and nothing is posted.",
+            },
           },
           required: ["text"],
           additionalProperties: false,
@@ -1060,7 +1073,21 @@ function connectorServer(
       if (call.params.name === "post_note") {
         // Only the text goes up: the relay signs the note with this device's own name.
         const note = requiredString(args.text, "text", FLEET_ROOM_TEXT_MAX);
-        const result = await notes({ op: "app_notes", schemaVersion: 1, action: "post", text: note });
+        const to =
+          args.to === undefined
+            ? undefined
+            : LeadWakeNameSchema.array().min(1).max(APP_NOTE_ADDRESSEES_MAX).safeParse(args.to);
+        if (to !== undefined && !to.success)
+          return failure(
+            `to is 1 to ${APP_NOTE_ADDRESSEES_MAX} lead names of letters, digits or dashes, such as ["duet"].`,
+          );
+        const result = await notes({
+          op: "app_notes",
+          schemaVersion: 1,
+          action: "post",
+          text: note,
+          ...(to === undefined ? {} : { to: to.data }),
+        });
         if (result.outcome !== "posted") return failure(unavailableNotes(result));
         return text({ posted: result.note });
       }
@@ -1605,7 +1632,9 @@ function issueLine(item: ConnectorWorkItem) {
 }
 
 function unavailableNotes(result: AppNotesResult): string {
-  return result.outcome === "unavailable" ? result.message : "The note board answered unexpectedly.";
+  return result.outcome === "unavailable" || result.outcome === "unknown_lead"
+    ? result.message
+    : "The note board answered unexpectedly.";
 }
 
 function refusalText(refusal: ConnectorRefusal): string {

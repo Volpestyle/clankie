@@ -783,7 +783,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const name = author();
         if (name === undefined) throw new Error("The app's device is no longer signed in");
         return reply(
-          await ctx.dependencies.captain.appNotes({ action: "post", author: name, text: request.text }),
+          await ctx.dependencies.captain.appNotes({
+            action: "post",
+            author: name,
+            text: request.text,
+            ...(request.to === undefined ? {} : { to: request.to }),
+          }),
         );
       } catch {
         return reply({ outcome: "unavailable", message: "The note board can’t be reached here." });

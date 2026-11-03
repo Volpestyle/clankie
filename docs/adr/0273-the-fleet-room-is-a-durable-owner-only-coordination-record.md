@@ -161,3 +161,9 @@ coordination text, so the board is one more kind kept here, not a second store.
 - **Information, never instruction.** Every tool that returns notes says they
   come from other apps and are information to weigh, not orders. A note grants
   nothing.
+- **Addressed notes (#179).** A post may name leads in `to`, and each one is
+  woken once ([ADR 0336](0336-a-connected-app-wakes-a-lead-at-its-webhook.md)'s
+  amendment). Each note's addressees and wake receipts live in their own
+  journal beside the room, and `app_notes` reads join them onto each note. A
+  room entry is unchanged: `to` stays null, so the owner's app keeps parsing
+  pages it already knows.

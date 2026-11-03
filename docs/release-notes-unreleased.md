@@ -1,5 +1,12 @@
 # Unreleased
 
+A board note can name the leads it is for. `post_note` takes `to` (`clankie`, or
+a lead with a stored wake webhook such as `duet` or `grok`). Each one is woken
+once: at its webhook, or, if that doesn't take it, through Clankie's lead lane
+(his live lead pane, else his model, which keeps it while the apps lead). The
+post and every board read show how each lead was reached.
+`clankie connector notes` shows the board with those receipts (#179).
+
 The owner's paired app can mark finished built-in work as working, or send it back
 with a note, through the new `post_owner_verdict` tracker write (ADR 0299). Only
 a Take Control device the owner paired locally may call it; agents, the operator

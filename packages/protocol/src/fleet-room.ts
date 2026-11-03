@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LeadWakeNameSchema } from "./connector.ts";
 import { DeliveryStageSchema } from "./delivery.ts";
 
 /**
@@ -152,6 +153,42 @@ export type FleetRoomResult = z.infer<typeof FleetRoomResultSchema>;
 /** A read of the app note board returns at most this many notes. */
 export const APP_NOTES_PAGE_MAX = 50;
 
+/** A note names at most this many leads to wake (#179). */
+export const APP_NOTE_ADDRESSEES_MAX = 4;
+/** The lead every note can name: Clankie himself, beside the leads with a stored wake webhook. */
+export const APP_NOTE_CLANKIE = "clankie";
+
+/**
+ * One way the service tried to reach an addressed lead, in the order James approved
+ * (note 14625, #179): the addressee's live lead pane, then its stored wake webhook,
+ * then Clankie's own lead lane. A step the addressee has no way to take is left out.
+ */
+export const AppNoteWakeStepSchema = z.strictObject({
+  via: z.enum(["lead_pane", "webhook", "clankie"]),
+  /**
+   * `delivered`: the pane or webhook took it, or Clankie's lane admitted a turn.
+   * `held`: Clankie is off (the apps lead), so his lane kept it for them (ADR 0350).
+   * `not_set`, `refused`, `unavailable`: this way didn't take it.
+   * `uncertain`: no answer in time; it may have arrived.
+   */
+  outcome: z.enum(["delivered", "held", "not_set", "refused", "uncertain", "unavailable"]),
+});
+export type AppNoteWakeStep = z.infer<typeof AppNoteWakeStepSchema>;
+
+/** The receipt for one addressed lead: the note woke it once, and here is how. */
+export const AppNoteWakeSchema = z.strictObject({
+  /** Stable for this note and lead; the service never wakes the same pair twice. */
+  receiptId: z.string().min(1).max(160),
+  lead: LeadWakeNameSchema,
+  /** Where the chain ended: the way that took it, or `none` when every way failed. */
+  reached: z.enum(["lead_pane", "webhook", "clankie", "none"]),
+  /** True when Clankie's lane kept it because the apps lead; nobody has run it yet. */
+  held: z.boolean().optional(),
+  steps: z.array(AppNoteWakeStepSchema).max(3),
+  at: z.string().datetime({ offset: true }),
+});
+export type AppNoteWake = z.infer<typeof AppNoteWakeSchema>;
+
 /** One note on the board: who left it, when, and what it says. */
 export const AppNoteSchema = z.strictObject({
   /** The room's sequence; a later read passes the page's `newer` to see what came after. */
@@ -160,6 +197,10 @@ export const AppNoteSchema = z.strictObject({
   /** The name the app's connector device was approved under; never the caller's own words. */
   author: z.string().min(1).max(120),
   text: z.string().max(FLEET_ROOM_TEXT_MAX),
+  /** The leads the author addressed (#179). Absent on an unaddressed note. */
+  to: z.array(LeadWakeNameSchema).min(1).max(APP_NOTE_ADDRESSEES_MAX).optional(),
+  /** One receipt per addressed lead, once its wake has settled. */
+  wakes: z.array(AppNoteWakeSchema).max(APP_NOTE_ADDRESSEES_MAX).optional(),
 });
 export type AppNote = z.infer<typeof AppNoteSchema>;
 
@@ -174,6 +215,17 @@ export const AppNotesRequestSchema = z.discriminatedUnion("action", [
     schemaVersion: z.literal(1),
     action: z.literal("post"),
     text: z.string().trim().min(1).max(FLEET_ROOM_TEXT_MAX),
+    /**
+     * The leads this note is for, by name (#179): `clankie`, or a lead with a wake
+     * webhook the owner stored. Each one is woken once. A name no lead goes by is
+     * refused, never guessed. Without it the note only sits on the board.
+     */
+    to: z
+      .array(LeadWakeNameSchema)
+      .min(1)
+      .max(APP_NOTE_ADDRESSEES_MAX)
+      .transform((names) => [...new Set(names)])
+      .optional(),
     /**
      * The connector device that wrote it, stamped by the relay from the device it
      * authenticated. A caller that sends it is refused; the service names the
@@ -194,6 +246,13 @@ export type AppNotesRequest = z.input<typeof AppNotesRequestSchema>;
 
 export const AppNotesResultSchema = z.discriminatedUnion("outcome", [
   z.strictObject({ outcome: z.literal("posted"), note: AppNoteSchema }),
+  /** An addressee no lead goes by: nothing was posted. `leads` are the names a note can use. */
+  z.strictObject({
+    outcome: z.literal("unknown_lead"),
+    unknown: z.array(z.string().max(64)).min(1).max(APP_NOTE_ADDRESSEES_MAX),
+    leads: z.array(LeadWakeNameSchema).max(65),
+    message: z.string().min(1).max(500),
+  }),
   z.strictObject({
     outcome: z.literal("ready"),
     /** Oldest first. */

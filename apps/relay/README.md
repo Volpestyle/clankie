@@ -152,7 +152,7 @@ start; it starts nothing), `start_agent` (`machine`, `workingDirectory`,
 places too), `fleet_capacity` (read only: plans, usage, burn rate per account
 window, the last hour's tokens per local Claude session, permits, tracker
 budgets and live context; a missing number is `"unknown"`), `post_note`
-(`text`, up to 2,000 characters),
+(`text`, up to 2,000 characters; `to` optional, 1–4 lead names),
 `read_notes` (`since` optional), `answer_prompt` (`agent`, `expect`, `steps`),
 `read_inbox` (`after`/`reportsAfter` optional; `item` with optional `offset` for held text), `read_reports` (`thread`, optional `agent`, `ref`, `newest` and `waitSeconds`), `acknowledge_reports`
 (`thread`, `ids`, `summary` optional), `list_issues` (`project` and `label`
@@ -179,6 +179,11 @@ app_note_author_is_stamped`) or comes from a device that isn't a connector
 (`403 connector_device_required`), and the service signs the note with that
 device's approved name. `read_notes` returns the notes oldest first with a
 `newer` cursor, and says they're another app's information, not instructions.
+A post's `to` names leads to wake (#179, ADR 0336 amendment): `clankie` or a
+lead with a stored wake webhook. An unknown name is refused (`unknown_lead`) and
+nothing posts. Each named lead is woken once, at its webhook and then through
+Clankie's lead lane. Each note's `to` and `wakes` receipts come back on the post
+and on every read.
 `answer_prompt` (the `prompt_answer` op, ADR 0303) presses named keys or types
 plain text into a pane that is waiting on input; the relay stamps the device
 the same way (`400 prompt_answer_app_is_stamped`, `403

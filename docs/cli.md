@@ -1908,7 +1908,16 @@ and Go ahead let it go without waking Clankie, [ADR 0335](adr/0335-connected-app
 note is signed with the name you approved that app under, never a name the app
 gives, and the apps read notes as information, not instructions. Clankie and
 his hired agents read the board too, and `clankie fleet room` shows the notes
-among the room's entries.
+among the room's entries. A note may name the leads it is for in `post_note`'s
+`to` (`clankie`, or a lead with a stored wake webhook). Each one is woken once:
+at its webhook, then through Clankie's lead lane (his live lead pane, else his
+model, which keeps it while the apps lead). A name no lead goes by refuses the
+post, and the note's own words never address anyone (#179). `clankie connector
+notes [SINCE] [--json]` reads the board with each note's addressees and how
+each was woken. JSON: `{ "ok": true, "notes": [{ "sequence", "at", "author",
+"text", "to"?, "wakes"?: [{ "receiptId", "lead", "reached":
+"webhook"|"lead_pane"|"clankie"|"none", "held"?, "steps": [{ "via", "outcome"
+}], "at" }] }], "newer" }`; pass `newer` as `SINCE` for later notes.
 
 A hire returns `pending` as soon as its pane is allocated, or after five seconds
 of preparation, with `startId` and the agent ID once known. The service retains
@@ -2006,7 +2015,10 @@ loopback. A bare key is sent as `Bearer KEY`. `clankie connector wake` lists the
 leads with a webhook (JSON `{ "ok": true, "leads": [...] }`), `wake clear LEAD`
 forgets one, and `wake send LEAD TEXT` hands the lead a job as you, exiting 1
 unless its webhook took it. Connected apps send one with the connector's
-`wake_lead` tool; the lead answers on the notes board.
+`wake_lead` tool; the lead answers on the notes board. A stored lead's name is
+also a name a board note can be addressed to. Such a note wakes it with kind
+`board_note`, carrying only the note's number, its author and a `read_notes`
+hint.
 
 Connected hires may opt into that webhook with `start_agent`'s
 `notify: {lead: "duet", ref: "thread-id"}`. Worker reports and settled watches
@@ -4903,7 +4915,9 @@ leaves `app_note` entries out unless `include` names them, so an app built
 before the board keeps reading the room it knows; the CLI always includes them.
 The board alone is the op `{op: "app_notes", schemaVersion: 1, action: "read",
 cursor?, limit?}` (up to 50 notes, oldest first, the newest without a cursor),
-which the owner reads here too; only a connector app posts, through the relay.
+which the owner reads here too, or with `clankie connector notes`; only a
+connector app posts, through the relay. Board reads add each addressed note's
+`to` and wake receipts; room entries don't carry them.
 
 The room keeps the newest 2,000 entries, none older than 14 days. History from
 before the host recorded the room is not reconstructed. An owner's answer text
