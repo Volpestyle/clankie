@@ -152,7 +152,7 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
 
         if (request.op === "recover") {
             const recovery = request.recovery;
-            if (!recovery || !["delivered", "abandoned", "abandoned-unknown"].includes(recovery.disposition))
+            if (!recovery || !["delivered", "abandoned", "abandoned-unknown", "adopted"].includes(recovery.disposition))
                 throw new Error("Invalid recovery disposition");
             if (!unknownRecovery && (typeof recovery.paneId !== "string" || !recovery.paneId.startsWith(claim.target.fleet + "/") || recovery.paneId.length <= claim.target.fleet.length + 1))
                 throw new Error("Original recovery allocation is incomplete");
@@ -162,6 +162,11 @@ export const REMOTE_HIRE_RECEIPT_PROGRAM = String.raw`function hostOperation(req
                 ...(allocationPane ? { terminalId: claim.target.fleet + "/" + allocationPane.terminal_id,
                     ...(allocationPane.agent_session?.value ? {sessionId: allocationPane.agent_session.value} : {}),
                     status: allocationPane.agent_status } : {}) };
+            // Adoption (#326) binds a running agent: its original pane must still hold a session.
+            if (recovery.disposition === "adopted" && (recovery.message !== undefined ||
+                !allocationPane || !allocationPane.agent_session?.value ||
+                !agents.some(agent => agent.pane_id === allocationPane.pane_id)))
+                throw new Error("Adoption requires the original pane with a running agent session");
             let delivery;
             if (recovery.disposition === "delivered") {
                 if (recovery.harness !== "claude" || !recovery.message || !Array.isArray(recovery.beforeIds))

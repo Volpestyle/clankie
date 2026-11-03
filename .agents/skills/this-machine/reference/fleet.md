@@ -69,8 +69,9 @@ project, delete receipts, create or repair a rollout file, or rewrite project-hi
 state files to escape a fence. `clankie hire-receipt settle UUID DISPOSITION` is the
 operator boundary; the lead tool `settle_hire_receipt` settles only its own
 conversation's fresh hires. `abandoned` needs a complete inventory showing no
-harness in the original pane; `adopt` binds a launched-but-unconfirmed local hire
-in its own pane, after which you confirm the task with the worker or retire it;
+harness in the original pane; `adopt` binds a launched-but-unconfirmed hire, local or on a
+fleet machine (including one that waited on folder trust or a legacy allocation
+without a matchable receipt), in its own pane, after which you confirm the task with the worker or retire it;
 `release-allocation` frees an inactive, unconfirmed project allocation. New remote
 work after settlement uses `hire_agent`'s `freshIntent: {id, afterReceiptId}` with
 one new UUID kept across uncertainty. Evidence rules: `docs/cli.md` under

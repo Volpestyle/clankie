@@ -259,7 +259,11 @@ function remoteExecutionWorkspaces(
 }
 
 /** Windows paths compare without case or separator style; POSIX paths exactly. */
-function sameRemoteDirectory(granted: string, requested: string, shell: "posix" | "powershell"): boolean {
+export function sameRemoteDirectory(
+  granted: string,
+  requested: string,
+  shell: "posix" | "powershell",
+): boolean {
   if (shell === "posix") return granted.replace(/\/+$/u, "") === requested.replace(/\/+$/u, "");
   const normal = (path: string) => win32.normalize(path).replace(/\\+$/u, "").toLowerCase();
   return normal(granted) === normal(requested);

@@ -18,7 +18,7 @@ export interface RemoteHireClaim {
   nonce: string;
 }
 export interface RemoteHireRecovery {
-  disposition: "delivered" | "abandoned" | "abandoned-unknown";
+  disposition: "delivered" | "abandoned" | "abandoned-unknown" | "adopted";
   /** Service retained admission but never committed launch; reservation may have lost its ACK. */
   launchUncommitted?: true;
   paneId?: string;

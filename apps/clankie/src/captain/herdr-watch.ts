@@ -118,6 +118,7 @@ import {
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { HerdrFleetError, nativeProofLocation, splitFleetQualified } from "../herdr-fleet.ts";
+import { sameRemoteDirectory } from "../herdr-session.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
@@ -3772,8 +3773,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (!guard) return refused("Settlement authority is required; nothing settled.");
     if (disposition === "adopt")
       return owner
-        ? refused("Only the operator may adopt an unconfirmed local hire; nothing adopted.")
-        : this.adoptLocalHire(receiptId, guard);
+        ? refused("Only the operator may adopt an unconfirmed hire; nothing adopted.")
+        : this.remoteAdoption(receiptId)
+          ? this.adoptRemoteHire(receiptId, guard)
+          : this.adoptLocalHire(receiptId, guard);
     try {
       await guard();
       const matches = this.hireReceipts
@@ -4340,7 +4343,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
         if (agent.agent !== harness || agent.session === undefined)
           throw new Error(`Pane ${paneId} holds no observed ${harness} session to adopt`);
-        if (agent.workingDirectory !== cwd && agent.foregroundWorkingDirectory !== cwd)
+        if (!agentInDirectory(agent, cwd, "posix"))
           throw new Error(`Pane ${paneId} runs outside the hire's directory`);
         const occupantId = occupantIdForHerdrSession(agent.session);
         const sessionId = nativeSessionId(agent);
@@ -4438,6 +4441,254 @@ export class HerdrWatchStore implements HerdrWatchPort {
     } catch (error) {
       return refused(
         `Local adoption refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
+      );
+    } finally {
+      if (fenced) this.activeHires.delete(fenced);
+      if (fencedAllocation) this.activeProjectHires.delete(fencedAllocation);
+    }
+  }
+
+  /** Whether an adoption names a hire on another fleet machine: its receipt or its allocation. */
+  private remoteAdoption(id: string): boolean {
+    try {
+      const original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === id);
+      if (original) return !thisMachineReceiptFleet(JSON.parse(original[0])[0]);
+      // A settled receipt leaves the pending set; a remote host's evidence names its fleet.
+      const settled = this.hireReceipts.settlement(id);
+      if (settled) return "target" in settled && !thisMachineReceiptFleet(settled.target.fleet);
+      const allocation = this.projectHires.allocation(id);
+      return allocation?.request.fleet !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Operator adoption of a hire on another fleet machine (#326): a hire that never
+   * confirmed, such as one that waited on its harness's folder-trust prompt, runs idle
+   * in its own pane with no session on its receipt. The fleet's census must show that
+   * pane holding the hire's harness in its directory, twice and unchanged, and the
+   * host's receipt program attests the same session before the receipt settles. An
+   * older allocation whose original receipt can't be matched is adopted from the
+   * census alone. Binds that exact occupant to the conversation that hired the pane
+   * and confirms its allocation from matching process proof. Never sends, replays or
+   * closes anything, and never claims the brief arrived.
+   */
+  private async adoptRemoteHire(id: string, guard: () => Promise<void>): Promise<HireReceiptSettlement> {
+    const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId: id, detail });
+    let fenced: string | undefined;
+    let fencedAllocation: string | undefined;
+    try {
+      await guard();
+      if (this.closed || !this.runner.list) throw new Error("Complete fleet Herdr inventory is unavailable");
+      const settled = this.hireReceipts.settlement(id);
+      if (settled && "disposition" in settled && settled.disposition === "adopted") {
+        // A repeat reads the retained adoption: its occupant, as the census shows it now.
+        const { allocation } = settled as HireRecoveryEvidence;
+        if (!("paneId" in allocation)) throw new Error("The retained adoption names no pane");
+        const fleet = splitFleetQualified(allocation.paneId)?.fleet;
+        const agent = (await this.runner.list(fleet)).find((entry) => entry.paneId === allocation.paneId);
+        const claim =
+          agent?.session &&
+          agent.terminalId === allocation.terminalId &&
+          agent.session.value === allocation.sessionId
+            ? this.hireOwners.claim(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session))
+            : undefined;
+        if (!agent?.session || !claim)
+          throw new Error("Already adopted; that occupant no longer runs in its pane");
+        const sessionId = nativeSessionId(agent);
+        return {
+          state: "adopted",
+          receiptId: id,
+          seat: {
+            paneId: agent.paneId,
+            seatId: agent.terminalId,
+            occupantId: occupantIdForHerdrSession(agent.session),
+            ...(sessionId === undefined ? {} : { sessionId }),
+          },
+          owner: { conversationId: claim.owner.conversationId },
+          evidence: settled as HireRecoveryEvidence,
+          detail: "Already adopted; the retained adoption is unchanged.",
+        };
+      }
+      let original = this.hireReceipts.entries().find(([, receipt]) => receipt.messageId === id);
+      let allocation = this.projectHires.allocation(id);
+      if (original && original[1].freshHire)
+        throw new Error("A fresh intent settles with not-launched, abandoned or abandoned-unknown");
+      const fleet = original ? (JSON.parse(original[0])[0] as string) : allocation?.request.fleet;
+      if (fleet === undefined || thisMachineReceiptFleet(fleet))
+        throw new Error("Only a hire on another fleet machine is adopted here");
+      if (original?.[1].paneId && !allocation)
+        allocation = this.projectHires.retirementCandidate(fleet, original[1].paneId);
+      if (allocation && !original) {
+        // The one unresolved original at the allocation's own pane, when there is one.
+        const { harness, workingDirectory: cwd } = allocation.request;
+        const matches = this.hireReceipts.entries().filter(([key, receipt]) => {
+          const [keyFleet, keyHarness, keyCwd] = JSON.parse(key) as string[];
+          return (
+            keyFleet === fleet &&
+            keyHarness === harness &&
+            keyCwd === cwd &&
+            receipt.paneId === allocation!.pane &&
+            !receipt.freshHire
+          );
+        });
+        if (matches.length > 1) throw new Error("The allocation's pane has more than one unresolved receipt");
+        original = matches[0];
+      }
+      if (!original && !allocation)
+        throw new Error("No unresolved fleet hire receipt or project allocation has this UUID");
+      if (allocation && (allocation.gone || allocation.request.fleet !== fleet || !allocation.started))
+        throw new Error(`Allocation ${allocation.id} is not a started hire on ${fleet}`);
+      const receipt = original?.[1];
+      const paneId = receipt?.paneId ?? allocation?.pane;
+      if (!paneId)
+        throw new Error(
+          "The original hire never recorded a pane; settle it as abandoned-unknown or not-launched",
+        );
+      if (splitFleetQualified(paneId)?.fleet !== fleet) throw new Error(`Pane ${paneId} is not on ${fleet}`);
+      if (allocation?.pane !== undefined && allocation.pane !== paneId)
+        throw new Error("The receipt and project allocation name different panes");
+      const [, keyHarness, keyCwd] = original ? (JSON.parse(original[0]) as string[]) : [];
+      const harness = keyHarness ?? allocation!.request.harness;
+      const cwd = keyCwd ?? allocation!.request.workingDirectory;
+      if (!harness || !cwd) throw new Error("The original hire's launch identity is incomplete");
+      if (
+        allocation &&
+        (allocation.request.harness !== harness || allocation.request.workingDirectory !== cwd)
+      )
+        throw new Error("The receipt and project allocation name different launches");
+      if (receipt?.recoveryRequested) throw new Error("The original is under remote recovery");
+      if (receipt?.settlement) throw new Error("The original receipt already has a retained disposition");
+      if (
+        (original && this.activeHires.has(original[0])) ||
+        (allocation && this.activeProjectHires.has(allocation.id))
+      )
+        throw new Error("The original hire is still active");
+      // Without a receipt, no other unresolved hire may claim this place: adoption must not
+      // pick between competing originals.
+      if (!original && this.hireReceipts.entries().some(([, entry]) => entry.paneId === paneId))
+        throw new Error("An unresolved receipt names this pane; adopt it by that receipt");
+      if (original) this.activeHires.add((fenced = original[0]));
+      if (allocation) this.activeProjectHires.add((fencedAllocation = allocation.id));
+      // The fleet's own shell decides how its paths compare. Claiming reads its configuration only.
+      if (!this.remoteHireReceipts) throw new Error("The fleet's host receipt program is unavailable");
+      const shell =
+        receipt?.remoteAdmission?.target.shell ??
+        (await this.remoteHireReceipts.claim(fleet, { receiptId: id, receiptKey: id, fingerprint: "" }))
+          ?.target.shell;
+      if (shell === undefined) throw new Error(`${fleet} is not a configured remote host`);
+      const observe = async () => {
+        const inventory = await this.runner.list!(fleet);
+        const agent = inventory.find((entry) => entry.paneId === paneId);
+        if (!agent) throw new Error(`Pane ${paneId} is absent; settle its receipt as abandoned instead`);
+        if (agent.agent !== harness || agent.session === undefined)
+          throw new Error(`Pane ${paneId} holds no observed ${harness} session to adopt`);
+        if (!agentInDirectory(agent, cwd, shell))
+          throw new Error(`Pane ${paneId} runs outside the hire's directory`);
+        const occupantId = occupantIdForHerdrSession(agent.session);
+        const sessionId = nativeSessionId(agent);
+        if (
+          (receipt?.occupantId !== undefined && receipt.occupantId !== occupantId) ||
+          (receipt?.sessionId !== undefined && receipt.sessionId !== sessionId) ||
+          (allocation?.occupantId !== undefined &&
+            (allocation.occupantId !== occupantId || allocation.seat !== agent.terminalId))
+        )
+          throw new Error(`Pane ${paneId} holds a different occupant than the original hire observed`);
+        return { agent, occupantId, sessionId, session: agent.session.value };
+      };
+      const first = await observe();
+      const claim = this.hireOwners.claim(paneId, first.agent.terminalId, first.occupantId);
+      const owner = claim?.owner ?? this.hireOwners.pendingOwner(paneId);
+      if (!owner) throw new Error(`No conversation's hire holds pane ${paneId}`);
+      const proof =
+        allocation && !allocation.confirmed
+          ? await this.projectPolicy?.proof?.(fleet, paneId).catch(() => undefined)
+          : undefined;
+      if (
+        allocation &&
+        !allocation.confirmed &&
+        (!proof ||
+          proof.nativeOccupantId !== first.occupantId ||
+          proof.pane !== paneId ||
+          proof.fleet !== fleet)
+      )
+        throw new Error(`Pane ${paneId} has no current process proof matching its occupant`);
+      let evidence: HireRecoveryEvidence | undefined;
+      if (original) {
+        let hostClaim = this.remoteClaim(original[0], original[1]);
+        if (!hostClaim) {
+          hostClaim = await this.remoteHireReceipts.claim(fleet, {
+            receiptId: original[1].messageId,
+            receiptKey: original[0],
+            fingerprint: original[1].fingerprint,
+          });
+          if (!hostClaim) throw new Error("The original is not on a configured remote host");
+          // Keep the exact claim before crossing SSH, so a lost reply is retried with it.
+          this.hireReceipts.update(original[0], original[1].messageId, {
+            remoteAdmission: { target: hostClaim.target, nonce: hostClaim.nonce },
+          });
+        }
+        await guard();
+        evidence = await this.remoteHireReceipts.recover(hostClaim, {
+          disposition: "adopted",
+          paneId,
+          cwd,
+          harness,
+        });
+        if (
+          evidence.disposition !== "adopted" ||
+          !("paneId" in evidence.allocation) ||
+          evidence.allocation.terminalId !== first.agent.terminalId ||
+          evidence.allocation.sessionId !== first.session
+        )
+          throw new Error("The host attested a different occupant than the fleet census");
+      }
+      await guard();
+      const final = await observe();
+      if (final.agent.terminalId !== first.agent.terminalId || final.occupantId !== first.occupantId)
+        throw new Error("The original pane's occupant changed during census");
+      // No await follows the final observation before the durable adoption.
+      if (this.closed) throw new Error("Native hire service is closed");
+      const { agent, occupantId, sessionId } = final;
+      if (original && evidence)
+        this.hireReceipts.settleRecovery(original[0], original[1].messageId, evidence);
+      if (!claim)
+        this.hireOwners.bind(
+          paneId,
+          owner,
+          agent.terminalId,
+          undefined,
+          occupantId,
+          sessionId === undefined ? undefined : JSON.stringify([fleet, harness, sessionId]),
+          allocation?.projectId,
+        );
+      if (allocation && !allocation.confirmed) {
+        this.projectHires.observe(allocation.id, agent.terminalId, occupantId, proof);
+        this.projectHires.confirmed(allocation.id);
+      }
+      this.watchHiredSeat(agent.terminalId, occupantId, owner);
+      return {
+        state: "adopted",
+        receiptId: id,
+        seat: {
+          paneId,
+          seatId: agent.terminalId,
+          occupantId,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        },
+        owner: { conversationId: owner.conversationId },
+        ...(allocation ? { allocationId: allocation.id } : {}),
+        ...(evidence ? { evidence } : {}),
+        detail: `Adopted the exact occupant on ${fleet} for its hiring conversation.${
+          original
+            ? ""
+            : " No original receipt matched this allocation; the census alone proved its occupant."
+        } Its brief's delivery stays unknown: the lead should message it to confirm its task. Nothing was sent, replayed or closed.`,
+      };
+    } catch (error) {
+      return refused(
+        `Fleet adoption refused: ${reasonDetail(error)}. Original retained; nothing sent, closed or relaunched.`,
       );
     } finally {
       if (fenced) this.activeHires.delete(fenced);
@@ -7454,4 +7705,18 @@ function startupSignIn(
     return "same";
   const own = report.accounts.filter(holds);
   return own.length > 0 && own.every((entry) => entry.signedIn === null) ? "unknown" : "changed";
+}
+
+/**
+ * Whether a pane's agent runs in a hire's directory. The foreground process's directory is
+ * the agent's own when Herdr reports it, so a pane opened in the directory whose agent moved
+ * elsewhere does not count; the pane's directory stands in only when no foreground is known.
+ */
+function agentInDirectory(
+  agent: Pick<HerdrAgentSnapshot, "workingDirectory" | "foregroundWorkingDirectory">,
+  cwd: string,
+  shell: "posix" | "powershell",
+): boolean {
+  const at = agent.foregroundWorkingDirectory ?? agent.workingDirectory;
+  return at !== undefined && sameRemoteDirectory(at, cwd, shell);
 }

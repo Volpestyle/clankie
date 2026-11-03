@@ -44,10 +44,15 @@ export type HireNoLaunchEvidence = z.infer<typeof HireNoLaunchEvidenceSchema>;
 export const HireReceiptIdSchema = z
   .string()
   .regex(/^(?:seat-)?[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u);
-/** Historical delivery and explicit abandonment do not assert a no-launch window. */
+/**
+ * Historical delivery and explicit abandonment do not assert a no-launch window.
+ * Adoption (#326) is the host's attestation that the original pane still holds an
+ * agent session, which the operator binds to the hiring conversation; it never
+ * claims the brief arrived.
+ */
 export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ window: true, journal: true })
   .extend({
-    disposition: z.enum(["delivered", "abandoned", "abandoned-unknown"]),
+    disposition: z.enum(["delivered", "abandoned", "abandoned-unknown", "adopted"]),
     journal: z.literal("authenticated-recovery"),
     allocation: z.union([
       z
@@ -86,6 +91,18 @@ export const HireRecoveryEvidenceSchema = HireNoLaunchEvidenceSchema.omit({ wind
   .superRefine((proof, ctx) => {
     if (proof.disposition === "delivered" && !proof.delivery)
       ctx.addIssue({ code: "custom", message: "Delivered recovery needs the original native channel event" });
+    if (
+      proof.disposition === "adopted" &&
+      (proof.delivery ||
+        "outcome" in proof.allocation ||
+        !proof.allocation.present ||
+        !proof.allocation.terminalId ||
+        !proof.allocation.sessionId)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Adoption needs the original pane present with an agent session, and claims no delivery",
+      });
     const unknown = "outcome" in proof.allocation;
     if (unknown !== (proof.disposition === "abandoned-unknown") || (unknown && proof.delivery))
       ctx.addIssue({ code: "custom", message: "Unknown abandonment cannot claim an allocation or delivery" });
@@ -206,8 +223,8 @@ export const HireReceiptSettlementSchema = z.discriminatedUnion("state", [
       owner: z.object({ conversationId: z.string() }).strict(),
       /** The project allocation confirmed by this adoption, when the hire had one. */
       allocationId: z.string().uuid().optional(),
-      /** The original native receipt's settlement, when the hire retained one. */
-      evidence: LocalHireSettlementEvidenceSchema.optional(),
+      /** The original native receipt's settlement, when the hire retained one: local inventory, or the remote host's. */
+      evidence: z.union([LocalHireSettlementEvidenceSchema, HireRecoveryEvidenceSchema]).optional(),
       detail: z.string(),
     })
     .strict(),

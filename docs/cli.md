@@ -1142,6 +1142,18 @@ and closes nothing. Once adopted, the lead retires the worker with
 `close_worker_pane` and its usual checks. An absent pane or a pane without that
 harness refuses. Repeating the command reads the retained adoption.
 
+The same command adopts a hire on another fleet machine (#326), such as a Claude
+hire on a PC that waited on its folder-trust prompt and came up idle once trust was
+accepted. `ID` is its remote hire receipt UUID or project allocation UUID. The
+fleet's census must show the hire's harness with a session in its own pane and
+directory, twice and unchanged. The host's receipt program then attests the same
+pane and session on its own census and journals the adoption; the receipt settles
+with that `adopted` host evidence. An older allocation whose original receipt can't
+be matched (other receipts at that place name no pane, or a different one) is
+adopted from the census alone, when no unresolved receipt names its pane; the
+result says so and carries no host evidence. Ownership, process proof and the
+"nothing sent" rule are the same as for a local hire.
+
 `clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
 native insertion through the same authenticated host census. The service resolves
 that exact event in its canonical mailbox journal and uniquely links its fingerprint
