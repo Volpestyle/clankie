@@ -85,6 +85,15 @@ class ScriptedPiSession {
         this.isStreaming = false;
         return;
       }
+      if (text.includes("Compact now"))
+        // What Pi announces after compacting the lane at its threshold.
+        this.emit({
+          type: "compaction_end",
+          reason: "threshold",
+          result: { summary: COMPACTED, firstKeptEntryId: "kept", tokensBefore: 200_000 },
+          aborted: false,
+          willRetry: false,
+        });
       const reply = `Service handled: ${/(?:Wake|Report) [A-Z]\b/u.exec(text)?.[0] ?? "input"}`;
       const message = { role: "assistant", content: [{ type: "text", text: reply }], stopReason: "stop" };
       this.state.messages.push(message);
@@ -277,6 +286,7 @@ function fixture(root = mkdtempSync(join(tmpdir(), "native-seat-fallback-"))) {
 }
 
 const ID = "global-default";
+const COMPACTED = "SUMMARY: the owner asked Clankie to bring the map to Friday's game night; he promised.";
 
 function harnessTurns(count: number, size: number) {
   return Array.from({ length: count }, (_, index) => ({
@@ -497,6 +507,45 @@ it("lets a fresh seat's SessionStart projection cover pending service turns inst
   const parsed = OperatorSeatEventSchema.parse(handoff);
   expect(parsed.content).toContain("Wake C after the seed");
   expect(parsed.content).not.toContain("Wake A review the queue");
+});
+
+it("#542: carries the service lane's compaction summary into every driver switch", async () => {
+  const f = fixture();
+  f.conversations.rememberNativeHead(ID, "claude-lead");
+  for (const text of ["Wake A review the queue", "Wake B Compact now"]) {
+    const wake = f.conversations.submitInternal(ID, text, "wake");
+    if (wake.status !== "accepted") throw new Error("Expected wake");
+    await settled(f, wake.runId);
+  }
+
+  // The returning harness gets the summary with the turns it missed, once.
+  const [first] = await f.pollSeat(ID, 60_000);
+  const handoff = OperatorSeatEventSchema.parse(first).content;
+  expect(handoff).toContain(COMPACTED);
+  expect(handoff).toContain("Wake B Compact now");
+  const later = f.conversations.submitInternal(ID, "Wake C after the handoff", "wake");
+  if (later.status !== "accepted") throw new Error("Expected wake");
+  await settled(f, later.runId);
+  const [second] = await f.pollSeat(ID, 60_000);
+  expect(OperatorSeatEventSchema.parse(second).content).toContain("Wake C after the handoff");
+  expect(OperatorSeatEventSchema.parse(second).content).not.toContain(COMPACTED);
+
+  // The harness drives long enough that the compacted turns fall out of the bounded log;
+  // the fresh service session it leaves behind still starts from the summary.
+  f.conversations.syncNativeSeatTranscript(ID, "claude-session", harnessTurns(60, 1_000));
+  const wake = f.conversations.submitInternal(ID, "Wake D back on the service", "wake");
+  if (wake.status !== "accepted") throw new Error("Expected wake");
+  await settled(f, wake.runId);
+  expect(f.freshSessions()).toBe(2);
+  const seeded = f.sessions[1]!.prompts[0]!;
+  expect(seeded).toContain("[Shared conversation context.");
+  expect(seeded).toContain("earlier events omitted");
+  expect(seeded).not.toContain("Wake B Compact now");
+  expect(seeded).toContain(COMPACTED);
+
+  // So does a fresh harness session's SessionStart projection, and a stalled-compaction recovery.
+  expect(f.conversations.seatStartProjection(ID)).toContain(COMPACTED);
+  expect(f.conversations.compactionRecoveryContext(ID)).toContain(COMPACTED);
 });
 
 it("keeps a long service handoff inside the seat channel's wire contract", async () => {

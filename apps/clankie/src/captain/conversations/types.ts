@@ -257,6 +257,11 @@ export interface ConversationMeta {
   serviceContextRevision?: number;
   /** Newest log cursor a harness is known to hold (its sync, a handoff, or a start seed). */
   harnessCursor?: string;
+  /**
+   * The service lane's latest compaction summary (Pi folds each earlier one into
+   * the next), carried into every driver-switch projection (#542).
+   */
+  compactionSummary?: { text: string; at: string; through: string | undefined };
   /** Service-run turns not yet handed to a returning harness (ADR 0218). */
   serviceHandoff?: ServiceHandoffSpan;
   /** The last handoff whose native take could not be proven; never resent. */
