@@ -108,10 +108,10 @@ setInterval(() => {}, 1 << 30);
   const watches = join(home, "watches.json");
   const receipts = `${watches}.hire-receipts.json`;
   /** The receipt a PC hire leaves when its pane opened but its start never confirmed. */
-  const uncertainHire = async (directory: string, paneId: string | undefined) => {
+  const uncertainHire = async (directory: string, paneId: string | undefined, harness = "claude") => {
     const claim: RemoteHireClaim = {
       receiptId: randomUUID(),
-      receiptKey: JSON.stringify(["pc", "claude", directory, "new"]),
+      receiptKey: JSON.stringify(["pc", harness, directory, "new"]),
       fingerprint: deliveryFingerprint("Fix the build."),
       nonce: randomUUID().replaceAll("-", "").repeat(2),
       target: { fleet: "pc", host: "configured-host", session: "default", shell: "posix" },
@@ -297,6 +297,51 @@ nativeIt(
         });
         // The unrelated older receipt is untouched.
         expect(JSON.stringify(new DeliveryFence(f.receipts).pending(older.receiptKey))).toBe(olderBytes);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "refuses a pane running another harness, or a session outside the hire's directory, with nothing changed",
+  async () => {
+    const f = await fixture();
+    try {
+      // The receipt names Codex; the pane runs Claude.
+      const codexPlace = join(f.home, "codex-place");
+      const claudePane = await f.pane(codexPlace);
+      const codexHire = await f.uncertainHire(codexPlace, claudePane, "codex");
+      f.owners.bind(claudePane, lead);
+      // The receipt names this directory; its pane's agent runs in another one.
+      const hirePlace = join(f.home, "hire-place");
+      await mkdir(hirePlace, { recursive: true });
+      const elsewhere = await f.pane(join(f.home, "elsewhere"));
+      const movedHire = await f.uncertainHire(hirePlace, elsewhere);
+      f.owners.bind(elsewhere, lead);
+      const store = new HerdrWatchStore(f.watches, { remoteHireReceipts: f.native, runner: f.runner });
+      try {
+        const bytes = await readFile(f.receipts, "utf8");
+        expect(await store.settleHireReceipt(codexHire.receiptId, async () => {}, "adopt")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("holds no observed codex session"),
+        });
+        expect(await store.settleHireReceipt(movedHire.receiptId, async () => {}, "adopt")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("outside the hire's directory"),
+        });
+        expect(await readFile(f.receipts, "utf8")).toBe(bytes);
+        // Neither reached the host: no adoption was journaled there.
+        for (const name of (await readdir(join(f.home, ".clankie/hire-receipts"))).filter((entry) =>
+          entry.endsWith(".json"),
+        ))
+          expect(JSON.parse(await readFile(join(f.home, ".clankie/hire-receipts", name), "utf8")).state).toBe(
+            "launching",
+          );
       } finally {
         store.close();
       }
