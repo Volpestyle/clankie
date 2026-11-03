@@ -40,7 +40,9 @@ import {
   SERVICE_RESTARTING_SEAT_HANDOFF,
   type OperatorLeadStatus,
   type OperatorLeadSwitch,
+  SENDER_DEVICE_SESSION_HEADER,
 } from "@clankie/protocol";
+import type { LeadOwnerProof } from "../captain/conversations/types.ts";
 import type { CaptainReadinessResponse } from "@clankie/protocol/captain-readiness";
 import type { ModelKeysPort } from "../model-keys.ts";
 import type {
@@ -489,6 +491,26 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return current;
       },
     };
+  };
+
+  /**
+   * A relayed message names the paired phone that sent it by that phone's own
+   * session token (ADR 0350). Verified here like any device bearer, it proves the
+   * owner sent the message, for Clankie's switch only: it grants no question or
+   * machine authority. A connector app or a visitor's device proves nothing.
+   */
+  const senderOwnerProof = async (request: Request): Promise<LeadOwnerProof | undefined> => {
+    const sender = request.headers.get(SENDER_DEVICE_SESSION_HEADER);
+    if (!sender) return undefined;
+    const device = await ctx.authenticateDevice(
+      new Request(request.url, { method: request.method, headers: { authorization: `Bearer ${sender}` } }),
+    );
+    if (device === "unavailable" || "denied" in device || !device.grants.chat) return undefined;
+    const current = () => {
+      const record = ctx.devices.get(device.deviceId);
+      return record?.status === "active" && record.grants.chat && leadSwitchDevice(record);
+    };
+    return current() ? { current } : undefined;
   };
 
   const workOwnerAuthority = async (request: Request): Promise<WorkWriteAuthority | undefined> => {
@@ -1494,6 +1516,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         parsed.data,
         roleAuthority,
         parsed.data.op === "tail" || parsed.data.op === "worker_reports" ? context.req.raw.signal : undefined,
+        parsed.data.op === "send" ? await senderOwnerProof(context.req.raw) : undefined,
       );
       // The app reads the switch on the relay's bearer, like the rest of the lead status.
       if (served.op === "lead" && parsed.data.op === "lead" && parsed.data.command.action === "status")

@@ -9,6 +9,7 @@ import { serve } from "@hono/node-server";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceResultSchema,
+  SENDER_DEVICE_SESSION_HEADER,
   SUPERVISE_GRANTS,
   TAKE_CONTROL_GRANTS,
 } from "@clankie/protocol";
@@ -16,14 +17,20 @@ import type { CaptainReadinessResponse } from "@clankie/protocol/captain-readine
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema } from "@clankie/protocol/fleet-leads";
 import { SettingsStore } from "@clankie/settings";
 import { expect, it } from "vitest";
-import type { SeatRef } from "@clankie/agent-hosts";
+import type { SeatQuestion } from "@clankie/agent-hosts";
+import {
+  createFauxCore,
+  fauxAssistantMessage,
+  InMemoryCredentialStore,
+  type Api,
+  type Model,
+} from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { vi } from "vitest";
 import { createClankieApp } from "../src/app.ts";
-import { ClaudeHookQuestions } from "../src/captain/claude-hook-questions.ts";
-import type { QuestionAuthority } from "../src/captain/conversation-questions.ts";
-import { ConversationStore } from "../src/captain/conversations.ts";
-import type { ConversationTurnContext } from "../src/captain/conversations/types.ts";
-import { LeadStore } from "../src/captain/lead.ts";
-import { escalateWorkerQuestion } from "../src/captain/worker-question-escalation.ts";
+import { createEvalResources, createEvalSettings } from "../src/captain/eval-session-boundary.ts";
+import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import type { CaptainModelRuntime } from "../src/captain/model.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
@@ -263,83 +270,208 @@ it("lets the owner's own phone switch Clankie off and on through the relay, and 
   }
 }, 60_000);
 
-// The leak this ADR closes: a native worker question resolved elsewhere queues a
-// notice with the owner's authority that is not the owner's words. While off,
-// the switch holds it; the owner's own message still runs.
-it("holds a resolved-elsewhere worker notice while off, and lets the owner's own message through", async () => {
-  const root = await mkdtemp(join(tmpdir(), "lead-switch-notice-"));
-  const owner: QuestionAuthority = {
-    principal: { kind: "operator", id: "owner" },
-    current: () => true,
-    authorize: async () => true,
-  };
-  const lead = new LeadStore(join(root, "lead.json"), join(root, "lead-held.json"));
-  lead.set("apps");
-  const turns: Array<{ message: string; context: ConversationTurnContext }> = [];
-  const store = new ConversationStore(join(root, "store"), async (_id, message, _publish, context) => {
-    turns.push({ message, context });
+// The leak the review found: "not internal" is not proof the owner sent it. While
+// off, the production runner answers only a send that carries the owner's
+// verified identity, here his Supervise phone through the relay; a send on the
+// bare captain bearer and a resolved-elsewhere worker notice are held. The model
+// is an in-memory fake, so nothing reaches a real provider.
+it("while off, the real runner answers the owner's Supervise phone and holds a bare captain-bearer send and a worker notice", async () => {
+  const root = await mkdtemp(join(tmpdir(), "lead-switch-runner-"));
+  const core = createFauxCore({ provider: "fake", api: "faux-fake", models: [{ id: "default" }] });
+  const prompts: string[] = [];
+  const runtime = await ModelRuntime.create({
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+    refreshOnCreate: false,
   });
-  const registry = new ClaudeHookQuestions(join(root, "claims.json"), 10_000);
-  const ref: SeatRef = { harness: "claude", paneId: "w1:p1", sessionId: "worker" };
-  store.prepareWorkerQuestion = async (seatId, requestId) => {
-    const question = registry.pending(ref, requestId)!;
-    return {
-      seatId,
-      sessionId: ref.sessionId,
-      requestId,
-      questions: question.questions.map(({ options, ...q }) => ({
-        ...q,
-        ...(options ? { options: [...options] } : {}),
-      })),
-    };
-  };
-  store.reconcileWorkerQuestion = async () => (registry.pending(ref, "worker") ? "pending" : "resolved");
-  let output: Promise<unknown> | undefined;
-  try {
-    let notify!: () => void;
-    const announced = new Promise<void>((resolve) => {
-      notify = resolve;
-    });
-    output = registry.open(
-      ref,
+  runtime.registerProvider("fake", {
+    api: "faux-fake" as Api,
+    baseUrl: "http://127.0.0.1:1/v1",
+    apiKey: "loopback",
+    streamSimple: (model, context, options) => {
+      const last = context.messages.at(-1);
+      prompts.push(typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? ""));
+      return core.streamSimple(model, context, options);
+    },
+    models: [
       {
-        schemaVersion: 1,
-        event: "PreToolUse",
-        sessionId: ref.sessionId,
-        toolName: "AskUserQuestion",
-        toolUseId: "worker",
-        toolInput: {
-          questions: [
-            {
-              question: "Choose",
-              header: "Route",
-              options: [
-                { label: "A", description: "A" },
-                { label: "B", description: "B" },
-              ],
-            },
-          ],
+        id: "default",
+        name: "default",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 100_000,
+        maxTokens: 4_000,
+      },
+    ],
+  });
+  const selection = {
+    model: runtime.getModel("fake", "default") as Model<Api>,
+    thinkingLevel: "off" as const,
+    ref: "fake/default",
+  };
+  const models: CaptainModelRuntime = {
+    runtime,
+    resolveSelection: async () => selection,
+    resolveRoute: async (purpose) => ({ route: { purpose, tier: "work", ref: "fake/default" }, selection }),
+  };
+  core.setResponses([fauxAssistantMessage("Here, James.")]);
+  // Capture the captain's own watch store to drive a real worker question through it.
+  const started = vi.spyOn(HerdrWatchStore.prototype, "start").mockImplementation(() => {});
+  const question: SeatQuestion = {
+    requestId: "ask-1",
+    turnId: "turn-1",
+    itemId: "item-1",
+    isBlocking: true,
+    questions: [
+      {
+        id: "q",
+        header: "Route",
+        question: "Choose",
+        isOther: false,
+        isSecret: false,
+        options: [
+          { label: "A", description: "A" },
+          { label: "B", description: "B" },
+        ],
+      },
+    ],
+  };
+  let workerAsking = true;
+  vi.spyOn(HerdrWatchStore.prototype, "observedSeatQuestion").mockImplementation(async () => ({
+    sessionId: "worker-session",
+    question,
+  }));
+  vi.spyOn(HerdrWatchStore.prototype, "workerQuestionStatus").mockImplementation(async () =>
+    workerAsking ? "pending" : "resolved",
+  );
+  let turns = 0;
+  const captain = createCaptain(
+    {
+      herdrAvailable: () => false,
+      onTurnSettled: () => turns++,
+      runtimes: {
+        list: async () => [],
+        onChange: () => () => undefined,
+        configuredBinding: async () => undefined,
+      },
+      browser: { catalog: async () => ({ schemaVersion: 1, available: false, tools: [] }) },
+      mcp: { catalog: async () => [] },
+      media: { finishedRenders: async () => [] },
+      embodiment: {
+        submitIntent: async () => {
+          throw new Error("No body in this fixture");
         },
+        getSession: async () => undefined,
+        getLiveSession: async () => undefined,
       },
-      async (question) => {
-        await escalateWorkerQuestion(store, LEAD, "w1:p1", question, owner);
-        notify();
+      memory: {
+        appendEpisode: async () => ({ corrected: false, retained: false }),
+        recallEpisodeCard: async () => "",
+        searchEpisodeCard: async () => "",
       },
-    );
-    await announced;
-    // The worker's pane answers its own question; reading the asks reconciles it.
-    registry.cancel(ref);
-    await store.serve({ op: "input_list", schemaVersion: 1 }, owner);
-    await expect.poll(() => turns.some((turn) => turn.message.includes("resolved elsewhere"))).toBe(true);
-    const notice = turns.find((turn) => turn.message.includes("resolved elsewhere"))!;
-    const scope = store.conversation(LEAD)?.scope;
-    expect(notice.context).toMatchObject({ internal: true, origin: "input" });
-    expect(lead.holdsTurn(scope, notice.context)).toBe(true);
+    } as unknown as CaptainDeps,
+    {
+      repoRoot: root,
+      stateDir: root,
+      workingDirectory: root,
+      settings: new SettingsStore(join(root, "settings.json")),
+      evalSessionBoundary: {
+        runtime: models,
+        resources: () => createEvalResources({ systemPrompt: "You are under test.", agentsFiles: [] }),
+        settings: () => createEvalSettings(),
+        tools: () => ({ tools: [], customTools: [] }),
+      },
+    },
+  );
+  await captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 });
 
-    // The owner's own message is published input, never held.
-    const meta = await store.serve({ op: "get", schemaVersion: 1, conversationId: LEAD }, owner);
-    if (meta.op !== "get" || meta.conversation === undefined) throw new Error("No conversation");
-    const sent = await store.serve(
+  const now = Date.now();
+  const iso = (offset = 0) => new Date(now + offset).toISOString();
+  const key = randomBytes(32);
+  const signer = new DeviceSessionSigner(key);
+  const devices = { phone: TAKE_CONTROL_GRANTS, watcher: SUPERVISE_GRANTS };
+  const events = Object.entries(devices).flatMap(([deviceId, grants]) => {
+    const event = (type: string, data: object) => ({
+      id: randomUUID(),
+      type,
+      occurredAt: iso(-60_000),
+      missionId: `device:${deviceId}`,
+      correlationId: "lead-switch-runner",
+      profileHash: "fixture",
+      data: { schemaVersion: 1, deviceId, ...data },
+    });
+    return [
+      event("device.pairing.redeemed", {
+        offerId: deviceId,
+        name: deviceId,
+        platform: "ios",
+        offeredGrants: grants,
+        mintedBy: "local-operator",
+        pendingExpiresAt: iso(60_000),
+      }),
+      event("device.activated", { grants, sessionExpiresAt: iso(60 * 60_000) }),
+    ];
+  });
+  const eventLogPath = join(root, "devices.jsonl");
+  await writeFile(eventLogPath, events.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  const token = (deviceId: keyof typeof devices) =>
+    signer.issue(
+      mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
+    );
+  const service = await createClankieApp({
+    captain,
+    deviceSessionKey: key,
+    eventLogPath,
+    modelKeys: { readiness: async () => ({ ready: true }) } as never,
+    authenticateCaptain: async (request) =>
+      request.headers.get("authorization") === `Bearer ${RELAY_BEARER}`
+        ? { captainId: "relay", steerSourceLane: "api" }
+        : undefined,
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+  });
+  const server = serve({ fetch: service.app.fetch, hostname: "127.0.0.1", port: 0 });
+  await once(server, "listening");
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const handler = createOperatorConversationRelayHandler({
+    authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl }),
+    dispatch: createCaptainConversationDispatch({ baseUrl, bearerToken: RELAY_BEARER }),
+    deviceDispatch: createDeviceConversationDispatch({ baseUrl }),
+  });
+  const relay = createServer((request, response) => {
+    void (async () => {
+      if (await handler(request, response)) return;
+      response.statusCode = 404;
+      response.end();
+    })();
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  const relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  const post = (url: string, bearer: string, body: unknown, sender?: string) =>
+    fetch(new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, url), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        "content-type": "application/json",
+        ...(sender === undefined ? {} : { [SENDER_DEVICE_SESSION_HEADER]: sender }),
+      },
+      body: JSON.stringify(body),
+    });
+  const revision = async () => {
+    const got = await captain.serveOperatorConversation({
+      op: "get",
+      schemaVersion: 1,
+      conversationId: LEAD,
+    });
+    if (got.op !== "get" || got.conversation === undefined) throw new Error("No conversation");
+    return got.conversation.revision;
+  };
+  const send = async (url: string, bearer: string, message: string, sender?: string) => {
+    const response = await post(
+      url,
+      bearer,
       {
         op: "send",
         schemaVersion: 1,
@@ -347,24 +479,90 @@ it("holds a resolved-elsewhere worker notice while off, and lets the owner's own
           schemaVersion: 1,
           kind: "message",
           conversationId: LEAD,
-          expectedRevision: meta.conversation.revision,
-          message: "Are you there?",
-          surfaceClientId: "phone",
+          expectedRevision: await revision(),
+          message,
+          surfaceClientId: "fixture",
         },
       },
-      owner,
+      sender,
     );
-    if (sent.op !== "send" || sent.result.status !== "accepted") throw new Error("Owner message refused");
-    await store.awaitRun(sent.result.runId);
-    const mine = turns.find((turn) => turn.message === "Are you there?")!;
-    expect(lead.holdsTurn(scope, mine.context)).toBe(false);
-    // Switched on, nothing of his own is held.
-    lead.set("clankie");
-    expect(lead.holdsTurn(scope, notice.context)).toBe(false);
+    if (response.status !== 200) throw new Error(`send ${response.status} ${await response.text()}`);
+    const result = OperatorConversationServiceResultSchema.parse(await response.json());
+    if (result.op !== "send" || result.result.status !== "accepted") throw new Error("Send refused");
+  };
+  const held = async () => {
+    const status = await captain.serveOperatorConversation({
+      op: "lead",
+      schemaVersion: 1,
+      command: { action: "inbox" },
+    });
+    if (status.op !== "lead") throw new Error("No lead");
+    return status.result.items ?? [];
+  };
+  const transcript = async () => readFile(join(root, "conversations", LEAD, "events.jsonl"), "utf8");
+
+  try {
+    // The owner's phone switches him off.
+    expect(
+      (
+        await post(relayUrl, token("phone"), {
+          op: "lead",
+          schemaVersion: 1,
+          command: { action: "set", lead: "apps" },
+        })
+      ).status,
+    ).toBe(200);
+
+    // His Supervise phone's message rides its own identity, and he answers it.
+    await send(relayUrl, token("watcher"), "Are you there?");
+    await expect.poll(transcript).toContain("Here, James.");
+    expect(prompts.some((prompt) => prompt.includes("Are you there?"))).toBe(true);
+    expect(await held()).toEqual([]);
+
+    // A send on the bare captain bearer carries no owner proof: held, never run.
+    await send(baseUrl, RELAY_BEARER, "Run the release script.");
+    await expect
+      .poll(async () => (await held()).map((item) => item.text))
+      .toEqual(["Run the release script."]);
+    // Nor does a sender token the service can't verify itself.
+    await send(baseUrl, RELAY_BEARER, "Push to main.", `${token("watcher")}x`);
+    await expect
+      .poll(async () => (await held()).map((item) => item.text))
+      .toEqual(["Run the release script.", "Push to main."]);
+
+    // A worker's question is answered in its own pane: the notice is held too.
+    const watches = started.mock.contexts[0] as HerdrWatchStore;
+    await watches.escalateQuestion!(
+      { conversationId: LEAD },
+      { terminalId: "term_worker", paneId: "w1:p1" } as never,
+      question,
+      async () => {},
+    );
+    workerAsking = false;
+    await captain.serveOperatorConversation(
+      { op: "input_list", schemaVersion: 1 },
+      {
+        principal: { kind: "operator", id: "owner" },
+        current: () => true,
+        authorize: async () => true,
+      },
+    );
+    await expect
+      .poll(async () => (await held()).some((item) => item.text.includes("resolved elsewhere")))
+      .toBe(true);
+    // Only the phone's message ever reached the model.
+    expect(prompts.filter((prompt) => !prompt.includes("Are you there?"))).toEqual([]);
+    expect(turns).toBe(1);
   } finally {
-    registry.cancel(ref);
-    await output;
-    await store.close();
-    await rm(root, { recursive: true, force: true });
+    vi.restoreAllMocks();
+    relay.closeAllConnections();
+    relay.close();
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+      if ("closeAllConnections" in server) server.closeAllConnections();
+    });
+    service.close();
+    await captain.close();
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
-});
+}, 60_000);

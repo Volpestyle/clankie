@@ -3,6 +3,7 @@ import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH,
   OperatorConversationServiceResultSchema,
+  SENDER_DEVICE_SESSION_HEADER,
   SERVICE_RESTARTING_SEAT_HANDOFF,
   parseProtocolResponse,
   type OperatorDeliveredFileDownloadRequest,
@@ -24,12 +25,13 @@ export function createCaptainConversationDispatch(
   if (options.bearerToken.trim().length < 16) throw new Error("Captain bearer token is too short");
   const endpoint = new URL(OPERATOR_CONVERSATION_DISPATCH_PATH, requireHttpBase(options.baseUrl));
   const fetcher = options.fetch ?? globalThis.fetch;
-  return async (request, signal) => {
+  return async (request, signal, sender) => {
     const response = await fetcher(endpoint, {
       method: "POST",
       headers: {
         authorization: `Bearer ${options.bearerToken}`,
         "content-type": "application/json",
+        ...(sender === undefined ? {} : { [SENDER_DEVICE_SESSION_HEADER]: sender.deviceToken }),
       },
       body: JSON.stringify(request),
       signal: dispatchSignal(signal, request.op),

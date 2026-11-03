@@ -47,11 +47,21 @@ turn of his own.
   couldn't be read). A worker harness account never decides it. While off, a
   model that can't run still carries its reason, so the app can say so before
   he's turned on.
-- **Off holds every turn of his own.** While off, every internal turn in a
-  global or workspace lead thread is held, including notices that carry owner
-  authority but are not the owner's words. The owner's own messages and
-  answers are published operator input and still run. Whether off should also
-  stop answering the owner is one condition, `LeadStore.holdsTurn`.
+- **Off runs only what the owner verifiably sent.** While off, a turn in a
+  global or workspace lead thread runs only when it is published input whose
+  owner proof is still current: question authority (this machine's operator or
+  a Take Control device, including his answers), or a host-verified sender. A
+  sender is a guarded linked owner channel, or a paired phone that relays its
+  message on the captain route with its own session token beside it
+  (`x-clankie-sender-device-session`). The service verifies that token itself,
+  as it would any device bearer, and accepts only an active, owner-paired,
+  non-connector device with the chat grant. That proof is never question or
+  machine authority. Everything else is held: his own wakes and watches,
+  notices that carry owner authority but are not the owner's words (a worker
+  question resolved elsewhere), and any send with no verified owner proof,
+  such as one on the bare captain bearer or from a worker or connector app.
+  Whether off should also stop the owner's own messages is one condition,
+  `ownerSent` in `LeadStore.holdsTurn`.
 - **Turning him on spends nothing by itself.** Setting `clankie` flips the
   setting only. Held turns stay in `lead-held.json` for the apps and are not
   replayed.

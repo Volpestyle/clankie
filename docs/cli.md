@@ -1982,9 +1982,12 @@ either way: this command with your operator credential, or your own paired
 Take Control device through the relay, which shows it as Clankie's on/off switch
 ([ADR 0350](adr/0350-the-owner-switches-clankie-on-and-off-from-his-app.md)).
 A connected app, captain bearer or worker can't. Handing it back only flips the
-setting: held turns are not replayed. While the apps lead, every turn Clankie
-would take himself is held, including notices that carry your authority but are
-not your words; your own messages and answers still run.
+setting: held turns are not replayed. While the apps lead, a turn runs only when
+you verifiably sent it: with your operator credential, from your own paired
+device (a Supervise phone's relayed message carries its own session token for
+the service to verify), or through a linked owner channel. Everything else is
+held, including notices that carry your authority but are not your words and
+sends on a bare captain bearer.
 JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:
 "state_unreadable" }`. Over the operator dispatch, `status` and `set` results
 also carry `status.clankie`: `{ "state": "on" | "off" | "cant_start", "reason"?:

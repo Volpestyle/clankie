@@ -67,17 +67,29 @@ export class LeadStore {
   }
 
   /**
-   * Whether the switch holds this turn (ADR 0350). While off, every turn Clankie
-   * would take himself is held, including notices that carry owner authority but
-   * are not the owner's words. The owner's own messages and answers are published
-   * operator input (`internal` unset) and still reach him: whether off should
-   * also stop those is this one condition.
+   * Whether the switch holds this turn (ADR 0350). While off, a turn runs only
+   * when the owner verifiably sent it: published input (not `internal`) whose
+   * owner proof is still current, either question authority (the operator or a
+   * Take Control device, including his answers) or a host-verified sender such
+   * as his Supervise phone or a guarded linked channel. Everything else is held:
+   * his own wakes and watches, notices that carry owner authority but are not
+   * the owner's words, and sends with no owner proof, such as a bare captain
+   * bearer. Whether off should also stop the owner's own messages is the
+   * `ownerSent` condition alone.
    */
   public holdsTurn(
     scope: OperatorConversation["scope"] | undefined,
-    turn: { readonly internal?: true },
+    turn: {
+      readonly internal?: true;
+      readonly ownerAuthority?: { readonly current: () => boolean };
+      readonly leadOwner?: { readonly current: () => boolean };
+    },
   ): boolean {
-    return turn.internal === true && this.holds(scope);
+    if (!this.holds(scope)) return false;
+    const ownerSent =
+      turn.internal !== true &&
+      (turn.ownerAuthority?.current() === true || turn.leadOwner?.current() === true);
+    return !ownerSent;
   }
 
   public hold(item: Omit<OperatorLeadHeldItem, "seq" | "at">, at = new Date().toISOString()): void {

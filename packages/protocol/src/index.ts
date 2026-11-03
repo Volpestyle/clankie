@@ -401,6 +401,7 @@ export {
   OperatorConversationServiceResultSchema,
   SendReceiptRecordSchema,
   SERVICE_RESTARTING_SEAT_HANDOFF,
+  SENDER_DEVICE_SESSION_HEADER,
   type SendReceiptRecord,
   type OperatorConversationServiceResult,
   type OperatorConversationServiceDispatch,

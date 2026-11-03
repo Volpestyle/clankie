@@ -1065,11 +1065,17 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             )
           : serviceRequest.op === "tail"
             ? readTail(tails, serviceRequest, abort.signal)
-            : serviceRequest.op === "send" ||
-                serviceRequest.op === "presence" ||
-                serviceRequest.op === "worker_reports"
-              ? options.dispatch(serviceRequest, abort.signal)
-              : options.dispatch(serviceRequest);
+            : serviceRequest.op === "send"
+              ? // The phone's own token rides beside its message, so the service can
+                // verify the owner sent it (ADR 0350); a connector app's never does.
+                options.dispatch(
+                  serviceRequest,
+                  abort.signal,
+                  currentAuthorization.device.scope === "connector" ? undefined : { deviceToken: token },
+                )
+              : serviceRequest.op === "presence" || serviceRequest.op === "worker_reports"
+                ? options.dispatch(serviceRequest, abort.signal)
+                : options.dispatch(serviceRequest);
       const result =
         serviceRequest.op === "send_receipt"
           ? await idempotency.read(currentAuthorization.device.deviceId, serviceRequest)
