@@ -550,6 +550,7 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       });
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
+    lane.capture.roomHistory = normalized.historyReader;
     lane.capture.actorId = normalized.actorId;
     lane.capture.guildId = normalized.guildId;
     lane.capture.channelId = normalized.channelId;
@@ -563,6 +564,8 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
         at: new Date().toISOString(),
         kind: "heard",
         text: normalized.heard,
+        actorId: normalized.actorId,
+        audience: normalized.roomAudience ?? "private",
       }),
     );
     const live = lane.running !== undefined || lane.session.isStreaming;
@@ -829,6 +832,7 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       at: new Date().toISOString(),
       kind: "said",
       text: message,
+      audience: normalized.roomAudience ?? "private",
     });
     await toolProgress?.complete();
     tryAppendTurnSettled(ctx.turnSettled, metrics, "completed", new Date(), tokensEnd);

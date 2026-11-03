@@ -364,6 +364,17 @@ including when an owner asks. Non-owners get social tools and exactly the room's
 skill adapter. Mixed-room machine turns use fresh Pi sessions with bounded
 room history. Participant Pi rooms reuse a loop under the same skill grant. Revocation rechecks settings at tool execution.
 
+A room turn starts with only the room's recent messages. Older ones stay in that
+room's lane log (`~/.clankie/captain/lanes/<lane>~<target>.jsonl`), and the
+`room_history` tool searches or reads them, newest first, at most 8 entries and
+about 4,000 characters a call, paged by `offset`. The turn's context says how
+many earlier messages it can read. The host binds the tool to the current room
+and the turn's audience: every lane log entry records whether its turn had
+private context, and a turn without it reads only entries written for the room.
+An owner-only exchange therefore never reaches a channel after its audience
+widens, and entries logged before audiences were recorded are visible to private
+turns only. Results carry the untrusted-context label (#340).
+
 Owner outreach, room relays, tracking messages and fleet webhooks require an
 owner-only audience. Everyone-owned servers satisfy that ownership condition;
 private rooms otherwise need live channel overwrites, guild-owner and role

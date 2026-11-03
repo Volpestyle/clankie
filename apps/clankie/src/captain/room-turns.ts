@@ -17,6 +17,8 @@ import type { PiTurnJournal } from "./pi-turn-journal.ts";
 import type { RoomConversations } from "./room-conversations.ts";
 import type { RoomForkReceipts, RoomForkResult } from "./room-forks.ts";
 import type { DiscordSessionAccess } from "./room-skill-tools.ts";
+import type { RoomHistoryReader } from "../room-history.ts";
+import type { RoomLogAudience } from "./lane-log.ts";
 import type { SeatOutbox } from "./seat-outbox.ts";
 import type { planDiscordTurnSession } from "./system-authority.ts";
 import type { TurnContext } from "./tools.ts";
@@ -34,6 +36,10 @@ import type { TurnSettledLog } from "./turn-metrics.ts";
 export interface NormalizedDiscordTurn {
   readonly journal?: PiTurnJournal;
   readonly access?: DiscordSessionAccess;
+  /** Host-bound reader of this room's earlier messages for this turn's audience (#340). */
+  readonly historyReader?: RoomHistoryReader;
+  /** Who this turn's lane log entries are for; absent records them as private. */
+  readonly roomAudience?: RoomLogAudience;
   /** Both planes continue a durable session per channel (ADR 0118). */
   readonly sessionKey: string;
   readonly durable: boolean;
@@ -75,6 +81,8 @@ export interface NormalizeRoomTurnOptions {
    */
   readonly carriesHistory?: boolean;
   readonly roomHistory?: string;
+  /** Earlier messages `room_history` can read for this turn; a positive count adds one context line. */
+  readonly roomHistoryCount?: number;
   /**
    * Context visuals this lane session has already been shown, by source
    * message id. Every warm-lane turn names the same newest visual; sending

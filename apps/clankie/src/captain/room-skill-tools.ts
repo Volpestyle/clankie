@@ -273,6 +273,8 @@ export function discordSessionTools(
 }
 
 const SOCIAL_DISCORD_TOOLS = new Set([
+  // Bound by the host to this room and this turn's audience (#340).
+  "room_history",
   "generate_image",
   "generate_video",
   "youtube_search",

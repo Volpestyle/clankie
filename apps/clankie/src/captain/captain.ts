@@ -293,6 +293,7 @@ import {
   turnSettledLogPath,
   type TurnMetricsQuery,
 } from "./turn-metrics.ts";
+import { roomHistoryReader } from "../room-history.ts";
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
@@ -4811,9 +4812,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   burst.handoff.grant = key;
                   burst.handoff.sessionKey = sessionKey;
                 }
+                // This room's own log, for this turn's audience only (#340).
+                const historyReader = roomHistoryReader(laneLog, lane, targetId, access.privateContext);
                 const heard = await roomTurns.normalize(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   systemTools: plan.systemTools,
+                  roomHistoryCount: await historyReader.count(),
                   // A warm loop already holds the room; a cold one reads the bounded backlog once.
                   carriesHistory: loopKey !== undefined && sessions.has(loopKey),
                   ...(loopKey !== undefined
@@ -4824,6 +4828,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 });
                 const normalized: NormalizedDiscordTurn = {
                   ...heard,
+                  historyReader,
+                  roomAudience: access.privateContext ? "private" : "room",
                   sessionKey,
                   durable: loopKey !== undefined,
                   handoffConversationId: child.conversationId,
