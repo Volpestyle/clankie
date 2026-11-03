@@ -736,3 +736,116 @@ it("an addressed board note wakes each named lead once, falling through to Clank
     await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+// #624: a restart that cuts a board-note wake short settles it as uncertain and never
+// sends it again. The first life posts a note to grok and stops while grok's real
+// webhook still holds the request; the second life boots on the same state, and the
+// owner's own read shows the receipt. A later note to grok does go, so the webhook is
+// reachable after the restart and the first note's silence is the journal's doing.
+it("a restart while a board-note wake is out settles it as uncertain and never sends it again", async () => {
+  const root = await mkdtemp(join(tmpdir(), "note-restart-"));
+  const store = new FileCredentialStore(join(root, "credentials.json"));
+  const fires: string[] = [];
+  let hold = true;
+  const webhook = createServer((request: IncomingMessage, response) => {
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString("utf8")));
+    request.on("end", () => {
+      fires.push((JSON.parse(body) as { text: string }).text);
+      if (hold) {
+        // The first life dies with this request still out; it is never answered.
+        request.socket.unref();
+        return;
+      }
+      response.statusCode = 200;
+      response.end();
+    });
+  });
+  webhook.listen(0, "127.0.0.1");
+  await once(webhook, "listening");
+  const hookUrl = `http://127.0.0.1:${(webhook.address() as AddressInfo).port}/hooks/grok`;
+  // The first life's wake would wait out its own deadline; a stopped service never sees it.
+  const first = createLeadWakes({ store, timeoutMs: 2 ** 31 - 1 });
+  let wakes = first;
+  let worker = await reportWakeCaptain(root, wakes);
+  let host = await createQaService({ leadWakes: wakes, captain: worker.captain });
+  const owner = async (args: readonly string[], stdin?: string) => {
+    let stdout = "";
+    const code = await runConnectorCommand(args, {
+      host: host.baseUrl,
+      env: { ...process.env, CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+      credentialStore: store,
+      ...(stdin === undefined ? {} : { stdin: Readable.from([stdin]) }),
+      stdout: { write: (text: string) => void (stdout += text) },
+      stderr: { write: () => undefined },
+    });
+    return { code, stdout };
+  };
+  const until = async (done: () => boolean | Promise<boolean>, what: string) => {
+    for (const end = Date.now() + 10_000; Date.now() < end; await new Promise((wait) => setTimeout(wait, 50)))
+      if (await done()) return;
+    throw new Error(`never ${what}`);
+  };
+  const post = async (text: string) => {
+    const posted = await worker.captain.appNotes!({ action: "post", author: "Cursor", text, to: ["grok"] });
+    if (posted.outcome !== "posted") throw new Error(JSON.stringify(posted));
+    return posted.note.sequence;
+  };
+  const wakesOf = async (sequence: number) => {
+    const read = await owner(["notes", "--json"]);
+    expect(read.code).toBe(0);
+    return (
+      JSON.parse(read.stdout) as {
+        notes: Array<{ sequence: number; wakes?: Array<Record<string, unknown>> }>;
+      }
+    ).notes.find((note) => note.sequence === sequence)?.wakes;
+  };
+  try {
+    expect((await owner(["wake", "set", "grok"], `${hookUrl}\nrk_restart\n`)).code).toBe(0);
+    const cut = await post("For Grok: the deploy key rotated.");
+    await until(() => fires.length === 1, "reached grok's webhook");
+    const journalPath = join(root, "fleet-room", "note-wakes.json");
+    const before = JSON.parse(await readFile(journalPath, "utf8"));
+    expect(before.notes).toEqual([
+      expect.objectContaining({
+        sequence: cut,
+        pending: [expect.objectContaining({ lead: "grok", trying: "webhook" })],
+      }),
+    ]);
+
+    // The service stops with grok's wake still out, and starts again on the same state.
+    await host.close();
+    await worker.close();
+    first.close();
+    hold = false;
+    wakes = createLeadWakes({ store });
+    worker = await reportWakeCaptain(root, wakes);
+    host = await createQaService({ leadWakes: wakes, captain: worker.captain });
+
+    expect(await wakesOf(cut)).toEqual([
+      {
+        receiptId: `note:${cut}:grok`,
+        lead: "grok",
+        reached: "none",
+        steps: [{ via: "webhook", outcome: "uncertain" }],
+        at: expect.any(String),
+      },
+    ]);
+    const later = await post("For Grok: and the staging one.");
+    await until(
+      async () => (await wakesOf(later))?.[0]?.reached === "webhook",
+      "woke grok for the later note",
+    );
+    // grok's webhook heard the cut note once, before the restart, and only the later one since.
+    expect(fires).toHaveLength(2);
+    expect(fires[0]).toContain(`Note ${cut} on Clankie's board`);
+    expect(fires[1]).toContain(`Note ${later} on Clankie's board`);
+    expect((await wakesOf(cut))?.[0]).toMatchObject({ reached: "none" });
+  } finally {
+    await host.close();
+    await worker.close();
+    wakes.close();
+    webhook.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 40_000);
