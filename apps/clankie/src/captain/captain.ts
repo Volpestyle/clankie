@@ -3829,7 +3829,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     cancel: (requestId, reason) =>
       conversations.withdrawAsk(conversations.defaultGlobalConversationId(), requestId, reason),
     pending: () => conversations.pendingAsks(conversations.defaultGlobalConversationId(), PANE_PROMPT_ORIGIN),
-    answer: (input) => panePromptAnswer({ app: "Your feed", current: () => true, ...input }),
+    answer: (input) => panePromptAnswer({ app: "Your feed", owner: true, current: () => true, ...input }),
   });
   conversations.paneAnswer = panePrompts;
   const panePromptRounds = setInterval(() => {

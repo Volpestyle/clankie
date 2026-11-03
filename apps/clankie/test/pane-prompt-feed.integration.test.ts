@@ -166,7 +166,7 @@ test("a hand-opened agent's menu reaches the feed and the owner's answer there p
       }),
     cancel: (requestId, reason) => store.withdrawAsk(owner, requestId, reason),
     pending: () => store.pendingAsks(owner, PANE_PROMPT_ORIGIN),
-    answer: (input) => answer({ app: "Your feed", current: () => true, ...input }),
+    answer: (input) => answer({ app: "Your feed", owner: true, current: () => true, ...input }),
   });
   store.paneAnswer = asks;
   const service = await createClankieApp({

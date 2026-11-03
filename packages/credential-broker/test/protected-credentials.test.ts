@@ -68,7 +68,7 @@ it("reads the protected copy first, writes new bearers there, and keeps a pre-mo
   const { login, protectedStore } = await stores();
   const owner = new ProtectedFirstCredentialStore({ legacy: login, primary: protectedStore });
   await login.set("clankie_captain", { type: "api", key: CAPTAIN });
-  expect((await owner.get("clankie_captain"))?.key).toBe(CAPTAIN);
+  expect(await owner.get("clankie_captain")).toEqual({ type: "api", key: CAPTAIN });
   await owner.set("clankie_play_voice", { type: "api", key: "new" });
   expect(await protectedStore.get("clankie_play_voice")).toEqual({ type: "api", key: "new" });
   expect(await login.get("clankie_play_voice")).toBeUndefined();

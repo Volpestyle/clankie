@@ -22,19 +22,28 @@ export interface PromptAnswerDeps {
    * this device id asked for. An app answers only its own hires unless the owner granted
    * it the pane; anything that can't be matched exactly is refused.
    */
-  readonly appHire: (agent: HerdrAgentSnapshot, deviceId: string) => boolean;
+  readonly appHire?: (agent: HerdrAgentSnapshot, deviceId: string) => boolean;
 }
 
-/** Who the call is for, as the route named it from the relay's stamp. */
-interface AppCaller {
+/**
+ * Who the call is for: a connected app, as the route named it from the relay's stamp,
+ * or the owner answering from their own feed (#149). The owner's answer is theirs to
+ * give, so it skips the own-hire scope and the risky-screen guard.
+ */
+type AppCaller = {
   readonly app: string;
-  /** The calling app's connector device. */
-  readonly deviceId: string;
-  /** The owner's grant for this app on one exact agent id, beyond its own hires. */
-  readonly paneGranted: (terminalId: string) => boolean;
   readonly current: () => boolean;
   readonly terminalId: string;
-}
+} & (
+  | { readonly owner: true }
+  | {
+      readonly owner?: undefined;
+      /** The calling app's connector device. */
+      readonly deviceId: string;
+      /** The owner's grant for this app on one exact agent id, beyond its own hires. */
+      readonly paneGranted: (terminalId: string) => boolean;
+    }
+);
 
 const NOT_YOURS =
   "That agent isn't one this app hired, so its prompts are the owner's to answer. The owner can let this app answer that one agent at the Mac with: clankie connector prompts pane APP AGENT on";
@@ -48,15 +57,16 @@ function scopeOf(
   deps: Pick<PromptAnswerDeps, "appHire">,
   input: AppCaller,
   now: HerdrAgentSnapshot,
-): "hire" | "grant" | undefined {
-  if (deps.appHire(now, input.deviceId)) return "hire";
+): "owner" | "hire" | "grant" | undefined {
+  if (input.owner) return "owner";
+  if (deps.appHire?.(now, input.deviceId) === true) return "hire";
   return input.paneGranted(now.terminalId) || input.paneGranted(input.terminalId) ? "grant" : undefined;
 }
 
-export interface PromptAnswerInput extends AppCaller {
+export type PromptAnswerInput = AppCaller & {
   readonly expect: string;
   readonly steps: readonly PromptAnswerStep[];
-}
+};
 
 const squash = (text: string) => text.replace(/\s+/gu, " ").trim();
 
@@ -148,7 +158,7 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
         };
       if ((await deps.watching?.()) === true)
         return { ok: false, outcome: "refused", why: "Clankie is only watching", message: WATCH_REFUSAL };
-      const risky = refuseStep(screen, step);
+      const risky = input.owner ? undefined : refuseStep(screen, step);
       if (risky !== undefined) return { ok: false, outcome: "refused", why: risky, message: RISKY(risky) };
       return { ok: true, screen };
     };
@@ -226,9 +236,9 @@ export function createPromptAnswerer(deps: PromptAnswerDeps) {
   };
 }
 
-export interface KeyPressInput extends AppCaller {
+export type KeyPressInput = AppCaller & {
   readonly keys: readonly string[];
-}
+};
 
 /**
  * A connected app presses keys in an agent's terminal, whatever it is doing (ADR 0323):
@@ -279,7 +289,7 @@ export function createKeyPresser(deps: PromptAnswerDeps) {
         };
       if ((await deps.watching?.()) === true)
         return { why: "Clankie is only watching", message: WATCH_REFUSAL };
-      const risky = refuseStep(await pane.readScreen(), { key });
+      const risky = input.owner ? undefined : refuseStep(await pane.readScreen(), { key });
       return risky === undefined ? undefined : { why: risky, message: RISKY(risky) };
     };
     const grantNote = () => (granted ? " (on the owner's grant for this agent)" : "");
