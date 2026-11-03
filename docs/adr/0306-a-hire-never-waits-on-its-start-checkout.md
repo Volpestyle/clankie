@@ -47,15 +47,20 @@ instead of a refusal.
   project registered at a subfolder still owns that subfolder's twin. A hire
   started inside another hire's worktree gets its own nested one, and grants
   and projects walk out through each start.
-- **A retry returns to its first worktree.** The service records each start
-  folder's last relocation (`hire-worktrees.json` in its state directory).
-  While the launch into that worktree is unresolved (an unconfirmed allocation
-  or an open hire receipt) or was settled by recovery, a hire from the same
-  start folder on the same machine reuses that worktree and brief line instead
-  of making another, so the allocation and receipt checks of
-  [ADR 0207](0207-work-records-and-native-agent-delivery.md) see the first
-  attempt and no second agent starts. Once the launch resolves, the next hire
-  gets a new worktree. A record is dropped only when it is over 30 days old and
+- **A retry returns to its first worktree.** The service records each
+  relocation by its launch: machine, start folder, harness and the caller's
+  brief (`hire-worktrees.json` in its state directory). While the launch into
+  that worktree is unresolved (an unconfirmed allocation or an open hire
+  receipt) or was settled by recovery, a retry of it (the same harness and
+  brief from the same start folder on the same machine) reuses that worktree
+  and brief line instead of making another, so the allocation and receipt
+  checks of [ADR 0207](0207-work-records-and-native-agent-delivery.md) see the
+  first attempt and no second agent starts. Other work from that folder is not
+  its retry and gets its own worktree (#614): one uncertain hire, such as one
+  cut off by a service restart mid-start, no longer holds every later hire from
+  its folder. Records written before #614 name only the start folder; such a
+  record holds new work only while its launch is unresolved, never once it is
+  settled. Once the launch resolves, the next hire gets a new worktree. A record is dropped only when it is over 30 days old and
   its launch is no longer fenced, never for age alone. Hires from one start
   folder queue through checkout preparation, and one that relocates keeps its
   place until it returns, so an overlapping attempt finds the first launch

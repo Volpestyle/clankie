@@ -1,6 +1,12 @@
 import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import { verifyHireCheckout, projectPathContains, type HireCheckoutFreshness } from "@clankie/settings";
-import { HireWorktrees, hireWorktreeScope, type HireWorktreeRelocation } from "./hire-worktrees.ts";
+import {
+  HireWorktrees,
+  hireRetryScope,
+  hireWorktreeScope,
+  type HireWorktreeRelocation,
+} from "./hire-worktrees.ts";
+import { deliveryFingerprint } from "./delivery-fence.ts";
 import { managedWorktreePaths } from "./tidy-worktrees.ts";
 import { formatFleetAutonomyGuidance } from "@clankie/protocol";
 import { type FleetRoomParty } from "@clankie/protocol";
@@ -229,12 +235,28 @@ export function createHiring(ctx: HiringContext) {
         }
       };
       // A retry of a launch that is still unresolved returns to the worktree its first attempt
-      // made, so the allocation and receipt checks below see it (ADR 0207, ADR 0306).
+      // made, so the allocation and receipt checks below see it (ADR 0207, ADR 0306). A retry
+      // is the same harness and brief from the same folder (#614): other work from the folder,
+      // or work after the original settled, gets its own worktree.
       const scope = hireWorktreeScope(request);
+      const retryScope = hireRetryScope(request, deliveryFingerprint(leadBrief ?? ""));
       place.release = await queueStart(scope);
-      let prior: HireWorktreeRelocation | undefined;
+      let retained: HireWorktreeRelocation | undefined;
       try {
-        prior = hireWorktrees.get(scope);
+        const launch = hireWorktrees.get(retryScope);
+        // An entry from before #614 names only the folder; it holds only while its launch is pending.
+        const legacy = hireWorktrees.get(scope);
+        retained =
+          launch !== undefined &&
+          herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: launch.workingDirectory })
+            ? launch
+            : legacy !== undefined &&
+                herdrWatches.hireUnresolved({
+                  fleet: request.fleet,
+                  workingDirectory: legacy.workingDirectory,
+                })
+              ? legacy
+              : undefined;
       } catch (error) {
         return {
           outcome: "failed",
@@ -242,11 +264,6 @@ export function createHiring(ctx: HiringContext) {
           detail: `Earlier hire worktrees are unreadable: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-      const retained =
-        prior !== undefined &&
-        herdrWatches.hireRetained({ fleet: request.fleet, workingDirectory: prior.workingDirectory })
-          ? prior
-          : undefined;
       // A launch still fenced, or still being admitted, in the start folder itself is checked
       // there the old way, never moved, so its retry meets that folder's own allocation and
       // receipt (ADR 0207). A launch under another harness is never this one's retry.
@@ -317,7 +334,7 @@ export function createHiring(ctx: HiringContext) {
         // The start checkout keeps its own work; the hire runs in the new worktree.
         if (!retained)
           hireWorktrees.record(
-            scope,
+            retryScope,
             {
               workingDirectory: freshness.workingDirectory ?? freshness.path,
               path: freshness.path,

@@ -703,6 +703,140 @@ it("overlapping hires from one dirty start folder queue, and the second returns 
   }
 });
 
+it("only the same harness and brief retry a folder's unresolved hire; other work and work after it settled get their own worktree (#614)", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-retry-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner"),
+    state = join(root, "state");
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // Only the native launch is stood in for; the real receipt journal decides what is unresolved.
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    // A new captain for each hire reads the journals as a restarted service would.
+    const hire = async (brief: string) => {
+      const captain = createCaptain(
+        { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: state,
+          settings: new SettingsStore(join(root, "settings.json")),
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
+        },
+      );
+      try {
+        await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: owner,
+            effort: "low",
+            effortReason: "A fixture hire only needs to reach the native launch.",
+          },
+          brief,
+        });
+      } finally {
+        await captain.close();
+      }
+      return launched.at(-1)!;
+    };
+    const receipts = join(state, "herdr-watches.json.hire-receipts.json");
+    /** The journal a restart mid-start leaves: the launch's receipt, pending or settled. */
+    const original = async (worktree: string, settled: boolean) => {
+      const key = JSON.stringify(["local", "codex", worktree, "new"]);
+      const fingerprint = deliveryFingerprint("original brief");
+      await writeFile(
+        receipts,
+        JSON.stringify({
+          [key]: {
+            messageId: "4138f334-6487-4403-9418-49094b1fcf06",
+            fingerprint,
+            paneId: "herdr-core/t6v",
+            ...(settled
+              ? {
+                  settlement: {
+                    receiptId: "4138f334-6487-4403-9418-49094b1fcf06",
+                    receiptKey: key,
+                    fingerprint,
+                    disposition: "adopted",
+                    journal: "local-host-inventory",
+                    census: { observedAt: 1, panes: 1, sha256: "0".repeat(64) },
+                    pane: {
+                      paneId: "herdr-core/t6v",
+                      present: true,
+                      terminalId: "herdr-core/t6v",
+                      occupantId: "session-fixture",
+                      owner: { conversationId: "global-default" },
+                    },
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
+    };
+    const first = await hire("original brief");
+    expect(first).toMatch(/\/\.local\/wt-fixture-[a-f0-9]{6}$/u);
+    await original(first, false);
+    // A different brief from the same folder is new work, not that launch's retry.
+    const other = await hire("another job");
+    expect(other).not.toBe(first);
+    // The same brief still returns to its own unresolved launch, never a second agent.
+    expect(await hire("original brief")).toBe(first);
+    // Once the original settled, a retry of it is still routed to its retained receipt
+    // (which refuses a relaunch)...
+    await original(first, true);
+    expect(await hire("original brief")).toBe(first);
+    // ...and new work from the folder goes elsewhere.
+    const later = await hire("a third job");
+    expect([first, other]).not.toContain(later);
+    // A folder-only entry from before #614 holds new work only while its launch is pending.
+    const ledger = join(state, "hire-worktrees.json");
+    const entries = JSON.parse(await readFile(ledger, "utf8")) as Record<
+      string,
+      { workingDirectory: string }
+    >;
+    const [, entry] = Object.entries(entries).find(([, value]) => value.workingDirectory === first)!;
+    await writeFile(ledger, JSON.stringify({ [JSON.stringify(["local", owner])]: entry }));
+    await original(first, false);
+    expect(await hire("unknown legacy brief")).toBe(first);
+    await original(first, true);
+    expect(await hire("unknown legacy brief")).not.toBe(first);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("a retry whose launch is still fenced in its clean start folder is never moved once that folder turns dirty", async () => {
   const { vi } = await import("vitest");
   const { createCaptain } = await import("../src/captain/captain.ts");
