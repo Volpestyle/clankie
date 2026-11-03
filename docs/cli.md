@@ -2834,6 +2834,16 @@ app password is withdrawn at the provider).
 GitHub on stderr, polls at GitHub's interval, and returns the connection.
 `accounts start github` and `accounts poll github --flow-id ID` expose the same
 flow as separate steps for interactive clients.
+With an OAuth app's client id the flow requests the `repo` scope. A GitHub App
+(client id starting `Iv`) gets no scope: its installations decide which
+repositories its token reaches, and the row lists no scopes. A GitHub App user
+token expires after 8 hours; the body keeps its refresh token in the broker and
+refreshes it before it lapses, under the broker lock, without the app's secret
+(device-flow tokens need none). If GitHub refuses a refresh, or the 6-month
+refresh token runs out, the row reads `reconnect_required` (`invalid_grant`)
+until the owner connects again; while GitHub is unreachable the current token
+stays in use until it expires. When GitHub refuses a write (HTTP 403/404) made
+with the Clankie GitHub App's token, the error names the app's install page.
 `accounts disconnect PROVIDER` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
 to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
@@ -2891,7 +2901,12 @@ Changing the active app identity requires new worker grants. Setup and scope:
 reads or writes the public OAuth client settings
 (`oauthApps` in `settings.json`); they apply without a restart.
 `CLANKIE_GITHUB_OAUTH_CLIENT_ID`, `CLANKIE_LINEAR_OAUTH_CLIENT_ID` and
-`CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them. A body may revoke its own
+`CLANKIE_LINEAR_OAUTH_REDIRECT_URI` override them. With no GitHub client id set,
+the body uses the Clankie GitHub App (`CLANKIE_GITHUB_APP` in
+`apps/clankie/src/accounts.ts`); an owner's own client id always wins, and
+`accounts apps clear --github-client-id` returns to the default. Until that app
+is registered its client id is empty and GitHub stays `unconfigured`
+([#185](https://github.com/Volpestyle/clankie/issues/185)). A body may revoke its own
 GitHub token using its own OAuth app's secret as broker entry `github-oauth-app`.
 Explicit owner provisioning uses
 `accounts apps github-secret --client-id ID --secret-stdin`; it stores the secret

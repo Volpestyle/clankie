@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,10 +14,13 @@ import {
 } from "@clankie/credential-broker";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
 import { writeConvention } from "@clankie/work-items";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import {
+  CLANKIE_GITHUB_APP,
   createAccounts,
   GITHUB_OAUTH_APP_PROVIDER_ID,
+  githubConnection,
   githubConnectionToken,
   oauthAppsFrom,
   type OauthApps,
@@ -49,6 +52,23 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
   const seen: Seen[] = [];
   const issues: Record<string, unknown>[] = [];
   const validTokens = new Set([TOKEN, OTHER_BODY_TOKEN]);
+  // A GitHub App client (`Iv…`) gets expiring user tokens; each refresh rotates both.
+  const app = { generation: 0, refresh: "", down: false };
+  const appPair = () => {
+    app.generation += 1;
+    const access = `ghu_MARKER_app_access_${String(app.generation)}`;
+    app.refresh = `ghr_MARKER_app_refresh_${String(app.generation)}`;
+    for (const token of validTokens) if (token.startsWith("ghu_")) validTokens.delete(token);
+    validTokens.add(access);
+    return {
+      access_token: access,
+      expires_in: 28_800,
+      refresh_token: app.refresh,
+      refresh_token_expires_in: 15_897_600,
+      token_type: "bearer",
+      scope: "",
+    };
+  };
   const server: Server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
@@ -69,7 +89,15 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
           interval: 5,
         });
       if (route === "POST /login/oauth/access_token") {
+        const form = new URLSearchParams(body);
+        if (form.get("grant_type") === "refresh_token") {
+          if (app.down) return json(502, { message: "unavailable" });
+          if (form.get("refresh_token") !== app.refresh || app.refresh === "")
+            return json(200, { error: "bad_refresh_token", error_description: `echo ${app.refresh}` });
+          return json(200, appPair());
+        }
         const next = device.shift() ?? "authorization_pending";
+        if (next === "token" && form.get("client_id")?.startsWith("Iv")) return json(200, appPair());
         if (next === "token") return json(200, { access_token: TOKEN, token_type: "bearer", scope: "repo" });
         return json(200, { error: next, error_description: `echo ${TOKEN}`, interval: 10 });
       }
@@ -87,8 +115,15 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
         response.writeHead(revokeStatus);
         return response.end();
       }
+      // The app is not installed on this repository: GitHub refuses its user token's writes.
+      if (url.pathname === "/repos/owner/uninstalled/issues")
+        return request.method === "GET"
+          ? json(200, [])
+          : json(403, { message: "Resource not accessible by integration" });
       if (url.pathname === "/repos/owner/repo/issues") {
-        if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
+        const bearer = (request.headers.authorization ?? "").replace(/^Bearer /u, "");
+        if (bearer !== TOKEN && !(bearer.startsWith("ghu_") && validTokens.has(bearer)))
+          return json(401, { message: TOKEN });
         if (request.method === "POST") {
           const created = {
             number: issues.length + 1,
@@ -104,7 +139,9 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
       }
       const issuePath = /^\/repos\/owner\/repo\/issues\/(\d+)$/u.exec(url.pathname);
       if ((request.method === "GET" || request.method === "PATCH") && issuePath) {
-        if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
+        const bearer = (request.headers.authorization ?? "").replace(/^Bearer /u, "");
+        if (bearer !== TOKEN && !(bearer.startsWith("ghu_") && validTokens.has(bearer)))
+          return json(401, { message: TOKEN });
         const issue = issues.find((entry) => entry.number === Number(issuePath[1]));
         if (issue && request.method === "PATCH") Object.assign(issue, JSON.parse(body));
         return issue ? json(200, issue) : json(404, { message: "Not Found" });
@@ -151,6 +188,9 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
     origin,
     seen,
     issues,
+    app,
+    /** Another account's token, valid at the fake GitHub. */
+    accept: (token: string) => validTokens.add(token),
     fetch: routed,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
@@ -244,6 +284,7 @@ async function setup(
     json,
     pair,
     telemetryDir,
+    now: () => clock,
     advance: (ms: number) => (clock += ms),
   };
 }
@@ -820,5 +861,323 @@ describe("work tracker on a hosted body", () => {
       message: "This repo tracks work in GitHub issues (owner/repo); connect GitHub to Clankie to use it",
     });
     expect(gh).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitHub App user tokens (#185)", () => {
+  const EIGHT_HOURS = 28_800_000;
+  const connectApp = async (clientId = "Iv23liFakeApp") => {
+    const context = await setup({ device: ["token"], apps: { github: { clientId } } });
+    const flowId = (await context.json("/v1/accounts/github/start", {})).body.flowId;
+    context.advance(1);
+    const polled = await context.json("/v1/accounts/github/poll", { flowId });
+    // Always the fake GitHub and the test clock: a real clock would see the token as expired.
+    const github = { fetch: context.providers.fetch, githubWeb: context.providers.origin, now: context.now };
+    const token = () => githubConnectionToken(context.store, github);
+    const connection = () => githubConnection(context.store, github);
+    const refreshes = () =>
+      context.providers.seen.filter(
+        (entry) =>
+          entry.path === "/login/oauth/access_token" &&
+          new URLSearchParams(entry.body).get("grant_type") === "refresh_token",
+      );
+    return { ...context, polled, github, token, connection, refreshes };
+  };
+
+  it("connects without the repo scope and keeps the rotating pair on the body", async () => {
+    const { polled, providers, store, json, token, refreshes, now } = await connectApp();
+    const deviceRequest = providers.seen.find((entry) => entry.path === "/login/device/code")!;
+    expect(Object.fromEntries(new URLSearchParams(deviceRequest.body))).toEqual({
+      client_id: "Iv23liFakeApp",
+    });
+    expect(polled.body).toMatchObject({
+      ok: true,
+      status: "connected",
+      connection: { provider: "github", status: "connected", account: "octo-owner", scopes: [] },
+    });
+    const stored = await store.get("github");
+    expect(stored).toMatchObject({
+      type: "oauth",
+      access: "ghu_MARKER_app_access_1",
+      refresh: "ghr_MARKER_app_refresh_1",
+      expires: now() + EIGHT_HOURS,
+      clientId: "Iv23liFakeApp",
+    });
+    const listed = await json("/v1/accounts");
+    expect(listed.body.connections).toContainEqual(
+      expect.objectContaining({
+        provider: "github",
+        status: "connected",
+        access: "Read and write issues in repositories where the GitHub App is installed.",
+      }),
+    );
+    expect(JSON.stringify([polled.body, listed.body])).not.toMatch(/gh[ur]_MARKER/u);
+    expect(await token()).toBe("ghu_MARKER_app_access_1");
+    expect(refreshes()).toHaveLength(0);
+  });
+
+  it("refreshes before the 8-hour expiry once for concurrent callers, keeping the account binding", async () => {
+    const { store, token, connection, refreshes, advance, providers } = await connectApp();
+    const before = await connection();
+    expect(before?.binding).toMatch(/^github-connection:/u);
+    advance(EIGHT_HOURS - 4 * 60_000);
+    expect(await Promise.all([token(), token(), token()])).toEqual([
+      "ghu_MARKER_app_access_2",
+      "ghu_MARKER_app_access_2",
+      "ghu_MARKER_app_access_2",
+    ]);
+    expect(refreshes()).toHaveLength(1);
+    // A device-flow token refreshes with no client secret.
+    expect(Object.fromEntries(new URLSearchParams(refreshes()[0]!.body))).toEqual({
+      client_id: "Iv23liFakeApp",
+      grant_type: "refresh_token",
+      refresh_token: "ghr_MARKER_app_refresh_1",
+    });
+    expect(await store.get("github")).toMatchObject({ refresh: "ghr_MARKER_app_refresh_2" });
+    expect((await connection())?.binding).toBe(before?.binding);
+    // The refreshed token works against the API; the rotated-out one does not.
+    const user = async (bearer: string) =>
+      (await fetch(`${providers.origin}/user`, { headers: { authorization: `Bearer ${bearer}` } })).status;
+    expect(await user("ghu_MARKER_app_access_2")).toBe(200);
+    expect(await user("ghu_MARKER_app_access_1")).toBe(401);
+  });
+
+  it("keeps a valid token while GitHub is unreachable and asks for a reconnect once refresh is refused", async () => {
+    const { providers, token, refreshes, advance, json } = await connectApp();
+    providers.app.down = true;
+    advance(EIGHT_HOURS - 60_000);
+    expect(await token()).toBe("ghu_MARKER_app_access_1");
+    advance(2 * 60_000);
+    await expect(token()).rejects.toThrow("GitHub is unavailable to refresh");
+    providers.app.down = false;
+    providers.app.refresh = "ghr_revoked_elsewhere";
+    expect(await token()).toBeUndefined();
+    const attempts = refreshes().length;
+    expect(await token()).toBeUndefined();
+    expect(refreshes()).toHaveLength(attempts);
+    expect((await json("/v1/accounts")).body.connections).toContainEqual(
+      expect.objectContaining({ provider: "github", status: "reconnect_required", reason: "invalid_grant" }),
+    );
+  });
+
+  it("defaults to Clankie's app, keeps an owner's own client id, and names the install page on a refused write", async () => {
+    expect(oauthAppsFrom({}, {}).github.clientId).toBeUndefined();
+    const original = { ...CLANKIE_GITHUB_APP };
+    Object.assign(CLANKIE_GITHUB_APP, { clientId: "Iv23liClankieApp", slug: "clankie-test" });
+    cleanups.push(() => Object.assign(CLANKIE_GITHUB_APP, original));
+    expect(oauthAppsFrom({}, {}).github.clientId).toBe("Iv23liClankieApp");
+    expect(oauthAppsFrom({ github: { clientId: "Ov23liOwnersOwn" } }, {}).github.clientId).toBe(
+      "Ov23liOwnersOwn",
+    );
+
+    const own = await connectApp("Iv23liOwnersApp");
+    expect((await own.connection())?.installUrl).toBeUndefined();
+
+    const { dir, providers, connection } = await connectApp(oauthAppsFrom({}, {}).github.clientId);
+    expect((await connection())?.installUrl).toBe("https://github.com/apps/clankie-test/installations/new");
+    const repo = join(dir, "uninstalled");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/uninstalled" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    const service = createWorkItemsService({
+      stateDirectory: dir,
+      workspace: () => repo,
+      githubConnection: connection,
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+    });
+    const failure = await service
+      .handle({ action: "create", repo: "workspace", title: "Needs the app", criteria: ["Installed"] }, true)
+      .catch((error: unknown) => error);
+    expect(String((failure as Error).message)).toContain(
+      "If the Clankie GitHub App is not installed on this repository, install it: https://github.com/apps/clankie-test/installations/new",
+    );
+  });
+
+  it("refuses an owner write when the owner's authority is revoked during any GitHub credential read", async () => {
+    const { dir, store, providers, github } = await connectApp();
+    const repo = join(await realpath(dir), "owner-write");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/repo" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    // Revokes the owner's authority during the Nth read of the GitHub connection.
+    let reads = 0;
+    let revokeAt = Number.POSITIVE_INFINITY;
+    let revoked = false;
+    const counted = {
+      get: async (id: string) => {
+        const value = await store.get(id);
+        if (id === "github" && ++reads === revokeAt) revoked = true;
+        return value;
+      },
+      update: store.update.bind(store),
+    };
+    const service = createWorkItemsService({
+      stateDirectory: join(dir, "owner-state"),
+      workspace: () => repo,
+      githubConnection: () => githubConnection(counted, github),
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+    });
+    await service.handle(
+      { action: "create", repo: "workspace", title: "Owner write", criteria: ["Labelled"] },
+      true,
+    );
+    const authority = {
+      principal: { kind: "operator" as const, id: "owner" },
+      authorize: async () => !revoked,
+      current: () => !revoked,
+    };
+    const writes = () =>
+      providers.seen.filter((entry) => entry.method !== "GET" && entry.path === "/repos/owner/repo/issues/1")
+        .length;
+    const write = (at: number) => {
+      reads = 0;
+      revokeAt = at;
+      revoked = false;
+      return service.handleOwnerWrite(
+        {
+          repoId: "workspace",
+          itemId: "#1",
+          requestId: randomUUID(),
+          command: { action: "add_label", label: `label-${String(at)}` },
+        },
+        authority,
+      );
+    };
+    // Unrevoked, the write lands; it shows how many connection reads one write makes.
+    const applied = await write(Number.POSITIVE_INFINITY);
+    expect(applied.outcome).toBe("applied");
+    expect(writes()).toBe(1);
+    const total = reads;
+    expect(total).toBeGreaterThan(1);
+    for (let at = 1; at <= total; at += 1) {
+      const outcome = await write(at).then(
+        (receipt) => receipt.outcome,
+        () => "threw",
+      );
+      expect({ at, revoked, outcome, writes: writes() }).toEqual({
+        at,
+        revoked: true,
+        outcome: expect.not.stringMatching(/^applied$/u),
+        writes: 1,
+      });
+    }
+  });
+
+  it("a seat's retirement write never goes out on an API built before its account pin read another account", async () => {
+    const { dir, store, providers, github } = await connectApp();
+    const repo = join(await realpath(dir), "seat-repo");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/repo" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    const accountA = (await store.get("github"))!;
+    const tokenB = "ghu_MARKER_account_b";
+    providers.accept(tokenB);
+    const accountB = {
+      type: "oauth" as const,
+      access: tokenB,
+      refresh: "ghr_MARKER_account_b",
+      expires: 0,
+      clientId: "Iv23liFakeApp",
+      metadata: { clientId: "Iv23liFakeApp", connectionId: "connection-b" },
+    };
+    // Reconnects account B right after the Nth read of the GitHub connection.
+    let reads = 0;
+    let reconnectAfter = Number.POSITIVE_INFINITY;
+    const counted = {
+      get: async (id: string) => {
+        const value = await store.get(id);
+        if (id === "github" && ++reads === reconnectAfter) await store.set("github", accountB);
+        return value;
+      },
+      update: store.update.bind(store),
+    };
+    const settings = ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "seat-project",
+          name: "Seat project",
+          workerCap: 4,
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: repo }],
+          trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+        },
+      ],
+    });
+    const service = createWorkItemsService({
+      stateDirectory: join(dir, "seat-state"),
+      workspace: () => repo,
+      githubConnection: () => githubConnection(counted, github),
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+      projects: async () => settings,
+      projectsFence: async () => ({ projects: settings, assertCurrent: () => {} }),
+      localMachineId: "local",
+    });
+    await service.handle(
+      { action: "create", repo: "workspace", title: "Seat issue", criteria: ["Retired"] },
+      true,
+    );
+    const writesSince = (start: number) =>
+      providers.seen
+        .slice(start)
+        .filter((entry) => entry.method !== "GET" && entry.path === "/repos/owner/repo/issues/1");
+    const retire = async (after: number) => {
+      await store.set("github", accountA);
+      reads = 0;
+      reconnectAfter = after;
+      const start = providers.seen.length;
+      const outcome = await service
+        .prepareSeatIssueTracker("seat-project", async () => {})
+        .then((scope) =>
+          scope.call("save_issue", { id: "#1", title: `Retired ${String(after)}` }, "interactive"),
+        )
+        .then(
+          () => "applied",
+          (error: unknown) => String((error as Error).message),
+        );
+      return { outcome, writes: writesSince(start) };
+    };
+    // With no reconnect the retirement lands as account A, after this many connection reads.
+    const settled = await retire(Number.POSITIVE_INFINITY);
+    expect(settled.outcome).toBe("applied");
+    expect(settled.writes.map((entry) => entry.headers.authorization)).toEqual([
+      "Bearer ghu_MARKER_app_access_1",
+    ]);
+    const total = reads;
+    expect(total).toBeGreaterThan(1);
+    // Once B is connected, nothing may go out as A: either B's own pin and API, or a refusal.
+    for (let after = 1; after < total; after += 1) {
+      const { outcome, writes } = await retire(after);
+      expect({ after, outcome, bearers: writes.map((entry) => entry.headers.authorization) }).toEqual({
+        after,
+        outcome: writes.length === 0 ? "Saved GitHub account changed." : "applied",
+        bearers: writes.length === 0 ? [] : [`Bearer ${tokenB}`],
+      });
+    }
   });
 });

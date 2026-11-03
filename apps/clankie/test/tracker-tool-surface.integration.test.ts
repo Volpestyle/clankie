@@ -20,7 +20,7 @@ import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 import { createWorkItemsService, type WorkItemsServiceOptions } from "../src/work-items.ts";
-import { githubConnectionToken } from "../src/accounts.ts";
+import { githubConnection } from "../src/accounts.ts";
 import { workRequest } from "../../tui/src/command/work.ts";
 
 /** Real fleet HTTP tools, host, settings, credentials and durable local storage. */
@@ -31,6 +31,20 @@ async function surface(
 ) {
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  // Lets a test reconnect another GitHub account right after a chosen read of the connection.
+  let afterGithubRead: { skip: number; hook: () => Promise<void> } | undefined;
+  const githubStore = {
+    get: async (id: string) => {
+      const value = await credentials.get(id);
+      const armed = afterGithubRead;
+      if (id === "github" && armed !== undefined && armed.skip-- === 0) {
+        afterGithubRead = undefined;
+        await armed.hook();
+      }
+      return value;
+    },
+    update: credentials.update.bind(credentials),
+  };
   const repo = join(root, "repo");
   await mkdir(repo, { recursive: true });
   let workItems!: ReturnType<typeof createWorkItemsService>;
@@ -63,7 +77,7 @@ async function surface(
     globalTrackerDirectory: join(root, "tracker"),
     workspace: () => repo,
     mcpHost: host,
-    githubToken: () => githubConnectionToken(credentials),
+    githubConnection: () => githubConnection(githubStore),
     ...github,
   });
   const worker = new WorkerMcp({
@@ -130,6 +144,9 @@ async function surface(
     settings,
     host,
     credentials,
+    afterGithubRead: (skip: number, hook: () => Promise<void>) => {
+      afterGithubRead = { skip, hook };
+    },
     repo,
     workItems,
     work: async (args: string[]) => {
@@ -683,6 +700,31 @@ it("binds delegated tools to the owner's gh login, or to the connected GitHub ac
     expect(mutations).toHaveLength(1);
     expect(issue.title).toBe("Connected delegated edit");
     expect(await readFile(ambientLog, "utf8")).toBe(ownerCommand);
+
+    // An expiring GitHub App connection is pinned by its connection id, read in the same
+    // snapshot as its token. Reconnecting another account right after the pin's read
+    // refuses the write instead of letting it go through as the new account (#611).
+    const appConnection = (id: string, access: string) =>
+      f.credentials.set("github", {
+        type: "oauth",
+        access,
+        refresh: `ghr_${id}`,
+        expires: 0,
+        clientId: "Iv23liFixture",
+        metadata: { clientId: "Iv23liFixture", connectionId: id },
+      });
+    await appConnection("connection-a", "ghu_account_a");
+    // Read 1 is the tracker lookup; read 2 is the account pin. Reconnect right after it.
+    f.afterGithubRead(1, () => appConnection("connection-b", "ghu_account_b"));
+    const reconnected = await f.tool("clankie_call", {
+      name: "linear_save_issue",
+      arguments: { repo: "workspace", id: "#42", title: "Must not publish as account B" },
+    });
+    expect(reconnected.isError).toBe(true);
+    expect(reconnected.content[0]?.text).toContain("Connected GitHub account changed");
+    expect(mutations).toHaveLength(1);
+    expect(issue.title).toBe("Connected delegated edit");
+    expect(seen.filter((request) => request.method !== "GET")).toHaveLength(1);
   } finally {
     await f.close();
     await new Promise<void>((resolve, reject) =>

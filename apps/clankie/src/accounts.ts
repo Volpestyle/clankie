@@ -38,7 +38,24 @@ import type {
 const GITHUB_PROVIDER_ID = "github";
 /** Optional OAuth app client secret; GitHub only revokes a grant for the app that holds it. */
 export const GITHUB_OAUTH_APP_PROVIDER_ID = "github-oauth-app";
-const GITHUB_SCOPES = ["repo"] as const;
+
+/**
+ * Clankie's own public GitHub App, the GitHub connection's default client when
+ * the owner sets none (#185). Both stay empty until the app is registered;
+ * while `clientId` is empty, `connect github` reports `unconfigured` exactly as
+ * before. `slug` names its install page, `https://github.com/apps/SLUG/installations/new`.
+ */
+export const CLANKIE_GITHUB_APP: { readonly clientId: string; readonly slug: string } = {
+  clientId: "",
+  slug: "",
+};
+
+/** An OAuth app's token reaches repositories through the `repo` scope. */
+const GITHUB_OAUTH_APP_SCOPES = ["repo"] as const;
+/** GitHub App client ids start `Iv`; an app ignores scopes, its installation grants access. */
+const isGithubAppClient = (clientId: string) => clientId.startsWith("Iv");
+/** Refresh this long before an expiring GitHub App user token lapses. */
+const GITHUB_REFRESH_SKEW_MS = 5 * 60_000;
 const GITHUB_WEB = "https://github.com";
 const GITHUB_API = "https://api.github.com";
 const LINEAR_FLOW_TTL_MS = 10 * 60_000;
@@ -113,7 +130,13 @@ export function oauthAppsFrom(
       clientId: pick("CLANKIE_GOOGLE_OAUTH_CLIENT_ID", settings.google?.clientId),
       redirectUri: pick("CLANKIE_GOOGLE_OAUTH_REDIRECT_URI", settings.google?.redirectUri),
     },
-    github: { clientId: pick("CLANKIE_GITHUB_OAUTH_CLIENT_ID", settings.github?.clientId) },
+    // The owner's own client id, set or in the environment, keeps precedence over Clankie's app.
+    github: {
+      clientId:
+        pick("CLANKIE_GITHUB_OAUTH_CLIENT_ID", settings.github?.clientId) ||
+        CLANKIE_GITHUB_APP.clientId ||
+        undefined,
+    },
     linear: {
       clientId: pick("CLANKIE_LINEAR_OAUTH_CLIENT_ID", settings.linear?.clientId),
       redirectUri: pick("CLANKIE_LINEAR_OAUTH_REDIRECT_URI", settings.linear?.redirectUri),
@@ -145,12 +168,177 @@ async function mailboxConnection(mailbox: Pick<EmailPort, "status">): Promise<Ac
   };
 }
 
-/** The GitHub connection's token for tools on this body, or undefined when GitHub is not connected. */
+export interface GithubConnectionOptions {
+  readonly fetch?: typeof fetch;
+  /** Test seam: the fake provider's web origin. */
+  readonly githubWeb?: string;
+  readonly now?: () => number;
+}
+
+type OauthCredential = Extract<ProviderCredential, { type: "oauth" }>;
+
+/** A rejected refresh, or a refresh token past its own expiry, needs the owner to connect again. */
+const githubRefreshDead = (credential: OauthCredential, at: number) => {
+  const refreshExpires = Date.parse(credential.metadata?.refreshExpiresAt ?? "");
+  return credential.metadata?.refreshRejectedAt !== undefined || refreshExpires <= at;
+};
+
+const githubNeedsRefresh = (credential: OauthCredential, at: number) =>
+  credential.expires !== 0 &&
+  credential.expires <= at + GITHUB_REFRESH_SKEW_MS &&
+  !githubRefreshDead(credential, at);
+
+const GithubRefreshSchema = z.union([
+  z.object({
+    access_token: z.string().min(1).max(65536),
+    expires_in: z.number().int().positive().optional(),
+    refresh_token: z.string().min(1).max(65536).optional(),
+    refresh_token_expires_in: z.number().int().positive().optional(),
+  }),
+  z.object({ error: z.string() }),
+]);
+
+/**
+ * Exchange the refresh token for a new pair. GitHub rotates both: the old
+ * refresh token stops working, so the caller writes the result under the
+ * store's lock. A device-flow token refreshes without the client secret.
+ */
+async function refreshGithubCredential(
+  credential: OauthCredential,
+  options: GithubConnectionOptions,
+  at: number,
+): Promise<ProviderCredential | "rejected" | "unavailable"> {
+  const clientId = credential.clientId ?? credential.metadata?.clientId;
+  if (clientId === undefined || credential.refresh.length === 0) return "rejected";
+  let body: z.infer<typeof GithubRefreshSchema>;
+  try {
+    const response = await (options.fetch ?? fetch)(
+      `${options.githubWeb ?? GITHUB_WEB}/login/oauth/access_token`,
+      {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          grant_type: "refresh_token",
+          refresh_token: credential.refresh,
+        }),
+        redirect: "error",
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+    );
+    const parsed = GithubRefreshSchema.safeParse(await response.json().catch(() => undefined));
+    if (!response.ok || !parsed.success) return "unavailable";
+    body = parsed.data;
+  } catch {
+    return "unavailable";
+  }
+  // GitHub answers a spent, revoked or expired refresh token with an error body.
+  if ("error" in body) return "rejected";
+  return githubCredentialFrom(body, credential.metadata ?? {}, clientId, at);
+}
+
+/** An expiring token pair is kept as `oauth` with its refresh token; a non-expiring one as `api`. */
+function githubCredentialFrom(
+  token: {
+    access_token: string;
+    expires_in?: number | undefined;
+    refresh_token?: string | undefined;
+    refresh_token_expires_in?: number | undefined;
+  },
+  metadata: Record<string, string>,
+  clientId: string,
+  at: number,
+): ProviderCredential {
+  const { refreshExpiresAt: _refreshExpiresAt, refreshRejectedAt: _refreshRejectedAt, ...kept } = metadata;
+  if (token.refresh_token === undefined || token.expires_in === undefined)
+    return { type: "api", key: token.access_token, metadata: kept };
+  return {
+    type: "oauth",
+    access: token.access_token,
+    refresh: token.refresh_token,
+    expires: at + token.expires_in * 1000,
+    clientId,
+    metadata: {
+      ...kept,
+      ...(token.refresh_token_expires_in === undefined
+        ? {}
+        : { refreshExpiresAt: new Date(at + token.refresh_token_expires_in * 1000).toISOString() }),
+    },
+  };
+}
+
+/**
+ * The connected GitHub account as one credential snapshot: its token, what
+ * identifies the account across token refreshes, and the install page to name
+ * when a write is refused. Token and identity always come from the same entry,
+ * so a reconnect can never pair one account's token with another's identity.
+ * A non-expiring token is its own identity, as before; an expiring GitHub App
+ * user token is identified by its connection and refreshed under the store's
+ * lock before it lapses. Undefined when GitHub is not connected or must be
+ * connected again; a refresh GitHub cannot answer leaves a still-valid token
+ * in use and otherwise throws.
+ */
+export async function githubConnection(
+  store: Pick<CredentialStore, "get" | "update">,
+  options: GithubConnectionOptions = {},
+): Promise<GithubConnection | undefined> {
+  const now = options.now ?? Date.now;
+  let current = await store.get(GITHUB_PROVIDER_ID);
+  if (current?.type === "oauth" && githubNeedsRefresh(current, now())) {
+    if (store.update === undefined) throw new Error("Credential store cannot refresh the GitHub connection");
+    let unavailable = false;
+    current = await store.update(GITHUB_PROVIDER_ID, async (latest) => {
+      // Another caller may have refreshed, replaced or disconnected it while this one waited.
+      const at = now();
+      if (latest.type !== "oauth" || !githubNeedsRefresh(latest, at)) return latest;
+      const refreshed = await refreshGithubCredential(latest, options, at);
+      if (refreshed === "unavailable") {
+        unavailable = true;
+        return latest;
+      }
+      if (refreshed === "rejected")
+        return { ...latest, metadata: { ...latest.metadata, refreshRejectedAt: new Date(at).toISOString() } };
+      return refreshed;
+    });
+    if (unavailable && current?.type === "oauth" && current.expires <= now())
+      throw new Error("GitHub is unavailable to refresh the connected account's token; try again shortly.");
+  }
+  if (current?.type !== "api" && current?.type !== "oauth") return undefined;
+  if (current.type === "oauth" && current.expires !== 0 && current.expires <= now()) return undefined;
+  const token = current.type === "api" ? current.key : current.access;
+  const connectionId = current.metadata?.connectionId;
+  const installUrl = githubInstallUrl(current.metadata?.clientId);
+  return {
+    token,
+    ...(current.type === "oauth" && connectionId !== undefined
+      ? { binding: `github-connection:${connectionId}` }
+      : {}),
+    ...(installUrl === undefined ? {} : { installUrl }),
+  };
+}
+
+export interface GithubConnection {
+  readonly token: string;
+  /** Stable across refreshes; absent when the token is its own identity. */
+  readonly binding?: string;
+  readonly installUrl?: string;
+}
+
+/** The GitHub connection's token alone, for callers that pin no account. */
 export async function githubConnectionToken(
-  store: Pick<CredentialStore, "get">,
+  store: Pick<CredentialStore, "get" | "update">,
+  options: GithubConnectionOptions = {},
 ): Promise<string | undefined> {
-  const credential = await store.get(GITHUB_PROVIDER_ID);
-  return credential?.type === "api" ? credential.key : undefined;
+  return (await githubConnection(store, options))?.token;
+}
+
+/** Clankie's own app has a known install page; an owner's own app is managed where they registered it. */
+function githubInstallUrl(clientId: string | undefined) {
+  return clientId !== undefined &&
+    clientId === CLANKIE_GITHUB_APP.clientId &&
+    /^[a-z0-9-]+$/u.test(CLANKIE_GITHUB_APP.slug)
+    ? `${GITHUB_WEB}/apps/${CLANKIE_GITHUB_APP.slug}/installations/new`
+    : undefined;
 }
 
 const DeviceCodeSchema = z.object({
@@ -166,7 +354,14 @@ const DeviceCodeSchema = z.object({
 });
 
 const DeviceTokenSchema = z.union([
-  z.object({ access_token: z.string().min(1).max(65536), scope: z.string().max(8192).optional() }),
+  z.object({
+    access_token: z.string().min(1).max(65536),
+    scope: z.string().max(8192).optional(),
+    // A GitHub App's user token expires unless the app opts out, and comes with a refresh token.
+    expires_in: z.number().int().positive().optional(),
+    refresh_token: z.string().min(1).max(65536).optional(),
+    refresh_token_expires_in: z.number().int().positive().optional(),
+  }),
   z.object({ error: z.string(), interval: z.number().int().positive().optional() }),
 ]);
 
@@ -231,21 +426,25 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
 
   const githubConnection = async (apps: OauthApps): Promise<AccountConnection> => {
     const credential = await store.get(GITHUB_PROVIDER_ID);
-    const clientId =
-      (credential?.type === "api" ? credential.metadata?.clientId : undefined) ?? apps.github.clientId;
+    const connected = credential?.type === "api" || credential?.type === "oauth" ? credential : undefined;
+    const clientId = connected?.metadata?.clientId ?? apps.github.clientId;
     const manageUrl = githubManageUrl(clientId);
-    if (credential?.type !== "api")
+    if (connected === undefined)
       return {
         provider: "github",
         status: apps.github.clientId === undefined ? "unconfigured" : "not_connected",
         scopes: [],
       };
-    const connectedAt = credential.metadata?.connectedAt;
+    const connectedAt = connected.metadata?.connectedAt;
+    const dead =
+      connected.type === "oauth" && githubRefreshDead(connected, now()) && connected.expires <= now();
     return {
       provider: "github",
-      status: "connected",
-      ...(credential.metadata?.login === undefined ? {} : { account: credential.metadata.login }),
-      scopes: scopesOf(credential.metadata?.scopes),
+      ...(dead
+        ? { status: "reconnect_required" as const, reason: "invalid_grant" as const }
+        : { status: "connected" as const }),
+      ...(connected.metadata?.login === undefined ? {} : { account: connected.metadata.login }),
+      scopes: scopesOf(connected.metadata?.scopes),
       ...(connectedAt === undefined || Number.isNaN(Date.parse(connectedAt)) ? {} : { connectedAt }),
       ...(manageUrl === undefined ? {} : { manageUrl }),
     };
@@ -285,8 +484,9 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
     apps: OauthApps,
     secret: ProviderCredential | undefined,
   ) => {
-    if (options.hosted || credential?.type !== "api") return false;
+    if (options.hosted || (credential?.type !== "api" && credential?.type !== "oauth")) return false;
     const clientId = credential.metadata?.clientId ?? apps.github.clientId;
+    const accessToken = credential.type === "api" ? credential.key : credential.access;
     if (
       clientId === undefined ||
       secret?.type !== "api" ||
@@ -301,7 +501,7 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
           authorization: `Basic ${Buffer.from(`${clientId}:${secret.key}`).toString("base64")}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ access_token: credential.key }),
+        body: JSON.stringify({ access_token: accessToken }),
       });
       // Missing/invalid app secrets, validation and rate limits are not revocation proof.
       return response.status === 204;
@@ -356,7 +556,11 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
             ...(await githubConnection(apps)),
             name: "GitHub",
             description: "Work with your repositories and issues.",
-            access: "Read and write repositories and issues.",
+            // A GitHub App reaches only the repositories it is installed on.
+            access:
+              apps.github.clientId !== undefined && isGithubAppClient(apps.github.clientId)
+                ? "Read and write issues in repositories where the GitHub App is installed."
+                : "Read and write repositories and issues.",
             readOnly: false,
           },
           {
@@ -384,7 +588,10 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
         const response = await call(`${githubWeb}/login/device/code`, {
           method: "POST",
           headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ client_id: github.clientId, scope: GITHUB_SCOPES.join(" ") }),
+          body: new URLSearchParams({
+            client_id: github.clientId,
+            ...(isGithubAppClient(github.clientId) ? {} : { scope: GITHUB_OAUTH_APP_SCOPES.join(" ") }),
+          }),
         });
         const body = DeviceCodeSchema.safeParse(await response.json().catch(() => undefined));
         if (!response.ok || !body.success) return { ok: false, error: "provider_rejected" };
@@ -468,18 +675,28 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
         /* The login is a label; the connection stands without it. */
       }
       await guard?.();
-      await store.set(GITHUB_PROVIDER_ID, {
-        type: "api",
-        key: token.access_token,
-        metadata: {
-          clientId: flow.clientId,
-          scopes: scopesOf(token.scope)
-            .filter((scope) => !scope.includes(token.access_token))
-            .join(","),
-          connectedAt: new Date(polled).toISOString(),
-          ...(login === undefined ? {} : { login }),
-        },
-      });
+      const secrets = [
+        token.access_token,
+        ...(token.refresh_token === undefined ? [] : [token.refresh_token]),
+      ];
+      await store.set(
+        GITHUB_PROVIDER_ID,
+        githubCredentialFrom(
+          token,
+          {
+            clientId: flow.clientId,
+            // A connection outlives its rotating tokens; its account binding is this id.
+            connectionId: flowId(),
+            scopes: scopesOf(token.scope)
+              .filter((scope) => !secrets.some((secret) => scope.includes(secret)))
+              .join(","),
+            connectedAt: new Date(polled).toISOString(),
+            ...(login === undefined || secrets.some((secret) => login.includes(secret)) ? {} : { login }),
+          },
+          flow.clientId,
+          polled,
+        ),
+      );
       return { ok: true, status: "connected", connection: await githubConnection(await options.apps()) };
     },
 
@@ -579,7 +796,9 @@ export function createAccounts(options: AccountsOptions): AccountsPort {
           await guard?.();
         });
         const clientId =
-          (credential?.type === "api" ? credential.metadata?.clientId : undefined) ?? apps.github.clientId;
+          (credential?.type === "api" || credential?.type === "oauth"
+            ? credential.metadata?.clientId
+            : undefined) ?? apps.github.clientId;
         const manageUrl = githubManageUrl(clientId);
         return { ok: true, revoked, ...(revoked || manageUrl === undefined ? {} : { manageUrl }) };
       }

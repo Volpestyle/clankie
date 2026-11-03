@@ -298,7 +298,7 @@ import {
   type EvidenceReference,
   type TrackerActor,
 } from "@clankie/work-items";
-import { createAccounts, githubConnectionToken, oauthAppsFrom } from "./accounts.ts";
+import { createAccounts, githubConnection, oauthAppsFrom } from "./accounts.ts";
 import { ConnectorDetection } from "./app/connector-detection.ts";
 import { CLANKIE_VERSION } from "./app/log.ts";
 
@@ -954,7 +954,7 @@ const workItems = createWorkItemsService({
       ? builtInTracker
       : createLocalTracker({ ...builtInTrackerOptions, assertIssueWrite }),
   mcpHost,
-  githubToken: () => githubConnectionToken(operatorCredentialStore),
+  githubConnection: () => githubConnection(operatorCredentialStore),
   posting: trackerPosting,
   // The captain starts below; until then a read keeps the tracker's own status.
   liveHolders: () => {
