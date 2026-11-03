@@ -43,6 +43,9 @@ export function installHarnessBridges(options: {
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;
 
+/** The opening every old Claude worker copy removal prompt shares. */
+export const OLD_CLAUDE_WORKER_REMOVAL: string;
+
 export function codexSourceSetupCommand(
   script: string,
   options?: { platform?: NodeJS.Platform; node?: string },

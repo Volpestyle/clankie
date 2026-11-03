@@ -5,7 +5,12 @@ import { createInterface } from "node:readline/promises";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { refreshLinkedHarnesses, type HarnessRefreshResult } from "../harness-refresh.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
-import { automaticCodexConsent, codexSourceSetupCommand, installHarnessBridges } from "../harness-install.ts";
+import {
+  automaticCodexConsent,
+  codexSourceSetupCommand,
+  installHarnessBridges,
+  OLD_CLAUDE_WORKER_REMOVAL,
+} from "../harness-install.ts";
 import { confirmMachineSetupApproval, machineSetupContext } from "./machine-setup.ts";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
@@ -115,7 +120,7 @@ export async function runHarnessCommand(
     return (
       claudeExists &&
       context?.profile === claudeProfile &&
-      detail.startsWith("Remove the old clankie-worker@clankie copy")
+      detail.startsWith(OLD_CLAUDE_WORKER_REMOVAL)
     );
   };
   if (refreshLinked) {

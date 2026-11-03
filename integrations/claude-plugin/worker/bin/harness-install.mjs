@@ -82,6 +82,8 @@ async function refreshCodexMarketplace(execute, marketplace) {
   await execute("codex", ["plugin", "marketplace", "add", marketplace]);
 }
 const WORKER = "clankie-worker@clankie";
+/** Every old-copy removal prompt starts with this; the setup command's consent matches it. */
+export const OLD_CLAUDE_WORKER_REMOVAL = `Remove the old ${WORKER} copy`;
 /** Remove the old worker copy from one profile; undefined when there is nothing to remove. */
 async function removeClaudeWorker({ profile, execute, consent }) {
   const old = await oldClaudeWorker(profile);
@@ -110,7 +112,7 @@ async function removeClaudeWorker({ profile, execute, consent }) {
     : "";
   if (!worker && !marketplace && projects.length === 0) return undefined;
   const where = `profile ${profile}${projects.length ? ` and from project${projects.length === 1 ? "" : "s"} ${projects.join(", ")}` : ""}`;
-  const detail = `Remove the old ${WORKER} copy${marketplace ? " and its clankie marketplace" : ""} from ${where}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
+  const detail = `${OLD_CLAUDE_WORKER_REMOVAL}${marketplace ? " and its clankie marketplace" : ""} from ${where}: Claude hires load the worker from Clankie's own files now (ADR 0317).`;
   if (!(await consent("claude", detail, { profile, source, managed, projects })))
     return { status: "declined", detail };
   const unchanged = async () => {
