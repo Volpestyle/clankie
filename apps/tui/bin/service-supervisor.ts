@@ -453,7 +453,8 @@ const LOG_COPY_CHUNK_BYTES = 1024 * 1024;
  * a rotation copies the file's newest `maxBytes` into a compressed archive and
  * then truncates it in place; with `O_APPEND`, the next write lands at the new
  * end. Lines written in the instant between the final copy and the truncate are
- * lost. An oversized log keeps only its newest `maxBytes`, so one rotation costs
+ * lost, and so is an unterminated last line, which may be an append still
+ * landing; the archive holds whole lines only. An oversized log keeps only its newest `maxBytes`, so one rotation costs
  * the same whatever the file grew to. Returns the logs it rotated.
  */
 export async function rotateServiceLogs(env: NodeJS.ProcessEnv = process.env): Promise<readonly string[]> {
@@ -493,6 +494,10 @@ async function rotateLog(path: string, maxBytes: number, archives: number): Prom
     const buffer = Buffer.alloc(LOG_COPY_CHUNK_BYTES);
     let position = Math.max(0, fstatSync(fd).size - maxBytes);
     let partialHead = position > 0;
+    // Bytes after the last newline copied so far. The file's size can end mid-line
+    // while a writer's append is still landing (Linux grows it page by page), so
+    // the archive takes each line only once its newline has been read.
+    let tail = Buffer.alloc(0);
     // Copy until the file stops growing between passes, so the truncate cuts as little as possible.
     for (let pass = 0; pass < 4; pass += 1) {
       const end = fstatSync(fd).size;
@@ -509,7 +514,19 @@ async function rotateLog(path: string, maxBytes: number, archives: number): Prom
           chunk = chunk.subarray(newline + 1);
           partialHead = false;
         }
-        if (!gzip.write(Buffer.from(chunk))) await once(gzip, "drain");
+        const lastNewline = chunk.lastIndexOf(10);
+        let whole: Buffer;
+        if (lastNewline === -1) {
+          tail = Buffer.concat([tail, chunk]);
+          // Output with no newline for a whole chunk is not line-shaped; keep it rather than hold it all.
+          if (tail.length < LOG_COPY_CHUNK_BYTES) continue;
+          whole = tail;
+          tail = Buffer.alloc(0);
+        } else {
+          whole = Buffer.concat([tail, chunk.subarray(0, lastNewline + 1)]);
+          tail = Buffer.from(chunk.subarray(lastNewline + 1));
+        }
+        if (!gzip.write(whole)) await once(gzip, "drain");
       }
     }
     ftruncateSync(fd, 0);
