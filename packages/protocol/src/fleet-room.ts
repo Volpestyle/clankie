@@ -183,6 +183,12 @@ export const APP_NOTES_PAGE_MAX = 50;
 export const APP_NOTE_ADDRESSEES_MAX = 4;
 /** The lead every note can name: Clankie himself, beside the leads with a stored wake webhook. */
 export const APP_NOTE_CLANKIE = "clankie";
+/**
+ * How often one app's addressed notes may wake Clankie's own lead lane (#625): each
+ * such wake can give his model a turn, so an app can't buy turns by posting. Wakes
+ * to a lead's own webhook don't count; a webhook that fails over to his lane does.
+ */
+export const APP_NOTE_LANE_WAKES = { max: 6, windowMs: 10 * 60_000 } as const;
 
 /**
  * One way the service tried to reach an addressed lead, in the order James approved
@@ -196,8 +202,10 @@ export const AppNoteWakeStepSchema = z.strictObject({
    * `held`: Clankie is off (the apps lead), so his lane kept it for them (ADR 0350).
    * `not_set`, `refused`, `unavailable`: this way didn't take it.
    * `uncertain`: no answer in time; it may have arrived.
+   * `limited`: the posting app already woke Clankie's lane as often as one app may in
+   *   the window (#625), so this one wasn't sent; the note itself stays on the board.
    */
-  outcome: z.enum(["delivered", "held", "not_set", "refused", "uncertain", "unavailable"]),
+  outcome: z.enum(["delivered", "held", "not_set", "refused", "uncertain", "unavailable", "limited"]),
 });
 export type AppNoteWakeStep = z.infer<typeof AppNoteWakeStepSchema>;
 

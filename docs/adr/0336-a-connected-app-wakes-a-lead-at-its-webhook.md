@@ -105,3 +105,18 @@ reached, held?, steps, at}`. The post answers with the note and its
   wake any stored lead with `wake_lead`. What is new is that a note can also
   give Clankie's lane a turn, and that turn holds only the note's number and
   author.
+
+## Amendment: addressed notes wake Clankie's lane only so often (#625, 2026-11-03)
+
+Each wake into Clankie's lead lane can give his model a turn, so a connected app
+could buy turns as fast as it posts. One app's addressed notes now reach his lane
+at most 6 times in 10 minutes (`APP_NOTE_LANE_WAKES`), counted by the connector
+device the service stamped on the post (its device id), never by the name an app
+registered under: two devices sharing a name each get their own bound, and renaming
+doesn't reset one. Notes addressed to `clankie` count, and so do notes whose
+webhook fell through to his lane; wakes a lead's own webhook takes don't. A wake
+that found the lane unavailable doesn't use a slot. The count is read from the wake
+journal (which now records each note's device), so a restart keeps it, and the
+check claims its slot before anything is awaited, so concurrent posts can't overrun
+it. Past the bound the note still posts; its receipt says `reached: "none"` with
+step `{via: "clankie", outcome: "limited"}`. The bound is fixed, not a setting.

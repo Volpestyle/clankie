@@ -1930,7 +1930,10 @@ among the room's entries. A note may name the leads it is for in `post_note`'s
 `to` (`clankie`, or a lead with a stored wake webhook). Each one is woken once:
 at its webhook, then through Clankie's lead lane (his live lead pane, else his
 model, which keeps it while the apps lead). A name no lead goes by refuses the
-post, and the note's own words never address anyone (#179). `clankie connector
+post, and the note's own words never address anyone (#179). One connector device's notes
+wake Clankie's lane at most 6 times in 10 minutes, counted by its device id (not
+its name) from the wake journal so a restart doesn't reset it; past that the note still posts and the wake is refused
+with step outcome `limited` (#625). A lead's own webhook doesn't count. `clankie connector
 notes [SINCE] [--json]` reads the board with each note's addressees and how
 each was woken. JSON: `{ "ok": true, "notes": [{ "sequence", "at", "author",
 "text", "to"?, "wakes"?: [{ "receiptId", "lead", "reached":

@@ -32,7 +32,7 @@ it("answers once the addressees are journaled, before a slow webhook settles, an
       },
     });
 
-    const answered = wakes.wake(note, ["grok", "clankie"]);
+    const answered = wakes.wake(note, ["grok", "clankie"], "device-grok-bot");
     expect(answered).toMatchObject({ sequence: 7, to: ["grok", "clankie"] });
     expect(answered.wakes).toBeUndefined();
     // Both are on disk as pending before any wake has settled. Read before anything awaits:
@@ -41,7 +41,7 @@ it("answers once the addressees are journaled, before a slow webhook settles, an
     expect(journal.notes[0].pending.map((item: { lead: string }) => item.lead)).toEqual(["grok", "clankie"]);
 
     // Posting the same note again wakes nobody a second time.
-    wakes.wake(note, ["grok", "clankie"]);
+    wakes.wake(note, ["grok", "clankie"], "device-grok-bot");
     release({ outcome: "sent", lead: "grok", message: "ok" } as LeadWakeResult);
     await wakes.settled(7);
     expect(webhooks).toEqual(["grok"]);
@@ -68,7 +68,7 @@ it("a restart while a wake is pending settles it as uncertain and never sends it
       webhook: () => new Promise(() => {}),
       leadLane: async () => ({ via: "clankie", outcome: "delivered" }),
     });
-    first.wake(note, ["grok"]);
+    first.wake(note, ["grok"], "device-grok-bot");
 
     const sent: string[] = [];
     const restarted = new NoteWakes({
@@ -87,9 +87,59 @@ it("a restart while a wake is pending settles it as uncertain and never sends it
         steps: [{ via: "webhook", outcome: "uncertain" }],
       }),
     ]);
-    restarted.wake(note, ["grok"]);
+    restarted.wake(note, ["grok"], "device-grok-bot");
     await restarted.settled(7);
     expect(sent).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+// #625 review: a wake still in flight in Clankie's lane already holds one of its device's
+// slots, so a concurrent post from that device can't take the same last slot.
+it("counts a device's in-flight lane wake against its bound, so concurrent posts can't share a slot", async () => {
+  const root = await mkdtemp(join(tmpdir(), "note-wakes-bound-"));
+  try {
+    let slow = false;
+    let release: () => void = () => {};
+    const lanes: number[] = [];
+    const wakes = new NoteWakes({
+      path: join(root, "note-wakes.json"),
+      webhookLeads: async () => [],
+      webhook: async (lead) => ({ outcome: "not_set", lead, message: "none" }) as LeadWakeResult,
+      leadLane: async (text) => {
+        lanes.push(Number(/\[board note (\d+)\]/u.exec(text)?.[1]));
+        if (slow) await new Promise<void>((resolve) => (release = resolve));
+        return { via: "clankie", outcome: "delivered" };
+      },
+      laneLimit: { max: 2, windowMs: 60_000 },
+    });
+    const at = "2026-11-03T22:00:00.000Z";
+    const posted = (sequence: number) => ({ sequence, at, author: "Cursor", text: `note ${sequence}` });
+
+    // One of the device's two slots is spent and settled.
+    wakes.wake(posted(1), ["clankie"], "device-a");
+    await wakes.settled(1);
+    // At max-1, two posts at once: the first takes the last slot and stays in flight in a
+    // slow lane; the second finds it held and is limited, before the first ever settles.
+    slow = true;
+    const inFlight = wakes.wake(posted(2), ["clankie"], "device-a");
+    const second = wakes.wake(posted(3), ["clankie"], "device-a");
+    expect(inFlight.wakes).toBeUndefined();
+    expect(second.wakes).toEqual([
+      expect.objectContaining({ reached: "none", steps: [{ via: "clankie", outcome: "limited" }] }),
+    ]);
+    expect(lanes).toEqual([1, 2]);
+    // Another device has its own bound, even while device-a's wake is in flight.
+    slow = false;
+    const releaseFirst = release;
+    wakes.wake(posted(4), ["clankie"], "device-b");
+    await wakes.settled(4);
+    expect(wakes.decorate(posted(4)).wakes).toEqual([expect.objectContaining({ reached: "clankie" })]);
+    releaseFirst();
+    await wakes.settled(2);
+    expect(wakes.decorate(posted(2)).wakes).toEqual([expect.objectContaining({ reached: "clankie" })]);
+    expect(lanes).toEqual([1, 2, 4]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

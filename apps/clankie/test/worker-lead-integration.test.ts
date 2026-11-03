@@ -836,7 +836,12 @@ it("the fleet room records a lead's message to its hire and the hire's report on
   // A connector app's note lands in the same journal, out of the default room,
   // and the lead reads it with read_notes, framed as information (ADR 0301).
   expect(
-    await restarted.appNotes!({ action: "post", author: "Claude", text: "PR review on kh2 is mine today." }),
+    await restarted.appNotes!({
+      action: "post",
+      author: "Claude",
+      deviceId: "device-claude",
+      text: "PR review on kh2 is mine today.",
+    }),
   ).toMatchObject({ outcome: "posted", note: { author: "Claude", sequence: live.entries[0]!.sequence + 1 } });
   const room = await restarted.fleetRoom!({});
   if (room.outcome !== "ready") throw new Error("Fleet room unavailable");

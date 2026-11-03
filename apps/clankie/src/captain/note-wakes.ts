@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import {
   APP_NOTE_CLANKIE,
+  APP_NOTE_LANE_WAKES,
   AppNoteWakeSchema,
   type AppNote,
   type AppNotesResult,
@@ -39,6 +40,8 @@ export interface NoteWakesOptions {
   readonly webhook: (lead: string, text: string) => Promise<LeadWakeResult>;
   /** A wake into Clankie's own lead lane, which runs in his live lead pane when one is up. */
   readonly leadLane: (text: string) => Promise<LeadLaneWake>;
+  /** How often one connector device's notes may wake Clankie's lane; the protocol's bound by default. */
+  readonly laneLimit?: { readonly max: number; readonly windowMs: number };
   readonly clock?: () => Date;
   readonly log?: (fields: Record<string, unknown>, message: string) => void;
 }
@@ -49,12 +52,23 @@ const PendingSchema = z.strictObject({
   steps: z.array(z.custom<AppNoteWakeStep>()),
   /** The way being tried when the journal was last written. */
   trying: z.enum(["lead_pane", "webhook", "clankie"]),
+  /**
+   * True once this wake passed the lane bound and holds one of its device's slots (#625).
+   * A note to clankie is journaled as trying his lane before its check runs, so `trying`
+   * alone doesn't say it holds a slot.
+   */
+  laneClaimed: z.boolean().optional(),
 });
 const JournalSchema = z.strictObject({
   schemaVersion: z.literal(1),
   notes: z.array(
     z.strictObject({
       sequence: z.number().int().positive(),
+      /**
+       * The connector device that posted it, as the app boundary stamped it: the lane
+       * bound (#625) counts by this id, never by the name an app registered under.
+       */
+      device: z.string().optional(),
       to: z.array(z.string()).min(1),
       wakes: z.array(AppNoteWakeSchema),
       pending: z.array(PendingSchema),
@@ -92,9 +106,9 @@ export class NoteWakes {
    * take most of a caller's deadline, and a post that timed out and was sent again
    * would be a new note waking its leads twice. Receipts appear on later reads.
    */
-  wake(note: AppNote, to: readonly string[]): AppNote {
+  wake(note: AppNote, to: readonly string[], device: string): AppNote {
     if (this.notes.has(note.sequence)) return this.decorate(note);
-    const record: JournalNote = { sequence: note.sequence, to: [...to], wakes: [], pending: [] };
+    const record: JournalNote = { sequence: note.sequence, device, to: [...to], wakes: [], pending: [] };
     const pending = to.map((lead) => ({
       receiptId: `note:${note.sequence}:${lead}`,
       lead,
@@ -173,7 +187,15 @@ export class NoteWakes {
         if (sent.outcome === "sent") return settle("webhook");
       }
       // Clankie's lane: his live lead pane when one is up, otherwise his own model.
+      // One device's notes wake it only so often (#625). The count and this wake's claim on
+      // a slot happen together, before any await, so concurrent posts can't both take one.
+      // A post with no stamped device has no bucket of its own, so it never reaches the lane.
+      if (!record.device || this.laneWakesInWindow(record.device) >= this.laneLimit().max) {
+        steps.push({ via: "clankie", outcome: "limited" });
+        return settle("none");
+      }
       pending.trying = "clankie";
+      pending.laneClaimed = true;
       this.save();
       const missed =
         lead === APP_NOTE_CLANKIE
@@ -191,6 +213,37 @@ export class NoteWakes {
       this.options.log?.({ receiptId, error: String(error) }, "Board note wake failed");
       if (record.pending.includes(pending)) settle("none");
     }
+  }
+
+  private laneLimit() {
+    return this.options.laneLimit ?? APP_NOTE_LANE_WAKES;
+  }
+
+  /**
+   * How many times this device's notes woke Clankie's lane within the window, counting
+   * wakes in flight that already hold a slot. Read from the journal, so a restart doesn't
+   * reset it.
+   */
+  private laneWakesInWindow(device: string): number {
+    const since = this.clock().getTime() - this.laneLimit().windowMs;
+    let count = 0;
+    for (const note of this.notes.values()) {
+      if (note.device !== device) continue;
+      count += note.pending.filter((item) => item.laneClaimed === true).length;
+      for (const wake of note.wakes)
+        if (
+          Date.parse(wake.at) >= since &&
+          wake.steps.some(
+            // A wake that took no turn (refused at the lane, or limited) leaves the slot free.
+            (step) =>
+              (step.via === "clankie" || step.via === "lead_pane") &&
+              step.outcome !== "limited" &&
+              step.outcome !== "unavailable",
+          )
+        )
+          count += 1;
+    }
+    return count;
   }
 
   private load(): void {

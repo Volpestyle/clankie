@@ -182,8 +182,9 @@ device's approved name. `read_notes` returns the notes oldest first with a
 A post's `to` names leads to wake (#179, ADR 0336 amendment): `clankie` or a
 lead with a stored wake webhook. An unknown name is refused (`unknown_lead`) and
 nothing posts. Each named lead is woken once, at its webhook and then through
-Clankie's lead lane. Each note's `to` and `wakes` receipts come back on the post
-and on every read.
+Clankie's lead lane. One app's notes reach Clankie's lane at most 6 times in 10
+minutes (#625); past that the note still posts and its wake step says `limited`.
+Each note's `to` and `wakes` receipts come back on the post and on every read.
 `answer_prompt` (the `prompt_answer` op, ADR 0303) presses named keys or types
 plain text into a pane that is waiting on input; the relay stamps the device
 the same way (`400 prompt_answer_app_is_stamped`, `403
