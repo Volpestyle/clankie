@@ -34,12 +34,41 @@ export interface HerdrTranscriptMessage {
   readonly role: "operator" | "agent";
   /** Internal channel delivery identity; never rendered as operator chat. */
   readonly internal?: true;
+  /**
+   * Set only for a channel delivery the harness itself recorded as one (Claude's native
+   * `origin.kind: "channel"`), with its sender and body read from a well-formed envelope.
+   * A launch brief or any other internal entry never carries it, whatever its text (#220).
+   */
+  readonly delivery?: TranscriptChannelDelivery;
   /** Native Pi custom-message correlation, never inferred from visible text. */
   readonly nativeRequestId?: string;
   readonly text: string;
   readonly occurredAt?: string | undefined;
   /** The harness refused this turn on a usage limit and wrote this in place of a reply. */
   readonly usageLimit?: HerdrUsageLimit | undefined;
+}
+
+/** A channel message the harness recorded as delivered into this session. */
+export interface TranscriptChannelDelivery {
+  readonly kind: "channel";
+  /** The MCP server that delivered it, from the native record. */
+  readonly server?: string;
+  /** The envelope's last `source` attribute (the plugin names itself first). */
+  readonly sender?: string;
+  readonly body: string;
+}
+
+/**
+ * The single `<channel …>body</channel>` envelope Claude wraps a delivery in, and nothing
+ * around it; undefined for anything else, including trailing text or a missing close.
+ */
+function channelEnvelope(text: string): Omit<TranscriptChannelDelivery, "kind" | "server"> | undefined {
+  const match = /^<channel((?:\s+[A-Za-z_][\w-]*="[^"]*")*)\s*>([\s\S]*)<\/channel>$/u.exec(text.trim());
+  if (match === null) return undefined;
+  const body = match[2]!.trim();
+  if (body.length === 0 || /<\/?channel\b/u.test(body)) return undefined;
+  const sender = [...match[1]!.matchAll(/\bsource="([^"]*)"/gu)].at(-1)?.[1];
+  return { ...(sender ? { sender } : {}), body };
 }
 
 /** A native session or weekly usage-limit refusal (VUH-2273); resetsAt when the harness said. */
@@ -1312,7 +1341,13 @@ function claudeRecordEntries(
   if (entry.type === "user") {
     const text = messageText(record(entry.message)?.content);
     if (CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
-      return claudePrompt(`claude:${nativeId}`, text, timestamp(entry), includeChannelPrompts);
+      return claudePrompt(
+        `claude:${nativeId}`,
+        text,
+        timestamp(entry),
+        includeChannelPrompts,
+        channelOrigin(entry.origin, entry.isMeta === true && entry.promptSource === "system"),
+      );
   }
   if (entry.isMeta === true || entry.promptSource === "system") return [];
   if (claudeInterrupt(entry)) return [{ type: "interrupted", id: `claude:${nativeId}`, ...timestamp(entry) }];
@@ -1327,7 +1362,13 @@ function claudeRecordEntries(
         ? CLAUDE_CHANNEL_PROMPT.test(text.trimStart())
         : origin === "human" && queued.isMeta !== true;
     return admitted
-      ? claudePrompt(`claude:${nativeId}`, text, timestamp(entry, queued.timestamp), includeChannelPrompts)
+      ? claudePrompt(
+          `claude:${nativeId}`,
+          text,
+          timestamp(entry, queued.timestamp),
+          includeChannelPrompts,
+          channelOrigin(queued.origin, true),
+        )
       : [];
   }
   const message = record(entry.message);
@@ -1595,17 +1636,54 @@ function claudeInterrupt(entry: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * A delivery's rendered fields, each through the same normalize, redact and bound pipeline as
+ * any transcript text (#220): a credential in a delivered message reads `[REDACTED]` here too.
+ */
+function channelDelivery(text: string, server: string | undefined): TranscriptChannelDelivery | undefined {
+  const envelope = channelEnvelope(text);
+  const body = envelope === undefined ? undefined : cleanText(envelope.body);
+  if (envelope === undefined || body === undefined) return undefined;
+  const field = (value: string | undefined) => {
+    const clean = value === undefined ? undefined : cleanText(value);
+    return clean === undefined ? undefined : clean.slice(0, CHANNEL_FIELD_MAX);
+  };
+  const sender = field(envelope.sender);
+  const origin = field(server);
+  return {
+    kind: "channel",
+    ...(origin === undefined ? {} : { server: origin }),
+    ...(sender === undefined ? {} : { sender }),
+    body,
+  };
+}
+
+/** A delivery's sender or server name is an identifier, never a message. */
+const CHANNEL_FIELD_MAX = 128;
+
+/** The native record's own word that a channel delivered it: `origin.kind: "channel"`, from a server. */
+function channelOrigin(origin: unknown, system: boolean): { readonly server?: string } | undefined {
+  const native = record(origin);
+  if (!system || native?.kind !== "channel") return undefined;
+  const server = string(native.server);
+  return server === undefined ? {} : { server };
+}
+
 function claudePrompt(
   id: string,
   text: string,
   at: { readonly occurredAt?: string },
   includeChannelPrompts: boolean,
+  channel?: { readonly server?: string },
 ): HerdrTranscriptMessage[] {
-  if (includeChannelPrompts && CLAUDE_CHANNEL_PROMPT.test(text.trimStart()))
+  if (includeChannelPrompts && CLAUDE_CHANNEL_PROMPT.test(text.trimStart())) {
+    const delivery = channel === undefined ? undefined : channelDelivery(text, channel.server);
     return transcriptMessage(id, "operator", text, at).map((item) => ({
       ...item,
       internal: true as const,
+      ...(delivery === undefined ? {} : { delivery }),
     }));
+  }
   // Bash mode (`! cmd`) records the owner's shell command and its output, never a prompt.
   if (
     /^<(?:local-command-|command-name>|system-reminder>|channel[ >]|bash-(?:input|stdout|stderr)>)/u.test(

@@ -32,15 +32,23 @@ export const TRANSCRIPT_READ_REFUSED =
   "This agent's own session transcript can't be read now, and its screen is never shown in its place; read it again once it has written to its session.";
 
 /**
- * The transcript as plain lines, oldest first: prompts marked `›`, the agent's
- * replies as written, tool calls and interruptions as one short `·` line each.
- * Internal channel deliveries and viewed-image host paths are left out.
+ * The transcript as plain lines, oldest first: prompts marked `›`, channel messages as
+ * `› [channel from …]` (only deliveries the harness recorded as one), the agent's replies as written, tool calls and interruptions as one short
+ * `·` line each. Other internal entries (a hire's launch brief) and viewed-image host paths are
+ * left out.
  */
 export function transcriptReadText(entries: readonly HerdrTranscriptEntry[]): string {
   const lines: string[] = [];
   for (const entry of entries) {
     if (entry.type === "message") {
-      if (entry.internal === true || !entry.text.trim()) continue;
+      if (!entry.text.trim()) continue;
+      if (entry.internal === true) {
+        // Only a delivery the harness recorded as one; a launch brief stays out whatever its text.
+        const delivery = entry.role === "operator" ? entry.delivery : undefined;
+        if (delivery?.kind === "channel")
+          lines.push(`› [channel${delivery.sender ? ` from ${delivery.sender}` : ""}] ${delivery.body}`);
+        continue;
+      }
       lines.push(entry.role === "operator" ? `› ${entry.text}` : entry.text);
     } else if (entry.type === "tool") {
       if (entry.phase === "started") lines.push(`· ${entry.name}`);
