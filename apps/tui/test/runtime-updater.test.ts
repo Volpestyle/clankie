@@ -43,7 +43,16 @@ function fixture(extra: Partial<RuntimeUpdaterOptions> = {}) {
   };
   const updater = createRuntimeUpdater({
     repoRoot: runtime,
-    env: { HOME: home, PATH: "/fixture", NODE_OPTIONS: "--bad-ambient", PI_SESSION_FILE: "/owner" },
+    env: {
+      HOME: home,
+      PATH: "/fixture",
+      NODE_OPTIONS: "--bad-ambient",
+      PI_SESSION_FILE: "/owner",
+      // The running service's own env, inherited once from an agent shell (#657).
+      TERM: "dumb",
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+    },
     run,
     spawnHelper: (command, args, options) => {
       launches.push({ command, args, options });
@@ -92,6 +101,10 @@ it("accepts once after preparation and detaches fixed helper with private file s
   const options = f.launches[0]!.options as { env: NodeJS.ProcessEnv; stdio: unknown[] };
   expect(options.env.NODE_OPTIONS).toBeUndefined();
   expect(options.env.PI_SESSION_FILE).toBeUndefined();
+  // The helper starts the new service with this env, so no terminal setting carries over (#657).
+  expect(options.env.TERM).toBeUndefined();
+  expect(options.env.NO_COLOR).toBeUndefined();
+  expect(options.env.FORCE_COLOR).toBeUndefined();
   expect(options.stdio[0]).toBe("ignore");
   expect(f.updater.status().latest).toEqual(result.latest);
 });

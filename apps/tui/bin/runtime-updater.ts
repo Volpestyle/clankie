@@ -552,6 +552,11 @@ export function createRuntimeUpdater(options: RuntimeUpdaterOptions): RuntimeUpd
               "NODE_OPTIONS",
               "NODE_PATH",
               "CLANKIE_LAUNCHER_PATH",
+              // The helper restarts the service with its own env (#657). A terminal setting the
+              // running service once inherited from a shell must not follow it into the next one.
+              "TERM",
+              "NO_COLOR",
+              "FORCE_COLOR",
             ])
               delete helperEnv[name];
             const child = (options.spawnHelper ?? spawn)(
