@@ -136,11 +136,14 @@ it("a pressure refusal names the top consumers, unleased work and who started it
   expect(refused).toMatch(/tsc PID \d+ \(\w+ permit of seat w1:p9\)/u);
   // The refusal is the hire result's detail, which connected apps read: no foreign executable
   // names, only an anonymous sum of everything no agent started.
-  const foreignNames = (await governor.snapshot())
-    .consumers!.filter((consumer) => !consumer.holder && !consumer.startedBy)
-    .map((consumer) => consumer.executable);
-  expect(foreignNames).toContain("foreignburn");
-  for (const name of foreignNames) expect(refused).not.toContain(name);
+  // Match each foreign entry by name and PID: a busy host also runs foreign processes that share
+  // an executable name, such as `node`, with work an agent started, which is named.
+  const unstarted = (await governor.snapshot()).consumers!.filter(
+    (consumer) => !consumer.holder && !consumer.startedBy,
+  );
+  expect(unstarted.map((consumer) => consumer.executable)).toContain("foreignburn");
+  expect(refused).not.toContain("foreignburn");
+  for (const { executable, pid } of unstarted) expect(refused).not.toContain(`${executable} PID ${pid} `);
   expect(refused).toMatch(/\d+ other process(es)?, \d+% CPU, [\d.]+ (MiB|GiB)/u);
   sample = { loadRatio: 9, availableMemoryMb: 64_000 };
   const queued = await resources.admitHire({});
