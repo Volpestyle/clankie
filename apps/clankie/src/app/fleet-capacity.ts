@@ -38,6 +38,7 @@ export interface FleetCapacityAccountSource {
   readonly tier?: string | undefined;
   readonly signedIn: boolean | null;
   readonly headroom: number | null;
+  readonly budget?: { readonly stopAtPercent: number } | undefined;
   readonly resetsAt?: string | undefined;
   readonly usage?:
     | {
@@ -160,6 +161,7 @@ export function projectFleetCapacity(input: {
           signedIn: account.signedIn === null ? "unknown" : account.signedIn,
           usable: account.usable,
           held: account.held !== undefined,
+          ...(account.budget === undefined ? {} : { stopAtPercent: account.budget.stopAtPercent }),
           remaining: fraction(account.headroom),
           resetsAt: instant(account.resetsAt) ?? instant(spare?.resetsAt) ?? "unknown",
           sparePerDay: finite(spare?.sparePerDay ?? undefined) ?? "unknown",

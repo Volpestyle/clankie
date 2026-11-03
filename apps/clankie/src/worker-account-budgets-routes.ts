@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { WORKER_ACCOUNT_BUDGETS_PATH, WorkerAccountBudgetRequestSchema } from "@clankie/protocol/worker-accounts";
+import {
+  WORKER_ACCOUNT_BUDGETS_PATH,
+  WorkerAccountBudgetRequestSchema,
+} from "@clankie/protocol/worker-accounts";
 import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 
 class TooManyBudgets extends Error {}
@@ -61,7 +64,9 @@ export function createWorkerAccountBudgetsRoutes(
           return {
             ...current,
             workerAccountBudgets:
-              stopAtPercent === null ? others : [...others, { machine, harness, label: named, stopAtPercent }],
+              stopAtPercent === null
+                ? others
+                : [...others, { machine, harness, label: named, stopAtPercent }],
           };
         },
         async () => {
@@ -71,7 +76,8 @@ export function createWorkerAccountBudgetsRoutes(
       );
       return context.json(snapshot(updated, resolve));
     } catch (error) {
-      if (error instanceof TooManyBudgets) return context.json({ error: "too_many_worker_account_budgets" }, 400);
+      if (error instanceof TooManyBudgets)
+        return context.json({ error: "too_many_worker_account_budgets" }, 400);
       return context.json({ error: "worker_account_budgets_conflict" }, 409);
     }
   });

@@ -138,7 +138,7 @@ device and machine tables, credential-rotate sentence). Everything else is alrea
 Do not edit `~/.config/clankie/clankie.json`,
 `~/.config/clankie/settings.json`, or Keychain entries by hand.
 
-Fleet settings, persona, voice, Discord fields, worker-account holds, Linear
+Fleet settings, persona, voice, Discord fields, worker-account holds and budgets, Linear
 follow/wake and host availability use the owner settings API. The command reads
 the current snapshot, sends its `expectedRevision`, and reports a conflict
 without retrying or writing a local fallback. The TUI uses the same path. Start
@@ -2601,6 +2601,28 @@ report per machine and holds or releases an account from it.
 clankie accounts workers --machine pc
 clankie accounts hold codex default --reason "plan not renewed"
 clankie accounts release codex default
+```
+
+### `accounts budget [claude|codex LABEL PERCENT|off [--machine ID]]`
+
+A usage budget (#603) stops new hires on one account at a chosen percent of its
+plan, for example 80% to keep headroom for the owner's own use. Hire admission
+refuses the account once its tightest all-model window reaches the budget, in
+place of the fixed 90% reserve an account without a budget keeps; the owner's
+per-hire usage override still reaches past it while capacity remains. Each fleet
+round, every lead hears a warning ten points before the budget, a "budget
+reached" notice naming the seats it leads on that account (it asks each to stop
+at its next safe point and report blocked), and a notice once a later reading is
+back under the budget, such as after the plan window resets. The numbers are the
+vendor's own usage readings, never estimates; an account whose usage was not
+read is not judged. With no account the command lists the budgets; `off` clears
+one. Budgets live in `workerAccountBudgets` and use the owner settings API at
+`GET`/`POST /v1/worker-accounts/budgets`, revision-fenced like holds.
+
+```sh
+clankie accounts budget claude work 80
+clankie accounts budget codex default 100 --machine pc
+clankie accounts budget claude work off
 ```
 
 A Codex home whose sign-in the vendor refuses when asked for usage (401/403) is

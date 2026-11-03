@@ -364,6 +364,8 @@ export interface BudgetNotice {
   readonly machine: string;
   readonly harness: string;
   readonly label: string;
+  /** Every name the account answers to (its key and home labels), to find seats running on it. */
+  readonly names: readonly string[];
   readonly stopAtPercent: number;
   readonly usedPercent: number;
   readonly window: string;
@@ -400,13 +402,16 @@ export class AccountBudgetNotices {
       if (budget === undefined || window === undefined || account.held || account.signedIn !== true) continue;
       const noun = account.harness === "claude" ? "Claude" : "Codex";
       const used = Math.round(window.usedPercent);
-      const where = `${noun} account ${account.label}${account.identity ? ` (${account.identity})` : ""} on ${report.machine}`;
+      // The owner's own name for it (a home label) reads better than a stable account key.
+      const name = account.aliases?.[0] ?? account.label;
+      const where = `${noun} account ${name}${account.identity ? ` (${account.identity})` : ""} on ${report.machine}`;
       const reset = window.resetsAt ? `, which resets at ${window.resetsAt}` : "";
       const previous = this.reached.get(id);
       const base = {
         machine: report.machine,
         harness: account.harness,
         label: account.label,
+        names: [account.label, ...(account.aliases ?? [])],
         stopAtPercent: budget.stopAtPercent,
         usedPercent: used,
         window: window.id,

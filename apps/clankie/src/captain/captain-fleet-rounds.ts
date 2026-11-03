@@ -375,13 +375,14 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
 }
 
 /** A budget notice with the seats this lead runs on that account, by seat id and title. */
-function budgetNoticeText(notice: BudgetNotice, led: readonly OperatorFleetSeat[]): string {
+export function budgetNoticeText(notice: BudgetNotice, led: readonly OperatorFleetSeat[]): string {
   if (notice.stage !== "reached") return notice.text;
   const on = led.filter(
     (seat) =>
       (seat.fleet ?? "local") === notice.machine &&
       seat.harness === notice.harness &&
-      seat.account?.label === notice.label,
+      seat.account !== undefined &&
+      notice.names.includes(seat.account.label),
   );
   return on.length
     ? `${notice.text}\nYour seats on it: ${on.map((seat) => `${seat.seatId} (${seat.title.slice(0, 80)})`).join("; ")}.`

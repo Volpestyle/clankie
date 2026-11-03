@@ -32,6 +32,8 @@ export const FleetCapacityAccountSchema = z
     signedIn: z.union([z.boolean(), unknown]),
     usable: z.boolean(),
     held: z.boolean(),
+    /** The owner's usage budget (#603): new hires on it stop at this percent of its plan. */
+    stopAtPercent: z.number().int().min(1).max(100).optional(),
     /** Fraction left of the tightest all-model window. */
     remaining: z.union([z.number().min(0).max(1), unknown]),
     resetsAt: knownInstant,

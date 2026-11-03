@@ -2973,6 +2973,43 @@ paths:
         "403": { description: Owner authority required }
         "409": { description: Stale revision, changed owner authority or unsupported preference }
         "503": { description: Settings unavailable }
+  /v1/worker-accounts/budgets:
+    get:
+      tags: [Operator]
+      operationId: getWorkerAccountBudgets
+      summary: Read per-account usage budgets and current revision
+      description: A budget stops new hires on an account at stopAtPercent of its tightest all-model plan window, in place of the fixed 90% reserve, and drives the lead's warning, budget-reached and clear-again notices (#603). Not relayed to devices yet.
+      security: [{ operatorBearer: [] }]
+      responses:
+        "200":
+          description: Current snapshot and SHA-256 revision; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkerAccountBudgetsSnapshot" }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+    post:
+      tags: [Operator]
+      operationId: updateWorkerAccountBudgets
+      summary: Set or clear one account's usage budget with revision fencing
+      description: The expectedRevision from GET is required; stopAtPercent null clears the budget. Owner authority is checked again before persistence. No automatic conflict retry.
+      security: [{ operatorBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WorkerAccountBudgetUpdate" }
+      responses:
+        "200":
+          description: Saved snapshot and revision
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WorkerAccountBudgetsSnapshot" }
+        "400": { description: Invalid update, or more than 64 budgets }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority required }
+        "409": { description: Stale revision or changed owner authority }
+        "503": { description: Settings unavailable }
   /v1/usage:
     get:
       tags: [Operator]
@@ -7893,6 +7930,39 @@ components:
         label: { type: string }
         held: { type: boolean }
         reason: { type: string, maxLength: 200, description: Hold only; a release carries no reason }
+    WorkerAccountBudgetsSnapshot:
+      type: object
+      required: [revision, budgets]
+      properties:
+        revision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        budgets:
+          {
+            type: array,
+            maxItems: 64,
+            items:
+              {
+                type: object,
+                required: [machine, harness, label, stopAtPercent],
+                properties:
+                  {
+                    machine: { type: string },
+                    harness: { type: string, enum: [claude, codex] },
+                    label: { type: string },
+                    stopAtPercent: { type: integer, minimum: 1, maximum: 100 },
+                  },
+              },
+          }
+    WorkerAccountBudgetUpdate:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, harness, label, stopAtPercent]
+      properties:
+        expectedRevision: { $ref: "#/components/schemas/OwnerSettingsRevision" }
+        machine: { type: string, default: local }
+        harness: { type: string, enum: [claude, codex] }
+        label: { type: string }
+        stopAtPercent:
+          { type: [integer, "null"], minimum: 1, maximum: 100, description: null clears the budget }
     VoiceSettingsPatch:
       type: object
       additionalProperties: false

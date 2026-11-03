@@ -919,10 +919,15 @@ export function createWorkerAccountsReader(options: {
     const report = {
       ...read,
       accounts: read.accounts.map(({ chatgptAccountId: _id, ...account }) => {
+        // A budget set by an older name still names the account its key replaced.
         const budget = budgets.find(
-          (entry) => entry.harness === account.harness && entry.label === account.label,
+          (entry) =>
+            entry.harness === account.harness &&
+            (entry.label === account.label || account.aliases?.includes(entry.label) === true),
         );
-        return budget === undefined ? account : { ...account, budget: { stopAtPercent: budget.stopAtPercent } };
+        return budget === undefined
+          ? account
+          : { ...account, budget: { stopAtPercent: budget.stopAtPercent } };
       }),
     };
     return { ...report, allocation: allocateAccounts(report) };

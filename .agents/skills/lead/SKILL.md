@@ -119,7 +119,11 @@ never from an old warning. To pace a push, read `burn` in `fleet_capacity`:
 a window whose recent percent per hour sits below `toUseAllByReset` will reset
 with capacity unused, so give it more independent work; one with `runsOutAt`
 before its reset is spending too fast, so move the next hires to another
-account. Its `lastHour` names which agents are spending it.
+account. Its `lastHour` names which agents are spending it. An account's
+`stopAtPercent` is the owner's usage budget: hires on it are refused at that
+line. A "budget reached" notice names the seats you lead on that account; ask
+each to stop at its next safe point and report blocked, and move what remains
+to an account with room. Its "clear again" notice means they can resume.
 
 Where work goes is your judgment (#425). Before hiring, look at the workers you
 already lead: `workedOn` in `fleet_efficiency` (and the line in `list_agents`)
