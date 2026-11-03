@@ -457,7 +457,7 @@ processIt("delivers and reports once across a desktop Codex service restart", as
       }),
     ]);
     expect(ready[0]).toMatchObject({ ready: true, port: expect.any(Number) });
-    return Object.assign(child, { port: (ready[0] as { port: number }).port });
+    return Object.assign(child, { port: (ready[0] as { port: number }).port, stderr: () => stderr });
   };
   const send = async (
     child: ChildProcess,
@@ -468,7 +468,11 @@ processIt("delivers and reports once across a desktop Codex service restart", as
     child.send({ seatId: paneId, text, receipt });
     return (await result)[0];
   };
-  const report = async (service: { port: number }, deliveryId: string, text: string) => {
+  const report = async (
+    service: { port: number; stderr: () => string },
+    deliveryId: string,
+    text: string,
+  ) => {
     const response = await fetch(
       `http://127.0.0.1:${service.port}/v1/fleet/seats/${encodeURIComponent(paneId)}/messages`,
       {
@@ -481,7 +485,9 @@ processIt("delivers and reports once across a desktop Codex service restart", as
         }),
       },
     );
-    return { status: response.status, body: await response.json() };
+    const result = { status: response.status, body: await response.json() };
+    // A refusal names its cause in the assertion diff (#564).
+    return response.status === 200 ? result : { ...result, service: service.stderr().slice(-4000) };
   };
   const firstService = await startService(true);
   expect(await report(firstService, randomUUID(), "Before restart report")).toMatchObject({
