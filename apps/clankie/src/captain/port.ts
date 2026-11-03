@@ -7,6 +7,7 @@ import type {
   FleetToolCatalogHealthPage,
 } from "@clankie/protocol/tool-catalog";
 import type { QuestionAuthority } from "./conversation-questions.ts";
+import type { LeadOwnerProof } from "./conversations/types.ts";
 import type { ProjectProcessProof } from "../project-process-proof.ts";
 import type {
   ProjectHireAssignment,
@@ -436,6 +437,8 @@ export interface CaptainPort {
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
+    /** Host-verified sender of a `send` without question authority (ADR 0350). */
+    leadOwner?: LeadOwnerProof,
   ): Promise<OperatorConversationServiceResult>;
   /** Service-only, after remote lead launch approves the exact linked-machine directory. */
   createRemoteWorkspaceConversation(input: {

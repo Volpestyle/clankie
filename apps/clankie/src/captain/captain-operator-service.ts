@@ -42,6 +42,7 @@ import {
   type ConversationOwner,
 } from "./conversation-owner.ts";
 import { authorizeQuestion, type QuestionAuthority } from "./conversation-questions.ts";
+import type { LeadOwnerProof } from "./conversations/types.ts";
 import { ConversationRefusedError, ConversationResetError, ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
@@ -193,6 +194,7 @@ export function createOperatorService(
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
     onHirePane?: (id: string) => void,
+    leadOwner?: LeadOwnerProof,
   ): Promise<OperatorConversationServiceResult> {
     const tailSignal =
       request.op === "tail"
@@ -1748,7 +1750,7 @@ export function createOperatorService(
         }
       }
     }
-    const result = await ctx.conversations.serve(request, authority, tailSignal);
+    const result = await ctx.conversations.serve(request, authority, tailSignal, leadOwner);
     if (request.op === "create" && request.scope.kind === "seat") {
       ctx.herdrWatches.trackSeat(request.scope.seatId);
     } else if (request.op === "create" && request.scope.kind === "persona") {
@@ -1796,7 +1798,7 @@ export function createOperatorService(
   // A request that reaches the service while it stops (a kept-alive tail, or a
   // turn racing SIGTERM) finds its stores closing. That is a restart, not a
   // failure, and callers retry it like a dropped connection (VUH-2626).
-  return async function serveOperatorConversation(request, authority, readSignal) {
+  return async function serveOperatorConversation(request, authority, readSignal, leadOwner) {
     if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
     try {
       if (request.op === "start_agent") {
@@ -1824,7 +1826,7 @@ export function createOperatorService(
         );
         if (seat) target = { seatId: seat.seatId, occupantId: seat.occupantId };
       }
-      const result = await serve(request, authority, readSignal);
+      const result = await serve(request, authority, readSignal, undefined, leadOwner);
       if (
         target &&
         (request.op === "send" || request.op === "close_seat") &&

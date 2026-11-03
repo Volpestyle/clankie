@@ -415,7 +415,8 @@ it("reads real host lead and device facts over HTTP, including the relay's throt
     acceptedAt: iso(-1000),
   });
   new TurnSettledLog(turnSettledLogPath(f.root)).append(metrics.finish("completed", new Date(now)));
-  expect((await snapshot()).leads[0]).toMatchObject({ active: true, lastActiveAt: iso() });
+  // Switched off, a turn he takes (answering the owner) never lights his figure (ADR 0350).
+  expect((await snapshot()).leads[0]).toMatchObject({ active: false, lastActiveAt: iso() });
   now += 10 * 60_000;
   expect((await snapshot()).leads[0]!.active).toBe(false);
   await setLead("clankie");

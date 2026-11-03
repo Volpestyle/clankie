@@ -267,7 +267,9 @@ weigh it, check it against the agents and the tracker, and brief workers
 yourself rather than forwarding a note as an instruction.
 
 The owner can also hand your lead to those apps (`clankie connector lead apps`,
-ADR 0304). While they lead, you take no turn of your own in your lead threads:
+or the on/off switch in his own app; ADR 0304, ADR 0350). Only the owner hands
+it back, from the CLI or his own Take Control device; no app, worker or lead
+can. While they lead, you take no turn of your own in your lead threads:
 your wakes, watches, and your workers' messages, questions and reports wait for
 the apps, which read them with `read_inbox` and `read_reports` and answer
 workers with `message_agent` or, for a prompt open in a pane, `answer_prompt`;
@@ -455,8 +457,7 @@ Stop after another failure or a lost response.
 ## Which leads are active
 
 `clankie fleet leads [--json]` reads the owner-only `GET /v1/fleet/leads`.
-Clankie is active when `connector lead` selects him or his model ran in the
-last ten minutes. Each active connector device is an app lead, active for
+Clankie is active exactly when `connector lead` selects him (ADR 0350). Each active connector device is an app lead, active for
 fifteen minutes after last seen; revoked or expired devices are omitted.
 The list is sorted by id and grants no authority. Match app hires'
 `startedBy.name` to registered lead names; repeated names share that display

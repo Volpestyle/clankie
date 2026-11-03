@@ -806,6 +806,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     // identity carries it. Status and off stay on chat, as the CLI's do.
     const autoOnOp =
       serviceRequest.op === "autonomy" && operatorAutonomyCommandRequiresOwner(serviceRequest.command);
+    // Clankie's on/off switch is the owner's too (ADR 0350): a Take Control device sets
+    // who leads on its own identity; the service rechecks it at the write.
+    const leadSetOp = serviceRequest.op === "lead" && serviceRequest.command.action === "set";
     // Only a connector reads the app note board on the relay's own bearer; any other
     // device reads it as the owner's coordination record, like the fleet room.
     const ownerNoteRead =
@@ -838,6 +841,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             serviceRequest.op === "fleet_room" ||
             ownerNoteRead ||
             autoOnOp ||
+            leadSetOp ||
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
             serviceRequest.op === "terminal_focus" ||
@@ -1004,6 +1008,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       questionOp ||
       workWriteOp ||
       autoOnOp ||
+      leadSetOp ||
       serviceRequest.op === "tracker_sync" ||
       serviceRequest.op === "evidence_fetch" ||
       serviceRequest.op === "fleet_room" ||
@@ -1046,6 +1051,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "input_answer" ||
           serviceRequest.op === "input_cancel" ||
           serviceRequest.op === "autonomy" ||
+          serviceRequest.op === "lead" ||
           serviceRequest.op === "send")
           ? options.deviceDispatch!(
               serviceRequest,
@@ -1059,11 +1065,17 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             )
           : serviceRequest.op === "tail"
             ? readTail(tails, serviceRequest, abort.signal)
-            : serviceRequest.op === "send" ||
-                serviceRequest.op === "presence" ||
-                serviceRequest.op === "worker_reports"
-              ? options.dispatch(serviceRequest, abort.signal)
-              : options.dispatch(serviceRequest);
+            : serviceRequest.op === "send"
+              ? // The phone's own token rides beside its message, so the service can
+                // verify the owner sent it (ADR 0350); a connector app's never does.
+                options.dispatch(
+                  serviceRequest,
+                  abort.signal,
+                  currentAuthorization.device.scope === "connector" ? undefined : { deviceToken: token },
+                )
+              : serviceRequest.op === "presence" || serviceRequest.op === "worker_reports"
+                ? options.dispatch(serviceRequest, abort.signal)
+                : options.dispatch(serviceRequest);
       const result =
         serviceRequest.op === "send_receipt"
           ? await idempotency.read(currentAuthorization.device.deviceId, serviceRequest)

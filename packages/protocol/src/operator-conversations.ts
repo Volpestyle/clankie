@@ -1684,12 +1684,31 @@ export const OperatorLeadHeldItemSchema = z
   .strict();
 export type OperatorLeadHeldItem = z.infer<typeof OperatorLeadHeldItemSchema>;
 
+/**
+ * Clankie's switch as the owner's app shows it (ADR 0350). `on`: he leads on his
+ * own. `off`: the lead is handed to the apps; he still answers the owner's own
+ * messages but takes no turn of his own. `cant_start`: the switch is on but his
+ * own model can't run. `reason` and `message` are present whenever his model
+ * can't run, in either position, so the app can say why before he is turned on.
+ */
+export const OperatorLeadSwitchSchema = z
+  .object({
+    state: z.enum(["on", "off", "cant_start"]),
+    reason: z.enum(["no_model", "no_credential", "unavailable"]).optional(),
+    /** One plain sentence for the owner. */
+    message: z.string().min(1).max(300).optional(),
+  })
+  .strict();
+export type OperatorLeadSwitch = z.infer<typeof OperatorLeadSwitchSchema>;
+
 export const OperatorLeadStatusSchema = z
   .object({
     lead: OperatorLeadSchema,
     error: z.literal("state_unreadable").optional(),
     /** Held items still kept; the oldest go first past the cap. */
     held: z.number().int().nonnegative(),
+    /** The switch for the owner's app; added by the service to status and set results (ADR 0350). */
+    clankie: OperatorLeadSwitchSchema.optional(),
   })
   .strict();
 export type OperatorLeadStatus = z.infer<typeof OperatorLeadStatusSchema>;
@@ -1734,9 +1753,13 @@ export const OperatorLeadResultSchema = z
   .strict();
 export type OperatorLeadResult = z.infer<typeof OperatorLeadResultSchema>;
 
-/** Handing the lead back to Clankie restarts his own turns: the owner's (ADR 0304). */
+/**
+ * Who leads is the owner's switch either way (ADR 0304, ADR 0350): this machine's
+ * operator or the owner's own Take Control device, never a connector app, captain
+ * bearer or worker.
+ */
 export function operatorLeadCommandRequiresOwner(command: OperatorLeadCommand): boolean {
-  return command.action === "set" && command.lead === "clankie";
+  return command.action === "set";
 }
 
 /**

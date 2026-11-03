@@ -1833,6 +1833,13 @@ export type OperatorConversationServiceResult = z.infer<typeof OperatorConversat
  * supply an authenticated HTTP transport (VUH-864); tests and co-located
  * surfaces supply an in-process dispatch to the captain-owned service handler.
  */
+/**
+ * Carries the paired phone's own session token beside a relayed `send`, so the
+ * service verifies for itself that the owner sent it (ADR 0350). The service
+ * never trusts the relay's word for it; a token it can't verify proves nothing.
+ */
+export const SENDER_DEVICE_SESSION_HEADER = "x-clankie-sender-device-session";
+
 export type OperatorConversationServiceDispatch = (
   request: OperatorConversationServiceRequest,
   /**
@@ -1841,6 +1848,8 @@ export type OperatorConversationServiceDispatch = (
    * that can cancel is handed the caller's signal rather than stranding it.
    */
   signal?: AbortSignal,
+  /** The paired device that sent a relayed message, for the service to verify (ADR 0350). */
+  sender?: { readonly deviceToken: string },
 ) => Promise<OperatorConversationServiceResult>;
 
 /**

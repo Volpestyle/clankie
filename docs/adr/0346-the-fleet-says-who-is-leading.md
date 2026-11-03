@@ -2,6 +2,8 @@
 
 Status: Proposed, 2026-11-02, from James's ask for a hoodie per active lead in the app's World. Builds on 0304 and 0321.
 
+Amended by [ADR 0350](0350-the-owner-switches-clankie-on-and-off-from-his-app.md): Clankie is active exactly while the lead setting is `clankie`; a turn he takes while the apps lead updates `lastActiveAt` but never marks him active.
+
 ## Context
 
 Several leads drive the same fleet: Clankie's own captain, and connected apps such as Claude Duet and Grok through the connector. The roster says who started each agent (0321), but nothing says which leads are around right now. The app's World wants to draw each active lead, and only active ones: Clankie's figure only while his own agent is actually leading.

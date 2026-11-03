@@ -225,6 +225,7 @@ import {
   type ConversationServiceRequest,
   type ConversationServiceResult,
   type ConversationTurnContext,
+  type LeadOwnerProof,
   type DeliveredFilePublisher,
   type DeliveryAdmission,
   type DurableMessageNotice,
@@ -859,6 +860,8 @@ export class ConversationStore {
     request: ConversationServiceRequest,
     authority?: QuestionAuthority,
     readSignal?: AbortSignal,
+    /** Host-verified sender of a `send` that carries no question authority (ADR 0350). */
+    leadOwner?: LeadOwnerProof,
   ): Promise<ConversationServiceResult> {
     switch (request.op) {
       case "project_proposal_get":
@@ -1051,7 +1054,11 @@ export class ConversationStore {
       case "send_receipt":
         return { op: "send_receipt", schemaVersion: 1 };
       case "send":
-        return { op: "send", schemaVersion: 1, result: await this.send(request.turn, authority) };
+        return {
+          op: "send",
+          schemaVersion: 1,
+          result: await this.send(request.turn, authority, leadOwner),
+        };
       case "upload_begin":
         return {
           op: "upload_begin",
@@ -2169,6 +2176,8 @@ export class ConversationStore {
           },
           {
             ...context,
+            // The caller authenticated the owner and the guard just rechecked it (ADR 0350).
+            leadOwner: { current: () => true },
             nativeOriginal: {
               messageId: input.messageId,
               ...(input.coalesce === undefined ? {} : { coalesce: input.coalesce }),
@@ -2709,6 +2718,7 @@ export class ConversationStore {
   private async send(
     turn: SubmitOperatorConversationTurn,
     authority?: QuestionAuthority,
+    leadOwner?: LeadOwnerProof,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const meta = this.metas.get(turn.conversationId);
     if (meta === undefined) {
@@ -2819,6 +2829,7 @@ export class ConversationStore {
       {
         surfaceClientId: turn.surfaceClientId,
         ...(authority === undefined ? {} : { ownerAuthority: authority }),
+        ...(leadOwner === undefined ? {} : { leadOwner }),
         ...(questionBinding === undefined ? {} : { questionBinding }),
         ...(turn.delivery === undefined || meta.scope.kind === "channel" ? {} : { delivery: turn.delivery }),
         ...(attachments === undefined ? {} : { attachments }),
@@ -3235,7 +3246,13 @@ export class ConversationStore {
     runner: ConversationRunner = this.runner,
     provenance: Pick<
       ConversationTurnContext,
-      "origin" | "surfaceClientId" | "attachments" | "ownerAuthority" | "questionBinding" | "inputAnswer"
+      | "origin"
+      | "surfaceClientId"
+      | "attachments"
+      | "ownerAuthority"
+      | "leadOwner"
+      | "questionBinding"
+      | "inputAnswer"
     > & {
       questionAnswer?: {
         readonly record: QuestionRecord;
@@ -3459,6 +3476,7 @@ export class ConversationStore {
         {
           runId,
           ...(provenance.ownerAuthority === undefined ? {} : { ownerAuthority: provenance.ownerAuthority }),
+          ...(provenance.leadOwner === undefined ? {} : { leadOwner: provenance.leadOwner }),
           ...(provenance.questionBinding === undefined
             ? {}
             : { questionBinding: provenance.questionBinding }),

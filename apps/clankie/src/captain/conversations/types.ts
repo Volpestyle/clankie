@@ -303,6 +303,15 @@ interface ConversationTurnSeat {
   readonly herdrPaneId: string;
 }
 
+/**
+ * Host-verified proof that the owner sent this turn, read by Clankie's switch
+ * (ADR 0350). It is never question or machine authority: a Supervise phone's
+ * chat carries one without being able to answer the owner's asks.
+ */
+export interface LeadOwnerProof {
+  readonly current: () => boolean;
+}
+
 /** Where a turn runs and who it arrived from. */
 export interface ConversationTurnContext {
   readonly delivery?: "steer" | "queue";
@@ -310,6 +319,8 @@ export interface ConversationTurnContext {
   /** Actual native admission, independent of the model turn's eventual result. */
   readonly deliveryOutcome?: (outcome: DeliveryAdmission) => void;
   readonly ownerAuthority?: QuestionAuthority;
+  /** The owner sent this turn without question authority, such as his Supervise phone (ADR 0350). */
+  readonly leadOwner?: LeadOwnerProof;
   readonly questionCurrent?: () => boolean;
   readonly questionBinding?: { readonly incarnationId: string; readonly workspace?: QuestionWorkspace };
   readonly inputAnswer?: { readonly requestId: string; readonly answer: ConversationQuestionAnswer };

@@ -38,7 +38,13 @@ import {
   type DeviceRecord,
   type DomainEvent,
   SERVICE_RESTARTING_SEAT_HANDOFF,
+  type OperatorLeadStatus,
+  type OperatorLeadSwitch,
+  SENDER_DEVICE_SESSION_HEADER,
 } from "@clankie/protocol";
+import type { LeadOwnerProof } from "../captain/conversations/types.ts";
+import type { CaptainReadinessResponse } from "@clankie/protocol/captain-readiness";
+import type { ModelKeysPort } from "../model-keys.ts";
 import type {
   WorkItemWriteReceipt,
   WorkItemWriteReceiptRequest,
@@ -170,7 +176,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
               id: "clankie",
               kind: "clankie",
               name: "Clankie",
-              active: state.lead === "clankie" || recent(state.lastActiveAt, 10 * 60_000),
+              // Off means off on the hearth too: answering the owner doesn't light him (ADR 0350).
+              active: state.lead === "clankie",
               ...(state.lastActiveAt === undefined ? {} : { lastActiveAt: state.lastActiveAt }),
             },
           ];
@@ -452,9 +459,17 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const deviceRequest = request;
     const device = await ctx.authenticateDevice(deviceRequest);
     if (device !== "unavailable" && !("denied" in device)) {
+      // The verified session and any automation run bound it, not just the registry (ADR 0350).
+      const sessionExpiresAt = Date.parse(device.sessionExpiresAt);
       const eligible = () => {
         const record = ctx.devices.get(device.deviceId);
-        return record?.status === "active" && record.grants.terminalControl;
+        const now = ctx.clock();
+        return (
+          record?.status === "active" &&
+          record.grants.terminalControl &&
+          now.getTime() < sessionExpiresAt &&
+          !isDeviceRunExpired(record, now)
+        );
       };
       if (!eligible()) return undefined;
       return {
@@ -484,6 +499,36 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return current;
       },
     };
+  };
+
+  /**
+   * A relayed message names the paired phone that sent it by that phone's own
+   * session token (ADR 0350). Verified here like any device bearer, it proves the
+   * owner sent the message, for Clankie's switch only: it grants no question or
+   * machine authority. A connector app or a visitor's device proves nothing.
+   */
+  const senderOwnerProof = async (request: Request): Promise<LeadOwnerProof | undefined> => {
+    const sender = request.headers.get(SENDER_DEVICE_SESSION_HEADER);
+    if (!sender) return undefined;
+    const device = await ctx.authenticateDevice(
+      new Request(request.url, { method: request.method, headers: { authorization: `Bearer ${sender}` } }),
+    );
+    if (device === "unavailable" || "denied" in device || !device.grants.chat) return undefined;
+    // Current while that verified session lasts and no automation run has ended,
+    // so a send queued behind a turn proves nothing once the phone's session expires.
+    const sessionExpiresAt = Date.parse(device.sessionExpiresAt);
+    const current = () => {
+      const record = ctx.devices.get(device.deviceId);
+      const now = ctx.clock();
+      return (
+        record?.status === "active" &&
+        record.grants.chat &&
+        leadSwitchDevice(record) &&
+        now.getTime() < sessionExpiresAt &&
+        !isDeviceRunExpired(record, now)
+      );
+    };
+    return current() ? { current } : undefined;
   };
 
   const workOwnerAuthority = async (request: Request): Promise<WorkWriteAuthority | undefined> => {
@@ -1079,6 +1124,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       // Handing the lead back restarts Clankie's own turns (ADR 0304).
       (parsed.data.op === "lead" && operatorLeadCommandRequiresOwner(parsed.data.command));
     if (goalOwnerOp && !owner) return context.json({ error: "goal_owner_required" }, 403);
+    // The switch is the owner's own: an app signed in to the connector holds
+    // Take Control grants too, but never sets who leads (ADR 0350).
+    if (
+      parsed.data.op === "lead" &&
+      parsed.data.command.action === "set" &&
+      owner?.principal.kind === "device" &&
+      !leadSwitchDevice(ctx.devices.get(owner.principal.id))
+    )
+      return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
     if (ownerHireOp && !owner) return context.json({ error: "owner_hire_required" }, 403);
     const nativeMessageOp = parsed.data.op === "pending_messages" || parsed.data.op === "stop_task";
@@ -1181,13 +1235,14 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         }
       }
       try {
-        return context.json(
-          await ctx.dependencies.captain.serveOperatorConversation(
-            parsed.data,
-            owner,
-            parsed.data.op === "worker_reports" ? context.req.raw.signal : undefined,
-          ),
+        const served = await ctx.dependencies.captain.serveOperatorConversation(
+          parsed.data,
+          owner,
+          parsed.data.op === "worker_reports" ? context.req.raw.signal : undefined,
         );
+        if (served.op === "lead" && parsed.data.op === "lead" && parsed.data.command.action !== "inbox")
+          return context.json(await withLeadSwitch(served, ctx.dependencies.modelKeys));
+        return context.json(served);
       } catch (error) {
         if (error instanceof Error && error.message === "goal_owner_required")
           return context.json({ error: "goal_owner_required" }, 403);
@@ -1475,15 +1530,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           },
         };
       }
-      return context.json(
-        await ctx.dependencies.captain.serveOperatorConversation(
-          parsed.data,
-          roleAuthority,
-          parsed.data.op === "tail" || parsed.data.op === "worker_reports"
-            ? context.req.raw.signal
-            : undefined,
-        ),
+      const served = await ctx.dependencies.captain.serveOperatorConversation(
+        parsed.data,
+        roleAuthority,
+        parsed.data.op === "tail" || parsed.data.op === "worker_reports" ? context.req.raw.signal : undefined,
+        parsed.data.op === "send" ? await senderOwnerProof(context.req.raw) : undefined,
       );
+      // The app reads the switch on the relay's bearer, like the rest of the lead status.
+      if (served.op === "lead" && parsed.data.op === "lead" && parsed.data.command.action === "status")
+        return context.json(await withLeadSwitch(served, ctx.dependencies.modelKeys));
+      return context.json(served);
     } catch (error) {
       if (
         (parsed.data.op === "tail" || parsed.data.op === "worker_reports") &&
@@ -1843,6 +1899,45 @@ export function ownerDeviceRecord(record: DeviceRecord | undefined): record is D
     !record.mintedBy.startsWith("support:")
   );
 }
+/** The owner's own paired device, never an app signed in to the connector (ADR 0350). */
+function leadSwitchDevice(record: DeviceRecord | undefined): boolean {
+  return ownerDeviceRecord(record) && record.scope !== "connector";
+}
+
+const CANT_START: Record<"no_model" | "no_credential" | "unavailable", (model?: string) => string> = {
+  no_model: () => "Clankie has no model chosen. Pick one with `clankie model` on your Mac.",
+  no_credential: (model) =>
+    `Clankie's model${model ? ` (${model})` : ""} has no sign-in or key on your Mac. Connect it with \`clankie model\`.`,
+  unavailable: () => "Clankie couldn't check his model just now. Try again in a moment.",
+};
+
+/**
+ * Adds the switch the owner's app renders (ADR 0350). It reads only Clankie's own
+ * model readiness, the same check `clankie doctor` reports as `captain`; worker
+ * harness accounts never decide it.
+ */
+async function withLeadSwitch<T extends { result: { status: OperatorLeadStatus } }>(
+  served: T,
+  modelKeys: { readiness?: ModelKeysPort["readiness"] } | undefined,
+): Promise<T> {
+  let readiness: CaptainReadinessResponse | { ready: false; reason: "unavailable"; model?: undefined };
+  try {
+    if (!modelKeys?.readiness) throw new Error("readiness_unavailable");
+    readiness = await modelKeys.readiness();
+  } catch {
+    readiness = { ready: false, reason: "unavailable" };
+  }
+  const status = served.result.status;
+  const clankie: OperatorLeadSwitch = readiness.ready
+    ? { state: status.lead === "apps" ? "off" : "on" }
+    : {
+        state: status.lead === "apps" ? "off" : "cant_start",
+        reason: readiness.reason,
+        message: CANT_START[readiness.reason](readiness.model),
+      };
+  return { ...served, result: { ...served.result, status: { ...status, clankie } } };
+}
+
 const appActor = (deviceId: string): TrackerActor => ({
   type: "app",
   id: `device:${deviceId}`,
