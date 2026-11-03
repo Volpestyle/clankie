@@ -1695,7 +1695,20 @@ function tailAuthorizationDenial(
   return grant === "chat" ? "chat_grant_required" : "terminal_observe_grant_required";
 }
 
+/**
+ * Ends a tail whose live recheck did not authorize it. A device-state service
+ * that could not answer (a stall past the five-second check, a 503) is no
+ * verdict on the device: the stream ends with nothing more written, as a lost
+ * connection would, and the client's reconnect is authorized from scratch
+ * (503 while it still cannot answer). Only a definitive denial is the typed
+ * auth failure a client treats as final. Without this, one slow check in a
+ * phone's terminal tail read as "not authorized for this device".
+ */
 async function writeTailAuthFailure(response: ServerResponse, reason: string): Promise<void> {
+  if (reason === "unavailable") {
+    response.end();
+    return;
+  }
   await writeNdjson(response, {
     kind: "auth_failure",
     failure: { schemaVersion: 1, outcome: "auth_failed", reason },
