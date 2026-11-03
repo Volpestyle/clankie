@@ -22,6 +22,7 @@ import {
   type SpawnOperatorSeat,
 } from "@clankie/protocol";
 import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
+import { checkoutGit, reconcileWorktree } from "@clankie/settings";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
 export const ProjectHireProcessProofSchema = z
@@ -85,6 +86,10 @@ const AllocationSchema = z
       .optional(),
     confirmed: z.boolean().default(false),
     gone: z.boolean().default(false),
+    /** This attempt's work landed on main first (#602); its harness and model won. */
+    attemptWon: z.string().datetime().optional(),
+    /** The winning attempt's allocation, once another attempt at this deliverable landed. */
+    supersededBy: z.string().optional(),
     operatorRelease: z
       .object({ at: z.string().datetime(), censusSha256: z.string().regex(/^[a-f0-9]{64}$/u) })
       .strict()
@@ -278,6 +283,43 @@ export class ProjectHires {
       return { ...structuredClone(allocation), reused: false };
     });
   }
+  /** A live hire's attempt state for the fleet view (#602); undefined for an ordinary claim. */
+  public attempt(
+    fleet: string,
+    pane: string | undefined,
+  ): { readonly deliverable: string; readonly superseded: boolean } | undefined {
+    const entry = this.read().allocations.find(
+      (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane === pane && a.request.attempt,
+    );
+    return entry?.request.deliverable === undefined
+      ? undefined
+      : { deliverable: entry.request.deliverable, superseded: entry.supersededBy !== undefined };
+  }
+  /**
+   * The attempt in this pane landed its work (#602): record it as the winner and mark
+   * every other live attempt at the same deliverable superseded. Advisory: the lead
+   * closes the superseded ones. Returns their panes; nothing when this isn't an attempt
+   * or another attempt already won.
+   */
+  public settleAttempt(fleet: string, pane: string | undefined): string[] {
+    return this.change((state) => {
+      const winner = state.allocations.find(
+        (a) => (a.request.fleet ?? "default") === fleet && a.pane === pane && a.request.attempt && !a.gone,
+      );
+      if (winner === undefined || winner.supersededBy !== undefined || winner.attemptWon) return [];
+      winner.attemptWon = new Date().toISOString();
+      const siblings = state.allocations.filter(
+        (a) =>
+          a.id !== winner.id &&
+          !a.gone &&
+          a.request.attempt &&
+          a.projectId === winner.projectId &&
+          a.request.deliverable === winner.request.deliverable,
+      );
+      for (const sibling of siblings) sibling.supersededBy = winner.id;
+      return siblings.map((sibling) => sibling.pane ?? sibling.id);
+    });
+  }
   /** Read-only identity and age for a refused retry; never settles the original hire. */
   public describe(id: string): string {
     const entry = this.read().allocations.find((allocation) => allocation.id === id);
@@ -337,6 +379,13 @@ export class ProjectHires {
     delete request.effort;
     return { ...allocation, request, reused: false };
   }
+  /**
+   * One live hire holds a deliverable in a project (#602), so an accidental second
+   * claim is refused under the state lock that also records the first. Deliberate
+   * attempts (`attempt: true`) coexist with each other, each with its own harness or
+   * model and its own working directory. A holder's claim ends when its allocation
+   * is released: the pane closed, or a complete census found it gone.
+   */
   private checkDeliverable(
     allocations: Allocation[],
     projectId: string,
@@ -347,20 +396,44 @@ export class ProjectHires {
       throw new Error(
         "Native-first hiring requires a stable deliverable key (for example the issue ID). Its slices belong to the worker's native subagents.",
       );
-    if (
-      request.deliverable &&
-      allocations.some(
-        (a) =>
-          !a.gone &&
-          a.id !== excluding &&
-          a.projectId === projectId &&
-          a.request.deliverable === request.deliverable &&
-          (a.request.delegation === "native-first" || request.delegation === "native-first"),
+    if (request.attempt && !request.deliverable)
+      throw new Error("An attempt needs the deliverable key it attempts.");
+    if (!request.deliverable) return;
+    const holders = allocations.filter(
+      (a) =>
+        !a.gone &&
+        a.id !== excluding &&
+        a.projectId === projectId &&
+        a.request.deliverable === request.deliverable,
+    );
+    for (const holder of holders) {
+      if (holder.request.delegation === "native-first" || request.delegation === "native-first")
+        throw new Error(
+          `Deliverable ${request.deliverable} already has a pane under native-first delegation. Message the existing worker; use its native subagents for slices instead of another hire.`,
+        );
+      const tries = (a: SpawnOperatorSeat) => JSON.stringify([a.harness ?? null, a.model ?? null]);
+      if (!request.attempt || !holder.request.attempt)
+        throw new Error(
+          `Deliverable ${request.deliverable} is already claimed by ${this.holderDetail(holder)}. Message that worker, or close its pane with close_worker_pane to reassign the work. To race another harness or model on purpose, hire each one with attempt: true.`,
+        );
+      if (tries(holder.request) === tries(request))
+        throw new Error(
+          `${this.holderDetail(holder)} already attempts ${request.deliverable} with the same harness and model. Each attempt tries a different one.`,
+        );
+      if (
+        (holder.request.fleet ?? "default") === (request.fleet ?? "default") &&
+        holder.request.workingDirectory === request.workingDirectory
       )
-    )
-      throw new Error(
-        `Deliverable ${request.deliverable} already has a pane under native-first delegation. Message the existing worker; use its native subagents for slices instead of another hire.`,
-      );
+        throw new Error(
+          `${this.holderDetail(holder)} already attempts ${request.deliverable} in ${request.workingDirectory}. Give each attempt its own worktree.`,
+        );
+    }
+  }
+  private holderDetail(holder: Allocation): string {
+    const harness = [holder.request.harness, holder.selection?.model ?? holder.request.model]
+      .filter(Boolean)
+      .join(" ");
+    return `${holder.request.attempt ? "an attempt by " : ""}${harness || "a hire"}${holder.seat === undefined ? "" : ` (seat ${holder.seat})`}, ${this.describe(holder.id)}`;
   }
   private checkCaps(
     allocations: Allocation[],
@@ -755,4 +828,14 @@ function deepFreeze<T>(value: T): T {
     for (const child of Object.values(value)) deepFreeze(child);
   }
   return value;
+}
+
+/**
+ * Whether a worktree made commits since `startHead` and every one of them is on
+ * main, with nothing left uncommitted: the test an attempt passes to win (#602).
+ */
+export async function landedSince(worktreeRoot: string, startHead: string): Promise<boolean> {
+  if ((await reconcileWorktree(worktreeRoot))?.state !== "reconciled") return false;
+  const own = await checkoutGit(worktreeRoot, ["rev-list", "--count", `${startHead}..HEAD`]);
+  return Number(own.trim()) > 0;
 }

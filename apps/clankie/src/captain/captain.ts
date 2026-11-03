@@ -36,6 +36,7 @@ import {
 import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { checkoutGit, hireWorktreeStart, projectPathContains } from "@clankie/settings";
+import { landedSince } from "./project-hires.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
@@ -2899,6 +2900,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         },
         original.restoredHire ? { restoredHire: original.restoredHire } : {},
       );
+    },
+    // #602: an attempt wins when it made commits since its hire and every one is on main.
+    // Only a local hire records the commit it started from, so a remote attempt never settles here.
+    attemptLanded: async (agent) => {
+      if (herdrWatches.hireAttempt(agent) === undefined || !agent.session) return false;
+      const owner = herdrWatches.tidyProvenance(agent);
+      if (typeof owner !== "object") return false;
+      const baseline = seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner);
+      if (baseline === undefined) return false;
+      return landedSince(baseline.worktreeRoot, baseline.head);
+    },
+    attemptSettled: (agent) => {
+      herdrWatches.settleHireAttempt(agent);
     },
     mainCheckpoint: async (agent) => {
       const qualified = splitFleetQualified(agent.paneId);

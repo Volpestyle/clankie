@@ -1271,6 +1271,11 @@ export const SpawnOperatorSeatSchema = z
       .optional(),
     /** Stable work item/deliverable key, required for native-first admission. */
     deliverable: z.string().trim().min(1).max(512).optional(),
+    /**
+     * A deliberate attempt at a deliverable another harness or model may also be
+     * attempting (#602). Without it, a deliverable has one live hire per project.
+     */
+    attempt: z.literal(true).optional(),
     /** The hired persona's team role (ADR 0208); absent leaves it as it was. */
     role: OperatorAgentRoleSchema.optional(),
     /**

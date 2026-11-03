@@ -946,6 +946,37 @@ it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s
   expect(f.tidy.leadHistory()[0]).toMatchObject({ paneId: pane });
   f.watch.close();
 });
+it("a closed attempt whose work landed settles as the winner, and only once the pane really closed (#602)", async () => {
+  const f = await fixture({ socket: true, readopt: true });
+  await f.watch.adoptSeat("term_111", authority);
+  const landed: string[] = [];
+  const settled: string[] = [];
+  const tidy = new PaneTidy(f.path, {
+    ...f.ports,
+    attemptLanded: async (agent) => {
+      landed.push(agent.paneId);
+      return true;
+    },
+    attemptSettled: (agent) => {
+      settled.push(agent.paneId);
+    },
+  });
+  // A refused close settles nothing: the attempt's pane is still running.
+  f.setAnsi(await golden("codex", "draft"));
+  expect(await tidy.close({ pane: "w1:p1", reason: "Landed", reportPath: f.reportPath }, authority)).toMatchObject({
+    outcome: "refused",
+    reason: "unsent_draft",
+  });
+  expect(settled).toEqual([]);
+  f.setAnsi(await golden("codex", "empty"));
+  expect(await tidy.close({ pane: "w1:p1", reason: "Landed", reportPath: f.reportPath }, authority)).toMatchObject({
+    outcome: "closed",
+  });
+  // Read before the close could prune its worktree, settled after the pane closed.
+  expect(landed).toEqual(["w1:p1"]);
+  expect(settled).toEqual(["w1:p1"]);
+  f.watch.close();
+});
 it.each([false, true])(
   "re-adoption cannot turn a hand-started pane into a hire (remote=%s)",
   async (remote) => {

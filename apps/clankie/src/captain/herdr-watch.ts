@@ -2652,6 +2652,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
   }
+  /** Whether this seat is a deliberate attempt at its deliverable, and whether it was superseded (#602). */
+  public hireAttempt(seat: { readonly paneId: string }) {
+    const fleet = nativeProofLocation(seat.paneId).fleet;
+    return this.projectHires.attempt(fleet, projectHirePane(fleet, seat.paneId));
+  }
+  /** Record this seat's attempt as the one that landed; returns the panes it superseded (#602). */
+  public settleHireAttempt(seat: { readonly paneId: string }): string[] {
+    const fleet = nativeProofLocation(seat.paneId).fleet;
+    return this.projectHires.settleAttempt(fleet, projectHirePane(fleet, seat.paneId));
+  }
   /**
    * The project a seat's current occupant was hired into, and the GitHub repository of the
    * checkout it was hired in, from the hire ledger; display only.

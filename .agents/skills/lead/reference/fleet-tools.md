@@ -85,6 +85,17 @@ subagents; another pane for that key is refused, so message the existing
 worker. Messages to a hire arrive numbered per lead; set `replaces` when one
 overrides earlier guidance.
 
+A `deliverable` claims that work for the hire within its project (#602). A
+second live hire for the same key is refused, and the refusal names the holder.
+Message the holder, or close its pane with `close_worker_pane` to reassign the
+work; the claim is also released when a census finds the pane gone. To race
+different harnesses or models on purpose, hire each one with `attempt: true`:
+attempts coexist only with other attempts, and each needs its own harness or
+model and its own worktree. When a local attempt closes with its own commits on
+main, it is recorded as the winner, with its harness and model. Its live
+siblings show the `superseded` flag in `fleet_efficiency`; close them, since
+only one attempt should merge. Every attempt shows the `attempt` flag.
+
 Never rearrange existing panes or substitute the lead's or focused pane.
 Sub-leads without `hire_agent` use the exact
 [worker grid commands](../../clankie/reference/worker-layout.md).
