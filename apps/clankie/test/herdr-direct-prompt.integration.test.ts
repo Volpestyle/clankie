@@ -102,6 +102,8 @@ function fixture(options: { status?: string; absorbs?: boolean; failure?: "refus
     draft: () => {
       ansi = screen("claude-draft");
     },
+    /** The agent's session records a user turn, as if it took one late. */
+    user,
   };
 }
 
@@ -266,4 +268,39 @@ test("a Codex TUI with no reachable queue receives the owner's message typed, co
     state: "started",
   });
   expect(typed).toEqual(["Pull main and rerun the tests."]);
+});
+
+// #639: the transcript reader scrubs credential-shaped spans, so a message that merely
+// mentions "password: …" reads back as "[REDACTED]". It is still the message: the
+// scrubbed span is the only difference allowed, and any other change fails.
+const MENTIONS_SECRET = "Sign in again; the password: hunter2 expired, so ask the owner.";
+
+test("a message that mentions a password is confirmed by its session as the reader scrubs it", async () => {
+  const f = fixture();
+  expect(await f.send(MENTIONS_SECRET)).toMatchObject({ outcome: "delivered", deliveryStage: "consumed" });
+  expect(f.typed).toEqual([MENTIONS_SECRET]);
+  expect(new DeliveryFence(f.receipts).entries()).toEqual([]);
+});
+
+test("a session turn that differs outside the scrubbed span is not the message", async () => {
+  const f = fixture({ absorbs: false });
+  const first = f.send(MENTIONS_SECRET);
+  f.user("Sign in again; the password: hunter2 expired, so ask the lead.");
+  expect(await first).toMatchObject({ outcome: "unconfirmed" });
+  // The original's receipt keeps both fingerprints, and still holds the recipient.
+  const [[, receipt]] = new DeliveryFence(f.receipts).entries();
+  expect(receipt).toMatchObject({ fingerprint: expect.any(String), scrubbedFingerprint: expect.any(String) });
+  expect((await f.send("and the logs?")).outcome).not.toBe("delivered");
+});
+
+test("an uncertain original that later shows up scrubbed is settled, and the next message goes", async () => {
+  const f = fixture({ absorbs: false });
+  expect(await f.send(MENTIONS_SECRET)).toMatchObject({ outcome: "unconfirmed" });
+  // The agent took it late; its session holds it scrubbed.
+  f.user(MENTIONS_SECRET);
+  f.typed.length = 0;
+  // The original is settled from its session, never retyped, so the next message is typed.
+  // (This session still records nothing new, so the next one waits on its own receipt.)
+  expect(await f.send("and the logs?")).toMatchObject({ outcome: "unconfirmed" });
+  expect(f.typed).toEqual(["and the logs?"]);
 });

@@ -25,6 +25,7 @@ import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { paneDraftState } from "./pane-draft.ts";
 import { parseHerdrSeatTranscript, resolveHerdrSeatTranscriptPath } from "./herdr-transcript.ts";
 import { channelBody } from "./claude-worker-seat.ts";
+import { readsBackAs, sentFingerprints } from "./delivery-fence.ts";
 import { z } from "zod";
 import { observeNativeBirth, nativeProcessStart } from "../local-fleet-process.ts";
 export type HiredRestartGuard = (phase?: "old" | "successor") => Promise<void>;
@@ -442,7 +443,9 @@ export class HiredSeatRestarts {
         entry.id === messageId &&
         entry.role === "operator" &&
         entry.internal === true &&
-        channelBody(entry.text)?.trim() === message.trim(),
+        // The transcript reads back scrubbed of credential-shaped text (#639).
+        channelBody(entry.text) !== undefined &&
+        readsBackAs(channelBody(entry.text)!, sentFingerprints(message)),
     );
     if (index < 0) return;
     const after = entries.slice(index + 1);

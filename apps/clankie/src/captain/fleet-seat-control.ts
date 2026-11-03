@@ -3,7 +3,13 @@ import {
   type FleetSeatInputCapabilities,
   type FleetSeatMessageReceiver,
 } from "@clankie/protocol";
-import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
+import {
+  DeliveryFence,
+  deliveryFingerprint,
+  readsBackAs,
+  sentFingerprints,
+  type UncertainReceipt,
+} from "./delivery-fence.ts";
 import { externalCodexQuestions, guardedCodexQuestions } from "./external-codex-questions.ts";
 import { openCodexSocket } from "./codex-app-server.ts";
 import { channelBody } from "./claude-worker-seat.ts";
@@ -494,7 +500,7 @@ export function createFleetSeatControl(
     }
     // The paste is confirmed only by the agent's own session: a new operator turn with this
     // exact text, matched as every other receipt here matches it.
-    const fingerprint = deliveryFingerprint(text);
+    const sent = sentFingerprints(text);
     const deadline = now() + directPromptConfirmMs;
     for (;;) {
       const transcript = await runner.transcript(current).catch(() => undefined);
@@ -503,7 +509,7 @@ export function createFleetSeatControl(
           entry.type === "message" &&
           entry.role === "operator" &&
           !before.has(entry.id) &&
-          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === fingerprint,
+          readsBackAs(channelBody(entry.text) ?? entry.text, sent),
       );
       if (matched)
         return {
@@ -700,7 +706,7 @@ export function createFleetSeatControl(
           (pending.beforeIds !== undefined
             ? !pending.beforeIds.includes(entry.id)
             : entry.occurredAt !== undefined && Date.parse(entry.occurredAt) > pending.beganAt!) &&
-          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+          readsBackAs(channelBody(entry.text) ?? entry.text, pending),
       ),
     };
   };
@@ -820,7 +826,7 @@ export function createFleetSeatControl(
     if (original && pending.beforeIds === undefined && pending.beganAt === undefined) return undefined;
     const transcript = await runner.transcript(live).catch(() => undefined);
     if (transcript === undefined) return undefined;
-    const fingerprint = deliveryFingerprint(text);
+    const sent = sentFingerprints(text);
     return {
       matched: transcript.entries.find(
         (entry) =>
@@ -830,7 +836,7 @@ export function createFleetSeatControl(
             (pending.beforeIds !== undefined
               ? !pending.beforeIds.includes(entry.id)
               : entry.occurredAt !== undefined && Date.parse(entry.occurredAt) > pending.beganAt!)) &&
-          deliveryFingerprint(channelBody(entry.text) ?? entry.text) === fingerprint,
+          readsBackAs(channelBody(entry.text) ?? entry.text, sent),
       ),
     };
   };
@@ -1228,7 +1234,7 @@ export function createFleetSeatControl(
           (entry) =>
             entry.type === "message" &&
             entry.role === "operator" &&
-            deliveryFingerprint(channelBody(entry.text) ?? entry.text) === deliveryFingerprint(text),
+            readsBackAs(channelBody(entry.text) ?? entry.text, sentFingerprints(text)),
         );
         if (matched)
           return {
@@ -1260,7 +1266,7 @@ export function createFleetSeatControl(
             "Another delivery to this seat is still awaiting its receipt; this message was not sent. Send it again once that one settles.",
         };
       const receiptData = {
-        fingerprint: deliveryFingerprint(text),
+        ...sentFingerprints(text),
         beganAt: now(),
         ...(options?.conversationId === undefined ? {} : { conversationId: options.conversationId }),
         ...(options?.recipientBinding === undefined ? {} : { recipientBinding: options.recipientBinding }),
