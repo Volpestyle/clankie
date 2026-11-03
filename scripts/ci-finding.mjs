@@ -77,8 +77,11 @@ function unfiled(names) {
   ).flatMap((page) => page.jobs ?? []);
   const found = new Map();
   for (const entry of jobs) {
-    if (!names.includes(entry.name) || entry.conclusion !== "failure") continue;
     const steps = entry.steps ?? [];
+    // A job that died at "Set up runner" can still read in_progress with no conclusion
+    // after its run has failed, so a failed step counts as well as the job's conclusion.
+    const failed = entry.conclusion === "failure" || steps.some((step) => step.conclusion === "failure");
+    if (!names.includes(entry.name) || !failed) continue;
     if (steps.some((step) => step.name === "File a ci-finding" && step.conclusion === "success")) continue;
     const setup = steps.some((step) => step.name === "Set up runner" && step.conclusion === "failure");
     // A broken runner is one finding however many jobs it fails; anything else is the job's.
