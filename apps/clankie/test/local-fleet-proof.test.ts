@@ -127,13 +127,18 @@ it("project proof requires the socket to descend from the current native agent, 
   let chain = "55 44\n44 33\n33 1\n";
   let foreground = 44;
   let nativeStart = "Sat Oct  3 10:00:00 2026";
+  let looks = 0;
+  let emptyLooks = 0;
   const prove = localProjectProof({
     platform: "darwin",
     launcher: async () => ({ executable: "/trusted/codex" }),
     canonical: async (path) => path,
     herdrBinary: "herdr",
     binding: async () => binding,
-    observeSocket: async (socket) => socketProcessFixture(socket, owner, chain, nativeStart),
+    observeSocket: async (socket) => {
+      looks += 1;
+      return emptyLooks-- > 0 ? undefined : socketProcessFixture(socket, owner, chain, nativeStart);
+    },
     run: async (command, args) => {
       if (command === "herdr" && args[0] === "agent")
         return JSON.stringify({
@@ -166,6 +171,16 @@ it("project proof requires the socket to descend from the current native agent, 
   foreground = 44;
   nativeStart = "Sat Oct  3 10:00:01 2026";
   expect(await prove(socket(), "w1:p1")).not.toEqual(first);
+  // #574: a first socket look that comes back empty is retried once, then refused.
+  nativeStart = "Sat Oct  3 10:00:00 2026";
+  looks = 0;
+  emptyLooks = 1;
+  expect(await prove(socket(), "w1:p1")).toEqual(first);
+  expect(looks).toBe(3);
+  looks = 0;
+  emptyLooks = 2;
+  expect(await prove(socket(), "w1:p1")).toBeUndefined();
+  expect(looks).toBe(2);
 });
 
 it("admits only a live registered private server matching the foreground native thread", async () => {
@@ -332,4 +347,37 @@ it.each([
     },
   });
   expect(await prove(connected, "w1:p1")).toBeUndefined();
+});
+
+it("looks once more when the first socket observation comes back empty, and refuses after that (#574)", async () => {
+  // A machine-wide census that runs out of its budget under load returns nothing and says nothing.
+  const proof = (observations: ("empty" | "seen")[]) => {
+    let looks = 0;
+    const prove = localFleetProof({
+      platform: "darwin",
+      herdrBinary: "/trusted/herdr",
+      binding: async () => binding,
+      observeSocket: async (s) => {
+        const next = observations[Math.min(looks++, observations.length - 1)];
+        return next === "empty" ? undefined : socketProcessFixture(s, owner, "55 44\n44 33\n33 1\n");
+      },
+      run: async (_command, args) =>
+        JSON.stringify({
+          result: { process_info: { pane_id: args.at(-1), shell_pid: args.at(-1) === "w1:p1" ? 33 : 99 } },
+        }),
+    });
+    return { prove, looks: () => looks };
+  };
+  // Empty once, then seen: admitted, with the initial look, its one retry and the final look.
+  const recovered = proof(["empty", "seen"]);
+  expect(await recovered.prove(socket(), "w1:p1")).toBe(true);
+  expect(recovered.looks()).toBe(3);
+  // Empty every time: refused after exactly one retry.
+  const absent = proof(["empty"]);
+  expect(await absent.prove(socket(), "w1:p1")).toBe(false);
+  expect(absent.looks()).toBe(2);
+  // A real non-member, seen at once, is refused without any retry.
+  const outsider = proof(["seen"]);
+  expect(await outsider.prove(socket(), "w1:p2")).toBe(false);
+  expect(outsider.looks()).toBe(1);
 });

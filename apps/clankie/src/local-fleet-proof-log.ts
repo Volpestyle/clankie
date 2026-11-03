@@ -71,6 +71,9 @@ export function localProofDiagnostics(
     string,
     { event: Extract<LocalFleetProofDiagnostic, { source: "native" }>["event"]; observedAt: string }
   >();
+  // The last native or transport reason seen for each request, so a refusal with no reason of
+  // its own (native_initial_unavailable) says which observation failed (#574).
+  const lastNative = new Map<string, string>();
   return (observation: LocalFleetProofDiagnostic, pane?: string, context?: LocalFleetProofRequestContext) => {
     if (observation.source === "socket_owner") {
       if (context)
@@ -83,7 +86,19 @@ export function localProofDiagnostics(
       // Bound diagnostic history; a reused connection does not reuse a failure.
       while (failures.size > 512) failures.delete(failures.keys().next().value!);
     }
-    if (observation.source === "proof_success" && context) failures.delete(context.requestId);
+    if (context && (observation.source === "native" || observation.source === "transport")) {
+      lastNative.set(
+        context.requestId,
+        observation.source === "native"
+          ? `${observation.checkpoint}:${observation.event.stage}:${observation.event.reason}`
+          : `transport:${observation.reason}`,
+      );
+      while (lastNative.size > 512) lastNative.delete(lastNative.keys().next().value!);
+    }
+    if (observation.source === "proof_success" && context) {
+      failures.delete(context.requestId);
+      lastNative.delete(context.requestId);
+    }
     metrics?.observeProof(operation, observation, pane);
     if (observation.source === "proof_success") return;
     // A refusal is a warning. Native and project checkpoints arrive on every
@@ -121,6 +136,8 @@ export function localProofDiagnostics(
     };
     const failure = failures.get(context.requestId);
     failures.delete(context.requestId);
+    const native = lastNative.get(context.requestId);
+    lastNative.delete(context.requestId);
     const ancestry = failure?.event.ancestryFailure;
     const callerRead = ancestry
       ? Promise.resolve({
@@ -134,6 +151,7 @@ export function localProofDiagnostics(
         {
           ...fields,
           callerAttribution: caller?.attribution ?? "unknown",
+          ...(native === undefined ? {} : { lastNativeReason: native }),
           ...(ancestry
             ? {
                 claimantStatus: ancestry.claimantStatus,
