@@ -1,7 +1,62 @@
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index 1da213f5fb33ff8d0e98ed044a1844c97463bcd3..c3cca98f0acd3615d2996d38915a59465319c307 100644
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -2170,6 +2170,9 @@ export class AgentSession {
+                     extensionCompaction = result.compaction;
+                     fromExtension = true;
+                 }
++                if (typeof result?.customInstructions === "string") {
++                    customInstructions = [customInstructions, result.customInstructions].filter(Boolean).join("\n\n");
++                }
+             }
+             let summary;
+             let firstKeptEntryId;
+@@ -2442,6 +2445,7 @@ export class AgentSession {
+             this._emit({ type: "compaction_start", reason });
+             abortController.signal.throwIfAborted();
+             let extensionCompaction;
++            let customInstructions;
+             if (this._extensionRunner.hasHandlers("session_before_compact")) {
+                 const extensionResult = (await this._extensionRunner.emit({
+                     type: "session_before_compact",
+@@ -2460,6 +2464,9 @@ export class AgentSession {
+                     extensionCompaction = extensionResult.compaction;
+                     fromExtension = true;
+                 }
++                if (typeof extensionResult?.customInstructions === "string") {
++                    customInstructions = extensionResult.customInstructions;
++                }
+             }
+             abortController.signal.throwIfAborted();
+             let summary;
+@@ -2477,7 +2484,7 @@ export class AgentSession {
+             }
+             else {
+                 // Shared default summary generator, also used by manual compaction.
+-                const compactResult = await this._runDefaultCompaction(preparation, model, undefined, abortController.signal, reason);
++                const compactResult = await this._runDefaultCompaction(preparation, model, customInstructions, abortController.signal, reason);
+                 summary = compactResult.summary;
+                 firstKeptEntryId = compactResult.firstKeptEntryId;
+                 tokensBefore = compactResult.tokensBefore;
+diff --git a/dist/core/extensions/types.d.ts b/dist/core/extensions/types.d.ts
+index e35f61a33d05b5debf8fec120ccabae2f651d867..e968c022acca3bf2be630b118c4220628fde8976 100644
+--- a/dist/core/extensions/types.d.ts
++++ b/dist/core/extensions/types.d.ts
+@@ -1094,6 +1094,8 @@ export interface SessionBeforeForkResult {
+ export interface SessionBeforeCompactResult {
+     cancel?: boolean;
+     compaction?: CompactionResult;
++    /** Extra focus for Pi's default summary, for every compaction reason (Clankie patch). */
++    customInstructions?: string;
+ }
+ export interface SessionBeforeTreeResult {
+     cancel?: boolean;
 diff --git a/dist/modes/interactive/components/tool-execution.js b/dist/modes/interactive/components/tool-execution.js
+index f643819064fd9b04212c9075c15c8ddb69867fb2..c0305beb547089fa8981a4dc679bf708290f4670 100644
 --- a/dist/modes/interactive/components/tool-execution.js
 +++ b/dist/modes/interactive/components/tool-execution.js
-@@ -329,7 +329,13 @@
+@@ -329,7 +329,13 @@ export class ToolExecutionComponent extends Container {
          }
          const output = this.getTextOutput();
          if (output) {
