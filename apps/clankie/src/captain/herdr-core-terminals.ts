@@ -20,7 +20,7 @@ import type { HerdrTerminalObserver } from "./herdr-terminal.ts";
 // label (`<space> / <tab>`); both are read, never written.
 
 /** The runtime the catalog names the desktop app's terminals under. */
-export const DESKTOP_TERMINAL_RUNTIME = { id: DESKTOP_SEAT_FLEET, session: "Herdr app" } as const;
+const DESKTOP_TERMINAL_RUNTIME = { id: DESKTOP_SEAT_FLEET, session: "Herdr app" } as const;
 const LAYOUT_DOC = "herdr-app";
 const PREFIX = `${DESKTOP_SEAT_FLEET}/`;
 const LABEL_MAX = 200;
