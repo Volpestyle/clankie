@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
@@ -68,6 +68,12 @@ it.skipIf(process.platform !== "darwin")(
     await writeFile(briefFile, JSON.stringify({ clankieBrief: brief }), { mode: 0o600 });
     const decoy = join(state, "claude-briefs", `clankie-brief-${randomUUID()}.json`);
     await writeFile(decoy, JSON.stringify({ clankieBrief: "A different brief" }), { mode: 0o600 });
+    // A brief-named symlink in the brief directory, pointing at a file elsewhere that
+    // holds the very brief the receipt fingerprinted. Reads never follow it.
+    const elsewhere = join(root, "elsewhere.json");
+    await writeFile(elsewhere, JSON.stringify({ clankieBrief: brief }), { mode: 0o600 });
+    const linked = join(state, "claude-briefs", `clankie-brief-${randomUUID()}.json`);
+    await symlink(elsewhere, linked);
 
     // Each hire's pane holds a Claude Code session launched in its start folder.
     const hire = async (pane: string, folder: string) => {
@@ -99,10 +105,16 @@ it.skipIf(process.platform !== "darwin")(
     };
     const ok = await hire(herdr.pane, "t6v");
     const other = await hire(herdr.foreignPane, "t6z");
-    // t6v received the pointer to its brief; t6z a pointer to a different brief file.
+    const third = (
+      await herdr.cli("pane", "split", herdr.pane, "--direction", "down", "--cwd", root, "--no-focus")
+    ).result.pane.pane_id as string;
+    const viaLink = await hire(third, "t70");
+    // t6v received the pointer to its brief; t6z a pointer to a different brief file;
+    // t70 a pointer to the symlink.
     await received(ok.session, briefPointer(briefFile));
     await received(other.session, briefPointer(decoy));
-    for (const { agent } of [ok, other])
+    await received(viaLink.session, briefPointer(linked));
+    for (const { agent } of [ok, other, viaLink])
       await expect
         .poll(
           async () =>
@@ -123,7 +135,7 @@ it.skipIf(process.platform !== "darwin")(
     const lead = { conversationId: golden.owner.conversationId as string };
     const fence = new DeliveryFence(`${path}.hire-receipts.json`);
     const owners = new HireOwners(`${path}.owners.json`);
-    for (const { cwd, session, agent } of [ok, other]) {
+    for (const { cwd, session, agent } of [ok, other, viaLink]) {
       fence.begin(
         JSON.stringify(["local", "claude", cwd, "new"]),
         ReceiptSchema.parse({
@@ -161,6 +173,8 @@ it.skipIf(process.platform !== "darwin")(
     expect(store.nativeOwner(await runner.get(herdr.pane))).toEqual(lead);
     // A pointer to any other brief file proves nothing: that hire stays uncertain.
     expect(await retry(other.cwd)).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
+    // Nor does a symlink in the brief directory, even to the same brief.
+    expect(await retry(viaLink.cwd)).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
   },
   90_000,
 );
