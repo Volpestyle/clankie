@@ -1,0 +1,15 @@
+{
+  "source": "Live receipt 4138f334 (pane herdr-core/t6v, 2026-11-03): a Claude brief-file hire whose service restarted 15 s into its start. Its messageId, fingerprint, sessionId, occupantId and paneId are replaced per test; the brief itself is not kept.",
+  "key": ["local", "claude", "/Users/owner/dev/clankie/.local/wt-example", "new"],
+  "receipt": {
+    "messageId": "4138f334-6487-4403-9418-49094b1fcf06",
+    "fingerprint": "b0000bfe7fadf45f567cc8d5cc97cbc92553b15ce57bc4e96d98c889c0249277",
+    "beganAt": 1793723691007,
+    "sessionId": "9bbf3a0e-32c8-47de-9a57-fe1dcc2e4cc9",
+    "occupantId": "session-b5729789aa581dba5f49b2f670be75ad7759d7f1b932536530b7e9b1fc506f45",
+    "paneId": "herdr-core/t6v",
+    "agentName": "clankie-github-app-connecti-d090",
+    "beforeIds": []
+  },
+  "owner": { "conversationId": "global-default" }
+}
