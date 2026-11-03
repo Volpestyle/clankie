@@ -146,6 +146,16 @@ export class ProjectHires {
           ))
     )?.request.title;
   }
+  /** The project and directory this exact seat and native occupant was hired into, for display only. */
+  public hiredInto(
+    seat: string,
+    occupantId: string,
+  ): { readonly projectId: string; readonly workingDirectory: string } | undefined {
+    const entry = this.read().allocations.findLast(
+      (allocation) => allocation.started && allocation.seat === seat && allocation.occupantId === occupantId,
+    );
+    return entry && { projectId: entry.projectId, workingDirectory: entry.request.workingDirectory };
+  }
   /**
    * Every roster projection reads this ledger once per seat. Parse a given
    * file version once: writes replace the file by rename, so its identity,

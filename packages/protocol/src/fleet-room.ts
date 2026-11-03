@@ -56,6 +56,20 @@ export const FleetRoomPartySchema = z.strictObject({
   conversationId: id.optional(),
   seatId: id.optional(),
   personaId: id.optional(),
+  /**
+   * The project a worker was hired into, from the host's own hire record for
+   * that seat and occupant when the line was recorded; never read from text.
+   * Display only, and sent only to a reader that asks with `projects`.
+   */
+  projectId: id.optional(),
+  /**
+   * The GitHub `owner/name` of the checkout that worker was hired in, from its
+   * `origin`, so its bare `#123` and commit hashes can open. Sent with `projectId`.
+   */
+  repository: z
+    .string()
+    .regex(/^[\w.-]{1,100}\/[\w.-]{1,100}$/u)
+    .optional(),
 });
 export type FleetRoomParty = z.infer<typeof FleetRoomPartySchema>;
 
@@ -131,6 +145,12 @@ export const FleetRoomRequestSchema = z.strictObject({
   waitMs: z.number().int().min(0).max(FLEET_ROOM_WAIT_MAX_MS).default(0),
   /** Opt-in kinds to show beside the default room; without it, none of them. */
   include: z.array(z.enum(FLEET_ROOM_OPT_IN_KINDS)).max(FLEET_ROOM_OPT_IN_KINDS.length).optional(),
+  /**
+   * Parties carry `projectId` and `repository` only when the reader asks for it. Apps parse
+   * pages strictly with the protocol they shipped with, so a field added after
+   * them stays out of every page that doesn't ask.
+   */
+  projects: z.boolean().optional(),
 });
 export type FleetRoomRequest = z.input<typeof FleetRoomRequestSchema>;
 

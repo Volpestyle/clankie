@@ -16,6 +16,7 @@ import { herdrAgentName, hirePaneLabel } from "./hire-name.ts";
 import { savedSessionHarness } from "../agent-sessions.ts";
 import { ResourceAdmissionError, type FleetResourceRuntime } from "../fleet-resource-runtime.ts";
 import { realpath } from "node:fs/promises";
+import { createGithubOriginReader } from "./github-origin.ts";
 import {
   ProjectHires,
   ProjectHireProcessProofSchema,
@@ -2640,6 +2641,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
   }
+  /**
+   * The project a seat's current occupant was hired into, and the GitHub repository of the
+   * checkout it was hired in, from the hire ledger; display only.
+   */
+  public hiredProject(
+    seatId: string,
+    occupantId: string,
+  ): { readonly projectId: string; readonly repository?: string } | undefined {
+    const hire = this.projectHires.hiredInto(seatId, occupantId);
+    if (hire === undefined) return undefined;
+    const repository = this.githubOrigin(hire.workingDirectory);
+    return { projectId: hire.projectId, ...(repository === undefined ? {} : { repository }) };
+  }
+  private readonly githubOrigin = createGithubOriginReader();
   public projectHireMembershipCandidate(fleet: string, pane: string) {
     const address = projectHirePane(fleet, pane);
     if (address === undefined) return { state: "none" as const };
