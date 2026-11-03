@@ -33,7 +33,7 @@ export function hireRetryScope(
   input: {
     readonly fleet?: string | undefined;
     readonly workingDirectory: string;
-    readonly harness?: string;
+    readonly harness?: string | undefined;
   },
   briefSha256: string,
 ): string {

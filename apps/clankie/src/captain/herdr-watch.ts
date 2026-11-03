@@ -2593,7 +2593,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     input: {
       readonly fleet?: string | undefined;
       readonly workingDirectory: string;
-      readonly harness?: string;
+      readonly harness?: string | undefined;
     },
     held: (key: string) => boolean,
   ): boolean {
