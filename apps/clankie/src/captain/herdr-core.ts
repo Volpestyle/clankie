@@ -241,6 +241,14 @@ function liveAgentOccupant(terminal: HcTerminal, previous?: number): LiveAgentOc
   };
 }
 
+/** The harness of the live coding agent in a `terminal.list` record now, as `list` decides it. */
+export function desktopTerminalAgent(terminal: unknown): string | undefined {
+  if (terminal === null || typeof terminal !== "object") return undefined;
+  const record = terminal as HcTerminal;
+  if (liveAgentOccupant(record) === undefined) return undefined;
+  return text(record.status?.app) ?? text(record.foreground?.name);
+}
+
 function pidOf(value: unknown): number | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 1 ? value : undefined;
 }

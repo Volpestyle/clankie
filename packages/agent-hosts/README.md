@@ -76,7 +76,10 @@ bound as a Herdr pane's `terminal_read` is (ADR 0307): only that agent, only
 what it showed since its first read, with a `note` while earlier screen is held
 back. Open asks `herdr-app` to focus the pane. Send
 always refuses: herdr-core's only way to message an agent is pasting into its
-terminal (ADR 0207). No core running lists nothing; nothing starts one.
+terminal (ADR 0207). No core running lists nothing; nothing starts one. The same terminals appear in
+the owner's own `terminal_catalog`, but the relay leaves them out of a
+connector's catalog and refuses a connector's tail of one (ADR 0319), so this
+source stays a connector's only way to them.
 
 ## Seat adapters
 

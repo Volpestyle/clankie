@@ -426,6 +426,17 @@ export const ConnectorDetectionRequestSchema = z.union([
 ]);
 
 /**
+ * Whether a connector app sees this terminal in the catalog and may stream it. The
+ * Herdr desktop app's terminals (`herdr-core/<address>`, ADR 0319) list and stream
+ * for the owner's own devices only: an app reads the agents there through
+ * `herdr_core_list` and `terminal_read` under the read scope (ADR 0307), never their
+ * raw screen, which can hold the owner's own shell work.
+ */
+export function connectorTerminalVisible(terminalId: string): boolean {
+  return !terminalId.startsWith("herdr-core/");
+}
+
+/**
  * What a connector device may ask the relay, whatever its grants: read the
  * fleet and its panes, start an agent in a known project, message an
  * agent's own persona thread, post and read the app note board, and read the
@@ -438,10 +449,12 @@ export const ConnectorDetectionRequestSchema = z.union([
  */
 export function connectorOperationAllowed(request: OperatorConversationServiceRequest): boolean {
   switch (request.op) {
+    // A Herdr pane's live screen; the desktop app's terminals are the owner's to watch.
+    case "terminal_tail":
+      return connectorTerminalVisible(request.observation.terminalId);
     case "fleet":
     case "fleet_capacity":
     case "terminal_catalog":
-    case "terminal_tail":
     case "terminal_read":
     case "start_agent":
     case "app_notes":

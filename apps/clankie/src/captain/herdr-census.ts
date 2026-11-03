@@ -666,7 +666,7 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
     return [
       {
         terminalId,
-        label: bounded(titleOf(pane), 200),
+        label: bounded(catalogLabel(pane, agent), 200),
         workspace: { id: workspaceId, label: bounded(workspace.label, 200), number: workspace.number },
         tab: { id: tabId, label: bounded(tab.label, 200), number: tab.number },
         pane: { id: paneId },
@@ -674,6 +674,24 @@ export function parseHerdrTerminalCatalog(stdout: string): OperatorTerminalSessi
       },
     ];
   });
+}
+
+/**
+ * What a catalog pane is called: the name it was given in Herdr (a hire's seat name),
+ * else its title, else what runs in it and where, never a bare pane id.
+ */
+function catalogLabel(pane: Record<string, unknown>, agent: string): string {
+  const named = typeof pane.label === "string" ? pane.label.trim() : "";
+  if (named.length > 0) return named;
+  const title = titleOf(pane);
+  if (title.length > 0) return title;
+  const program = agent === "" ? "shell" : agent;
+  const cwd = [pane.foreground_cwd, pane.cwd].find(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  if (cwd === undefined) return program;
+  const home = homedir();
+  return `${program} · ${cwd === home ? "~" : basename(cwd) || cwd}`;
 }
 
 /** Bounded observable terminal catalog, in Herdr's native workspace/tab/pane order. */

@@ -53,6 +53,7 @@ import {
   connectorConversationOf,
   connectorLeadThreadOf,
   connectorOperationAllowed,
+  connectorTerminalVisible,
 } from "../../../packages/protocol/src/connector.ts";
 import {
   DISCORD_VOICE_TRANSCRIPTS_PATH,
@@ -1098,7 +1099,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         writeGrantDenial(response, "terminalControl");
         return true;
       }
-      const publicResult = publicServiceResult(result);
+      const publicResult = connectorView(
+        publicServiceResult(result),
+        currentAuthorization.device.scope === "connector",
+      );
       if (publicResult.op === "tracker_sync" && publicResult.result.outcome === "bootstrap") {
         response.statusCode = 200;
         response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
@@ -1697,6 +1701,18 @@ async function writeTailAuthFailure(response: ServerResponse, reason: string): P
     failure: { schemaVersion: 1, outcome: "auth_failed", reason },
   });
   response.end();
+}
+
+/** A connector app's catalog leaves out the terminals it may not stream (ADR 0319, ADR 0307). */
+function connectorView(
+  result: OperatorConversationServiceResult,
+  connector: boolean,
+): OperatorConversationServiceResult {
+  if (!connector || result.op !== "terminal_catalog") return result;
+  return {
+    ...result,
+    sessions: result.sessions.filter((session) => connectorTerminalVisible(session.terminalId)),
+  };
 }
 
 function publicServiceResult(value: unknown): OperatorConversationServiceResult {

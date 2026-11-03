@@ -212,6 +212,7 @@ import {
   herdrCoreCensusFleet,
 } from "./herdr-core-runner.ts";
 import { createHerdrCoreSeats } from "./herdr-core-seats.ts";
+import { herdrCoreSocketPath } from "./herdr-core.ts";
 import { createHerdrWindow } from "./herdr-window.ts";
 import { HerdrParentEdges } from "./herdr-parent-edges.ts";
 import {
@@ -422,6 +423,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const terminals = new RuntimeTerminals({
     ...(deps.runtimes ? { connections: deps.runtimes } : {}),
     ...(deps.herdrAvailable ? { defaultAvailable: deps.herdrAvailable } : {}),
+    // The desktop app's terminals sit beside Herdr's panes in the owner's catalog (ADR 0319).
+    desktopSocket: () => herdrCoreSocketPath(process.env),
   });
   // One runner over the local fleet and every registered remote one (ADR 0184).
   let remoteFleets = deps.fleets?.list ?? [];
