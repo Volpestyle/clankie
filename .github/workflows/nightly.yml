@@ -61,6 +61,9 @@ jobs:
         run: pnpm exec turbo run typecheck --concurrency=1 --filter=!@clankie/vox
       - name: Every test
         if: ${{ !cancelled() }}
+        # Inside the job's 90 minutes, so a hung file fails this step and the finding
+        # steps below still run; the suite takes about 25 (#593).
+        timeout-minutes: 55
         env:
           CLANKIE_RELEASE_TEST_REPORT: ${{ github.workspace }}/.local/nightly-run.json
         run: >-
@@ -87,7 +90,9 @@ jobs:
         with:
           name: nightly-suite
           include-hidden-files: true
-          path: .local/nightly-run.json
+          path: |
+            .local/nightly-run.json
+            .local/nightly-run.json.running
           retention-days: 14
       - name: File a ci-finding
         if: failure() && github.event_name != 'pull_request'

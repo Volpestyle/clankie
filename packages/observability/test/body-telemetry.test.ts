@@ -157,7 +157,11 @@ describe("the spool", () => {
     const { dir, telemetry } = spool();
     telemetry.emit({ event: "body.boot", phase: "clankie-healthy", sinceStartMs: 1200 });
     expect(readdirSync(dir)).toEqual(["2026092606-service.jsonl"]);
-    const broken = createBodyTelemetry({ dir: "/proc/not-writable/telemetry", writer: "service" });
+    // A directory under a regular file fails at once everywhere. Under /proc, Node's
+    // recursive mkdirSync spins forever on Linux and hung the nightly suite (#593).
+    const blocker = join(dir, "not-a-directory");
+    writeFileSync(blocker, "");
+    const broken = createBodyTelemetry({ dir: join(blocker, "telemetry"), writer: "service" });
     expect(() => broken.emit({ event: "body.shutdown", reason: "sigterm" })).not.toThrow();
   });
 
