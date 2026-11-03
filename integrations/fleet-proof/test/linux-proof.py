@@ -8,6 +8,7 @@ from pathlib import Path
 import select
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -117,49 +118,239 @@ class LinuxProof(unittest.TestCase):
         self.reap(pid)
         self.admitted()
 
-    def test_real_census_churn_restarts_whole_scan_and_records_attempts(self):
+    def closed_child(self):
+        return self.child(lambda _: (self.client.close(), self.peer.close(), self.server.close()))
+
+    def after_listing(self, proof, action, *, every=False, before=None):
+        """Run an actual owned process change right after a real /proc listing
+        (the first, or every one); `before` runs ahead of listing N instead."""
+        observe = proof.listing
+        calls = []
+
+        def listing():
+            if before is not None and len(calls) == before:
+                action(len(calls))
+            observed = observe()
+            if before is None and (every or not calls):
+                action(len(calls))
+            calls.append(None)
+            return observed
+
+        proof.listing = listing
+        return calls
+
+    def holder(self):
+        """A child that keeps its inherited copy of the socket."""
+        return self.child(lambda _: None)
+
+    def reuse_pid(self, pid, start):
+        """As root, fork an owned child that receives exactly this freed PID."""
+        for _ in range(100):
+            with open("/proc/sys/kernel/ns_last_pid", "w") as last:
+                last.write(str(pid - 1))
+            child = start()
+            if child == pid:
+                return child
+            self.reap(child)
+        self.fail("PID reuse lost every race to the machine")
+
+    def test_births_are_read_without_restarting_the_census(self):
+        # An actual owned birth after the first real PID list is one more
+        # process to read (#440); before, every birth restarted the census.
         with module.Proof() as proof:
-            observe = proof.entries
-            changed = False
-
-            def observe_then_birth(directory, maximum):
-                nonlocal changed
-                observed = observe(directory, maximum)
-                if directory == proof.root and not changed:
-                    changed = True
-                    self.child(lambda _: (self.client.close(), self.peer.close(), self.server.close()))
-                return observed
-
-            # Schedule an actual owned birth after the actual kernel PID list.
-            # No kernel facts or successful proof replies are fabricated.
-            proof.entries = observe_then_birth
+            calls = self.after_listing(proof, lambda _: self.closed_child())
             result = proof.socket_proof(self.ports)
             self.assertEqual(result["owner"]["pid"], os.getpid())
-            self.assertGreaterEqual(proof.census_attempts, 3)
-            self.assertEqual(proof.census_refusals[0]["reason"], "process_census_changed")
+            self.assertGreaterEqual(len(calls), 2)
+            self.assertEqual(proof.census_refusals, [])
 
     def test_continuous_real_census_churn_refuses_without_partial_result(self):
+        # A birth after every listing never settles: refuse, never return a partial census.
         with module.Proof() as proof:
-            observe = proof.entries
-
-            def observe_then_birth(directory, maximum):
-                observed = observe(directory, maximum)
-                if directory == proof.root:
-                    self.child(lambda _: (self.client.close(), self.peer.close(), self.server.close()))
-                return observed
-
-            proof.entries = observe_then_birth
+            self.after_listing(proof, lambda _: self.closed_child(), every=True)
             with self.assertRaises(module.Refusal) as refused:
                 proof.socket_proof(self.ports)
             self.assertIn(refused.exception.reason, ("attempts_exhausted", "budget_exhausted"))
-            self.assertTrue(proof.census_refusals)
+
+    def test_birth_that_takes_the_socket_mid_census_refuses(self):
+        # A process forked after the first listing inherits the socket.
+        with module.Proof() as proof:
+            self.after_listing(proof, lambda _: self.holder())
+            with self.assertRaises(module.Refusal) as refused:
+                proof.socket_proof(self.ports)
+            self.assertEqual(refused.exception.reason, "multiple_owners")
+
+    def test_socket_passed_to_an_already_read_process_refuses_by_the_closing_census(self):
+        # SCM_RIGHTS into a process the first census already read: the census
+        # itself cannot see a later transfer, so the bracketing census must.
+        ours, theirs = socket.socketpair()
+
+        def receive(ready):
+            ours.close()
+            self.client.close(), self.peer.close(), self.server.close()
+            os.write(ready, b"ready")
+            # Keep the received descriptor open in this process's table.
+            _, ancillary, _, _ = theirs.recvmsg(1, socket.CMSG_LEN(4))
+            if len(ancillary) != 1:
+                os._exit(97)
+            while True:
+                signal.pause()
+
+        self.child(receive)
+        theirs.close()
+        try:
+            with module.Proof() as proof:
+                def send(index):
+                    if index == 1:
+                        ours.sendmsg([b"x"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS,
+                                               struct.pack("i", self.client.fileno()))])
+                        time.sleep(0.05)
+                self.after_listing(proof, send, every=True)
+                with self.assertRaises(module.Refusal) as refused:
+                    proof.socket_proof(self.ports)
+                self.assertEqual(refused.exception.reason, "multiple_owners")
+        finally:
+            ours.close()
+
+    def record_reads(self, proof):
+        """Each completed read: (PID, the instance inode it read)."""
+        reads = []
+        scan = proof.scan
+
+        def recorded(pid, *rest):
+            instance = scan(pid, *rest)
+            reads.append((pid, instance))
+            return instance
+
+        proof.scan = recorded
+        return reads
+
+    @unittest.skipUnless(os.getuid() == 0, "PID reuse needs ns_last_pid, which only root may write")
+    def test_reused_pid_of_a_read_process_is_read_again(self):
+        # A PID the census already read, freed and reused by a socket holder
+        # before the next listing. Before #440 an unchanged PID list hid the new
+        # process from the census; now its new inode is read in the same attempt.
+        old = self.closed_child()
+        reused = []
+
+        def replace(_):
+            self.reap(old)
+            reused.append(self.reuse_pid(old, self.holder))
+
+        with module.Proof() as proof:
+            reads = self.record_reads(proof)
+            self.after_listing(proof, replace, before=1)
+            with self.assertRaises(module.Refusal) as refused:
+                proof.census(proof.tcp(*map(int, self.ports))[0])
+            self.assertEqual(refused.exception.reason, "multiple_owners")
+            self.assertEqual(reused, [old])
+            self.assertEqual(proof.census_attempts, 1)
+            instances = [instance for pid, instance in reads if pid == old]
+            # The old instance's read completed; the reused PID's new inode was
+            # read next, and that read raised multiple_owners, so it is not recorded.
+            self.assertEqual(len(instances), 1)
+            directory = os.open(f"/proc/{old}", os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                self.assertNotEqual(os.fstat(directory).st_ino, instances[0])
+            finally:
+                os.close(directory)
+
+    @unittest.skipIf(os.getuid() == 0, "Root reads non-dumpable tables, so nothing is unreadable")
+    def test_unreadable_process_that_vanishes_mid_census_needs_a_confirmed_exit(self):
+        # A same-user table the census could not read, gone from the next
+        # listing: settling needs its exit confirmed, never mere absence.
+        def unobservable(_):
+            self.client.close(), self.peer.close(), self.server.close()
+            if ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) != 0:  # PR_SET_DUMPABLE.
+                os._exit(98)
+
+        pid = self.child(unobservable)
+        with module.Proof() as proof:
+            confirmations = []
+            exited = proof.exited
+
+            def recorded(target, *rest, **options):
+                result = exited(target, *rest, **options)
+                if target == pid and not rest:
+                    confirmations.append(result)
+                return result
+
+            proof.exited = recorded
+            self.after_listing(proof, lambda _: self.reap(pid), before=1)
+            result = proof.socket_proof(self.ports)
+            self.assertEqual(result["owner"]["pid"], os.getpid())
+            # The denied read stayed unresolved until the kernel confirmed the exit.
+            self.assertIn(True, confirmations)
+
+    def test_owner_that_exits_and_is_replaced_is_never_admitted_as_itself(self):
+        # The only owner hands its socket on and exits mid-census, and (as root)
+        # the new holder takes the owner's very PID. The census restarts and
+        # names the new holder; the original owner's fences then refuse.
+        ours, theirs = socket.socketpair()
+        go, command = os.pipe()
+
+        def original(ready):
+            os.close(command)
+            ours.close()
+            self.peer.close(), self.server.close()
+            os.write(ready, b"ready")
+            os.read(go, 1)
+            theirs.sendmsg([b"x"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS,
+                                     struct.pack("i", self.client.fileno()))])
+            os._exit(0)
+
+        def successor(target, _):
+            self.peer.close(), self.server.close()
+            if target is not None and os.getpid() != target:
+                return  # Lost the PID race: leave the queued socket for the next try.
+            _, ancillary, _, _ = ours.recvmsg(1, socket.CMSG_LEN(4))
+            if len(ancillary) != 1:
+                os._exit(97)
+
+        owner = self.child(original)
+        os.close(go)
+        theirs.close()
+        self.client.close()
+        try:
+            result, before = self.run_proof()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(before["owner"]["pid"], owner)
+            fences = [str(owner), *before["owner"]["birth"], before["owner"]["socket"],
+                      before["owner"]["kernelIdentity"]]
+            replaced = []
+
+            def replace(_):
+                os.write(command, b"x")
+                os.waitpid(owner, 0)
+                self.children.remove(owner)
+                if os.getuid() == 0:
+                    replaced.append(self.reuse_pid(owner, lambda: self.child(
+                        lambda ready: successor(owner, ready))))
+                else:
+                    replaced.append(self.child(lambda ready: successor(None, ready)))
+
+            with module.Proof() as proof:
+                # After the census read the owner, before its next listing.
+                self.after_listing(proof, replace, before=1)
+                with self.assertRaises(module.Refusal) as refused:
+                    proof.socket_proof([*self.ports, *fences])
+                self.assertEqual(refused.exception.stage, "owner_pin")
+                self.assertEqual(proof.census_refusals[0]["reason"], "process_census_changed")
+            result, after = self.run_proof()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(after["owner"]["pid"], replaced[0])
+            self.assertNotEqual(after["owner"]["kernelIdentity"], before["owner"]["kernelIdentity"])
+            if os.getuid() == 0:
+                self.assertEqual(replaced, [owner])
+        finally:
+            ours.close()
+            os.close(command)
 
     def test_exit_churn_skips_confirmed_exits_instead_of_restarting(self):
         # Processes that never held the socket each exit while the census is
         # reading them, after the first PID list (#440). Before #440 every exit
         # restarted the whole census.
-        exiting = {self.child(lambda _: (self.client.close(), self.peer.close(), self.server.close()))
-                   for _ in range(12)}
+        exiting = {self.closed_child() for _ in range(12)}
         with module.Proof() as proof:
             observe = proof.identity
 
@@ -221,6 +412,7 @@ class LinuxProof(unittest.TestCase):
         self.reap(pid)
         self.admitted()
 
+    @unittest.skipIf(os.getuid() == 0, "Root reads non-dumpable tables, so nothing is unreadable")
     def test_unreadable_same_user_process_refuses_instead_of_guessing(self):
         self.admitted()
 

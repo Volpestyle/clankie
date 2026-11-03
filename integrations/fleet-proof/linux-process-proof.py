@@ -2,6 +2,7 @@
 """Read-only Linux kernel facts. A claim never supplies process authority."""
 import contextlib
 import ctypes
+import errno
 import fcntl
 import json
 import os
@@ -18,6 +19,8 @@ MAX_BYTES = 1 << 20
 MAX_LINE = 4096
 MAX_OUTPUT = 65536
 MAX_CHAIN = 64
+MAX_ROUNDS = 1024
+MAX_DENIALS = 3
 PREFIX = "Native process proof diagnostic: "
 # systemd hosts (Ubuntu among them) mount binfmt_misc on demand at this one
 # path: an autofs trigger with the binfmt_misc filesystem stacked on it. Neither
@@ -222,11 +225,27 @@ class Proof:
                 "socket_owner", "socket_identity_invalid")
         return inode, cookie
 
+    def listing(self):
+        # Each /proc entry with its directory inode. A live process keeps its
+        # cached /proc/PID dentry, and a reused PID gets a new inode, so a
+        # (PID, inode) pair names one process instance across listings.
+        self.bound()
+        with os.scandir(self.root) as table:
+            found = {int(entry.name): entry.inode() for entry in table
+                     if re.fullmatch(r"[1-9][0-9]*", entry.name)}
+        self.bound()
+        require(len(found) <= MAX_PIDS, "census", "process_census_changed")
+        return found
+
     def census(self, inode):
-        # A process that appears discards the entire census, and so does a
-        # changed thread list. A confirmed exit of a process the socket was never
-        # seen in is skipped (#440): its descriptors closed with it. No owner,
-        # partial FD table or new PID survives an attempt; the deadline still binds.
+        # Reads build up across /proc listings (#440): each listing reads only
+        # the process instances not yet read, and the census settles on the
+        # first listing in which every live instance has been read. A birth or
+        # PID reuse is one more process to read, never a skipped one; a process
+        # whose read churned is read again. Discarding the whole census is left
+        # for churn in a process the socket was seen in, or an owner that left.
+        # No owner, partial FD table or new PID survives an attempt; the
+        # deadline still binds.
         while True:
             self.bound()
             require(self.census_attempts < 16, "census", "attempts_exhausted")
@@ -242,13 +261,18 @@ class Proof:
             self.census_refusals.append({"attempt": self.census_attempts,
                                         "reason": reason, "errno": number})
 
-    def exited(self, pid, handle=None):
+    def exited(self, pid, handle=None, wait=0):
         # Confirmed exit only: the pidfd proves whole-group exit, or the kernel
         # has no such PID at all. Anything else is not an exit.
         if handle is not None:
+            if wait:
+                poll = select.poll()
+                poll.register(handle, select.POLLIN)
+                self.bound()
+                poll.poll(max(1, int(min(wait, self.deadline - time.monotonic()) * 1000)))
             return not live(handle)
         try:
-            handle = os.pidfd_open(pid, 0)
+            handle = self.pidfd(pid)
         except ProcessLookupError:
             return True
         try:
@@ -256,43 +280,102 @@ class Proof:
         finally:
             os.close(handle)
 
+    def exiting(self, thread):
+        # PF_EXITING in a thread's kernel flags: it has entered do_exit and
+        # never returns to user space. A hint to wait, never itself an exit.
+        stat = self.read(thread, "stat", 65536)
+        fields = stat[stat.rfind(b")") + 2:].split()
+        return len(fields) > 6 and bool(int(fields[6]) & 0x4)
+
+    def pidfd(self, pid):
+        try:
+            return os.pidfd_open(pid, 0)
+        except OSError as error:
+            # EINVAL: the PID now names a thread of another process, so the
+            # listed process is gone (/proc/TID opens though it is never listed).
+            if error.errno == errno.EINVAL:
+                raise ProcessLookupError(errno.ESRCH, "listed process exited") from error
+            raise
+
     def complete_census(self, inode):
         owners = {}
         seen = set()
-        pids = self.entries(self.root, MAX_PIDS)
-        for pid in pids:
-            self.bound()
-            try:
-                self.scan(pid, inode, seen, owners)
-            except (FileNotFoundError, ProcessLookupError):
-                # Exited mid-read. Where the socket was already seen, the census
-                # restarts as before; otherwise nothing it held can matter now.
-                if pid in seen or not self.exited(pid):
-                    raise
-        final = self.entries(self.root, MAX_PIDS)
-        # Only exits may differ: a PID that appeared restarts, as does an owner that left.
-        require(set(final) <= set(pids) and all(pid in final for pid in owners),
-                "census", "process_census_changed")
-        require(len(owners) == 1, "socket_owner", "multiple_owners" if owners else "owner_not_found")
-        return next(iter(owners.values()))
+        read = {}
+        denials = {}
+        # Listed instances whose read did not complete. Each must be read, or
+        # leave with a confirmed exit, before the census settles: absence from
+        # a later listing alone proves nothing.
+        unresolved = {}
+        for _ in range(MAX_ROUNDS):
+            listed = self.listing()
+            # An owner that left, or whose PID now names another process,
+            # discards the attempt: its socket may have moved with it.
+            require(all(listed.get(pid) == read[pid] for pid in owners),
+                    "census", "process_census_changed")
+            for pid, instance in list(unresolved.items()):
+                if listed.get(pid) == instance:
+                    continue  # Still listed: read it again below.
+                # A PID is reused only once its old process is reaped, so a new
+                # instance (read below) also ends the old one.
+                require(pid in listed or self.exited(pid), "census", "process_census_changed")
+                del unresolved[pid]
+            pending = [pid for pid in sorted(listed) if read.get(pid) != listed[pid]]
+            if not pending:
+                require(not unresolved, "census", "process_census_changed")
+                require(len(owners) == 1, "socket_owner", "multiple_owners" if owners else "owner_not_found")
+                return next(iter(owners.values()))
+            for pid in pending:
+                self.bound()
+                unresolved[pid] = listed[pid]
+                try:
+                    read[pid] = self.scan(pid, inode, seen, owners)
+                    del unresolved[pid]
+                except (FileNotFoundError, ProcessLookupError):
+                    if pid in seen:
+                        raise
+                    if self.exited(pid):
+                        # Gone, never seen holding the socket: what it held closed
+                        # with it. A reused PID lists a new inode and is read.
+                        read[pid] = listed[pid]
+                        del unresolved[pid]
+                except Refusal as error:
+                    # A thread list that moved, or an identity that changed under
+                    # the read (an orphan's new parent), is read again next
+                    # listing, unless the socket was already seen in this process.
+                    # So is a same-user table denied mid-exit or mid-exec, until
+                    # it stays unreadable for MAX_DENIALS reads.
+                    if pid in seen:
+                        raise
+                    if error.reason == "fd_list_unavailable" and error.error == errno.EACCES:
+                        # Counted per instance: a reused PID starts afresh.
+                        key = (pid, listed[pid])
+                        denials[key] = denials.get(key, 0) + 1
+                        if denials[key] >= MAX_DENIALS:
+                            raise
+                    elif error.reason not in ("process_census_changed", "process_changed"):
+                        raise
+        raise Refusal("census", "attempts_exhausted")
 
     def scan(self, pid, inode, seen, owners):
-        """One process's every thread FD table; False when it held no socket or exited first."""
+        """Read one process's every thread FD table; return the inode of the instance read."""
         # Even a zombie leader can retain live threads with private FD
         # tables. Skip only a process whose pidfd proves whole-group exit.
         directory = os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
                             os.O_NOFOLLOW, dir_fd=self.root)
         try:
             before = self.identity(directory, pid)
-            handle = os.pidfd_open(pid, 0)
+            instance = os.fstat(directory).st_ino
+            handle = self.pidfd(pid)
             try:
                 if not live(handle):
-                    return False
+                    return instance
                 require(before == self.identity(directory, pid), "process", "process_changed")
                 task = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
                                os.O_NOFOLLOW, dir_fd=directory)
                 try:
                     tids = self.entries(task, MAX_PIDS)
+                    if not tids and pid not in seen and self.exited(pid, handle, wait=0.02):
+                        return instance  # A dying process lists no threads (#440).
                     require(bool(tids), "fd_list", "fd_list_unavailable")
                     found = False
                     for tid in tids:
@@ -330,10 +413,15 @@ class Proof:
                             # Only an unreadable, freshly confirmed foreign
                             # identity may be ignored. Same-user uncertainty
                             # and any observed shared ownership refuse. An exiting
-                            # process's table turns unreadable; a confirmed exit
-                            # it never showed the socket in is skipped (#440).
-                            if not found and pid not in seen and self.exited(pid, handle):
-                                return False
+                            # process's table turns unreadable once its memory is
+                            # released, before its pidfd shows the group's exit;
+                            # a thread already in do_exit (PF_EXITING) gets a short
+                            # wait for that exit. Only a confirmed exit it never
+                            # showed the socket in is skipped (#440).
+                            if not found and pid not in seen and (
+                                    self.exited(pid, handle) or
+                                    (self.exiting(thread) and self.exited(pid, handle, wait=0.02))):
+                                return instance
                             if (found or self.uid in before[2][:2] or
                                     self.uid in original[2][:2] or
                                     original != self.identity(thread, tid)):
@@ -345,12 +433,12 @@ class Proof:
                     os.close(task)
                 if not found and self.exited(pid, handle):
                     # It exited after its table showed no socket (#440).
-                    return False
+                    return instance
                 require(live(handle) and before == self.identity(directory, pid),
                         "process", "process_changed")
                 if found:
                     owners[pid] = before[0]
-                return found
+                return instance
             finally:
                 os.close(handle)
         finally:
