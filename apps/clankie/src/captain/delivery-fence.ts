@@ -109,6 +109,28 @@ export const ReceiptSchema = z
   })
   .strict();
 export type UncertainReceipt = z.infer<typeof ReceiptSchema>;
+
+/**
+ * The exact pane, terminal and session the host attested when the operator adopted
+ * this remote original (#578). Retirement counts it like a completed hire, for that
+ * occupant only; nothing else about the receipt changes.
+ */
+export function adoptedOccupant(receipt: UncertainReceipt) {
+  const settled = receipt.settlement;
+  return settled &&
+    settled.journal === "authenticated-recovery" &&
+    settled.disposition === "adopted" &&
+    "paneId" in settled.allocation &&
+    settled.allocation.present &&
+    settled.allocation.terminalId &&
+    settled.allocation.sessionId
+    ? {
+        paneId: settled.allocation.paneId,
+        terminalId: settled.allocation.terminalId,
+        sessionId: settled.allocation.sessionId,
+      }
+    : undefined;
+}
 const COMPLETED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 /** Receipt fleets this machine's own inventory settles: Herdr's local panes and the desktop app's ("herdr-core"). */
 const LOCAL_SETTLEMENT_FLEETS: ReadonlySet<unknown> = new Set(["local", "herdr-core"]);
@@ -234,7 +256,7 @@ export class DeliveryFence {
     return { key, metadata, target };
   }
 
-  /** A complete successful inventory may retire only already completed exact remote hires. */
+  /** A complete successful inventory may retire only completed or adopted exact remote hires. */
   public retireCompleted(
     target: HireNoLaunchEvidence["target"],
     panes: ReadonlySet<string>,
@@ -246,12 +268,12 @@ export class DeliveryFence {
       .digest("hex");
     let changed = false;
     for (const [key, receipt] of this.all()) {
+      const paneId = receipt.completed ? receipt.paneId : adoptedOccupant(receipt)?.paneId;
       if (
-        receipt.completed &&
         !receipt.retired &&
         isDeepStrictEqual(receipt.remoteAdmission?.target, target) &&
-        receipt.paneId &&
-        !panes.has(receipt.paneId) &&
+        paneId &&
+        !panes.has(paneId) &&
         !active.has(key)
       ) {
         this.records.set(key, { ...receipt, retired: { at: Date.now(), censusSha256 } });

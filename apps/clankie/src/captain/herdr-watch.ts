@@ -35,7 +35,12 @@ import {
 } from "./conversation-owner.ts";
 import { DiscordWatchOriginSchema, type DiscordWatchOrigin } from "./conversation-owner.ts";
 export type { DiscordWatchOrigin } from "./conversation-owner.ts";
-import { DeliveryFence, deliveryFingerprint, type UncertainReceipt } from "./delivery-fence.ts";
+import {
+  adoptedOccupant,
+  DeliveryFence,
+  deliveryFingerprint,
+  type UncertainReceipt,
+} from "./delivery-fence.ts";
 import { channelBody, claudeWorkerPermissionMode } from "./claude-worker-seat.ts";
 import { hireDeliveryStage } from "@clankie/protocol";
 import { codexProxyControl, codexProxySettled, type ExternalCodexControl } from "./external-codex-control.ts";
@@ -3720,13 +3725,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
       .all()
       .filter(
         ([key, receipt]) =>
-          receipt.completed &&
-          receipt.paneId &&
+          originalPane(receipt) !== undefined &&
           !receipt.retired &&
           receipt.remoteAdmission?.target.fleet === fleet &&
           (scope.baseKey === undefined ||
             (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === scope.baseKey) &&
-          (scope.paneId === undefined || receipt.paneId === scope.paneId),
+          (scope.paneId === undefined || originalPane(receipt) === scope.paneId),
       );
     if (!candidates.length) return;
     if (!this.runner.list || !this.remoteHireReceipts)
@@ -6283,8 +6287,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   /**
    * Herdr restore preserves a native session but creates a new terminal and process.
-   * Recover retirement authority from the exact completed hire, never from a title,
-   * directory, adoption or today's project assignment. Original journals stay intact.
+   * Recover retirement authority from the exact completed hire, or the exact occupant an
+   * operator adopted by its receipt (#578), never from a title, directory, ownership
+   * adoption or today's project assignment. Original journals stay intact.
    */
   private async restoredRetirementGuard(agent: HerdrAgentSnapshot): Promise<RetirementGuard> {
     const fleet = splitFleetQualified(agent.paneId)?.fleet;
@@ -6304,17 +6309,25 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const candidate = this.projectHires.retirementCandidate(fleet, agent.paneId);
     if (candidate && (!candidate.confirmed || candidate.occupantId !== occupant))
       throw new Error("Restored retirement cannot replace an unconfirmed or different original hire");
-    const originals = this.hireReceipts
-      .all()
-      .filter(
-        ([, receipt]) =>
-          receipt.completed &&
-          !receipt.retired &&
+    const originals = this.hireReceipts.all().filter(([, receipt]) => {
+      if (receipt.retired || receipt.remoteAdmission?.target.fleet !== fleet) return false;
+      if (receipt.completed)
+        return (
           receipt.paneId === agent.paneId &&
           receipt.sessionId === sessionId &&
-          receipt.occupantId === occupant &&
-          receipt.remoteAdmission?.target.fleet === fleet,
+          receipt.occupantId === occupant
+        );
+      // An operator adoption (#578) names the exact terminal and session the host attested.
+      const adopted = adoptedOccupant(receipt);
+      return (
+        adopted?.paneId === agent.paneId &&
+        adopted.terminalId === agent.terminalId &&
+        adopted.sessionId === agent.session!.value &&
+        (receipt.paneId ?? agent.paneId) === agent.paneId &&
+        (receipt.sessionId ?? sessionId) === sessionId &&
+        (receipt.occupantId ?? occupant) === occupant
       );
+    });
     if (originals.length !== 1) throw new Error("Completed original hire is missing or ambiguous");
     const [key, receipt] = originals[0]!;
     // Completed ordinary hires live under completed-hire:<id>, not their launch key.
@@ -6528,9 +6541,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
             .all()
             .some(
               ([, receipt]) =>
-                receipt.completed &&
                 !receipt.retired &&
-                receipt.paneId === current.paneId &&
+                originalPane(receipt) === current.paneId &&
                 receipt.remoteAdmission?.target.fleet === fleet,
             );
         // Unmanaged closes have neither project allocations nor authenticated hire receipts to retire.
@@ -7728,6 +7740,11 @@ function startupSignIn(
  * the agent's own when Herdr reports it, so a pane opened in the directory whose agent moved
  * elsewhere does not count; the pane's directory stands in only when no foreground is known.
  */
+/** A remote original's pane once it completed, or once the operator adopted its occupant. */
+function originalPane(receipt: UncertainReceipt): string | undefined {
+  return receipt.completed ? receipt.paneId : adoptedOccupant(receipt)?.paneId;
+}
+
 function agentInDirectory(
   agent: Pick<HerdrAgentSnapshot, "workingDirectory" | "foregroundWorkingDirectory">,
   cwd: string,
