@@ -5348,7 +5348,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       const posted = fleetRoom.postAppNote(command.author, command.text);
       if (posted.outcome !== "posted" || to.length === 0 || noteWakes === undefined) return posted;
       // It answers once the addressees are journaled; their wakes settle after (#623).
-      return { outcome: "posted", note: noteWakes.wake(posted.note, to) };
+      return { outcome: "posted", note: noteWakes.wake(posted.note, to, command.deviceId) };
     },
     answerPrompt: createPromptAnswerer({
       paneAddress: (terminalId) => terminals.paneAddress(terminalId),

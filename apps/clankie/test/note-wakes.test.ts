@@ -32,7 +32,7 @@ it("answers once the addressees are journaled, before a slow webhook settles, an
       },
     });
 
-    const answered = wakes.wake(note, ["grok", "clankie"]);
+    const answered = wakes.wake(note, ["grok", "clankie"], "device-grok-bot");
     expect(answered).toMatchObject({ sequence: 7, to: ["grok", "clankie"] });
     expect(answered.wakes).toBeUndefined();
     // Both are on disk as pending before any wake has settled. Read before anything awaits:
@@ -41,7 +41,7 @@ it("answers once the addressees are journaled, before a slow webhook settles, an
     expect(journal.notes[0].pending.map((item: { lead: string }) => item.lead)).toEqual(["grok", "clankie"]);
 
     // Posting the same note again wakes nobody a second time.
-    wakes.wake(note, ["grok", "clankie"]);
+    wakes.wake(note, ["grok", "clankie"], "device-grok-bot");
     release({ outcome: "sent", lead: "grok", message: "ok" } as LeadWakeResult);
     await wakes.settled(7);
     expect(webhooks).toEqual(["grok"]);
@@ -68,7 +68,7 @@ it("a restart while a wake is pending settles it as uncertain and never sends it
       webhook: () => new Promise(() => {}),
       leadLane: async () => ({ via: "clankie", outcome: "delivered" }),
     });
-    first.wake(note, ["grok"]);
+    first.wake(note, ["grok"], "device-grok-bot");
 
     const sent: string[] = [];
     const restarted = new NoteWakes({
@@ -87,7 +87,7 @@ it("a restart while a wake is pending settles it as uncertain and never sends it
         steps: [{ via: "webhook", outcome: "uncertain" }],
       }),
     ]);
-    restarted.wake(note, ["grok"]);
+    restarted.wake(note, ["grok"], "device-grok-bot");
     await restarted.settled(7);
     expect(sent).toEqual([]);
   } finally {

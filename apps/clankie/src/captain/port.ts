@@ -389,6 +389,11 @@ export interface CaptainPort {
       | {
           readonly action: "post";
           readonly author: string;
+          /**
+           * The connector device the app boundary stamped on the post. Its own id, never
+           * the name an app chose, so the lane bound (#625) is per device.
+           */
+          readonly deviceId: string;
           readonly text: string;
           /** The leads it's addressed to (#179); each is woken once. */
           readonly to?: readonly string[] | undefined;

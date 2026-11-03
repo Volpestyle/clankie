@@ -786,6 +786,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           await ctx.dependencies.captain.appNotes({
             action: "post",
             author: name,
+            // author() just checked this device's active connector record.
+            deviceId: request.appDeviceId!,
             text: request.text,
             ...(request.to === undefined ? {} : { to: request.to }),
           }),
