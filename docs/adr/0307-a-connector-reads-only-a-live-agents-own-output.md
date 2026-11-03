@@ -99,7 +99,8 @@ agent showed.
   session reported, no file yet, an unreachable host), the read is refused;
   the screen is never shown in its place. Other harnesses keep the screen
   read and its cut, and so do the Herdr desktop app's own terminals
-  (`herdr_core_read`), whose owner-started agents carry no session identity.
+  (`herdr_core_read`), whose owner-started agents carry no session identity
+  ([#530](https://github.com/Volpestyle/clankie/issues/530)).
 
 ## Consequences
 
