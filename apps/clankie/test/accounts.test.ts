@@ -14,6 +14,7 @@ import {
 } from "@clankie/credential-broker";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
 import { writeConvention } from "@clankie/work-items";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import {
   CLANKIE_GITHUB_APP,
@@ -188,6 +189,8 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
     seen,
     issues,
     app,
+    /** Another account's token, valid at the fake GitHub. */
+    accept: (token: string) => validTokens.add(token),
     fetch: routed,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
@@ -1074,6 +1077,106 @@ describe("GitHub App user tokens (#185)", () => {
         revoked: true,
         outcome: expect.not.stringMatching(/^applied$/u),
         writes: 1,
+      });
+    }
+  });
+
+  it("a seat's retirement write never goes out on an API built before its account pin read another account", async () => {
+    const { dir, store, providers, github } = await connectApp();
+    const repo = join(await realpath(dir), "seat-repo");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/repo" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    const accountA = (await store.get("github"))!;
+    const tokenB = "ghu_MARKER_account_b";
+    providers.accept(tokenB);
+    const accountB = {
+      type: "oauth" as const,
+      access: tokenB,
+      refresh: "ghr_MARKER_account_b",
+      expires: 0,
+      clientId: "Iv23liFakeApp",
+      metadata: { clientId: "Iv23liFakeApp", connectionId: "connection-b" },
+    };
+    // Reconnects account B right after the Nth read of the GitHub connection.
+    let reads = 0;
+    let reconnectAfter = Number.POSITIVE_INFINITY;
+    const counted = {
+      get: async (id: string) => {
+        const value = await store.get(id);
+        if (id === "github" && ++reads === reconnectAfter) await store.set("github", accountB);
+        return value;
+      },
+      update: store.update.bind(store),
+    };
+    const settings = ProjectsSettingsSchema.parse({
+      projects: [
+        {
+          id: "seat-project",
+          name: "Seat project",
+          workerCap: 4,
+          workspaces: [{ id: "primary", machineId: "local", platform: "posix", path: repo }],
+          trackerRef: { workspaceId: "primary", path: ".clankie/tracking.json" },
+        },
+      ],
+    });
+    const service = createWorkItemsService({
+      stateDirectory: join(dir, "seat-state"),
+      workspace: () => repo,
+      githubConnection: () => githubConnection(counted, github),
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+      projects: async () => settings,
+      projectsFence: async () => ({ projects: settings, assertCurrent: () => {} }),
+      localMachineId: "local",
+    });
+    await service.handle(
+      { action: "create", repo: "workspace", title: "Seat issue", criteria: ["Retired"] },
+      true,
+    );
+    const writesSince = (start: number) =>
+      providers.seen
+        .slice(start)
+        .filter((entry) => entry.method !== "GET" && entry.path === "/repos/owner/repo/issues/1");
+    const retire = async (after: number) => {
+      await store.set("github", accountA);
+      reads = 0;
+      reconnectAfter = after;
+      const start = providers.seen.length;
+      const outcome = await service
+        .prepareSeatIssueTracker("seat-project", async () => {})
+        .then((scope) =>
+          scope.call("save_issue", { id: "#1", title: `Retired ${String(after)}` }, "interactive"),
+        )
+        .then(
+          () => "applied",
+          (error: unknown) => String((error as Error).message),
+        );
+      return { outcome, writes: writesSince(start) };
+    };
+    // With no reconnect the retirement lands as account A, after this many connection reads.
+    const settled = await retire(Number.POSITIVE_INFINITY);
+    expect(settled.outcome).toBe("applied");
+    expect(settled.writes.map((entry) => entry.headers.authorization)).toEqual([
+      "Bearer ghu_MARKER_app_access_1",
+    ]);
+    const total = reads;
+    expect(total).toBeGreaterThan(1);
+    // Once B is connected, nothing may go out as A: either B's own pin and API, or a refusal.
+    for (let after = 1; after < total; after += 1) {
+      const { outcome, writes } = await retire(after);
+      expect({ after, outcome, bearers: writes.map((entry) => entry.headers.authorization) }).toEqual({
+        after,
+        outcome: writes.length === 0 ? "Saved GitHub account changed." : "applied",
+        bearers: writes.length === 0 ? [] : [`Bearer ${tokenB}`],
       });
     }
   });
