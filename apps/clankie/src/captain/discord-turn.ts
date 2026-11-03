@@ -212,11 +212,18 @@ export async function normalizeDiscordTurn(
         options.roomHistory,
       ]
     : [];
+  const olderBlock =
+    (options.roomHistoryCount ?? 0) > 0
+      ? [
+          `This room has ${String(options.roomHistoryCount)} earlier messages stored beyond what you see here; room_history searches and reads them.`,
+        ]
+      : [];
   const prompt = [
     framing,
     ...memoryBlock,
     ...renderBlock,
     ...historyBlock,
+    ...olderBlock,
     ...contextBlock,
     ...triggerBlock,
   ].join("\n\n");

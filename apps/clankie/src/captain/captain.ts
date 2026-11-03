@@ -293,6 +293,7 @@ import {
   turnSettledLogPath,
   type TurnMetricsQuery,
 } from "./turn-metrics.ts";
+import { roomHistoryReader } from "../room-history.ts";
 /** How long a head seat stays held after a completed poll; see the seat outbox. */
 const HEAD_BOUND_GRACE_MS = 30_000;
 /** Unchanged from the outbox default: a taken event's exact acknowledgment window. */
@@ -4811,9 +4812,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   burst.handoff.grant = key;
                   burst.handoff.sessionKey = sessionKey;
                 }
+                // This room's own log, for this turn's audience only (#340). Who may read
+                // what this turn adds is proven on its own, never inferred from the turn
+                // lacking private context: a failed audience check also lacks it.
+                const historyReader = roomHistoryReader(laneLog, lane, targetId, access.privateContext);
+                // Voice is logged private: speech in a channel some members cannot join is
+                // not proven public by a text read check.
+                const roomAudience =
+                  !access.privateContext &&
+                  lane === "discord_presence" &&
+                  request.trigger.guildId !== undefined &&
+                  (await roomTurns.everyoneCanRead(request.trigger.guildId, request.trigger.channelId))
+                    ? ("room" as const)
+                    : ("private" as const);
                 const heard = await roomTurns.normalize(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   systemTools: plan.systemTools,
+                  roomHistoryCount: await historyReader.count(),
                   // A warm loop already holds the room; a cold one reads the bounded backlog once.
                   carriesHistory: loopKey !== undefined && sessions.has(loopKey),
                   ...(loopKey !== undefined
@@ -4824,6 +4839,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 });
                 const normalized: NormalizedDiscordTurn = {
                   ...heard,
+                  historyReader,
+                  roomAudience,
                   sessionKey,
                   durable: loopKey !== undefined,
                   handoffConversationId: child.conversationId,
@@ -4890,6 +4907,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     });
                   nativeCapture.room = roomKey(normalized.lane, normalized.targetId);
                   nativeCapture.targetId = normalized.targetId;
+                  nativeCapture.roomHistory = normalized.historyReader;
                   nativeCapture.actorId = normalized.actorId;
                   nativeCapture.guildId = normalized.guildId;
                   nativeCapture.channelId = normalized.channelId;

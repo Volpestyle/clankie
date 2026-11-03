@@ -1,4 +1,8 @@
-import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
+import {
+  discordActorOwnsServer,
+  discordEveryoneCanRead,
+  discordOwnerAudience,
+} from "@clankie/discord-presence-core";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_LANE_ENTRIES_MAX,
@@ -550,6 +554,7 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       });
     lane.capture.room = roomKey(normalized.lane, normalized.targetId);
     lane.capture.targetId = normalized.targetId;
+    lane.capture.roomHistory = normalized.historyReader;
     lane.capture.actorId = normalized.actorId;
     lane.capture.guildId = normalized.guildId;
     lane.capture.channelId = normalized.channelId;
@@ -563,6 +568,8 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
         at: new Date().toISOString(),
         kind: "heard",
         text: normalized.heard,
+        actorId: normalized.actorId,
+        audience: normalized.roomAudience ?? "private",
       }),
     );
     const live = lane.running !== undefined || lane.session.isStreaming;
@@ -829,6 +836,7 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       at: new Date().toISOString(),
       kind: "said",
       text: message,
+      audience: normalized.roomAudience ?? "private",
     });
     await toolProgress?.complete();
     tryAppendTurnSettled(ctx.turnSettled, metrics, "completed", new Date(), tokensEnd);
@@ -1093,6 +1101,13 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       (await discordOwnerAudience(discord, guildId, channelId, async (action) => {
         const result = await ctx.deps.discordActions!.serverAction(action);
         if (!result.ok) throw new Error("Discord audience unavailable");
+        return result.data;
+      })),
+    everyoneCanRead: async (guildId, channelId) =>
+      ctx.deps.discordActions !== undefined &&
+      (await discordEveryoneCanRead(guildId, channelId, async (action) => {
+        const result = await ctx.deps.discordActions!.serverAction(action);
+        if (!result.ok) throw new Error("Discord channel unavailable");
         return result.data;
       })),
     runDiscordWatchTurn,

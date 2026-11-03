@@ -372,6 +372,75 @@ export async function discordOwnerAudience(
   }
 }
 
+/** Channels whose messages members can scroll back through: text, voice text chat, announcement, stage, forum, media. */
+const EVERYONE_READABLE_CHANNEL_TYPES = new Set([0, 2, 5, 13, 15, 16]);
+/** Public and announcement threads, judged by their parent; a private thread (12) never qualifies. */
+const PUBLIC_THREAD_TYPES = new Set([10, 11]);
+/** VIEW_CHANNEL and READ_MESSAGE_HISTORY. */
+const READ_BACK = 1024n | 65536n;
+
+/**
+ * Conservative positive proof that every member of the server can read this
+ * channel and its history, so anything said there may be recalled to anyone in
+ * it later (#340). It is not a permission evaluator: it holds only when the
+ * channel type is a known readable one, `@everyone` may view channels and read
+ * history at the server level (or is an administrator), and no overwrite of any
+ * kind on the channel, or a thread's parent, denies either. Everything is read
+ * twice, and both reads must agree, so no mix of states from different moments
+ * passes. Anything unreadable, unknown or changing fails closed.
+ */
+export async function discordEveryoneCanRead(
+  guildId: string,
+  channelId: string,
+  request: DiscordServerRequest,
+): Promise<boolean> {
+  const read = async () => {
+    const channel = record(await request({ method: "GET", path: `/channels/${channelId}` }));
+    if (channel?.guild_id !== guildId) return undefined;
+    const channels = [channel];
+    const type = channel.type;
+    if (typeof type !== "number") return undefined;
+    if (PUBLIC_THREAD_TYPES.has(type)) {
+      if (typeof channel.parent_id !== "string") return undefined;
+      const parent = record(await request({ method: "GET", path: `/channels/${channel.parent_id}` }));
+      if (parent?.guild_id !== guildId || typeof parent.type !== "number") return undefined;
+      if (![0, 5, 15, 16].includes(parent.type)) return undefined;
+      channels.push(parent);
+    } else if (!EVERYONE_READABLE_CHANNEL_TYPES.has(type)) return undefined;
+    const roles = await request({ method: "GET", path: `/guilds/${guildId}/roles` });
+    if (!Array.isArray(roles)) return undefined;
+    const everyone = roles.map(record).find((role) => role?.id === guildId);
+    if (typeof everyone?.permissions !== "string") return undefined;
+    return {
+      channels: channels.map((entry) => ({
+        id: entry.id,
+        type: entry.type,
+        parent: entry.parent_id,
+        overwrites: entry.permission_overwrites,
+      })),
+      everyone: everyone.permissions,
+    };
+  };
+  try {
+    const seen = await read();
+    if (seen === undefined) return false;
+    const permissions = BigInt(seen.everyone);
+    if ((permissions & 8n) === 0n && (permissions & READ_BACK) !== READ_BACK) return false;
+    for (const channel of seen.channels) {
+      if (!Array.isArray(channel.overwrites)) return false;
+      for (const input of channel.overwrites) {
+        const entry = record(input);
+        if (!entry || typeof entry.deny !== "string") return false;
+        if ((BigInt(entry.deny) & READ_BACK) !== 0n) return false;
+      }
+    }
+    // Both reads span the moment between the first read's end and the second's start.
+    return JSON.stringify(await read()) === JSON.stringify(seen);
+  } catch {
+    return false;
+  }
+}
+
 /** Only host-owned REST membership evidence may authorize a Discord role. */
 export async function discordActorOwnsServer(
   authority: Pick<DiscordServerAuthority, "servers" | "ownerUserId">,

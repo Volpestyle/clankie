@@ -9,6 +9,16 @@ import {
 } from "@clankie/protocol";
 import type { LaneObservation, LaneObservationEntry } from "./port.ts";
 
+/** Who a room entry was for, recorded by the host; absent on entries written before #340. */
+export type RoomLogAudience = "room" | "private";
+/** A lane entry as `room_history` reads it, with the host-recorded audience and speaker. */
+export interface RoomLogEntry extends LaneObservationEntry {
+  readonly audience?: RoomLogAudience;
+  readonly actorId?: string;
+}
+/** How far back `room_history` reads a room's log. */
+const ROOM_HISTORY_LINES_MAX = 4_000;
+
 /**
  * One JSONL file per lane recording what he heard and what he said there.
  * This is what makes him one person across rooms: `observe_room` and the TUI
@@ -21,7 +31,7 @@ export class LaneLog {
     this.dir = dir;
   }
 
-  public async append(lane: string, targetId: string, entry: LaneObservationEntry): Promise<void> {
+  public async append(lane: string, targetId: string, entry: RoomLogEntry): Promise<void> {
     await mkdir(this.dir, { recursive: true });
     const line = `${JSON.stringify({ ...entry, targetId })}\n`;
     await appendFile(join(this.dir, `${laneKey(lane, targetId)}.jsonl`), line, "utf8");
@@ -30,6 +40,42 @@ export class LaneLog {
   public async read(lane: string, targetId: string, limit = 40): Promise<LaneObservation> {
     const entries = await this.readEntries(laneKey(lane, targetId), limit);
     return { lane, targetId, entries };
+  }
+
+  /** One room's entries, oldest first, with their recorded audience and speaker (#340). */
+  public async history(lane: string, targetId: string): Promise<RoomLogEntry[]> {
+    let raw: string;
+    try {
+      raw = await readFile(join(this.dir, `${laneKey(lane, targetId)}.jsonl`), "utf8");
+    } catch {
+      return [];
+    }
+    return raw
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .slice(-ROOM_HISTORY_LINES_MAX)
+      .flatMap((line) => {
+        try {
+          const parsed = JSON.parse(line) as RoomLogEntry & { targetId?: string };
+          const entry = CaptainLaneObservationEntrySchema.safeParse({
+            at: parsed.at,
+            kind: parsed.kind,
+            text: typeof parsed.text === "string" ? parsed.text.slice(0, CAPTAIN_LANE_TEXT_MAX) : parsed.text,
+          });
+          if (!entry.success) return [];
+          return [
+            {
+              ...entry.data,
+              ...(parsed.audience === "room" || parsed.audience === "private"
+                ? { audience: parsed.audience }
+                : {}),
+              ...(typeof parsed.actorId === "string" ? { actorId: parsed.actorId } : {}),
+            },
+          ];
+        } catch {
+          return [];
+        }
+      });
   }
 
   public async list(limit = 20): Promise<readonly ObservableCaptainLane[]> {
