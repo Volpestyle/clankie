@@ -74,7 +74,7 @@ export async function observeProcessTable(): Promise<ProcessRow[]> {
   return pending;
 }
 
-export function parseProcessTable(text: string): ProcessRow[] {
+function parseProcessTable(text: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
   for (const line of text.split("\n")) {
     const fields = line.trim().split(/\s+/u);
