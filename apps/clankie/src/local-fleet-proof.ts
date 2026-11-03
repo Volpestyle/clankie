@@ -109,11 +109,15 @@ export interface LocalFleetProofOptions extends Pick<
   run?: Run;
   platform?: string;
   processHelper?: string;
-  /** Host observation seam; production always uses the fresh native census. */
+  /**
+   * Host observation seam; production always uses the fresh native census. A project
+   * proof passes `report`, which takes the diagnostics a native observation would send.
+   */
   observeSocket?(
     socket: Socket,
     expected?: NativeSocketOwner,
     signal?: AbortSignal,
+    report?: (event: NativeProcessDiagnostic) => void,
   ): Promise<NativeSocketProcess | undefined>;
   /**
    * Host lifetime seam for a proven connection's owner and ancestors; production
@@ -180,6 +184,20 @@ interface ConnectionProof {
   readonly binding: Pick<HerdrBinding, "socketPath" | "session">;
 }
 
+/**
+ * One more look after an empty first observation (#574), queued behind any other request's:
+ * a burst of empty looks under load runs its retries one at a time rather than piling more
+ * native helper runs onto a machine that is already short of time (#613).
+ */
+function retryQueue() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(look: () => Promise<T>): Promise<T> => {
+    const next = tail.then(look, look);
+    tail = next.catch(() => undefined);
+    return next;
+  };
+}
+
 const sameOwner = (a: NativeSocketOwner, b: NativeSocketOwner) =>
   a.pid === b.pid &&
   a.uid === b.uid &&
@@ -193,6 +211,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
   const observe = options.observeSocket;
   const owners = new WeakMap<Socket, NativeSocketOwner>();
   const proven = new WeakMap<Socket, ConnectionProof>();
+  const lookAgain = retryQueue();
   const observeBirth =
     options.observeBirth ??
     (observe === undefined
@@ -371,7 +390,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       // once with nothing said about any of them (#574). Look once more, with every fence
       // unchanged, before refusing; a terminal reason or a closed socket is never retried.
       if (!initial && nativeReason === undefined && alive()) {
-        initial = await snapshot("initial", expected);
+        initial = await lookAgain(() => snapshot("initial", expected));
         signal?.throwIfAborted();
       }
       if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");
@@ -447,7 +466,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
     report?: (event: NativeProcessDiagnostic) => void,
   ) =>
     options.observeSocket !== undefined
-      ? options.observeSocket(socket, expected, signal)
+      ? options.observeSocket(socket, expected, signal, report)
       : observeSocketProcess(
           socket,
           options.processHelper ?? fleetProcessHelper(),
@@ -460,6 +479,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
           signal,
         );
   const owners = new WeakMap<Socket, NativeSocketOwner>();
+  const lookAgain = retryQueue();
   /**
    * A desktop-app seat (ADR 0319): the launcher execs the harness in the terminal's own
    * process, so there is no separate shell and foreground group to read. The harness is
@@ -500,16 +520,15 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       const launcher = await (options.launcher ?? installedLauncher)(seat.agent);
       signal?.throwIfAborted();
       if (!launcher) return refuse("observation_failed");
-      const initial = await observeSocket(
-        socket,
-        "initial",
-        pane,
-        options.expectedOwner?.(socket) ?? owners.get(socket),
-        signal,
-        context,
-        report,
-      );
+      const expected = options.expectedOwner?.(socket) ?? owners.get(socket);
+      const look = () => observeSocket(socket, "initial", pane, expected, signal, context, report);
+      let initial = await look();
       signal?.throwIfAborted();
+      // As for the fleet and project proofs: once more, fences unchanged, before refusing (#574, #613).
+      if (!initial && nativeReason() === undefined && alive()) {
+        initial = await lookAgain(look);
+        signal?.throwIfAborted();
+      }
       if (!initial) return refuse(nativeReason() ?? "native_initial_unavailable");
       emit({ source: "socket_owner", owner: initial.owner });
       if (!alive()) return refuse("closed_socket");
@@ -694,7 +713,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       signal?.throwIfAborted();
       // As for the fleet proof: once more, fences unchanged, before refusing (#574).
       if (!initial && nativeReason === undefined && alive()) {
-        initial = await look();
+        initial = await lookAgain(look);
         signal?.throwIfAborted();
       }
       if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");

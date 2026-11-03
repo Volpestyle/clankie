@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { Socket } from "node:net";
-import { ancestors, clientPid, localFleetProof } from "../src/local-fleet-proof.ts";
+import { ancestors, clientPid, localFleetProof, localProjectProof } from "../src/local-fleet-proof.ts";
 import {
   socketProcessFixture,
   projectProcessFixture,
@@ -380,4 +380,120 @@ it("looks once more when the first socket observation comes back empty, and refu
   const outsider = proof(["seen"]);
   expect(await outsider.prove(socket(), "w1:p2")).toBe(false);
   expect(outsider.looks()).toBe(1);
+});
+
+it("looks once more under the same owner fence, and a changed owner is still refused (#613)", async () => {
+  const tree = "55 44\n44 33\n33 1\n";
+  const pinned = socketProcessFixture(socket(), owner, tree)!.owner;
+  // The native helper refuses an owner other than the one it was asked to expect, with no
+  // terminal reason, so that refusal reaches the retry; the retry must ask for the same owner.
+  const proof = (expectedOwner: typeof pinned) => {
+    const asked: (typeof pinned | undefined)[] = [];
+    let looks = 0;
+    const prove = localFleetProof({
+      platform: "darwin",
+      herdrBinary: "/trusted/herdr",
+      binding: async () => binding,
+      expectedOwner: () => expectedOwner,
+      observeSocket: async (s, expected) => {
+        asked.push(expected);
+        if (looks++ === 0) return undefined;
+        const seen = socketProcessFixture(s, owner, tree);
+        return seen && expected && seen.owner.pid !== expected.pid ? undefined : seen;
+      },
+      run: async (_command, args) =>
+        JSON.stringify({ result: { process_info: { pane_id: args.at(-1), shell_pid: 33 } } }),
+    });
+    return { prove, asked };
+  };
+  const same = proof(pinned);
+  expect(await same.prove(socket(), "w1:p1")).toBe(true);
+  expect(same.asked.slice(0, 2)).toEqual([pinned, pinned]);
+  const changed = proof({ ...pinned, pid: 77 });
+  expect(await changed.prove(socket(), "w1:p1")).toBe(false);
+  expect(changed.asked).toEqual([
+    { ...pinned, pid: 77 },
+    { ...pinned, pid: 77 },
+  ]);
+});
+
+it("runs concurrent requests' retries one at a time, so a burst under load doesn't pile on (#613)", async () => {
+  const tree = "55 44\n44 33\n33 1\n";
+  const looks = new Map<Socket, number>();
+  let retrying = 0;
+  let most = 0;
+  const prove = localFleetProof({
+    platform: "darwin",
+    herdrBinary: "/trusted/herdr",
+    binding: async () => binding,
+    observeSocket: async (s) => {
+      const look = looks.get(s) ?? 0;
+      looks.set(s, look + 1);
+      if (look === 0) return undefined;
+      if (look === 1) {
+        most = Math.max(most, ++retrying);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        retrying -= 1;
+      }
+      return socketProcessFixture(s, owner, tree);
+    },
+    run: async (_command, args) =>
+      JSON.stringify({ result: { process_info: { pane_id: args.at(-1), shell_pid: 33 } } }),
+  });
+  const burst = [socket(), socket(), socket(), socket()];
+  expect(await Promise.all(burst.map((s) => prove(s, "w1:p1")))).toEqual([true, true, true, true]);
+  expect(most).toBe(1);
+});
+
+it("a desktop-app seat's proof looks once more too, and refuses after that (#613)", async () => {
+  let looks = 0;
+  const prove = localProjectProof({
+    herdrBinary: "herdr",
+    platform: "darwin",
+    binding: async () => undefined,
+    coreBinding: async () => ({
+      runtime: "external" as const,
+      session: "herdr-core",
+      socketPath: "/core.sock",
+    }),
+    coreSeat: async () => ({ pid: 4242, agent: "claude", session: "s" }),
+    launcher: async () => ({ executable: "/trusted/claude" }),
+    observeSocket: async () => {
+      looks += 1;
+      return undefined;
+    },
+  });
+  expect(await prove(socket(), "herdr-core/t3")).toBeUndefined();
+  expect(looks).toBe(2);
+});
+
+it("a desktop-app seat's proof never retries after a terminal native reason (#613)", async () => {
+  let looks = 0;
+  const prove = localProjectProof({
+    herdrBinary: "herdr",
+    platform: "darwin",
+    binding: async () => undefined,
+    coreBinding: async () => ({
+      runtime: "external" as const,
+      session: "herdr-core",
+      socketPath: "/core.sock",
+    }),
+    coreSeat: async () => ({ pid: 4242, agent: "claude", session: "s" }),
+    launcher: async () => ({ executable: "/trusted/claude" }),
+    // The caller exited during its own check: a final answer, not a stall worth a second look.
+    observeSocket: async (_socket, _expected, _signal, report) => {
+      looks += 1;
+      report?.({
+        schemaVersion: 1,
+        stage: "socket_owner",
+        reason: "caller_exited",
+        errno: 3,
+        attempt: 1,
+        retry: false,
+      });
+      return undefined;
+    },
+  });
+  expect(await prove(socket(), "herdr-core/t3")).toBeUndefined();
+  expect(looks).toBe(1);
 });
