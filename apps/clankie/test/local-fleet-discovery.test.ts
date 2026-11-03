@@ -8,6 +8,7 @@ import { LocalFleetLink } from "../src/local-fleet-link.ts";
 test.each(["normal close", "failure after publish", "failure during publish"])(
   "private-state discovery preserves production bytes and native reads through %s",
   async (cleanup) => {
+    // allow-no-sandbox -- loads the worker plugin's link module by URL, not Playwright
     const { readLink } = (await import(
       new URL("../../../integrations/claude-plugin/worker/bin/link.mjs", import.meta.url).href
     )) as {

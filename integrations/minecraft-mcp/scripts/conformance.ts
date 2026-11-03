@@ -26,6 +26,7 @@ const spike = resolve(spikeIndex < 0 ? join(homedir(), "dev/minecraft-spike") : 
 const motorIndex = args.indexOf("--motor");
 const motorEntry =
   motorIndex < 0 ? fileURLToPath(new URL("../src/main.ts", import.meta.url)) : resolve(args[motorIndex + 1]!);
+// allow-no-sandbox -- loads the Minecraft spike's rcon helper by path, not Playwright
 const { rcon } = (await import(pathToFileURL(join(spike, "rcon.mjs")).href)) as {
   rcon(command: string): Promise<string>;
 };

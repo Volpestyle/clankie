@@ -39,6 +39,7 @@ async function workerTui() {
   await writeFile(loader, source);
   // Match the pinned host's readV1Plugin contract, rather than bypassing its
   // loader with the module's named exports.
+  // allow-no-sandbox -- loads the loader module this test just wrote, not Playwright
   const module = (await import(pathToFileURL(loader).href)) as {
     default: { id: string; tui(api: unknown, options: unknown): Promise<void> };
   };

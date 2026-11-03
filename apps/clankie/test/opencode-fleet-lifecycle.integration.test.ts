@@ -110,6 +110,7 @@ async function fixture(
     );
   const loader = join(root, "worker-tui.mjs");
   await writeFile(loader, source);
+  // allow-no-sandbox -- loads the loader module this test just wrote, not Playwright
   const module = (await import(pathToFileURL(loader).href)) as {
     default: { tui(api: unknown, options: unknown): Promise<void> };
   };

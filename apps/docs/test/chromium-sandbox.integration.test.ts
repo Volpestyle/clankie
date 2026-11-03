@@ -64,6 +64,15 @@ const refused: Record<string, string> = {
     'import * as pw from "playwright-core";\nconst key = "chrom" + "ium";\nawait pw[key].launch({ headless: true });\n',
   "re-export.ts": 'export * from "playwright-core";\n',
   "untracked.ts": "const browserType = loaded.chromium;\nawait browserType.launch({});\n",
+  // t65's third round: a module's default is the module, and no non-literal load passes.
+  "named-default.ts": 'import { default as pw } from "playwright-core";\nawait pw.chromium.launch({});\n',
+  "namespace-default.ts":
+    'import * as pw from "playwright-core";\nawait pw.default.chromium.launch({ chromiumSandbox: true });\n',
+  "dynamic-default.ts":
+    'const pw = await import("playwright-core");\nawait pw.default.chromium.launch({ chromiumSandbox: true });\n',
+  "destructured-default.ts":
+    'const { default: pw } = await import("playwright-core");\nawait pw.chromium.launch({});\n',
+  "external-name.ts": "const pw = await import(process.env.BROWSER_MODULE);\nawait pw.chromium.launch({});\n",
 };
 
 it("refuses every launch it can't prove sandboxed", () => {

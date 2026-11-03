@@ -22,6 +22,7 @@ export interface FleetLoadServiceConfig {
 
 /** Target modules resolve their dependencies in sourceRoot's own real install. */
 export async function startFleetLoadService(config: FleetLoadServiceConfig) {
+  // allow-no-sandbox -- loads this checkout's own service modules by path, not Playwright
   const load = (path: string) => import(pathToFileURL(join(config.sourceRoot, path)).href);
   const [
     appModule,

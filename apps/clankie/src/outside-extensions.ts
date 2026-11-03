@@ -183,6 +183,7 @@ async function migrateGameModules(input: OutsideExtensionLoadInput): Promise<rea
   const migrated: string[] = [];
   for (const entry of legacy) {
     try {
+      // allow-no-sandbox -- loads an owner-installed extension module by path, not Playwright
       const loaded: unknown = await import(pathToFileURL(entry.module).href);
       const id = record(loaded) && record(loaded.gameExtension) ? loaded.gameExtension.id : undefined;
       if (typeof id !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(id))
@@ -293,6 +294,7 @@ async function prepare(item: InstalledExtension, input: OutsideExtensionLoadInpu
   if (!real.startsWith(root + sep)) unavailable("entry_outside_folder");
   let module: unknown;
   try {
+    // allow-no-sandbox -- loads an owner-installed extension module by path, not Playwright
     module = await import(pathToFileURL(real).href);
   } catch {
     return unavailable("import_failed");

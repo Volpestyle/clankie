@@ -3,6 +3,7 @@ import { relative, isAbsolute, posix } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { nativePermissionProfile } from "./lead-native-policy.mjs";
 import { nativeRuntimeEvidence } from "./lead-native-capability.mjs";
+// allow-no-sandbox -- loads Pi's coding-agent package by URL, not Playwright
 const {
   createReadToolDefinition,
   createEditToolDefinition,

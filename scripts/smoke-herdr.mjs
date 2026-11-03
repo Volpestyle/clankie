@@ -12,6 +12,7 @@ const checkout = resolve(import.meta.dirname, "..");
 
 export async function smokeHerdr(repoRoot = checkout, binaryOverride, managed = false) {
   const compiled = join(repoRoot, "apps/clankie/src/herdr-runtime.js");
+  // allow-no-sandbox -- loads this checkout's herdr-runtime module by path, not Playwright
   const { startHerdrRuntime } = await import(
     pathToFileURL(existsSync(compiled) ? compiled : compiled.replace(/\.js$/u, ".ts")).href
   );

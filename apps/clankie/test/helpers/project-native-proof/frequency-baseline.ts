@@ -68,6 +68,7 @@ export async function frequencyBaseline(checkout: string, ref: "ae91cca8" | "b5b
       },
     ],
   });
+  // allow-no-sandbox -- loads the proof bundle this helper just built, not Playwright
   return import(pathToFileURL(outfile).href) as Promise<
     typeof import("../../../src/local-fleet-proof.ts") &
       typeof import("../../../src/project-process-proof.ts") &

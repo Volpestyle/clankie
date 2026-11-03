@@ -6,10 +6,10 @@
 // It parses every code file with TypeScript and fails closed. It resolves nothing:
 // Chromium is reached only as a binding named in a Playwright import (or the
 // destructuring of an awaited literal `import()`/`require()`), or as `.chromium` on
-// such a module binding. Every use of those bindings must be a plain member access;
+// such a module binding (`{ default as pw }` counts as one; `pw.default` is refused). Every use of those bindings must be a plain member access;
 // one passed, returned, assigned, spread, exported or accessed by a computed key is
-// refused, as is any `import()`/`require()` whose specifier isn't a literal and any
-// re-export of Playwright. A launch passes only with an inline object literal whose
+// refused, as is every `import()`/`require()` whose specifier isn't a literal (each
+// legitimate one carries its own allow comment) and any re-export of Playwright. A launch passes only with an inline object literal whose
 // `chromiumSandbox` is the literal `true`, whose spreads are inline literals that
 // can't carry `chromiumSandbox` or `args`, and whose `args` are literal strings.
 // A launch that truly cannot keep the sandbox (a Linux CI runner, say) says why
@@ -81,20 +81,22 @@ function checkFile(path, source, report) {
       : ts.ScriptKind.JS;
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, kind);
   const lines = source.split("\n");
+  const lineOf = (node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line;
+  // An exception sits on the line itself or on the line above the statement holding it.
   const fail = (node, message) => {
-    const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line;
-    if (allowed.test(lines[line] ?? "") || allowed.test(lines[line - 1] ?? "")) return;
+    const line = lineOf(node);
+    let statement = node;
+    while (
+      statement.parent &&
+      !ts.isBlock(statement.parent) &&
+      !ts.isSourceFile(statement.parent) &&
+      !ts.isModuleBlock(statement.parent) &&
+      !ts.isCaseOrDefaultClause(statement.parent)
+    )
+      statement = statement.parent;
+    for (let at = lineOf(statement) - 1; at <= line; at += 1) if (allowed.test(lines[at] ?? "")) return;
     report(`${path}:${line + 1}: ${message}`);
   };
-
-  // Any string, joined with `+` or not, that names Playwright.
-  let namesPlaywright = false;
-  const scan = (node) => {
-    const text = folded(node);
-    if (text !== undefined && /playwright/iu.test(text)) namesPlaywright = true;
-    else ts.forEachChild(node, scan);
-  };
-  scan(file);
 
   // Names bound to a Playwright module, and names bound to its Chromium, by declaration only.
   const modules = new Set();
@@ -111,8 +113,12 @@ function checkFile(path, source, report) {
       const bindings = clause?.namedBindings;
       if (bindings && ts.isNamespaceImport(bindings)) modules.add(bindings.name.text);
       if (bindings && ts.isNamedImports(bindings))
-        for (const element of bindings.elements)
-          if ((element.propertyName ?? element.name).text === "chromium") chromiums.add(element.name.text);
+        for (const element of bindings.elements) {
+          const from = (element.propertyName ?? element.name).text;
+          if (from === "chromium") chromiums.add(element.name.text);
+          // `{ default as pw }` is the module itself.
+          if (from === "default") modules.add(element.name.text);
+        }
     }
     if (ts.isImportEqualsDeclaration(node)) fail(node, "an `import =` the check can't follow");
     if (
@@ -128,7 +134,10 @@ function checkFile(path, source, report) {
           const from = keyName(element.propertyName ?? element.name);
           if (from === undefined || element.dotDotDotToken)
             fail(element, "destructures Playwright in a way the check can't follow");
-          else if (from === "chromium" && ts.isIdentifier(element.name)) chromiums.add(element.name.text);
+          else if (!ts.isIdentifier(element.name))
+            fail(element, "destructures Playwright in a way the check can't follow");
+          else if (from === "chromium") chromiums.add(element.name.text);
+          else if (from === "default") modules.add(element.name.text);
         }
       else fail(node, "destructures Playwright in a way the check can't follow");
     }
@@ -231,10 +240,8 @@ function checkFile(path, source, report) {
     // load anywhere but a declaration.
     if (loader(node)) {
       const specifier = literalText(node.arguments[0]);
-      if (specifier === undefined) {
-        if (namesPlaywright)
-          fail(node, "loads a module the check can't name in a file that names Playwright");
-      } else if (playwright.test(specifier)) {
+      if (specifier === undefined) fail(node, "loads a module the check can't name");
+      else if (playwright.test(specifier)) {
         let at = node.parent;
         while (ts.isParenthesizedExpression(at) || ts.isAwaitExpression(at)) at = at.parent;
         if (!ts.isVariableDeclaration(at)) fail(node, "loads Playwright where the check can't follow it");
@@ -258,6 +265,9 @@ function checkFile(path, source, report) {
         if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node)
           fail(node, "a Playwright module is used in a way the check can't follow");
         else if (parent.name.text === "chromium") useChromium(parent);
+        // A module's `default` is the module again; the check refuses rather than follows it.
+        else if (parent.name.text === "default")
+          fail(parent, "reaches Playwright through `default`, which the check refuses");
       }
     }
     ts.forEachChild(node, visit);

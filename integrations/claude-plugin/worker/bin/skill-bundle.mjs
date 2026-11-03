@@ -34,6 +34,7 @@ export async function prepareWorkerSkill(workerRoot) {
     ) {
       // Always use this module's trusted builder, never a caller-selected one.
       // An installed standalone worker has neither builder nor canonical source.
+      // allow-no-sandbox -- loads this checkout's skill builder by URL, not Playwright
       const { materializeSkill } = await import(builder.href);
       materializeSkill(source, target);
       await writeFile(

@@ -60,6 +60,7 @@ function versionAtLeast(detected, minimum) {
 // store), never in env files. list() returns redacted summaries only.
 try {
   const storePath = resolve(root, "packages/credential-broker/src/credential-store.ts");
+  // allow-no-sandbox -- loads this checkout's credential-store module by path, not Playwright
   const { createDefaultCredentialStore } = await import(pathToFileURL(storePath).href);
   const listed = await createDefaultCredentialStore().list();
   const ids = Object.keys(listed).sort();

@@ -1,15 +1,18 @@
 /** Dedicated fixed-model Pi runtime; raw registry and credentials never leave the controller. */
 import { isDeepStrictEqual } from "node:util";
+// allow-no-sandbox -- loads Pi's coding-agent package by URL, not Playwright
 const sdk = await import(
   new URL("../../apps/clankie/node_modules/@earendil-works/pi-coding-agent/dist/index.js", import.meta.url)
     .href
 );
+// allow-no-sandbox -- loads Pi's AI package by URL, not Playwright
 const providerModule = await import(
   new URL(
     "../../apps/clankie/node_modules/@earendil-works/pi-ai/dist/providers/openai-codex.js",
     import.meta.url,
   ).href
 );
+// allow-no-sandbox -- loads Pi's AI package by URL, not Playwright
 const api = await import(
   new URL(
     "../../apps/clankie/node_modules/@earendil-works/pi-ai/dist/api/openai-codex-responses.js",

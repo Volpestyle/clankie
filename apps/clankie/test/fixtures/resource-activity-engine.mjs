@@ -79,6 +79,7 @@ const api = {
 const emit = async (name, event = {}) => {
   for (const hook of hooks.get(name) ?? []) await hook(api, event, async () => ({}));
 };
+// allow-no-sandbox -- loads the activity module the fixture's environment names, not Playwright
 const mod = await import(process.env.ACTIVITY_MOD_PATH);
 mod.register((name, matcher, hook) => {
   const entries = hooks.get(name) ?? [];
