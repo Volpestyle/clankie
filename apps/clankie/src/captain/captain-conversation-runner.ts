@@ -574,6 +574,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 publishActivity("waiting");
               } else if (event.type === "compaction_end") {
                 publishActivity("waiting");
+                if (!event.aborted && event.result !== undefined)
+                  ctx.conversations.noteCompactionSummary(conversationId, event.result.summary);
                 const usage = lane.session.getContextUsage();
                 if (usage !== undefined) {
                   publish({

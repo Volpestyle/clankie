@@ -68,6 +68,7 @@ import { CHANNEL_ROUND_INTERRUPTED_NOTICE, type ChannelTranscriptEntry } from ".
 import { ConversationJournal } from "../conversation-journal.ts";
 import {
   claimServiceHandoff,
+  noteCompactionSummary,
   markServiceContext,
   noteServiceTurn,
   restoreServiceHandoff,
@@ -1352,6 +1353,11 @@ export class ConversationStore {
   /** Opens the handoff span before a service turn appends anything. */
   public noteServiceTurn(conversationId: string): boolean {
     return noteServiceTurn(this, conversationId);
+  }
+
+  /** The service lane compacted; its summary reaches the next driver. */
+  public noteCompactionSummary(conversationId: string, summary: string): void {
+    noteCompactionSummary(this, conversationId, summary);
   }
 
   /** The SessionStart projection for a fresh harness session; advances its cursor. */

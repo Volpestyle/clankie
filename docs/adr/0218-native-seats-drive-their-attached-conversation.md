@@ -378,6 +378,16 @@ carries the log back out at each change of driver:
   worker-report inbox for anything omitted. The original inputs are never
   delivered again as separate turns.
 
+**The service lane's compaction summary travels with every projection** (#542,
+2026-11-03). When the service lane compacts, its latest summary (Pi folds each
+earlier one into the next) is stored on the conversation, clipped to 6k
+characters. The fresh service seed, the SessionStart section and a
+stalled-compaction recovery lead with it, so the oldest turns survive a driver
+switch after they fall out of the bounded log. A handoff carries it only when
+the compaction happened after the harness cursor, inside the handoff's budget.
+It is labelled as context, and whatever it retells from agent or external lines
+stays untrusted.
+
 The existing fence decides in-flight work. A service run admitted before the
 seat polled finishes on the service lane and lands inside the handoff. Input
 queued behind it selects its driver after the poll binds, so it goes to the
@@ -423,6 +433,9 @@ and handoff state, with a scripted model. It covers the following:
 - a second rebind gets no handoff;
 - a restart between take and settlement does not duplicate the handoff;
 - the SessionStart projection suppresses a second handoff;
+- the compaction summary reaches the next handoff once, the fresh service seed
+  after the compacted turns fall out of the log, the SessionStart section and
+  the stalled-compaction recovery;
 - failed service wakes keep their backoff.
 
 No live harness, provider or production state was exercised.
