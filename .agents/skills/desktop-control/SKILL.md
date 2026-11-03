@@ -74,6 +74,24 @@ Pick the first that fits:
    When the stock Herdr app or another workspace ships its own browser
    commands, use them the same way.
 
+   For Playwright's full API (locators, evaluate, network and console events,
+   full-page screenshots, cookies), when `herdr-browser commands` lists
+   `browser.cdp`, ask your agent pane for its endpoint and connect to it
+   ([ADR 0349](../../../docs/adr/0349-playwright-reaches-agent-browser-panes-through-a-guarded-pipe.md)):
+
+   ```js
+   const { endpoint } = JSON.parse(execSync(`herdr-browser do browser.cdp --pane ${pane}`));
+   const browser = await chromium.connectOverCDP(endpoint);
+   const page = browser
+     .contexts()[0]
+     .pages()
+     .find((p) => p.url().startsWith(myUrl));
+   ```
+
+   Only agent-profile pages are visible there, and `newPage()` opens a pane the
+   owner can see. All agents share agent panes, so pick yours by URL.
+   `browser.close()` only disconnects. Use `goBack({ waitUntil: 'commit' })`.
+
 2. **Your own headless browser tools** when the workspace has no browser pane.
 3. **A desktop** for native apps only, in the machine's desktop mode
    ([ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)):
