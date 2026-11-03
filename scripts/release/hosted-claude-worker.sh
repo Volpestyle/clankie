@@ -1,22 +1,23 @@
 #!/bin/sh
-# Provision Clankie's Claude workers for the body's runtime user (VUH-1767): the
-# worker plugin, installed and off (each hire enables it for its own session),
-# and Herdr's Claude hook, which reports each session to Herdr. Runs at every
-# body start, after the release root, so a self-installed release brings its own
-# plugin. The image's managed settings approve the plugin's channel.
+# Provision Clankie's Claude workers for the body's runtime user (VUH-1767):
+# Herdr's Claude hook, which reports each session to Herdr, and first-run
+# defaults. Each hire loads the release's worker plugin for its own session with
+# --plugin-dir (ADR 0317), so nothing is installed in the profile; an older
+# installed copy is removed. Runs at every body start, after the release root.
+# The image's managed settings approve the inline worker's channel.
 set -eu
 umask 077
 source_dir="${CLANKIE_CLAUDE_MARKETPLACE:-/state/install/current/integrations/claude-plugin}"
-plugin=clankie-worker@clankie
+old_plugin=clankie-worker@clankie
 stamp="$HOME/.claude/clankie-hosted-setup.sha256"
 command -v claude >/dev/null 2>&1 || exit 0
-if [ ! -f "$source_dir/.claude-plugin/marketplace.json" ]; then
+if [ ! -f "$source_dir/worker/.claude-plugin/plugin.json" ]; then
   rm -f "$stamp"
-  echo "clankie: no Claude marketplace at $source_dir" >&2
+  echo "clankie: no Claude worker plugin at $source_dir/worker" >&2
   exit 1
 fi
 # Cache only successful reconciliation. Local digests include the shipped plugin,
-# CLI identities, installed plugin contents and owner-controlled setup inputs.
+# CLI identities, the installed plugin registry and owner-controlled setup inputs.
 # No authentication material is written to the stamp or logs.
 fingerprint() {
   CLANKIE_SETUP_SOURCE="$source_dir" CLANKIE_SETUP_SCRIPT="$0" \
@@ -40,8 +41,7 @@ function tree(p) {
 }
 file(process.env.CLANKIE_SETUP_SCRIPT);
 const source = fs.realpathSync(process.env.CLANKIE_SETUP_SOURCE);
-file(`${source}/.claude-plugin/marketplace.json`);
-tree(`${source}/worker`);
+file(`${source}/worker/.claude-plugin/plugin.json`);
 for (const cli of [process.env.CLANKIE_SETUP_CLAUDE, process.env.CLANKIE_SETUP_HERDR]) {
   const real = fs.realpathSync(cli), stat = fs.statSync(real);
   hash.update(JSON.stringify([real, stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino]));
@@ -50,11 +50,6 @@ const home = process.env.HOME, workspace = process.env.CLANKIE_HOSTED_WORKSPACE 
 for (const name of ["settings.json", "settings.local.json", "hooks/herdr-agent-state.sh", ".credentials.json", "plugins/known_marketplaces.json", "plugins/installed_plugins.json"])
   file(`${home}/.claude/${name}`);
 file("/etc/claude-code/managed-settings.json");
-const registry = `${home}/.claude/plugins/installed_plugins.json`;
-if (fs.existsSync(registry)) {
-  const plugins = JSON.parse(fs.readFileSync(registry, "utf8")).plugins;
-  for (const entry of plugins?.["clankie-worker@clankie"] || []) if (entry.installPath) tree(entry.installPath);
-}
 let state = {};
 try { state = JSON.parse(fs.readFileSync(`${home}/.claude.json`, "utf8")); }
 catch (e) { if (e.code !== "ENOENT") throw e; }
@@ -73,27 +68,15 @@ fi
 rm -f "$stamp"
 field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const v=JSON.parse(s).find(e=>e[process.argv[1]]===process.argv[2]);process.stdout.write(v?String(v[process.argv[3]]??""):"")}catch{}})' "$@"; }
 
-registered="$(claude plugin marketplace list --json 2>/dev/null | field name clankie path)"
-if [ "$registered" != "$source_dir" ]; then
-  [ -n "$registered" ] && claude plugin marketplace remove clankie >/dev/null 2>&1
-  claude plugin marketplace add "$source_dir" >/dev/null || exit 1
-else
-  claude plugin marketplace update clankie >/dev/null 2>&1 || exit 1
+# An older setup installed the worker in this profile; hires load it per session now.
+if [ -n "$(claude plugin list --json 2>/dev/null | field id "$old_plugin" id)" ]; then
+  claude plugin uninstall "$old_plugin" --scope user >/dev/null || exit 1
 fi
-if [ -n "$(claude plugin list --json 2>/dev/null | field id "$plugin" id)" ]; then
-  claude plugin update "$plugin" >/dev/null 2>&1 || exit 1
-else
-  claude plugin install "$plugin" --scope user >/dev/null || exit 1
+if [ -n "$(claude plugin marketplace list --json 2>/dev/null | field name clankie name)" ] &&
+  ! claude plugin list --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.exit(JSON.parse(s).some(e=>String(e.id).endsWith("@clankie"))?0:1)}catch{process.exit(0)}})'; then
+  claude plugin marketplace remove clankie >/dev/null || exit 1
 fi
-# Claude 2.1.281 returns 1 when the user-scoped plugin is already disabled.
-# Accept that idempotent result only after verifying the desired native state.
-claude plugin disable "$plugin" --scope user >/dev/null 2>&1 || node -e '
-try {
-  const settings = JSON.parse(require("node:fs").readFileSync(`${process.env.HOME}/.claude/settings.json`, "utf8"));
-  process.exit(settings.enabledPlugins?.["clankie-worker@clankie"] === false ? 0 : 1);
-} catch { process.exit(1); }
-' || exit 1
-# Needs ~/.claude, which the plugin install above creates.
+mkdir -p "$HOME/.claude"
 herdr integration install claude >/dev/null || exit 1
 # A hired Claude must not stop at first-run prompts nobody will answer: mark the
 # cosmetic onboarding (theme picker) done, keeping any choice already made, and
@@ -143,7 +126,7 @@ fs.writeFileSync(path, JSON.stringify({ ...settings, permissions: { ...settings.
 ' || exit 1
 
 # Rename on the same filesystem publishes success atomically. Recompute because
-# plugin installation and first-run defaults changed the inputs above.
+# plugin removal and first-run defaults changed the inputs above.
 current="$(fingerprint)" || exit 1
 temporary="$stamp.tmp.$$"
 trap 'rm -f "$temporary"' EXIT HUP INT TERM

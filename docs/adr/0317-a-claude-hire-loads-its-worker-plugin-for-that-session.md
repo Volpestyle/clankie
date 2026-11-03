@@ -63,3 +63,14 @@ and the plugin named in `--channels`. Managed `disableSideloadFlags` drops
   `claude --resume` in prepared panes. A hand-started session elsewhere (a
   Windows machine, an unprepared pane) has no worker until it is resumed with
   the two flags; a Windows shim is a follow-up.
+
+## Amendment, 2026-11-03 (#594)
+
+The bridge no longer accepts the old `plugin:clankie-worker@clankie` channel, so an
+installed copy cannot bind a seat's mailbox. Cleanup also removes project-scoped
+copies. A settings source that declares only the `clankie` marketplace (which the
+operator plugin may still use) no longer blocks the removal: the copy is removed
+and the marketplace stays. Only a source that still sets
+`enabledPlugins["clankie-worker@clankie"]` is refused. Launches still switch the
+old name off, and a layer that sets it to `false` still opts out of the Mac PATH
+shim. Both cover a profile whose cleanup was declined or refused.

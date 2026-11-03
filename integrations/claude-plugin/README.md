@@ -478,8 +478,9 @@ a hire needs `"channelsEnabled": true` and
 [managed consent](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-09-26-interactive-swarm-workers/managed-consent.md)).
 `clankie herdr prepare` writes it on a fleet machine; on the Mac it is the
 owner's administrator step. Nothing is installed in a Claude profile: `clankie
-harness install` and its update refresh remove an older `clankie-worker@clankie`
-copy, and the clankie marketplace when no other Clankie plugin uses it.
+update` (and `clankie harness install`) remove an older `clankie-worker@clankie`
+copy at user and project scope, and the clankie marketplace when no other Clankie
+plugin or settings source still uses it; `clankie doctor` names any copy left.
 
 Until the entry is there, a Claude hire reports `consent_required` with the
 missing step and unavailable control. It does not type the brief into the

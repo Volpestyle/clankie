@@ -369,7 +369,7 @@ async function startBridge(
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@clankie" : harness)},requestTimeoutMs:${String(bridgeRequestTimeoutMs)},unknownAckTimeoutMs:1000});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(f.pane)},parentArgv:${JSON.stringify(polling ? "claude --channels plugin:clankie-worker@inline" : harness)},requestTimeoutMs:${String(bridgeRequestTimeoutMs)},unknownAckTimeoutMs:1000});`,
     ],
     { env: { PATH: process.env.PATH, HOME: f.root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: f.pane } },
   );

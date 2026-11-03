@@ -340,11 +340,12 @@ export async function inspectHarnessBridges(
         : []),
       // Claude hires load the worker from Clankie's own files (ADR 0317); an older
       // installed copy still loads in hand-started sessions, so doctor names it.
+      // `clankie update` removes it from every profile; --refresh-linked does the same now.
       ...profiles.claude
         .filter((profile) => profile.installed)
         .map(
           (profile) =>
-            `Remove the old clankie-worker ${profile.version ?? "unknown"} copy from ${profile.profile}: clankie harness install`,
+            `Remove the old clankie-worker ${profile.version ?? "unknown"} copy from ${profile.profile}: clankie update, or clankie harness install --refresh-linked`,
         ),
       ...(profiles.codex.pluginInstalled && profiles.codex.versionMatches === false
         ? [

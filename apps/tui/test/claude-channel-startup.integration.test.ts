@@ -8,7 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 const hook = join(import.meta.dirname, "../../../integrations/claude-plugin/worker/bin/seat-hook.mjs");
-const channel = "plugin:clankie-worker@clankie";
+const channel = "plugin:clankie-worker@inline";
+const workerRoot = join(import.meta.dirname, "../../../integrations/claude-plugin/worker");
+// The hire loads this worker for its own session (ADR 0317), so the fix names its folder.
+const restart = (sessionId: string) =>
+  `claude --resume ${sessionId} --plugin-dir "${workerRoot}" --channels ${channel}`;
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
@@ -102,6 +106,7 @@ child.stdin.end(process.env.HOOK_INPUT);child.on('exit',code=>process.exit(code?
         CLANKIE_STATE: state,
         HERDR_PANE_ID: settings.pane ?? pane,
         HERDR_SOCKET_PATH: socket,
+        CLAUDE_PLUGIN_ROOT: workerRoot,
         CLANKIE_CODEX_CATALOG_OBSERVED: "1",
         HOOK_ARGS: JSON.stringify(settings.codex ? ["--codex"] : []),
         HOOK_INPUT: JSON.stringify({
@@ -131,7 +136,7 @@ it("shows the exact safe session restart at startup through a linked pane's real
   const output = await f.run();
   expect(output).toEqual([
     {
-      systemMessage: `Clankie's live messages are off in this pane. Restart this session with: claude --resume ${f.sessionId} --channels ${channel}`,
+      systemMessage: `Clankie's live messages are off in this pane. Restart this session with: ${restart(f.sessionId)}`,
     },
   ]);
   expect(f.requests).toMatchObject([{ event: "SessionStart", sessionId: f.sessionId }]);
@@ -181,6 +186,6 @@ it("keeps print mode out of the interactive startup fix", async () => {
 it("shows a conservative exact-session fix when the native launch cannot be observed", async () => {
   const f = await fixture({ unknownParent: true });
   expect((await f.run())[0]?.systemMessage).toBe(
-    `Clankie cannot confirm live messages in this pane. Restart this session with: claude --resume ${f.sessionId} --channels ${channel}`,
+    `Clankie cannot confirm live messages in this pane. Restart this session with: ${restart(f.sessionId)}`,
   );
 });

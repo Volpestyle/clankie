@@ -141,11 +141,29 @@ it("names the entries a source-managed settings file must drop, and changes noth
   });
   expect(results.find((entry) => entry.harness === "claude")).toMatchObject({
     status: "source-manager-required",
-    detail: expect.stringMatching(
-      /enabledPlugins\["clankie-worker@clankie"\] and extraKnownMarketplaces\.clankie/u,
-    ),
+    detail: expect.stringMatching(/Remove enabledPlugins\["clankie-worker@clankie"\] there/u),
   });
   expect(fixture.calls.filter((call) => call.startsWith("claude plugin"))).toEqual([]);
+  expect(await readFile(fixture.source, "utf8")).toBe(linked);
+});
+
+it("removes the worker but keeps a marketplace a shared settings source still declares", async () => {
+  // A named profile whose settings link to the main profile's, which keeps the
+  // clankie marketplace for the operator plugin installed there.
+  const linked = JSON.stringify({
+    enabledPlugins: { "clankie@clankie": false },
+    extraKnownMarketplaces: { clankie: { source: { source: "directory", path: "/old/clankie" } } },
+  });
+  const fixture = await legacyProfile({ linkedSettings: linked });
+  const results = await installHarnessBridges({
+    repoRoot: "/fixture/clankie",
+    env: { HOME: fixture.home },
+    execute: fixture.execute,
+    consent: async () => true,
+  });
+  expect(results.find((entry) => entry.harness === "claude")?.status).toBe("removed");
+  expect(fixture.calls).toContain("claude plugin uninstall clankie-worker@clankie --scope user");
+  expect(fixture.calls.some((call) => call.includes("marketplace remove"))).toBe(false);
   expect(await readFile(fixture.source, "utf8")).toBe(linked);
 });
 

@@ -9,7 +9,7 @@ const env = {
   CLANKIE_STATE: state,
   HERDR_SOCKET_PATH: socketPath,
   HERDR_PANE_ID: pane,
-  CLANKIE_SEAT_PARENT_ARGV: "ordinary-fixture --channels plugin:clankie-worker@clankie",
+  CLANKIE_SEAT_PARENT_ARGV: "ordinary-fixture --channels plugin:clankie-worker@inline",
 };
 for (const key of Object.keys(env)) if (/TOKEN|SECRET|CREDENTIAL|API_KEY/u.test(key)) delete env[key];
 let bridge;

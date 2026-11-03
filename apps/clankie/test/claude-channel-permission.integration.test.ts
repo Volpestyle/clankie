@@ -125,7 +125,7 @@ async function fixture(channel = true) {
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:${JSON.stringify(channel ? "claude --channels plugin:clankie-worker@clankie" : "claude")},requestTimeoutMs:100});`,
+      `import {runSeatChannel} from ${JSON.stringify(bridge.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:${JSON.stringify(channel ? "claude --channels plugin:clankie-worker@inline" : "claude")},requestTimeoutMs:100});`,
     ],
     {
       env: {

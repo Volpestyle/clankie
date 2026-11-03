@@ -234,6 +234,13 @@ setInterval(() => {}, 1 << 30);
   expect(staged.clankieBrief).toContain(request.brief);
   expect(launched.env.CLANKIE_OPERATOR_TOKEN).toBe("");
 
+  // The hire loads Clankie's worker for this session only (ADR 0317): its own folder,
+  // its inline channel, and an older installed copy switched off.
+  const pluginDir = launched.argv.indexOf("--plugin-dir");
+  expect(launched.argv[pluginDir + 1]).toMatch(/[\\/]claude-plugin[\\/]worker$/u);
+  expect(launched.argv[launched.argv.indexOf("--channels") + 1]).toBe("plugin:clankie-worker@inline");
+  expect(launched.argv.join(" ")).not.toContain("plugin:clankie-worker@clankie");
+
   // The worker plugin's bridge in that pane serves message_clankie over the join channel.
   const [harness, bridge] = InMemoryTransport.createLinkedPair();
   // `clankie mcp` takes its stdio transport through the same options the hook routes.
@@ -242,7 +249,8 @@ setInterval(() => {}, 1 << 30);
     env: {
       ...launched.env,
       CLANKIE_CREDENTIALS_FILE: herdrEnv.CLANKIE_CREDENTIALS_FILE,
-      CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@clankie",
+      // The bridge binds from the hire's own launch flags.
+      CLANKIE_SEAT_PARENT_ARGV: ["claude", ...launched.argv].join(" "),
     },
     transport: bridge,
     stderr: { write: () => true },
