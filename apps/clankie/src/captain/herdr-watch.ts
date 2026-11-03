@@ -118,6 +118,7 @@ import {
 } from "./fleet-seat.ts";
 import { herdrSummariesPath, readHerdrSummariesFile, type HerdrAgentSummary } from "./herdr-summaries.ts";
 import { HerdrFleetError, nativeProofLocation, splitFleetQualified } from "../herdr-fleet.ts";
+import { sameRemoteDirectory } from "../herdr-session.ts";
 import type { RemoteHireClaim, RemoteHireReceipts } from "../remote-hire-receipts.ts";
 import {
   chooseWorkerAccount,
@@ -4342,7 +4343,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           );
         if (agent.agent !== harness || agent.session === undefined)
           throw new Error(`Pane ${paneId} holds no observed ${harness} session to adopt`);
-        if (agent.workingDirectory !== cwd && agent.foregroundWorkingDirectory !== cwd)
+        if (!agentInDirectory(agent, cwd, "posix"))
           throw new Error(`Pane ${paneId} runs outside the hire's directory`);
         const occupantId = occupantIdForHerdrSession(agent.session);
         const sessionId = nativeSessionId(agent);
@@ -4566,23 +4567,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
         throw new Error("The original hire is still active");
       // Without a receipt, no other unresolved hire may claim this place: adoption must not
       // pick between competing originals.
-      if (
-        !original &&
-        this.hireReceipts.entries().some(([key, entry]) => {
-          const [keyFleet, , keyCwd] = JSON.parse(key) as string[];
-          return keyFleet === fleet && keyCwd === cwd && entry.paneId === paneId;
-        })
-      )
+      if (!original && this.hireReceipts.entries().some(([, entry]) => entry.paneId === paneId))
         throw new Error("An unresolved receipt names this pane; adopt it by that receipt");
       if (original) this.activeHires.add((fenced = original[0]));
       if (allocation) this.activeProjectHires.add((fencedAllocation = allocation.id));
+      // The fleet's own shell decides how its paths compare. Claiming reads its configuration only.
+      if (!this.remoteHireReceipts) throw new Error("The fleet's host receipt program is unavailable");
+      const shell =
+        receipt?.remoteAdmission?.target.shell ??
+        (await this.remoteHireReceipts.claim(fleet, { receiptId: id, receiptKey: id, fingerprint: "" }))
+          ?.target.shell;
+      if (shell === undefined) throw new Error(`${fleet} is not a configured remote host`);
       const observe = async () => {
         const inventory = await this.runner.list!(fleet);
         const agent = inventory.find((entry) => entry.paneId === paneId);
         if (!agent) throw new Error(`Pane ${paneId} is absent; settle its receipt as abandoned instead`);
         if (agent.agent !== harness || agent.session === undefined)
           throw new Error(`Pane ${paneId} holds no observed ${harness} session to adopt`);
-        if (agent.workingDirectory !== cwd && agent.foregroundWorkingDirectory !== cwd)
+        if (!agentInDirectory(agent, cwd, shell))
           throw new Error(`Pane ${paneId} runs outside the hire's directory`);
         const occupantId = occupantIdForHerdrSession(agent.session);
         const sessionId = nativeSessionId(agent);
@@ -4614,7 +4616,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
         throw new Error(`Pane ${paneId} has no current process proof matching its occupant`);
       let evidence: HireRecoveryEvidence | undefined;
       if (original) {
-        if (!this.remoteHireReceipts) throw new Error("The fleet's host receipt program is unavailable");
         let hostClaim = this.remoteClaim(original[0], original[1]);
         if (!hostClaim) {
           hostClaim = await this.remoteHireReceipts.claim(fleet, {
@@ -7704,4 +7705,18 @@ function startupSignIn(
     return "same";
   const own = report.accounts.filter(holds);
   return own.length > 0 && own.every((entry) => entry.signedIn === null) ? "unknown" : "changed";
+}
+
+/**
+ * Whether a pane's agent runs in a hire's directory. The foreground process's directory is
+ * the agent's own when Herdr reports it, so a pane opened in the directory whose agent moved
+ * elsewhere does not count; the pane's directory stands in only when no foreground is known.
+ */
+function agentInDirectory(
+  agent: Pick<HerdrAgentSnapshot, "workingDirectory" | "foregroundWorkingDirectory">,
+  cwd: string,
+  shell: "posix" | "powershell",
+): boolean {
+  const at = agent.foregroundWorkingDirectory ?? agent.workingDirectory;
+  return at !== undefined && sameRemoteDirectory(at, cwd, shell);
 }

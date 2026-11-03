@@ -69,11 +69,14 @@ async function fixture() {
 const { execFileSync } = require("node:child_process");
 const { randomUUID } = require("node:crypto");
 process.title = "claude";
+require("node:fs").appendFileSync(${JSON.stringify(join(home, "pids"))}, process.pid + "\\n");
 execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:claude",
   "--agent", "claude", "--state", "idle"]);
 execFileSync("herdr", ["pane", "report-agent-session", process.env.HERDR_PANE_ID, "--source", "herdr:claude",
   "--agent", "claude", "--agent-session-id", randomUUID()]);
 process.stdout.write("Claude is idle after folder trust\\n");
+// A harness that changes directory mid-session (the census-change probe).
+process.on("SIGUSR2", () => process.chdir(${JSON.stringify(join(home, "moved"))}));
 setInterval(() => {}, 1 << 30);
 `,
   );
@@ -84,11 +87,17 @@ setInterval(() => {}, 1 << 30);
     new Map([["pc", createRemoteHerdrRunner(pc, async (args) => herdrCli(args), { pollMs: 0 })]]),
   );
   /** A pane on the "PC" in this directory; with the stand-in Claude unless `shellOnly`. */
-  const pane = async (directory: string, shellOnly = false) => {
+  const pane = async (directory: string, shellOnly = false, agentDirectory?: string) => {
     await mkdir(directory, { recursive: true });
     const id = await runner.createTab!({ cwd: directory, label: "PC worker" });
     if (!shellOnly) {
-      await runner.runInPane!(id, [join(home, "bin/claude")]);
+      if (agentDirectory !== undefined) await mkdir(agentDirectory, { recursive: true });
+      await runner.runInPane!(
+        id,
+        agentDirectory === undefined
+          ? [join(home, "bin/claude")]
+          : ["sh", "-c", `cd '${agentDirectory}' && exec '${join(home, "bin/claude")}'`],
+      );
       await expect
         .poll(
           async () => {
@@ -129,7 +138,16 @@ setInterval(() => {}, 1 << 30);
     return claim;
   };
   const owners = new HireOwners(`${watches}.owners.json`);
-  return { home, herdr, runner, native, watches, receipts, pane, uncertainHire, owners };
+  /** The pane's stand-in changes its own directory, as a harness can mid-session. */
+  const moveAgent = async (paneId: string) => {
+    await mkdir(join(home, "moved"), { recursive: true });
+    for (const pid of (await readFile(join(home, "pids"), "utf8")).trim().split("\n"))
+      process.kill(Number(pid), "SIGUSR2");
+    await expect
+      .poll(async () => (await runner.get(paneId)).foregroundWorkingDirectory, { timeout: 15_000 })
+      .toBe(join(home, "moved"));
+  };
+  return { home, herdr, runner, native, watches, receipts, pane, uncertainHire, owners, moveAgent };
 }
 
 nativeIt(
@@ -342,6 +360,118 @@ nativeIt(
           expect(JSON.parse(await readFile(join(f.home, ".clankie/hire-receipts", name), "utf8")).state).toBe(
             "launching",
           );
+      } finally {
+        store.close();
+      }
+    } finally {
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "refuses a pane opened in the hire's directory whose agent runs in a sibling directory",
+  async () => {
+    const f = await fixture();
+    try {
+      const directory = join(f.home, "A");
+      const paneId = await f.pane(directory, false, join(f.home, "B"));
+      expect(await f.runner.get(paneId)).toMatchObject({
+        workingDirectory: directory,
+        foregroundWorkingDirectory: join(f.home, "B"),
+      });
+      const original = await f.uncertainHire(directory, paneId);
+      f.owners.bind(paneId, lead);
+      const store = new HerdrWatchStore(f.watches, { remoteHireReceipts: f.native, runner: f.runner });
+      try {
+        const bytes = await readFile(f.receipts, "utf8");
+        expect(await store.settleHireReceipt(original.receiptId, async () => {}, "adopt")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("outside the hire's directory"),
+        });
+        expect(await readFile(f.receipts, "utf8")).toBe(bytes);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "refuses a legacy allocation's pane that an unresolved receipt elsewhere names, even for another harness",
+  async () => {
+    const f = await fixture();
+    try {
+      const directory = join(f.home, "A");
+      const paneId = await f.pane(directory);
+      // A Codex hire at B recorded this very pane.
+      await f.uncertainHire(join(f.home, "B"), paneId, "codex");
+      const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "game", name: "Game" }] });
+      const ledger = new ProjectHires(`${f.watches}.project-hires.json`);
+      const allocation = ledger.reserve(
+        settings,
+        "game",
+        SpawnOperatorSeatSchema.parse({
+          schemaVersion: 1,
+          fleet: "pc",
+          harness: "claude",
+          title: "Ada",
+          workingDirectory: directory,
+        }),
+      );
+      ledger.launch(allocation.id, settings);
+      ledger.pane(allocation.id, paneId);
+      f.owners.bind(paneId, lead);
+      const store = new HerdrWatchStore(f.watches, { remoteHireReceipts: f.native, runner: f.runner });
+      try {
+        expect(await store.settleHireReceipt(allocation.id, async () => {}, "adopt")).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("An unresolved receipt names this pane"),
+        });
+        expect(new ProjectHires(`${f.watches}.project-hires.json`).allocation(allocation.id)).toMatchObject({
+          confirmed: false,
+        });
+      } finally {
+        store.close();
+      }
+    } finally {
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "refuses when the census changes between its two reads, settling nothing",
+  async () => {
+    const f = await fixture();
+    try {
+      const directory = join(f.home, "changing");
+      const paneId = await f.pane(directory);
+      const original = await f.uncertainHire(directory, paneId);
+      f.owners.bind(paneId, lead);
+      const store = new HerdrWatchStore(f.watches, { remoteHireReceipts: f.native, runner: f.runner });
+      try {
+        const bytes = await readFile(f.receipts, "utf8");
+        let checks = 0;
+        // The last authority check runs just before the final census read.
+        const adopted = await store.settleHireReceipt(
+          original.receiptId,
+          async () => {
+            if (++checks === 3) await f.moveAgent(paneId);
+          },
+          "adopt",
+        );
+        expect(checks).toBe(3);
+        expect(adopted).toMatchObject({
+          state: "refused",
+          detail: expect.stringContaining("outside the hire's directory"),
+        });
+        expect(await readFile(f.receipts, "utf8")).toBe(bytes);
       } finally {
         store.close();
       }
