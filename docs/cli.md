@@ -2389,7 +2389,9 @@ Each chat has `conversationId`, `title`, `projects: [{id, name}]`, `workspace`,
 `{kind: "service", lane: "operator"}`), `state` (`current`, `stale`,
 `reconnecting`, `disconnected` or `service`), `activity` (`unbound`, `active`,
 `waiting`, `completed` or `failed`), `lastActiveAt`, optional `lastBridgeSeenAt`,
-`messageSeat` and `messageAvailable`. These fields follow `LeadChatSchema` in
+`messageSeat` and `messageAvailable`. A project's `id` is its Clankie project ID from
+project settings, never the Linear or built-in tracker project ID its chat route is
+keyed by; a route no project binds names no project. These fields follow `LeadChatSchema` in
 `@clankie/protocol`. An unavailable observation returns
 `{outcome: "unavailable", message}`; it is distinct from an empty ready roster.
 

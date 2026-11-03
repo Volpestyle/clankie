@@ -105,7 +105,7 @@ import { AutonomyStore } from "./autonomy.ts";
 import { createKeyPresser, createPromptAnswerer } from "./prompt-answer.ts";
 import { createPanePromptAsks, PANE_PROMPT_ORIGIN } from "./pane-prompt-asks.ts";
 import { LeadStore } from "./lead.ts";
-import { countOutsideProjects, projectStatuses } from "./auto-projects.ts";
+import { countOutsideProjects, projectStatuses, routedProjects } from "./auto-projects.ts";
 import { replayAutoRounds, AutoReplayInputError } from "./auto-replay.ts";
 import { RoutineError, RoutineStore } from "./routines.ts";
 import { createRoutineRunner } from "./routine-runner.ts";
@@ -1838,9 +1838,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       chats.push({
         conversationId: id,
         title: conversation.title,
-        projects: current.linearWebhook.projectChats
-          .filter((route) => route.conversationId === id)
-          .map((route) => ({ id: route.projectId, name: route.name })),
+        projects: routedProjects(current.projects.projects, current.linearWebhook.projectChats, id),
         workspace:
           conversation.scope.kind === "workspace"
             ? conversation.scope.workspaceId

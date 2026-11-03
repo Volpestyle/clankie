@@ -1,5 +1,6 @@
 import { CHANNEL_NOTIFICATION_METHOD, pumpSeatEvents } from "../../tui/src/command/mcp.ts";
 import { randomUUID } from "node:crypto";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { afterEach, expect, it, vi } from "vitest";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { join } from "node:path";
@@ -386,6 +387,19 @@ it.each([false, true])(
     }));
     await f.settings.update((current) => ({
       ...current,
+      // The work chat's route is bound to a Clankie project, which its roster row names (#662).
+      projects: ProjectsSettingsSchema.parse({
+        ...current.projects,
+        projects: [
+          ...current.projects.projects,
+          {
+            id: "work-project",
+            name: "Work project",
+            workspaces: [{ id: "local", machineId: "local", platform: "posix", path: f.root }],
+            trackerProjectId: routes[1]!.projectId,
+          },
+        ],
+      }),
       linearWebhook: {
         ...current.linearWebhook,
         projectChats: [
@@ -408,7 +422,7 @@ it.each([false, true])(
     expect(before.map((chat) => chat.conversationId)).not.toEqual(expect.arrayContaining(hidden));
     for (const id of hidden) expect(before.some((chat) => chat.conversationId === id)).toBe(false);
     expect(before.find((chat) => chat.conversationId === work)).toMatchObject({
-      projects: [{ id: routes[1]!.projectId, name: "Work project" }],
+      projects: [{ id: "work-project", name: "Work project" }],
       holder: { kind: "native", seatId: f.head.terminalId, harness: "claude" },
       machine: remote ? "pc" : "local",
       state: "disconnected",
