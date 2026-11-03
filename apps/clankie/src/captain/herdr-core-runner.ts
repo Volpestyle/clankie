@@ -379,9 +379,26 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
       const sessionId = nativeSessionId(agent);
       const process = (await harnessProcess(agent.paneId))?.[0];
       const endpoint = codexControlEndpoint(process);
-      if (!sessionId || typeof endpoint !== "string") return undefined;
-      const socket = await openCodexSocket(`ws+unix://${endpoint.slice(7)}:/`);
-      if (!socket) return undefined;
+      if (!sessionId) return undefined;
+      const socket =
+        typeof endpoint === "string" ? await openCodexSocket(`ws+unix://${endpoint.slice(7)}:/`) : undefined;
+      // Its server can be gone while the view lives on (it then says "Reconnect failed"). The
+      // session Clankie recorded for this live hire still names its file, found as a Herdr
+      // pane's Codex session is (ADR 0307); the label alone is anyone's to write, so never it.
+      if (!socket) {
+        const recorded =
+          options.seatDirectory === undefined
+            ? null
+            : await liveDesktopSeat(seats, options.seatDirectory, agent.paneId);
+        if (recorded?.agent !== "codex" || recorded.session !== sessionId) return undefined;
+        const read = readHerdrSeatTranscript("codex", {
+          source: "herdr:codex",
+          kind: "id",
+          value: recorded.session,
+        });
+        const after = await liveDesktopSeat(seats, options.seatDirectory!, agent.paneId);
+        return after?.pid === recorded.pid && after.session === recorded.session ? read : undefined;
+      }
       const client = new CodexAppServerClient(socket, () => {}, 5000);
       try {
         await client.initialize(true);

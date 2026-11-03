@@ -72,3 +72,13 @@ unconfirmed. The dedicated adapter also checks `thread/read`'s cwd before
 binding or sending any brief. A thread mismatch fails startup without a brief.
 No process-wide cwd change or shared app-server restart is needed. This applies
 to new hires after the updated service loads; existing threads keep their cwd.
+
+## Amendment: history outlives the server (2026-11-03)
+
+A Codex hire's view can outlive its dedicated app-server: the view then says
+"Reconnect failed" and `thread/read` has nothing to answer. Its history is
+still read, from the session file Clankie recorded for that live hire (its
+private seat record, matched to the terminal's pid before and after the read),
+found the way a Herdr pane's Codex session is (ADR 0307). A terminal label
+alone never names a session to read. When no history can be read at all, the
+owner's chat says so in plain words instead of naming the native source.

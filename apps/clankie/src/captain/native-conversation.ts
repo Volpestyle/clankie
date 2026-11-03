@@ -92,7 +92,14 @@ export async function nativeConversationPage(
     add(`native-source:${status}`, entries.at(-1)?.occurredAt ?? conversation.createdAt, {
       type: "message",
       role: "external",
-      text: `${status === "offline" ? "Agent offline" : "Native history unavailable"}. ${transcript.entries.length ? "Showing the last known transcript." : "No transcript has been cached yet."}`,
+      text:
+        status === "offline"
+          ? transcript.entries.length
+            ? "This agent has stopped. These are its last saved messages."
+            : "This agent has stopped, and none of its messages were saved."
+          : transcript.entries.length
+            ? "Couldn't load this agent's latest messages, so these may be out of date."
+            : "Couldn't load this agent's messages yet.",
       streaming: false,
     });
   const phase = status === "working" ? "responding" : "waiting";
