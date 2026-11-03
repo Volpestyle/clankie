@@ -58,9 +58,9 @@ async function fixture() {
   };
   const paneShell = await installPaneShell({ root, socketPath: env.HERDR_SOCKET_PATH, owner: env });
   env.PATH = `${root}/bin:${env.PATH}`;
-  const launch = async (args: string[], overrides = {}) => {
+  const launch = async (args: string[], overrides = {}, cwd = home) => {
     try {
-      await exec(join(root, "bin/claude"), args, { env: { ...env, ...overrides }, cwd: home });
+      await exec(join(root, "bin/claude"), args, { env: { ...env, ...overrides }, cwd });
       throw new Error("Expected the native child's exit status");
     } catch (error) {
       const result = error as { code: number; stdout: string };
@@ -183,13 +183,25 @@ it.skipIf(process.platform !== "darwin")(
       { CLAUDECODE: "1" },
     ])
       expect((await f.launch(args, overrides)).args).toEqual(args);
-    await mkdir(join(f.home, "alternate"));
-    expect((await f.launch(args, { CLAUDE_CONFIG_DIR: join(f.home, "alternate") })).args).toEqual(args);
+    // The selected CLAUDE_CONFIG_DIR, not ~/.claude, decides (ADR 0317): its own switch-off opts out.
+    const alternate = { CLAUDE_CONFIG_DIR: join(f.home, "alternate") };
+    await mkdir(alternate.CLAUDE_CONFIG_DIR);
+    // From $HOME, ~/.claude/settings.json is also the project layer; launch elsewhere to read the profile alone.
+    const elsewhere = join(f.home, "elsewhere");
+    await mkdir(elsewhere);
+    await writeFile(
+      join(alternate.CLAUDE_CONFIG_DIR, "settings.json"),
+      JSON.stringify({ enabledPlugins: { [worker]: false } }),
+    );
+    expect((await f.launch(args, alternate, elsewhere)).args).toEqual(args);
     await writeFile(
       join(f.home, ".claude/settings.json"),
       JSON.stringify({ enabledPlugins: { [worker]: false } }),
     );
     expect((await f.launch(args)).args).toEqual(args);
+    // A profile that says nothing still loads the worker, whatever ~/.claude says.
+    await writeFile(join(alternate.CLAUDE_CONFIG_DIR, "settings.json"), "{}");
+    expect((await f.launch(args, alternate, elsewhere)).args).toEqual([...loaded, ...args]);
     // Switching off the older installed copy's name opts out the same way.
     await writeFile(
       join(f.home, ".claude/settings.json"),
