@@ -283,8 +283,14 @@ export interface HerdrWatchRunner {
   /** Fresh complete inventory of exactly one fleet, for native session reuse. */
   list?(fleet?: string): Promise<readonly HerdrAgentSnapshot[]>;
   get(target: string): Promise<HerdrAgentSnapshot>;
-  /** Resolve an exact terminal or pane ID; never a name or focus alias. */
-  resolveTerminal(terminalId: string): Promise<HerdrAgentSnapshot | undefined>;
+  /**
+   * Resolve an exact terminal or pane ID; never a name or focus alias. `fresh` reads Herdr's
+   * pane list now, never one a runner kept from an earlier call.
+   */
+  resolveTerminal(
+    terminalId: string,
+    options?: { readonly fresh?: boolean },
+  ): Promise<HerdrAgentSnapshot | undefined>;
   wait(target: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   waitForChange?(target: string, currentStatus: string, signal: AbortSignal): Promise<HerdrAgentSnapshot>;
   /**

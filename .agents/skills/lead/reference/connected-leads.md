@@ -70,9 +70,13 @@ it; none takes precedence over another.
   worker from its own session transcript (prompts marked `›`, its replies, a `·`
   line per tool call), never its screen, so it shows what the worker said even
   once it has gone quiet (waiting on CI, say); read it to tell waiting from stuck
-  or done. A menu or question the worker waits on is only on its screen: while
-  it waits, the read adds those rows under "Waiting on input, on its screen
-  now:", and that is the text `answer_prompt`'s `expect` takes. A Claude Code or
+  or done. While a worker you hired waits on a menu or question, the read adds
+  its screen's rows under "Waiting on input, on its screen now:", and that is
+  the text `answer_prompt`'s `expect` takes. An agent the owner started is never
+  read from its screen: the read adds the tool call it waits on, from its
+  session, under "Waiting on input, for this call in its session:", and
+  `expect` takes text the prompt shows about it (a command's first words, or the
+  harness's own question). A Claude Code or
   Codex worker whose session can't be read is refused, not shown from its screen.
   Other harnesses are read from their screen: a hire's whole, and an agent the
   owner started by hand comes back empty with a note until it prints again.

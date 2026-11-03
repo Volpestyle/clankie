@@ -1606,7 +1606,13 @@ function claudePrompt(
       ...item,
       internal: true as const,
     }));
-  if (/^<(?:local-command-|command-name>|system-reminder>|channel[ >])/u.test(text.trimStart())) return [];
+  // Bash mode (`! cmd`) records the owner's shell command and its output, never a prompt.
+  if (
+    /^<(?:local-command-|command-name>|system-reminder>|channel[ >]|bash-(?:input|stdout|stderr)>)/u.test(
+      text.trimStart(),
+    )
+  )
+    return [];
   return transcriptMessage(id, "operator", text, at);
 }
 
