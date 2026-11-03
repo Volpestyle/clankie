@@ -530,7 +530,12 @@ it.skipIf(process.platform !== "darwin")(
     const next = await f.acquire(childHolder);
     expect(next.id).not.toBe(lease.id);
   },
-  30_000,
+  // Measured, not padded (#320): the service accepts activity evidence only
+  // within 15 s, so crossing the 610 s quiet window takes 44 ticks of 14 s,
+  // each a real worker-hook round trip of about 286 ms. That is 12.9 s of the
+  // case's 17.8 s alone, and more than 30 s on a loaded Mac; 75 s is about
+  // four times the unloaded run.
+  75_000,
 );
 
 it.skipIf(process.platform !== "darwin")(
