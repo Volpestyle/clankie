@@ -255,6 +255,10 @@ export interface ResourceSnapshot {
     serverCpuCores?: number;
   };
   pressure: ResourcePressure;
+  /** Under pressure, the heaviest processes now, each charged to its permit or unleased (#332). */
+  consumers?: import("./consumers.ts").ResourceConsumer[];
+  /** Under load pressure, how long the load average takes to reach the limit once the load stops. */
+  loadRetryAfterMs?: number;
   leases: {
     id: string;
     kind: "heavy" | "simulator";
@@ -267,6 +271,8 @@ export interface ResourceSnapshot {
     deviceId?: string;
     usage?: SimulatorUsage;
     pid?: number;
+    /** A heavy permit's process group: CPU (100 = one core), resident memory, process count. */
+    processUsage?: import("./consumers.ts").ProcessGroupUsage;
   }[];
   queue: {
     id: string;
@@ -292,6 +298,7 @@ export interface ResourceSnapshot {
     executable: string;
     createdAtMs: number;
     pid?: number;
+    processUsage?: import("./consumers.ts").ProcessGroupUsage;
   }[];
   lightQueue: {
     id: string;

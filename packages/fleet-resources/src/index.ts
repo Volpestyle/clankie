@@ -1,6 +1,8 @@
 export * from "./model.ts";
 export type { RestartResourceGuard } from "./restart-guard.ts";
 export { createResourceGovernor } from "./governor.ts";
+export { describeConsumers, retryLater } from "./consumers.ts";
+export type { ProcessGroupUsage, ResourceConsumer } from "./consumers.ts";
 export {
   observeSimulatorReferents,
   processIdentity,

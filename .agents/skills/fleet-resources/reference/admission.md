@@ -36,6 +36,18 @@ is below its floor or the observation fails; high load admits it, and its
 receipt's `resourceNotice` says its heavy work and simulator leases will queue
 until load drops. Python 3 and the shipped native helper must be available.
 
+Pressure notices say who is using the machine (#332). While a heavy permit is
+held or pressure is unhealthy, the governor takes one `ps` census of every
+process (about 65 ms for 1,050 processes on the owner's Mac, cached five
+seconds). Each permit's `processUsage` sums its runner's process group: CPU
+where 100 is one core (the kernel's decaying average on macOS, the lifetime
+average on Linux), resident memory and process count. Under pressure,
+`consumers` lists the five heaviest processes at 5% CPU or more, each with its
+permit's lane and seat, or unleased with the nearest agent harness above it
+(`claude`, `codex`, …). Under load pressure, `loadRetryAfterMs` estimates how
+long the one-minute load average takes to fall to the limit once that work
+stops. The census is diagnostic only; it never admits, charges or stops anything.
+
 `clankie fleet resources --machine ID` selects a registered host, with its own
 specs, capacity, holders and queue. `local` and `default` select this service's
 machine; an unavailable remote host never reports the local machine's snapshot.
