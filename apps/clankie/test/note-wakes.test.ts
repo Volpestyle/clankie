@@ -2,7 +2,8 @@
 // Clankie's lane, close to the relay's deadline. A post that timed out and was sent again is
 // a new note that wakes its leads a second time. The post now answers once the addressees
 // are journaled, each pending; the wakes settle after and show on later reads.
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -34,8 +35,9 @@ it("answers once the addressees are journaled, before a slow webhook settles, an
     const answered = wakes.wake(note, ["grok", "clankie"]);
     expect(answered).toMatchObject({ sequence: 7, to: ["grok", "clankie"] });
     expect(answered.wakes).toBeUndefined();
-    // Both are on disk as pending before any wake has settled.
-    const journal = JSON.parse(await readFile(path, "utf8"));
+    // Both are on disk as pending before any wake has settled. Read before anything awaits:
+    // Clankie's lane here answers at once and settles on the next turn.
+    const journal = JSON.parse(readFileSync(path, "utf8"));
     expect(journal.notes[0].pending.map((item: { lead: string }) => item.lead)).toEqual(["grok", "clankie"]);
 
     // Posting the same note again wakes nobody a second time.
