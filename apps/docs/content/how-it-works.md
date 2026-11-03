@@ -10,7 +10,7 @@ customize him, connect a team, or know where your work goes.
 <div class="diagram" role="img" aria-label="The app and console, plus optional Discord text and voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
   <div class="diagram-col">
     <h4>Talk to him</h4>
-    <div class="dnode"><strong>The app</strong><span>Messages · Commons · Terminal</span></div>
+    <div class="dnode"><strong>The app</strong><span>Sessions · Feed · World · Terminal</span></div>
     <div class="dnode"><strong>The console</strong><span>on this machine</span></div>
     <div class="dnode"><strong>Optional rooms</strong><span>Discord text · voice</span></div>
   </div>
@@ -107,8 +107,8 @@ Agents can also message Clankie and each other (`message_clankie`,
 `/fleet` can switch peer messages off. A busy-looking agent or a claim of "done"
 is something to check, not proof the work is finished.
 
-In the app, agents appear in Messages, as figures in Commons, and as live panes
-in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
+In the app, agents appear in Sessions, as figures in the World, and as live
+panes in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
 `/sessions` open each kind of thread
 ([vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md),
 [console](/console/)).

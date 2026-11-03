@@ -8,7 +8,7 @@ executable; the launcher keeps the existing process boundaries behind it.
 
 ## Install
 
-Follow the [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
+Follow the [quick start](https://docs.clankie.bot/get-started/#diy-install-on-your-own-machine)
 for requirements, installation, and first model setup.
 This reference covers the installer and runtime layout. `clankie --version`
 reports the installed release.

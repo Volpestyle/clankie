@@ -75,17 +75,21 @@ DIY helpers use the harnesses you install and sign in to
 
 ## The app
 
-**Messages is home.** Clankie is pinned at the top, with a contact for each
-agent so you can follow a larger job without a terminal.
+**Sessions is home.** Clankie's thread is pinned at the top, and every agent
+is listed under the machine and Herdr session it runs in, so you can follow a
+larger job without a terminal.
 
-| View     | When it helps                                                                      |
-| -------- | ---------------------------------------------------------------------------------- |
-| Messages | Talk to Clankie, read replies and files, or message an individual helper.          |
-| Commons  | See the team as a little world of agent figures; tap one to open its conversation. |
-| Terminal | Watch the real terminal behind a worker, and type into it if your device may.      |
+| View     | When it helps                                                                         |
+| -------- | ------------------------------------------------------------------------------------- |
+| Sessions | Talk to Clankie, read replies and files, or message an individual helper.             |
+| Feed     | Answer what needs you and see checks, finished work and updates, grouped by project.  |
+| World    | See the same sessions as a little village of agent figures; tap one to open its chat. |
+| Terminal | Watch the real terminal behind a worker, and type into it if your device may.         |
 
-What each device can do depends on the host and the access granted when it
-paired. Messages alone is enough to use Clankie.
+Settings → Navigation picks which of these show as tabs and in what order; the
+rest stay in the menu. The app has no work board: an issue opens on its own
+page in the browser. What each device can do depends on the host and the access
+granted when it paired. Sessions alone is enough to use Clankie.
 
 ## Discord, voice, and game night
 

@@ -1,8 +1,8 @@
 # Get started
 
 Clankie is an agent lead with a memory and a personality: he plans the work,
-leads a team to do it, and owns it until it lands. Start on your Mac with your
-own agent subscriptions, models and tools. The desktop pet is the front door;
+leads a team to do it, and owns it until it lands. Start on your Mac or Linux
+machine with your own agent subscriptions, models and tools. The desktop pet is the front door;
 the TUI, CLI and phone app reach the same lead.
 
 The software and Clankie accounts are free. Clankie leads the agents in your
@@ -12,16 +12,26 @@ and connected services may charge. Check [clankie.bot](https://clankie.bot) for
 current account signup and app install availability; a source capability does
 not establish that a public install or account signup is open.
 
-## DIY: start on your Mac
+<a id="diy-start-on-your-mac"></a>
 
-The bundle supports **Apple silicon and macOS 14 or newer** and includes its
-own runtime. It also needs Apple's Command Line Tools, which provide `git` and
-`python3`; on a Mac without them the installer opens Apple's install window and
-asks you to run it again afterwards (or run `xcode-select --install` first).
+## DIY: install on your own machine
+
+Clankie runs only on machines you own. One installer command picks the bundle
+for your platform and brings its own runtime:
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh
 ```
+
+It installs on Apple silicon Macs and on arm64 or x64 Linux. A Windows PC joins
+an existing Clankie as a fleet machine until it can install him itself.
+
+### macOS
+
+Apple silicon with **macOS 14 or newer**. The bundle needs Apple's Command Line
+Tools, which provide `git` and `python3`; on a Mac without them the installer
+opens Apple's install window and asks you to run it again afterwards (or run
+`xcode-select --install` first).
 
 When a Mac release includes the approved companion pin, installation also
 writes `Clankie.app` to `/Applications` and opens it with a private local
@@ -36,7 +46,38 @@ Updates remember that choice. **The signed companion release is not available
 yet**, so the current installer supplies the terminal bundle only
 ([distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#mac-companion-app)).
 
-Open a new Terminal window, run `clankie`, and choose **Run Clankie on this
+### Linux
+
+**Ubuntu 24.04 LTS or newer**, with glibc, on arm64 or x64. Install
+`ca-certificates`, `curl`, `tar`, `coreutils`, `python3`, `git`, `procps` and
+`lsof` with your package manager first; Node and Herdr are bundled.
+
+The installer checksums the matching Linux archive and starts the service with
+the portable launcher. No systemd user session is required; after logout or
+reboot, run `clankie` again. Linux needs an official release that contains
+`clankie-linux-arm64` or `clankie-linux-x64`; a release without Linux assets
+cannot install on Linux. See
+[distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#linux)
+for prerequisites and lifecycle details. The
+[Linux container deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
+remains available separately.
+
+### Windows
+
+The installer doesn't run on Windows yet. A Windows PC joins a Clankie running
+on your Mac or Linux machine as a fleet machine: he reaches it over SSH and hires
+agents into its Herdr sessions.
+
+```sh
+clankie machines add pc --ssh my-pc --shell powershell
+```
+
+See [machines](/cli/#machines-list-discover-json) for discovery and the access
+each machine gets.
+
+### Set him up
+
+Open a new terminal, run `clankie`, and choose **Run Clankie on this
 computer**. The launcher starts his service and opens the console, and `/setup`
 walks you through the rest:
 
@@ -46,8 +87,8 @@ walks you through the rest:
    `clankie claude`, which opens Claude Code as him under its own sign-in
    ([seat commands](/cli/#seat-commands)). The model you pick still runs the
    console, app, Discord and his own work.
-2. **Your phone.** Setup signs this Mac in for remote access and shows a pairing
-   QR. Install the app, scan it, and accept.
+2. **Your phone.** Setup signs this machine in for remote access and shows a
+   pairing QR. Install the app, scan it, and accept.
 3. **Services and a first agent.** Connect accounts with `/connect`, then give a
    first agent a folder and a task. Clankie handles the hire.
 
@@ -60,29 +101,9 @@ lists the other settings.
 
 The software is free; model providers and connected services may charge. See
 [distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md)
-for checksums, pinning, and the installed layout,
+for checksums, pinning, and the installed layout, or
 [contributing](https://github.com/Volpestyle/clankie/blob/main/CONTRIBUTING.md)
-to run from source, or the
-[Linux deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md).
-
-## Linux release path
-
-Linux bundles support **Ubuntu 24.04 LTS or newer**, with glibc, on arm64 or x64.
-Install `ca-certificates`, `curl`, `tar`, `coreutils`, `python3`, `git`, `procps`
-and `lsof` using your package manager. Node and Herdr are bundled.
-
-The same installer selects and checksums the matching Linux archive, then starts
-the service with the portable launcher. Run `clankie`, choose local, and enter
-`/setup`. Model authentication, remote phone access and optional worker harnesses
-use the same setup flow. No systemd user session is required. After logout or
-reboot, run `clankie` again; `clankie update` follows the Linux release target.
-
-This path requires an official release containing `clankie-linux-arm64` or
-`clankie-linux-x64`; a release without Linux assets cannot install on Linux.
-See [distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md#linux)
-for prerequisites and lifecycle details. The
-[Linux container deployment](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)
-remains available separately.
+to run from source.
 
 ## Bring your Mac's Clankie into the app
 

@@ -4,7 +4,7 @@ Make him yours: a name he answers to, a character you enjoy, a voice that
 sounds right, and habits that fit your life. Models and connections can come
 after.
 
-New installation? Follow [Get started](/get-started/#diy-start-on-your-mac).
+New installation? Follow [Get started](/get-started/#diy-install-on-your-own-machine).
 Everything here works from the console, and most of it from the [CLI](/cli/)
 too; Clankie can run the commands for you. Keys go into the setup wizards,
 never into a chat message or a command flag.

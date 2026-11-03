@@ -53,12 +53,18 @@ const PAGES = [
   {
     path: "/",
     title: "Clankie field guide",
-    description: "Everyday help, a free Mac setup, phone pairing and existing hosted support.",
+    description: "Everyday help, a free setup on your own Mac or Linux machine, and phone pairing.",
   },
   {
     path: "/get-started/",
     title: "Get started",
-    description: "Run Clankie on your Mac and pair your phone with a free account.",
+    description: "Install Clankie on your Mac or Linux machine and pair your phone with a free account.",
+  },
+  {
+    path: "/faq/",
+    title: "Questions",
+    description:
+      "What Clankie is, whether he is a Discord bot, what he costs, where he runs, and his license.",
   },
   {
     path: "/using-clankie/",
@@ -128,6 +134,7 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
   const architecture = await readFile(resolve(repoRoot, "docs/architecture.md"), "utf8");
   const sources = {
     "/get-started/": await readContent("get-started.md"),
+    "/faq/": await readContent("faq.md"),
     "/using-clankie/": await readContent("using-clankie.md"),
     "/diy/": await readContent("diy.md"),
     "/reference/": await readContent("reference.md"),
@@ -169,6 +176,7 @@ export async function buildPublicDocs(outputDir = defaultOutputDir) {
     llmsFull([
       sources["/"],
       sources["/get-started/"],
+      sources["/faq/"],
       sources["/using-clankie/"],
       sources["/diy/"],
       sources["/reference/"],
@@ -922,7 +930,7 @@ function buildNetworkRows() {
       {
         access: "Encrypted live device bearer with account-paired operator authority",
         purpose:
-          "Run a bounded operator request on the hosted body; device revocation and inner route validation remain authoritative.",
+          "Run a bounded operator request on the owner's machine from an account-paired device; device revocation and inner route validation remain authoritative.",
       },
     ],
     [
@@ -1339,19 +1347,6 @@ async function slashCommands() {
   let registered = 0;
   for await (const file of glob("**/*.ts", { cwd: tuiSrc })) {
     const source = await readFile(resolve(tuiSrc, file), "utf8");
-    // Hosted mode has a deliberately smaller command set, documented in the CLI
-    // connection contract. Its duplicate /model, /persona, etc. are not local
-    // console registrations. The shared connection picker is its sole addition.
-    if (file === "hosted-console.ts") {
-      registered += 1;
-      commands.push({
-        name: "connection",
-        aliases: ["settings"],
-        description: "Choose local Clankie or an existing hosted body",
-        argument: "",
-      });
-      continue;
-    }
     registered += (source.match(/^\s*takesArgument: (?:true|false),/gm) ?? []).length;
     for (const match of source.matchAll(literal)) {
       commands.push({
@@ -1646,7 +1641,7 @@ function structuredData(pagePath) {
         "A personal AI assistant with a personality. He remembers you, plans your work, leads coding agents, chats and talks in Discord, and plays games on stream.",
       url: "https://clankie.bot/",
       applicationCategory: "ProductivityApplication",
-      operatingSystem: "macOS, iOS, iPadOS",
+      operatingSystem: "macOS, Linux, iOS, iPadOS",
       license: "https://www.apache.org/licenses/LICENSE-2.0",
       sameAs: [REPO, SITE],
     },
@@ -1698,9 +1693,9 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> Clankie is a personal AI assistant with a personality, from clankie.bot. He remembers you, plans your work, leads coding agents like Claude Code and Codex, and owns the work until it lands. Start on your Mac with your own agent subscriptions. A free account supports phone pairing, steering while the Mac is awake and the official Discord bot; check clankie.bot for current account and install availability.",
+    "> Clankie is a personal AI assistant with a personality, from clankie.bot. He runs on your own Mac or Linux machine, remembers you, plans your work, leads coding agents like Claude Code and Codex in your Herdr sessions, and owns the work until it lands. The software is free and open source; he uses your own agent subscriptions and joins Discord through a bot you create. A free account lets the iPhone and iPad app reach your machine through the clankie.bot gateway while it is awake; check clankie.bot for current account and install availability.",
     "",
-    "In more detail: Clankie is a persistent agent lead with a personality and memory. He plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He runs on your machine. The desktop pet is the front door; the TUI, CLI and iPhone and iPad app reach that same service. Existing hosted bodies have their own support documentation. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
+    "In more detail: Clankie is a persistent agent lead with a personality and memory. He plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He runs only on machines you own: Apple silicon Macs and arm64 or x64 Linux, with Windows PCs joining as fleet machines; there is no hosted Clankie. The desktop pet is the front door; the TUI, CLI and iPhone and iPad app reach that same service. Discord runs on your own bot. Clankie (clankie.bot) is not affiliated with clankie.com. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
     "",
     "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, projects, memory, tools, and access. Clankie's built-in runtime is pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Account and install availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
     "",

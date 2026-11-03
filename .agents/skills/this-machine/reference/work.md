@@ -56,7 +56,7 @@ notes. Local Codex `/goal` state appears automatically, including paused,
 blocked, budget/usage limits and completion. Remote or unsupported native goal
 stores remain unknown. Goal state and busy/idle turn status are independent.
 
-`stance` moves your own figure in the commons and takes no seat argument — it resolves
+`stance` moves your own figure in the World and takes no seat argument — it resolves
 `HERDR_PANE_ID` against the live census, so it can only move the figure you are
 sitting in. `--for` defaults to 15 minutes, caps at an hour, and then lapses
 back to observed behavior. `{"outcome":"unseated"}` means this pane holds no
