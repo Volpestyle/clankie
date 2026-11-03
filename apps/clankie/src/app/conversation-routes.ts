@@ -459,9 +459,17 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const deviceRequest = request;
     const device = await ctx.authenticateDevice(deviceRequest);
     if (device !== "unavailable" && !("denied" in device)) {
+      // The verified session and any automation run bound it, not just the registry (ADR 0350).
+      const sessionExpiresAt = Date.parse(device.sessionExpiresAt);
       const eligible = () => {
         const record = ctx.devices.get(device.deviceId);
-        return record?.status === "active" && record.grants.terminalControl;
+        const now = ctx.clock();
+        return (
+          record?.status === "active" &&
+          record.grants.terminalControl &&
+          now.getTime() < sessionExpiresAt &&
+          !isDeviceRunExpired(record, now)
+        );
       };
       if (!eligible()) return undefined;
       return {
@@ -506,9 +514,19 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       new Request(request.url, { method: request.method, headers: { authorization: `Bearer ${sender}` } }),
     );
     if (device === "unavailable" || "denied" in device || !device.grants.chat) return undefined;
+    // Current while that verified session lasts and no automation run has ended,
+    // so a send queued behind a turn proves nothing once the phone's session expires.
+    const sessionExpiresAt = Date.parse(device.sessionExpiresAt);
     const current = () => {
       const record = ctx.devices.get(device.deviceId);
-      return record?.status === "active" && record.grants.chat && leadSwitchDevice(record);
+      const now = ctx.clock();
+      return (
+        record?.status === "active" &&
+        record.grants.chat &&
+        leadSwitchDevice(record) &&
+        now.getTime() < sessionExpiresAt &&
+        !isDeviceRunExpired(record, now)
+      );
     };
     return current() ? { current } : undefined;
   };

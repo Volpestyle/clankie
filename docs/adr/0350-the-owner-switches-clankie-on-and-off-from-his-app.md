@@ -53,9 +53,14 @@ turn of his own.
   a Take Control device, including his answers), or a host-verified sender. A
   sender is a guarded linked owner channel, or a paired phone that relays its
   message on the captain route with its own session token beside it
-  (`x-clankie-sender-device-session`). The service verifies that token itself,
-  as it would any device bearer, and accepts only an active, owner-paired,
-  non-connector device with the chat grant. That proof is never question or
+  (`x-clankie-sender-device-session`). The token is the phone's own device
+  session, not a per-request signature. The service verifies it itself, as it
+  would any device bearer, and accepts only an active, owner-paired,
+  non-connector device with the chat grant. A token it can't verify proves
+  nothing, so the turn is held. Both owner-device proofs (this one and a Take
+  Control device's authority) stay current only while the verified session
+  lasts and no automation run has ended, so a message queued behind a running
+  turn is held if the session expires first. That proof is never question or
   machine authority. Everything else is held: his own wakes and watches,
   notices that carry owner authority but are not the owner's words (a worker
   question resolved elsewhere), and any send with no verified owner proof,

@@ -1984,8 +1984,9 @@ Take Control device through the relay, which shows it as Clankie's on/off switch
 A connected app, captain bearer or worker can't. Handing it back only flips the
 setting: held turns are not replayed. While the apps lead, a turn runs only when
 you verifiably sent it: with your operator credential, from your own paired
-device (a Supervise phone's relayed message carries its own session token for
-the service to verify), or through a linked owner channel. Everything else is
+device (a Supervise phone's relayed message carries its own device session
+token, which the service verifies itself and which proves nothing once it
+expires), or through a linked owner channel. Everything else is
 held, including notices that carry your authority but are not your words and
 sends on a bare captain bearer.
 JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:

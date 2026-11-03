@@ -415,14 +415,15 @@ it("while off, the real runner answers the owner's Supervise phone and holds a b
   });
   const eventLogPath = join(root, "devices.jsonl");
   await writeFile(eventLogPath, events.map((row) => JSON.stringify(row)).join("\n") + "\n");
-  const token = (deviceId: keyof typeof devices) =>
-    signer.issue(
-      mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
-    );
+  const token = (deviceId: keyof typeof devices, ttlSeconds = 3600) =>
+    signer.issue(mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds }));
+  // The service's clock, moved forward to let a phone's session expire.
+  let skew = 0;
   const service = await createClankieApp({
     captain,
     deviceSessionKey: key,
     eventLogPath,
+    clock: () => new Date(Date.now() + skew),
     modelKeys: { readiness: async () => ({ ready: true }) } as never,
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === `Bearer ${RELAY_BEARER}`
@@ -553,6 +554,27 @@ it("while off, the real runner answers the owner's Supervise phone and holds a b
     // Only the phone's message ever reached the model.
     expect(prompts.filter((prompt) => !prompt.includes("Are you there?"))).toEqual([]);
     expect(turns).toBe(1);
+
+    // Proof is the phone's verified session, not just its record: a message queued
+    // behind a running turn is held if that session expires before it runs.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    core.appendResponses([
+      async () => {
+        await released;
+        return fauxAssistantMessage("Done.");
+      },
+    ]);
+    await send(relayUrl, token("watcher"), "Hold on.");
+    await expect.poll(() => prompts.some((prompt) => prompt.includes("Hold on."))).toBe(true);
+    await send(relayUrl, token("watcher", 600), "Still there?");
+    skew = 11 * 60_000;
+    release();
+    await expect.poll(async () => (await held()).map((item) => item.text)).toContain("Still there?");
+    expect(prompts.some((prompt) => prompt.includes("Still there?"))).toBe(false);
+    expect(turns).toBe(2);
   } finally {
     vi.restoreAllMocks();
     relay.closeAllConnections();
