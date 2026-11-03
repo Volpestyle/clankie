@@ -30,6 +30,8 @@ import {
   type CreateOperatorServiceContext,
 } from "../src/captain/captain-operator-service.ts";
 import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
+import { TRANSCRIPT_READ_DETAIL, TRANSCRIPT_WAITING_HEADING } from "../src/captain/agent-transcript-read.ts";
+import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
 import { createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
 
@@ -114,6 +116,9 @@ function processInfo(
     },
   });
 }
+
+/** A harness still read from its screen under ADR 0307; Claude Code and Codex read their transcript (#328). */
+const PI = { agent: "pi", agent_session: { source: "herdr:pi", kind: "id", value: "session-pi" } };
 
 function pane(paneId: string, terminalId: string, status: string, extra: Record<string, unknown> = {}) {
   return {
@@ -318,7 +323,7 @@ describe("fleet routing", () => {
     const run: HerdrFleetRun = async (args) => {
       calls.push([...args]);
       if (args[0] === "pane" && args[1] === "list")
-        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working")] } });
+        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", "working", PI)] } });
       if (args[0] === "pane" && args[1] === "read") return paneText;
       if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
       if (args[0] === "api") return JSON.stringify({ result: { snapshot: { version: "0.9.5" } } });
@@ -389,7 +394,7 @@ describe("fleet routing", () => {
 
   it("reads only a live agent's pane, and only what its current agent showed", async () => {
     // One PC pane over the real remote runner and operator service; only Herdr's answers are stood in.
-    let agent = "claude";
+    let agent = "pi";
     let session = "session-one";
     let foreground: number[] = [401];
     let history = "";
@@ -404,7 +409,7 @@ describe("fleet routing", () => {
             panes: [
               pane("w2:p1J", "term_abc", "working", {
                 agent,
-                agent_session: { source: "herdr:claude", kind: "id", value: session },
+                agent_session: { source: "herdr:pi", kind: "id", value: session },
               }),
             ],
           },
@@ -444,7 +449,7 @@ describe("fleet routing", () => {
       status: "unavailable",
       detail: "No coding agent is running in that pane now.",
     });
-    agent = "claude";
+    agent = "pi";
     foreground = [];
     expect(await read()).toMatchObject({
       status: "unavailable",
@@ -606,7 +611,7 @@ describe("fleet routing", () => {
       [900, 300, false],
       [920, 310, true],
     ] as const) {
-      names = { [child]: "rg" };
+      names = { [agentPid]: "pi", [child]: "rg" };
       foreground = childFirst ? [agentPid, child] : [agentPid];
       history = " Claude Code\n> go";
       screen = history;
@@ -637,6 +642,84 @@ describe("fleet routing", () => {
     expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
   });
 
+  it("reads a Claude Code agent from its own transcript, adding only a waiting prompt from its screen (#328)", async () => {
+    // A PC's Claude Code pane the owner started, over the real remote runner and operator service.
+    // Herdr's answers and the PC's transcript host are stood in.
+    // A three-row window over the pane's history.
+    let status = "idle";
+    let history = "$ cat .env\nTOKEN=owner-secret\n$ claude\n Claude Code\n> fix the build";
+    const window = () => history.split("\n").slice(-3).join("\n");
+    const run: HerdrFleetRun = async (args) => {
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", status)] } });
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
+      if (args[0] === "pane" && args[1] === "read") return args[4] === "visible" ? window() : history;
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const path = "C:\\Users\\volpe\\.claude\\projects\\kh2\\session-term_abc.jsonl";
+    const jsonl = [
+      { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "Fix the build" } },
+      {
+        type: "assistant",
+        uuid: "a1",
+        parentUuid: "u1",
+        message: { role: "assistant", content: [{ type: "text", text: "The build is fixed." }] },
+      },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join("\n");
+    const transcriptHost: AgentTranscriptHost = {
+      id: "pc",
+      list: async () => [{ harness: "claude", path, size: Buffer.byteLength(jsonl), mtimeMs: 1 }],
+      readBytes: async (_path, from, count) => {
+        const bytes = Buffer.from(`${jsonl}\n`);
+        return { bytes: bytes.subarray(from, from + count), size: bytes.length };
+      },
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: { list: [pc], run: () => run, remoteWorkspace: async () => false },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [],
+      herdrWatches: { stoppedReason: async () => undefined },
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 5, transcriptHost })]]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+    const read = () => serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" });
+    const transcript = "› Fix the build\nThe build is fixed.";
+
+    // Its own session, never its screen, even on the first read of an agent the owner started.
+    expect(await read()).toEqual({
+      op: "terminal_read",
+      schemaVersion: 1,
+      terminalId: "pc/term_abc",
+      status: "read",
+      text: transcript,
+      detail: TRANSCRIPT_READ_DETAIL,
+    });
+    // Waiting on a menu it drew since: only the visible rows the screen cut lets through are added.
+    status = "blocked";
+    history += "\nAllow edit to build.ts?\n 1. Yes\n 2. No";
+    // The remote runner keeps its pane list for a moment, so the new status shows on a later read.
+    await expect.poll(async () => JSON.stringify(await read())).toContain(TRANSCRIPT_WAITING_HEADING);
+    const waiting = await read();
+    expect(waiting).toMatchObject({
+      status: "read",
+      text: `${transcript}\n\n${TRANSCRIPT_WAITING_HEADING}\nAllow edit to build.ts?\n 1. Yes\n 2. No`,
+    });
+    expect(JSON.stringify(waiting)).not.toContain("owner-secret");
+    // No longer waiting: the screen is gone from the read again.
+    status = "working";
+    await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(transcript);
+  });
+
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {
     // PC2 is reached by two connections to one Herdr session; Clankie hired nothing on it.
     const pc2: HerdrFleet = {
@@ -658,7 +741,7 @@ describe("fleet routing", () => {
               terminal_id: "term_claude",
               workspace_id: "w1",
               tab_id: "t1",
-              agent: "claude",
+              agent: "pi",
               title: "kh2 read run",
             },
             { pane_id: "w1:p2", terminal_id: "term_shell", workspace_id: "w1", tab_id: "t1", title: "pwsh" },
@@ -669,7 +752,7 @@ describe("fleet routing", () => {
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "api") return snapshot;
       if (args[0] === "pane" && args[1] === "list")
-        return JSON.stringify({ result: { panes: [pane("w1:p1", "term_claude", "idle")] } });
+        return JSON.stringify({ result: { panes: [pane("w1:p1", "term_claude", "idle", PI)] } });
       if (args[0] === "pane" && args[1] === "process-info") return processInfo("w1:p1", 400, [401]);
       if (args[0] === "pane" && args[1] === "read") return slots;
       throw new Error(`unexpected ${args.join(" ")}`);
@@ -713,7 +796,7 @@ describe("fleet routing", () => {
       {
         id: "pc2/term_claude",
         source: "herdr",
-        harness: "claude",
+        harness: "pi",
         machine: "pc2",
         title: "kh2 read run",
         canMessage: false,

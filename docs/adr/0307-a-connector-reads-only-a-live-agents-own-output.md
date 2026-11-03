@@ -2,6 +2,8 @@
 
 Status: Accepted, 2026-10-31. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md).
+Amended 2026-11-02 for [#328](https://github.com/Volpestyle/clankie/issues/328):
+Claude Code and Codex are read from their own session transcript.
 
 ## Context
 
@@ -76,6 +78,30 @@ agent showed.
   for a service that has no `terminal_read` at all; any answer from that op,
   refusals and unreachable machines included, is passed back as the refusal.
 
+- **Claude Code and Codex are read from their own transcript** (amended
+  2026-11-02, #328). Terminal text has no author per line, so the cut above
+  is a heuristic, and its known gaps below can show the owner's shell work.
+  For a live Claude Code or Codex occupant with a native session, the read
+  is the tail of that session's own transcript instead of the pane: prompts
+  marked `›`, the agent's replies, a `·` line per tool call or interruption;
+  internal channel deliveries and image paths are left out. It is found as
+  the fleet already finds a seat's transcript (the harness's own session
+  files on this Mac, the confined transcript host over ssh on a linked PC),
+  and returned only if the same occupant, session included, holds the pane
+  after the read. The read carries the detail "Read from this agent's own
+  session transcript, not its screen." A menu or question the agent waits
+  on is drawn on its screen only, and `answer_prompt` needs its text, so
+  while Herdr reports the agent `blocked` the read adds, under "Waiting on
+  input, on its screen now:", the visible rows of its screen that the cut
+  above lets through (all of them for a hire read whole), never scrollback.
+  Every transcript read passes the screen through the cut, so its anchor is
+  set before a prompt is drawn. When no transcript can be read (no
+  session reported, no file yet, an unreachable host), the read is refused;
+  the screen is never shown in its place. Other harnesses keep the screen
+  read and its cut, and so do the Herdr desktop app's own terminals
+  (`herdr_core_read`), whose owner-started agents carry no session identity
+  ([#530](https://github.com/Volpestyle/clankie/issues/530)).
+
 ## Consequences
 
 - A connected app can no longer read a shell, or text from before the agent it
@@ -95,6 +121,17 @@ agent showed.
   earlier ones.
 - Lines held back by their text also drop an agent line that repeats that text
   exactly (a banner or a border).
+- For Claude Code and Codex in a Herdr pane, the transcript read (#328)
+  closes the gaps below: the suspend case, a launch inside a longer command or
+  multiline block, reprinted or reflowed lines and a hired session resumed by
+  hand, except while the agent waits on input: then the visible rows the
+  cut lets through are added, so shell text left visible below the anchor
+  after a suspend and `fg` can show there until the agent draws over it. A
+  Claude Code or Codex agent whose transcript can't be found is now
+  unreadable instead of read from its screen, and when it isn't waiting on
+  input a read shows only what it wrote to its session, not its live screen.
+  The gaps below remain for other harnesses and for the desktop app's
+  terminals.
 - One case still shows the owner's own shell work. An agent suspended
   (Ctrl-Z), with shell commands run and then brought back with `fg`, keeps its
   process and session, so its anchor holds and the shell work in between is

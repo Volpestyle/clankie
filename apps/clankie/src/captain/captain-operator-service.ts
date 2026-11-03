@@ -24,6 +24,13 @@ import { FleetMembershipReadError } from "../fleet-project-membership.ts";
 import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
 import { HerdrUnavailableError } from "../herdr-session.ts";
 import { agentReadScope, liveAgentOccupant } from "./agent-read-scope.ts";
+import {
+  TRANSCRIPT_READ_DETAIL,
+  TRANSCRIPT_READ_HARNESSES,
+  TRANSCRIPT_READ_REFUSED,
+  TRANSCRIPT_WAITING_HEADING,
+  transcriptReadText,
+} from "./agent-transcript-read.ts";
 import type { createAgentWorkStore } from "./agent-work.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { LeadStore } from "./lead.ts";
@@ -889,15 +896,20 @@ export function createOperatorService(
           scope.forget(request.terminalId);
           return unavailable("No coding agent is running in that pane now.");
         }
-        // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
-        const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
-        const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
-        // The pane is read only if the same agent held it on both sides of the reads.
-        const after = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
-        if (after?.key !== occupant.key) {
-          scope.forget(request.terminalId);
-          return unavailable("The agent in that pane changed while it was read; read it again.");
-        }
+        // Its screen may still look busy after the runtime under it ended.
+        const withStopped = async (detail: string | undefined) => {
+          const stopped = await ctx.herdrWatches.stoppedReason(pane);
+          return stopped === undefined ? detail : detail === undefined ? stopped : `${stopped} ${detail}`;
+        };
+        const answer = (text: string, detail: string | undefined) =>
+          ({
+            op: "terminal_read",
+            schemaVersion: 1,
+            terminalId: request.terminalId,
+            status: "read",
+            text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+            ...(detail === undefined ? {} : { detail }),
+          }) as const;
         // A desktop-app hire's terminal has run nothing but the harness Clankie started in it
         // (ADR 0319), and a Herdr pane Clankie hired into is a tab he opened for that hire, on
         // this Mac or a linked PC: all of its history is that agent's own, so a quiet hire still
@@ -911,27 +923,56 @@ export function createOperatorService(
               seat.owner?.hired === true &&
               seat.occupantId === occupantIdForHerdrSession(pane.session!),
           );
-        const read =
-          splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET || hired
-            ? { text: history, detail: undefined }
-            : scope.bound(request.terminalId, occupant, history, screen);
-        const { text } = read;
-        // Its screen may still look busy after the runtime under it ended.
-        const stopped = await ctx.herdrWatches.stoppedReason(pane);
-        const detail =
-          stopped === undefined
-            ? read.detail
-            : read.detail === undefined
-              ? stopped
-              : `${stopped} ${read.detail}`;
-        return {
-          op: "terminal_read",
-          schemaVersion: 1,
-          terminalId: request.terminalId,
-          status: "read",
-          text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
-          ...(detail === undefined ? {} : { detail }),
-        };
+        const whole = splitFleetQualified(pane.paneId)?.fleet === HERDR_CORE_FLEET || hired;
+        // Claude Code and Codex are read from their own session transcript, never their screen:
+        // terminal text has no author per line, so a screen read can carry the owner's shell work
+        // (a suspend and `fg`, a launch inside a longer block). No transcript is a refusal (#328).
+        if (TRANSCRIPT_READ_HARNESSES.has(pane.agent)) {
+          const transcript =
+            pane.session === undefined ? undefined : await ctx.herdrRunner.transcript?.(pane);
+          // A menu or question waiting on input is on its screen only, and answer_prompt needs
+          // its text. Only then is the screen added: its visible rows, never scrollback, and for
+          // an agent the owner started only rows the same cut as any screen read lets through.
+          // The cut sees every read, so its anchor is set before a prompt is drawn.
+          let waiting: string | undefined;
+          if (transcript !== undefined) {
+            const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+            const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
+            const allowed = whole
+              ? undefined
+              : new Set(scope.bound(request.terminalId, occupant, history, screen).text.split("\n"));
+            if (pane.status === "blocked")
+              waiting = screen
+                .split("\n")
+                .filter((line) => line.trim() && (allowed === undefined || allowed.has(line)))
+                .join("\n");
+          }
+          // The transcript is shown only if the same agent and session held the pane on both sides.
+          const held = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
+          if (held?.key !== occupant.key) {
+            scope.forget(request.terminalId);
+            return unavailable("The agent in that pane changed while it was read; read it again.");
+          }
+          if (transcript === undefined) return unavailable(TRANSCRIPT_READ_REFUSED);
+          const text = transcriptReadText(transcript.entries);
+          return answer(
+            waiting ? `${text}\n\n${TRANSCRIPT_WAITING_HEADING}\n${waiting}` : text,
+            await withStopped(TRANSCRIPT_READ_DETAIL),
+          );
+        }
+        // Recent history, not only the visible screen, so a caller can ask for more lines than fit.
+        const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
+        const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
+        // The pane is read only if the same agent held it on both sides of the reads.
+        const after = await liveAgentOccupant(ctx.herdrRunner, pane, occupant.pid);
+        if (after?.key !== occupant.key) {
+          scope.forget(request.terminalId);
+          return unavailable("The agent in that pane changed while it was read; read it again.");
+        }
+        const read = whole
+          ? { text: history, detail: undefined }
+          : scope.bound(request.terminalId, occupant, history, screen);
+        return answer(read.text, await withStopped(read.detail));
       } catch (error) {
         return unavailable(
           error instanceof Error ? error.message.slice(0, 1024) : String(error).slice(0, 1024),

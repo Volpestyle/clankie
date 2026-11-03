@@ -19,8 +19,9 @@ const exec = promisify(execFile);
 
 // #298: a quiet hire (waiting on CI) must still show its last screen to its lead, on this Mac
 // and over the linked-PC read path, while an agent the owner started by hand keeps ADR 0307's
-// cut. Real Herdr, real local and remote runners and the real operator service; only `codex`
-// is a stand-in that reports itself to Herdr as Codex does, prints, then goes quiet. The PC's
+// cut. Real Herdr, real local and remote runners and the real operator service; only `grok`
+// is a stand-in that reports itself to Herdr as Grok does, prints, then goes quiet. Grok is a harness
+// still read from its screen; Claude Code and Codex read their own transcript (#328). The PC's
 // ssh transport is stood in by running the same argv against this Herdr.
 const cleanups: (() => Promise<unknown> | unknown)[] = [];
 afterEach(async () => {
@@ -39,20 +40,22 @@ test("a quiet Clankie hire shows its last screen locally and on a PC; an owner's
     'onboarding = false\n[terminal]\ndefault_shell = "/bin/sh"\n[update]\nversion_check = false\nmanifest_check = false\n',
   );
   await writeFile(
-    join(root, "bin/codex"),
+    join(root, "bin/grok"),
     `#!${process.execPath}
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 // Herdr names a pane's agent from its foreground process. On Linux node's own name is
-// "MainThread" with "node" in its cmdline, so name the stand-in as real Codex's binary is.
-process.title = "codex";
-execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:codex",
-  "--agent", "codex", "--state", "idle", "--agent-session-id", randomUUID()]);
-process.stdout.write("Codex: fixing #298\\nPR opened as a draft\\nWaiting on CI\\n");
+// "MainThread" with "node" in its cmdline, so name the stand-in as real Grok's binary is.
+process.title = "grok";
+execFileSync("herdr", ["pane", "report-agent", process.env.HERDR_PANE_ID, "--source", "herdr:grok",
+  "--agent", "grok", "--state", "idle"]);
+execFileSync("herdr", ["pane", "report-agent-session", process.env.HERDR_PANE_ID, "--source", "herdr:grok",
+  "--agent", "grok", "--agent-session-id", randomUUID()]);
+process.stdout.write("Grok: fixing #298\\nPR opened as a draft\\nWaiting on CI\\n");
 setInterval(() => {}, 1 << 30);
 `,
   );
-  await chmod(join(root, "bin/codex"), 0o755);
+  await chmod(join(root, "bin/grok"), 0o755);
   const env: NodeJS.ProcessEnv = {
     ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_"))),
     PATH: `${join(root, "bin")}:${process.env.PATH}`,
@@ -81,12 +84,13 @@ setInterval(() => {}, 1 << 30);
   );
 
   // Clankie's hire: a tab he opens, then the harness launched at its prompt. (hire_agent uses
-  // `herdr agent start`, which waits on real Codex's readiness the stand-in doesn't draw.)
+  // `herdr agent start`, which waits on a real harness's readiness the stand-in doesn't draw.)
   const hirePane = await runner.createTab!({ cwd: join(root, "work"), label: "quiet hire" });
-  await runner.runInPane!(hirePane, ["codex"]);
-  // The owner's own agent: shell work, then Codex, in a tab Clankie didn't hire into.
+  // By absolute path, so a real `grok` installed on this machine never starts instead.
+  await runner.runInPane!(hirePane, [join(root, "bin/grok")]);
+  // The owner's own agent: shell work, then Grok, in a tab Clankie didn't hire into.
   const ownerPane = await runner.createTab!({ cwd: join(root, "work"), label: "owner" });
-  await runner.runInPane!(ownerPane, ["sh", "-c", "echo TOKEN=owner-secret; exec codex"]);
+  await runner.runInPane!(ownerPane, ["sh", "-c", `echo TOKEN=owner-secret; exec ${join(root, "bin/grok")}`]);
 
   const settled = async (paneId: string) => {
     let text = "";
@@ -95,7 +99,7 @@ setInterval(() => {}, 1 << 30);
         async () => {
           const pane = await runner.get(paneId);
           text = await runner.readPane!(paneId, "recent-unwrapped", "text");
-          return pane.agent === "codex" && pane.session !== undefined && text.includes("Waiting on CI");
+          return pane.agent === "grok" && pane.session !== undefined && text.includes("Waiting on CI");
         },
         { timeout: 15_000 },
       )
@@ -109,7 +113,7 @@ setInterval(() => {}, 1 << 30);
       seatId: terminalId,
       occupantId: occupantIdForHerdrSession(session),
       personaId: "persona-quiet",
-      harness: "codex",
+      harness: "grok",
       status: "idle",
       title: "quiet hire",
       owner: { conversationId: "global-default", hired },

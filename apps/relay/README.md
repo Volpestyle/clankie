@@ -248,7 +248,11 @@ into their terminal (ADR 0207), and their reads pass through the same
 agent-only scope as Herdr's (ADR 0307). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 It answers only for a pane with a live coding agent, and only with what that
-agent showed (ADR 0307); its refusal is final. A pane Clankie hired into (a
+agent showed (ADR 0307); its refusal is final. A Claude Code or Codex agent is
+read from the tail of its own session transcript, never its screen, with a
+`note` saying so, plus the visible rows of a menu or question it waits on
+(through the screen cut below); when that transcript can't be read the read is
+refused (#328). Other harnesses are read from the screen as follows. A pane Clankie hired into (a
 tab he opened for that hire, on this Mac or a linked PC, still held by the
 hired occupant) is read whole, so a quiet hire still shows its last screen. For
 an agent the owner started by hand, what the pane showed at its first read is
