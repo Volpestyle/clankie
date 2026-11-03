@@ -102,19 +102,21 @@ export function driftSection(velocities: readonly ProjectVelocity[], roundId?: s
       .map((detection) => `- ${driftLine(velocity.name, detection)}`),
     ...(velocity.correctionCheck?.state === "in_progress"
       ? [
-          `- ${velocity.name}: correction in progress: ${velocity.correctionCheck.correction.issue} (recorded ${velocity.correctionCheck.correction.recordedAt.slice(0, 16)}Z) answers ${[
-            ...new Set(
-              (velocity.drift ?? [])
-                .filter((detection) => answered(velocity, detection))
-                .map((detection) => `${detection.signal} on ${detection.day}`),
-            ),
-          ].join(", ") || "the earlier drift"}; it has until ${velocity.correctionCheck.graceUntil?.slice(0, 16) ?? "later"}Z to start and land product work. Nothing new to record for it.`,
+          `- ${velocity.name}: correction in progress: ${velocity.correctionCheck.correction.issue} (recorded ${velocity.correctionCheck.correction.recordedAt.slice(0, 16)}Z) answers ${
+            [
+              ...new Set(
+                (velocity.drift ?? [])
+                  .filter((detection) => answered(velocity, detection))
+                  .map((detection) => `${detection.signal} on ${detection.day}`),
+              ),
+            ].join(", ") || "the earlier drift"
+          }; it has until ${velocity.correctionCheck.graceUntil?.slice(0, 16) ?? "later"}Z to start and land product work. Nothing new to record for it.`,
         ]
       : velocity.correctionCheck
-      ? [
-          `- ${velocity.name}: correction check for ${velocity.correctionCheck.correction.issue}: ${velocity.correctionCheck.state}; issue started ${velocity.correctionCheck.issueStarted === null ? "unknown" : String(velocity.correctionCheck.issueStarted)}; product lines landed after the response ${velocity.correctionCheck.productLines === null ? "unknown" : String(velocity.correctionCheck.productLines)}.${velocity.correctionCheck.reasons.length ? ` ${velocity.correctionCheck.reasons.join("; ")}. Correct course again; keep the next milestone feature staffed.` : ""}`,
-        ]
-      : []),
+        ? [
+            `- ${velocity.name}: correction check for ${velocity.correctionCheck.correction.issue}: ${velocity.correctionCheck.state}; issue started ${velocity.correctionCheck.issueStarted === null ? "unknown" : String(velocity.correctionCheck.issueStarted)}; product lines landed after the response ${velocity.correctionCheck.productLines === null ? "unknown" : String(velocity.correctionCheck.productLines)}.${velocity.correctionCheck.reasons.length ? ` ${velocity.correctionCheck.reasons.join("; ")}. Correct course again; keep the next milestone feature staffed.` : ""}`,
+          ]
+        : []),
     ...(roundId &&
     ((velocity.drift ?? []).some((detection) => !answered(velocity, detection)) ||
       (velocity.correctionCheck &&

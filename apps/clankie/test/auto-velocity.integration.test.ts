@@ -492,7 +492,10 @@ it("gives a staffed drift correction the rest of its day before calling it unres
     ...correction,
     recordedAt: "2026-10-15T04:30:00.000Z",
   });
-  expect(late.correctionCheck).toMatchObject({ state: "in_progress", graceUntil: "2026-10-15T08:30:00.000Z" });
+  expect(late.correctionCheck).toMatchObject({
+    state: "in_progress",
+    graceUntil: "2026-10-15T08:30:00.000Z",
+  });
 });
 
 it("applies a configured tracker WIP cap to live velocity and historical replay", async () => {
