@@ -193,6 +193,7 @@ function retryQueue() {
   let tail: Promise<unknown> = Promise.resolve();
   return <T>(look: () => Promise<T>): Promise<T> => {
     const next = tail.then(look, look);
+    // allow-swallowed-rejection -- the caller gets this look's rejection from next; the tail only orders the queue
     tail = next.catch(() => undefined);
     return next;
   };
