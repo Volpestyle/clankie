@@ -12,6 +12,7 @@ import {
   type ResourcePressureInput,
   type ResourceSnapshot,
 } from "@clankie/fleet-resources";
+import { FleetResourceSnapshotSchema } from "@clankie/protocol/fleet-resources";
 import { createFleetResourceRuntime } from "../src/fleet-resource-runtime.ts";
 
 const exec = promisify(execFile);
@@ -101,6 +102,11 @@ it("a pressure refusal names the top consumers, unleased work and who started it
     await delay(1_000);
   }
   expect(snapshot.pressure.healthy).toBe(false);
+  // What the governor reports is what the wire schema accepts (#570).
+  expect(FleetResourceSnapshotSchema.parse(snapshot)).toMatchObject({
+    consumers: snapshot.consumers,
+    loadRetryAfterMs: snapshot.loadRetryAfterMs,
+  });
   expect(named("vitest"), JSON.stringify(snapshot.consumers)).toMatchObject({
     pid: expect.any(Number),
     startedBy: { executable: "claude", pid: outside.pid },
