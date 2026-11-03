@@ -481,3 +481,84 @@ nativeIt(
   },
   120_000,
 );
+
+nativeIt(
+  "retires a PC hire adopted by its receipt through the close preflight, for its attested occupant only (#578)",
+  async () => {
+    const f = await fixture();
+    try {
+      const directory = join(f.home, "adopted-done");
+      const paneId = await f.pane(directory);
+      const original = await f.uncertainHire(directory, paneId);
+      f.owners.bind(paneId, lead);
+      const agent = await f.runner.get(paneId);
+      const occupantId = occupantIdForHerdrSession(agent.session!);
+      const open = () =>
+        new HerdrWatchStore(f.watches, {
+          remoteHireReceipts: f.native,
+          runner: f.runner,
+          projectHirePolicy: {
+            settings: async () => ProjectsSettingsSchema.parse({ projects: [] }),
+            project: async () => undefined,
+            // Modelled: the remote process proof for this exact occupant.
+            proof: async (fleet, pane) => ({
+              nativeOccupantId: occupantId,
+              fleet,
+              pane,
+              binding: { socketPath: "pc-herdr.sock", session: "default" },
+              shell: { pid: 4242, startTime: "2026-11-02T00:00:00.000Z" },
+              processes: [{ pid: 4243, startTime: "2026-11-02T00:00:01.000Z" }],
+            }),
+          },
+        });
+      let store = open();
+      let evidence: unknown;
+      try {
+        // Before adoption neither the owner nor the original names this occupant.
+        await expect(store.retirementGuard(agent)).rejects.toThrow(/persisted exact hiring owner/u);
+        const adopted = await store.settleHireReceipt(original.receiptId, async () => {}, "adopt");
+        if (adopted.state !== "adopted") throw new Error(JSON.stringify(adopted));
+        evidence = adopted.evidence;
+      } finally {
+        store.close();
+      }
+      // A settlement attesting another terminal names a different occupant: refused.
+      const adoptedBytes = await readFile(f.receipts, "utf8");
+      await writeFile(
+        f.receipts,
+        adoptedBytes.replaceAll(`"terminalId":"${agent.terminalId}"`, '"terminalId":"other"'),
+      );
+      store = open();
+      try {
+        await expect(store.retirementGuard(agent)).rejects.toThrow(/Completed original hire is missing/u);
+      } finally {
+        store.close();
+      }
+      await writeFile(f.receipts, adoptedBytes);
+      // A finished worker sits idle; the census requires it.
+      await expect.poll(async () => (await f.runner.get(paneId)).status, { timeout: 15_000 }).toBe("idle");
+      store = open();
+      try {
+        const guard = await store.retirementGuard(await f.runner.get(paneId));
+        expect(guard.restoredHire).toMatchObject({
+          receiptId: original.receiptId,
+          originalSeatId: agent.terminalId,
+          target: original.target,
+        });
+        await guard();
+        // The close proves the pane gone, then retires the adopted original with the census.
+        expect(await store.closeSeat(agent.terminalId, guard)).toBe(true);
+        const [, retired] = new DeliveryFence(f.receipts)
+          .all()
+          .find(([, receipt]) => receipt.messageId === original.receiptId)!;
+        expect(retired.retired).toMatchObject({ censusSha256: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+        expect(retired.settlement).toEqual(evidence);
+      } finally {
+        store.close();
+      }
+    } finally {
+      await f.herdr.close();
+    }
+  },
+  120_000,
+);

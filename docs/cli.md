@@ -1152,7 +1152,10 @@ with that `adopted` host evidence. An older allocation whose original receipt ca
 be matched (other receipts at that place name no pane, or a different one) is
 adopted from the census alone, when no unresolved receipt names its pane; the
 result says so and carries no host evidence. Ownership, process proof and the
-"nothing sent" rule are the same as for a local hire.
+"nothing sent" rule are the same as for a local hire. A hire adopted by its receipt
+retires through `close_worker_pane` like a completed one, for the exact terminal and
+session the host attested (#578); once the close proves its pane gone, the receipt
+is marked retired beside its adoption.
 
 `clankie hire-receipt settle seat-ORIGINAL_UUID delivered` records historical
 native insertion through the same authenticated host census. The service resolves
