@@ -30,14 +30,19 @@ export interface ChatMessage {
   tool_calls?: { function: { name: string } }[];
 }
 
-/** One scripted model step: a single tool call, a final answer, or the provider answering 503. */
+/** One scripted model step: a tool call, a final answer, the provider answering 503, or refusing the credential (401). */
 export type ScriptedReply =
   | { readonly call: { readonly name: string; readonly args: object } }
   | { readonly text: string }
-  | { readonly unavailable: true };
+  | { readonly unavailable: true }
+  | { readonly rejected: true };
 
 /** The default script: memory write, then a shell call that blocks, then a final answer naming what it saw. */
-function defaultReply(messages: readonly ChatMessage[], requestId: string, script: string): ScriptedReply {
+export function defaultReply(
+  messages: readonly ChatMessage[],
+  requestId: string,
+  script: string,
+): ScriptedReply {
   const tools = messages.filter((message) => message.role === "tool");
   if (tools.length === 0) return { call: { name: "memory", args: { action: "write", text: requestId } } };
   if (tools.length === 1) return { call: { name: "bash", args: { command: `exec node '${script}'` } } };
@@ -78,6 +83,19 @@ async function scriptedModel(reply: (messages: readonly ChatMessage[]) => Script
         null,
       ) + sse({}, "tool_calls");
     const next = reply(body.messages);
+    if ("rejected" in next) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          error: {
+            message: "Incorrect API key provided",
+            type: "invalid_request_error",
+            code: "invalid_api_key",
+          },
+        }),
+      );
+      return;
+    }
     if ("unavailable" in next) {
       response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: { message: "Service Unavailable", type: "server_error" } }));
