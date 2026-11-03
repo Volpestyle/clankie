@@ -3794,7 +3794,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             status: seat.status,
             name: seat.title || seat.seatId,
             ...(seat.workingDirectory ? { workingDirectory: seat.workingDirectory } : {}),
-            led: seat.owner !== undefined || herdrWatches.paneHire(paneId) !== undefined,
+            // A hire, an adoption, or a child pane whose parent's lead hears it.
+            led:
+              seat.owner !== undefined ||
+              seatLeadOwners.has(seat) ||
+              herdrWatches.paneHire(paneId) !== undefined,
           },
         ];
       });
