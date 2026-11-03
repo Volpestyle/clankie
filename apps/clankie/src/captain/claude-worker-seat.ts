@@ -1,3 +1,4 @@
+import { briefPointer } from "./brief-file.ts";
 import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 /**
  * Claude seats through Clankie's `clankie-worker` plugin (VUH-1458, ADR 0203).
@@ -1218,9 +1219,7 @@ export function createClaudeWorkerSeatAdapter(deps: ClaudeWorkerSeatDeps): Harne
           { ...launch, harnessArgs },
           trackerDeny,
           await stage(settings),
-          briefPath === undefined
-            ? undefined
-            : `Execute the assignment in the clankieBrief JSON field of @${briefPath}`,
+          briefPath === undefined ? undefined : briefPointer(briefPath),
           workerRoot,
           namedSessionId,
         );

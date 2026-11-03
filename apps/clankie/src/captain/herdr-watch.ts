@@ -1,3 +1,4 @@
+import { pointedBrief } from "./brief-file.ts";
 import {
   HiredSeatRestarts,
   type HiredRestartCandidate,
@@ -1117,6 +1118,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | undefined;
   private readonly remoteWorkspace: ((fleet: string, directory: string) => Promise<boolean>) | undefined;
   private readonly path: string;
+  /** Where hire briefs that go by file live: `<stateDir>/claude-briefs` (#615). */
+  private readonly briefStateDir: string | undefined;
   private readonly hireReceipts: DeliveryFence;
   private readonly hireOwners: HireOwners;
   private readonly hiredRestarts: HiredSeatRestarts;
@@ -1236,6 +1239,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
         readonly repoRoot: string;
         readonly stateDir: string;
       };
+      /** The state directory whose `claude-briefs` holds brief files; defaults to this store's. */
+      readonly briefStateDir?: string;
       readonly runner?: HerdrWatchRunner;
       readonly available?: () => boolean;
       readonly summariesPath?: string;
@@ -1314,6 +1319,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ) {
     this.onWorkerSettled = options.onWorkerSettled;
     this.path = path;
+    this.briefStateDir = options.briefStateDir ?? dirname(path);
     this.remoteHireReceipts = options.remoteHireReceipts;
     this.channelReceipt = options.channelReceipt;
     this.validateOwner = options.validateOwner;
@@ -3418,21 +3424,28 @@ export class HerdrWatchStore implements HerdrWatchPort {
           exact && agent !== undefined
             ? await this.runner.transcript?.(agent).catch(() => undefined)
             : undefined;
-        const received =
-          brief === undefined
-            ? exact
-            : input.harness !== "pi" &&
-              transcript?.entries.some(
-                (entry) =>
-                  entry.type === "message" &&
-                  entry.role === "operator" &&
-                  pending.beforeIds !== undefined &&
-                  !pending.beforeIds.includes(entry.id) &&
-                  readsBackAs(
-                    channelBody(entry.text) ?? entry.text,
-                    pending.fingerprint === deliveryFingerprint(brief) ? sentFingerprints(brief) : pending,
-                  ),
-              ) === true;
+        // A brief that went by file (claude-worker-seat) arrives as a pointer to the
+        // service's own brief file; the brief it names is what was delivered (#615).
+        const arrived = async (text: string) => {
+          if (brief === undefined) return false;
+          const sent = pending.fingerprint === deliveryFingerprint(brief) ? sentFingerprints(brief) : pending;
+          if (readsBackAs(text, sent)) return true;
+          const pointed =
+            this.briefStateDir === undefined ? undefined : await pointedBrief(text, this.briefStateDir);
+          return pointed?.kind === "brief" && readsBackAs(pointed.brief, sent);
+        };
+        let received = brief === undefined ? exact : false;
+        if (brief !== undefined && input.harness !== "pi" && pending.beforeIds !== undefined)
+          for (const entry of transcript?.entries ?? [])
+            if (
+              entry.type === "message" &&
+              entry.role === "operator" &&
+              !pending.beforeIds.includes(entry.id) &&
+              (await arrived(channelBody(entry.text) ?? entry.text))
+            ) {
+              received = true;
+              break;
+            }
         if (
           exact &&
           received &&
