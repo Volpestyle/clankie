@@ -5073,7 +5073,7 @@ unattended launch can use its persisted decision. An unprovable launch directory
 
 `--auto-tidy 1h` (the default; also `30m`, `4h`, `1d`) lets the service tidy
 finished hires on its own (VUH-2392). Every five minutes it closes a local hire's
-pane once the pane has sat idle or done for that long, its authenticated report
+pane, in Herdr or in the desktop app's terminals (#584), once the pane has sat idle or done for that long, its authenticated report
 is kept, every report it sent has been acknowledged, no project names it as its
 standing reviewer (`review.seat`), and no one kept it with
 `keep_worker_pane` (`clankie agents keep`); a keep whose pane and session are

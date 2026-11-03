@@ -54,6 +54,8 @@ export interface HerdrCoreTerminal {
   readonly labels: Readonly<Record<string, string>>;
   readonly pid?: number;
   readonly exitCode?: number;
+  /** When its program ended (ms since the epoch), once it has. */
+  readonly finishedMs?: number;
   /** The agent's own status report (OSC 7501), when it gives one. */
   readonly status?: string;
   /** Which agent reported it (`claude-code`, `codex`). */
@@ -71,8 +73,15 @@ export interface HerdrCoreSeats {
   get(address: string): Promise<HerdrCoreTerminal | undefined>;
   /** Every terminal the core keeps, live or finished, Clankie's or not. */
   list(): Promise<readonly HerdrCoreTerminal[]>;
+  /** The finished terminals the core still keeps, which a plain list leaves out. */
+  finished(): Promise<readonly HerdrCoreTerminal[]>;
   /** Ends a terminal Clankie started; one that is already gone is not an error. */
   kill(address: string): Promise<void>;
+  /**
+   * Takes a finished terminal out of the core, so the window no longer shows it; one that is
+   * gone is not an error. False when it is still live and so stays (#584).
+   */
+  remove(address: string): Promise<boolean>;
   /** The terminal's text: its screen, with `lines` of history above it. */
   read(address: string, lines: number): Promise<string>;
   /** Sets labels on a terminal Clankie started; an empty value removes one. */
@@ -148,6 +157,18 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
       );
     },
 
+    async finished() {
+      const listed = (await call("terminal.list", { all: true })) as { terminals?: unknown };
+      return (Array.isArray(listed.terminals) ? (listed.terminals as HcRecord[]) : []).flatMap((record) =>
+        record !== null &&
+        typeof record === "object" &&
+        typeof record.address === "string" &&
+        record.state === "finished"
+          ? [terminalOf(record)]
+          : [],
+      );
+    },
+
     async read(address, lines) {
       const read = (await call("terminal.read", { terminal: address, lines })) as { text?: unknown };
       return typeof read.text === "string" ? read.text : "";
@@ -171,6 +192,17 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
         throw error;
       }
     },
+
+    async remove(address) {
+      try {
+        await call("terminal.rm", { terminal: address });
+        return true;
+      } catch (error) {
+        if (error instanceof HerdrCoreError && error.kind === "not_found") return true;
+        if (error instanceof HerdrCoreError && error.kind === "live") return false;
+        throw error;
+      }
+    },
   };
 }
 
@@ -180,6 +212,7 @@ interface HcRecord {
   readonly labels?: unknown;
   readonly pid?: unknown;
   readonly exit_code?: unknown;
+  readonly finished_ms?: unknown;
   readonly status?: { readonly state?: unknown; readonly app?: unknown } | null;
   readonly title?: unknown;
   readonly cwd?: unknown;
@@ -204,6 +237,7 @@ function terminalOf(record: HcRecord): HerdrCoreTerminal {
     labels,
     ...(typeof record.pid === "number" ? { pid: record.pid } : {}),
     ...(typeof record.exit_code === "number" ? { exitCode: record.exit_code } : {}),
+    ...(typeof record.finished_ms === "number" ? { finishedMs: record.finished_ms } : {}),
     ...(typeof status === "string" ? { status } : {}),
     ...(typeof app === "string" && app.length > 0 ? { app } : {}),
     ...(typeof record.title === "string" && record.title.length > 0 ? { title: record.title } : {}),

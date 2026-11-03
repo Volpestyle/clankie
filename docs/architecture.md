@@ -1150,8 +1150,12 @@ linked-machine Git reads stay on that machine. Repos with no checkpoint jobs in
 20 recent main push runs, and workers with no commits beyond their hire/worktree
 base or Git fork point, have no checkpoint to account for. A connection-scoped
 three-minute cache shares merge results, run/merge bug searches and in-flight
-reads across panes, including unknown results after rate limiting. `captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
-setting on two timers: every five minutes it closes settled local hires whose
+reads across panes, including unknown results after rate limiting. A close waits
+20 seconds for that read and then holds as unknown, so it answers within a caller's
+tool budget; the read goes on and its cached answer serves the next close (#607).
+`captain/auto-tidy.ts` runs the owner's `autoTidy` fleet
+setting on two timers: every five minutes it closes settled local hires, in Herdr
+or the desktop app's terminals (#584), whose
 reports are kept and acknowledged through `PaneTidy.close` (same landed-work,
 draft, idle and main-checkpoint checks; kept panes in `pane-keeps.json` are skipped). Fresh
 `agent get` lifecycle counters restart the idle window when they change, so

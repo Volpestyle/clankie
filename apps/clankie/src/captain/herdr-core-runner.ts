@@ -12,7 +12,7 @@ import type { HerdrCensusFleet } from "./herdr-census.ts";
 import { readHerdrSeatTranscript, type HerdrAgentSession } from "./herdr-transcript.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
 import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
-import { SESSION_LABEL } from "./herdr-core.ts";
+import { AGENT_LABEL, SESSION_LABEL } from "./herdr-core.ts";
 import { SEAT_LABEL, type HerdrCoreSeats, type HerdrCoreTerminal } from "./herdr-core-seats.ts";
 import {
   SPACE_NAME_LABEL,
@@ -32,8 +32,6 @@ import {
 /** The prefix a desktop-app terminal's seat id carries; no Herdr fleet may take it. */
 export const HERDR_CORE_FLEET = DESKTOP_SEAT_FLEET;
 
-/** Labels a hire's terminal carries once its harness starts, so they outlive Clankie's restarts. */
-const AGENT_LABEL = "clankie.agent";
 /**
  * The agent name Clankie minted for the hire, unique among live seats as a Herdr agent's
  * name is. The seat label is only what the desktop app shows, and many hires share one
@@ -171,6 +169,13 @@ export interface DesktopAgentReport {
   readonly session?: string;
 }
 
+/** A finished terminal's hire as its labels name it, for removeFinished to match against its records. */
+export interface FinishedHire {
+  readonly seatId: string;
+  readonly agent: string;
+  readonly session: string;
+}
+
 export interface HerdrCoreRunnerOptions {
   readonly seats: HerdrCoreSeats;
   /**
@@ -198,6 +203,15 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
   Required<Pick<HerdrWatchRunner, "list" | "readPane" | "closePane" | "createTab" | "startAgent">> & {
     /** Records a controller's report on a harness Clankie started here (DesktopAgentReport). */
     reportAgent(address: string, report: DesktopAgentReport): Promise<void>;
+    /**
+     * Takes out of the window Clankie's own terminals that finished at least `ageMs` ago:
+     * nothing runs in them, and nothing else lists or closes them (#584). Answers their addresses.
+     */
+    removeFinished(
+      ageMs: number,
+      hired: (terminal: FinishedHire) => boolean,
+      now?: number,
+    ): Promise<string[]>;
   } {
   const { seats } = options;
   const pollMs = options.pollMs ?? POLL_MS;
@@ -325,6 +339,26 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
     }
   };
   return {
+    removeFinished: async (ageMs, hired, now = Date.now()) => {
+      const removed: string[] = [];
+      for (const terminal of await seats.finished()) {
+        const agent = terminal.labels[AGENT_LABEL];
+        const session = terminal.labels[SESSION_LABEL];
+        // Only a hire this service recorded, by its seat and session: a label alone is anyone's
+        // to write, and an owner's finished terminal is his to keep or remove.
+        if (terminal.labels[SEAT_LABEL] === undefined || agent === undefined || session === undefined)
+          continue;
+        if (terminal.finishedMs === undefined || now - terminal.finishedMs < ageMs) continue;
+        if (!hired({ seatId: `${HERDR_CORE_FLEET}/${terminal.address}`, agent, session })) continue;
+        if (!(await seats.remove(terminal.address))) continue;
+        pending.delete(terminal.address);
+        reported.delete(terminal.address);
+        if (options.seatDirectory !== undefined)
+          await rm(recordPath(options.seatDirectory, terminal.address), { force: true });
+        removed.push(terminal.address);
+      }
+      return removed;
+    },
     // Only Clankie's own live terminals: an owner's terminal is never a seat here.
     list: async () =>
       (await seats.list())
@@ -397,6 +431,9 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
       reported.delete(address);
       if ((await own(address)) === undefined) return;
       await seats.kill(address);
+      // The core keeps an ended terminal in the window until it is removed (#584); one still
+      // ending stays for removeFinished.
+      await seats.remove(address);
       if (options.seatDirectory !== undefined)
         await rm(recordPath(options.seatDirectory, address), { force: true });
     },

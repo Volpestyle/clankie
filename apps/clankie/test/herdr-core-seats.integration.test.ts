@@ -197,9 +197,50 @@ coreIt("Clankie reads, waits on and closes his own hire, and its worker knows it
   expect((await seats.get(warm))?.state).toBe("live");
 
   await runner.closePane(address);
-  const ended = await runner.wait(address, AbortSignal.timeout(10_000));
-  expect(ended.status).toBe("offline");
+  // A closed hire leaves the window too: the core keeps an ended terminal until it is removed (#584).
+  expect(await seats.get(address)).toBeUndefined();
+  expect((await seats.finished()).map((terminal) => terminal.address)).not.toContain(address);
 });
+
+coreIt(
+  "a finished hire's terminal leaves the window after its window, only when Clankie recorded it",
+  async () => {
+    const seats = createHerdrCoreSeats({ env });
+    const runner = createHerdrCoreRunner({ seats, pollMs: 50 });
+    const hire = (seat: string, session: string) =>
+      seats.start({
+        argv: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
+        cwd,
+        seat,
+        labels: { "clankie.agent": "claude", "clankie.session": session },
+      });
+    const recorded = await hire("recorded", "session-recorded");
+    const stranger = await hire("stranger", "session-stranger");
+    // The owner's own terminal, ended: never Clankie's to remove.
+    const own = (
+      JSON.parse(
+        (await exec(hc!, ["run", "--bg", "--json", "--name", "owners", "--", "true"], { env, cwd })).stdout,
+      ) as { address: string }
+    ).address;
+    for (const address of [recorded, stranger]) await seats.kill(address);
+    await until(async () =>
+      (await Promise.all([recorded, stranger, own].map((address) => seats.get(address)))).every(
+        (terminal) => terminal?.state === "finished",
+      ),
+    );
+    const hired = ({ seatId, agent, session }: { seatId: string; agent: string; session: string }) =>
+      seatId === `herdr-core/${recorded}` && agent === "claude" && session === "session-recorded";
+
+    // Not yet past the window: everything stays.
+    expect(await runner.removeFinished(60 * 60_000, hired)).toEqual([]);
+    expect(await runner.removeFinished(0, hired)).toEqual([recorded]);
+    expect(await seats.get(recorded)).toBeUndefined();
+    // A label alone proves nothing, and the owner's terminal is his.
+    expect((await seats.get(stranger))?.state).toBe("finished");
+    expect((await seats.get(own))?.state).toBe("finished");
+    for (const address of [stranger, own]) await seats.remove(address);
+  },
+);
 
 coreIt("each desktop hire gets its own named tab in its project's space, never one shared tab", async () => {
   const seats = createHerdrCoreSeats({ env });

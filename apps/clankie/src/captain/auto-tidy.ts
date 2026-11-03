@@ -43,6 +43,14 @@ const platform = process.platform === "win32" ? "windows" : "posix";
 export interface AutoTidyPorts {
   readonly setting: () => Promise<FleetAutoTidy>;
   readonly runner: Pick<HerdrWatchRunner, "list"> & Partial<Pick<HerdrWatchRunner, "get">>;
+  /**
+   * The fleets whose hires are considered, besides this machine's Herdr (undefined): the
+   * desktop app's terminals when it runs (#584). Each is listed on its own, so one that
+   * doesn't answer never holds back another's closes.
+   */
+  readonly fleets?: () => Promise<readonly (string | undefined)[]>;
+  /** Takes out finished terminals of Clankie's own, ended at least this long ago (#584). */
+  readonly removeFinished?: (ageMs: number) => Promise<readonly string[]>;
   /** Latest report/progress from this exact occupant, including acknowledged reports. */
   readonly activityAt?: (agent: HerdrAgentSnapshot) => readonly (string | undefined)[];
   readonly tidy: Pick<PaneTidy, "close" | "keptPane" | "keepVersion" | "hasKeptReport">;
@@ -137,7 +145,22 @@ export function createAutoTidy(ports: AutoTidyPorts) {
       { owner: ConversationOwner; entries: ClosedWorkerPaneHistory[]; adopted: string[] }
     >();
     const reviewers = (await ports.reviewerSeats?.()) ?? new Set<string>();
-    for (const listed of await ports.runner.list()) {
+    // Nothing runs in a finished terminal, so it goes after the same window a settled hire waits.
+    await ports.removeFinished?.(delay).catch((error: unknown) => {
+      console.warn("Auto-tidy finished terminal removal unavailable", String(error));
+    });
+    const inventory: HerdrAgentSnapshot[] = [];
+    for (const fleet of (await ports.fleets?.()) ?? [undefined]) {
+      if (fleet === undefined) inventory.push(...(await ports.runner.list()));
+      else
+        inventory.push(
+          ...(await ports.runner.list(fleet).catch((error: unknown) => {
+            console.warn("Auto-tidy inventory unavailable", fleet, String(error));
+            return [];
+          })),
+        );
+    }
+    for (const listed of inventory) {
       if (ports.stopped()) break;
       if (!SETTLED.has(listed.status) || !["claude", "codex"].includes(listed.agent)) continue;
       // pane list omits lifecycle counters. agent get carries them; an unavailable

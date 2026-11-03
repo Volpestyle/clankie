@@ -126,13 +126,17 @@ afterAll(async () => {
   await rm(cwd, { recursive: true, force: true });
 });
 
-function sources(herdrCoreEnv: NodeJS.ProcessEnv = env): SessionSources {
+function sources(
+  herdrCoreEnv: NodeJS.ProcessEnv = env,
+  leftoverStarter?: CreateOperatorServiceContext["leftoverStarter"],
+): SessionSources {
   const serve = createOperatorService({
     shutdown: new AbortController(),
     deps: {},
     personas: { ready: async () => {} },
     settingsStore: {},
     herdrCore: createHerdrCore({ env: herdrCoreEnv }),
+    ...(leftoverStarter === undefined ? {} : { leftoverStarter }),
   } as unknown as CreateOperatorServiceContext);
   return new SessionSources([createHerdrCoreSessionSource({ dispatch: (request) => serve(request) })]);
 }
@@ -188,3 +192,54 @@ coreIt("lists nothing when no core runs, rather than failing", async () => {
   // Listing never starts a core.
   expect(existsSync(join(stateHome, "herdr-core", `${session}-absent`))).toBe(false);
 });
+
+coreIt(
+  "lists a hire's terminal that finished as a leftover, with who started it, until it is removed",
+  async () => {
+    const finished = async (name: string, labels: readonly string[]) => {
+      const { address } = JSON.parse(
+        await run(
+          "run",
+          "--bg",
+          "--json",
+          "--name",
+          name,
+          ...labels.flatMap((label) => ["--label", label]),
+          "--",
+          "sh",
+          "-c",
+          "exit 0",
+        ),
+      ) as { address: string };
+      await until(
+        async () => (JSON.parse(await run("get", address)) as { state: string }).state === "finished",
+      );
+      return address;
+    };
+    const hire = await finished("hire", [
+      "clankie.seat=clankie · Paperclip comparison",
+      "clankie.agent=claude",
+      "clankie.session=session-hire",
+    ]);
+    // The owner's own terminal that ended is his, and no leftover of Clankie's.
+    await finished("owners", []);
+    const asked: unknown[] = [];
+    const layer = sources(env, (leftover) => {
+      asked.push(leftover);
+      return "Grok Bot";
+    });
+    const listed = (await layer.list()).sessions.filter((session) => session.status === "finished");
+    expect(listed).toEqual([
+      expect.objectContaining({
+        id: `herdr-core:${hire}`,
+        harness: "claude",
+        status: "finished",
+        startedBy: "Grok Bot",
+        canMessage: false,
+      }),
+    ]);
+    expect(asked).toEqual([{ seatId: `herdr-core/${hire}`, agent: "claude", session: "session-hire" }]);
+    await run("rm", hire);
+    expect((await layer.list()).sessions.some((session) => session.id === `herdr-core:${hire}`)).toBe(false);
+  },
+);

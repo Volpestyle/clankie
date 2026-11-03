@@ -88,9 +88,15 @@ function core(): HerdrCoreSeats & { terminals: Map<string, HerdrCoreTerminal> } 
     },
     get: async (address) => terminals.get(address),
     list: async () => [...terminals.values()],
+    finished: async () => [...terminals.values()].filter((terminal) => terminal.state === "finished"),
     kill: async (address) => {
       const terminal = terminals.get(address);
       if (terminal?.pid) process.kill(terminal.pid);
+    },
+    remove: async (address) => {
+      if (terminals.get(address)?.state === "live") return false;
+      terminals.delete(address);
+      return true;
     },
     read: async () => "",
     label: async (address, labels) => {

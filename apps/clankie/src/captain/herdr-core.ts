@@ -5,6 +5,7 @@ import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { OPERATOR_TERMINAL_READ_MAX, type HerdrCoreAgent } from "@clankie/protocol";
 import { logger } from "../app/log.ts";
+import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
 import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-scope.ts";
 
 // herdr-core (`hc`) is the terminal server behind the Herdr desktop app: a
@@ -22,6 +23,8 @@ const GENERATION = 1;
 export const SEAT_LABEL = "clankie.seat";
 /** The agent session Clankie named for a hire, once its harness starts. */
 export const SESSION_LABEL = "clankie.session";
+/** The harness Clankie started in a hire's terminal; it outlives Clankie's restarts. */
+export const AGENT_LABEL = "clankie.agent";
 const CALL_MS = 5_000;
 /**
  * A history read of an idle full-screen agent (Claude Code, Codex) is answered by
@@ -35,8 +38,15 @@ const LIST_MAX = 48;
 /** History read above the screen, so an occupant's anchor stays in view as it writes. */
 const HISTORY_LINES = 2_000;
 
+/** A finished hire's terminal as its labels name it, so the service can say who started it. */
+export interface HerdrCoreLeftover {
+  readonly seatId: string;
+  readonly agent: string;
+  readonly session: string;
+}
+type HerdrCoreListed = HerdrCoreAgent & { readonly leftover?: HerdrCoreLeftover };
 type HerdrCoreList =
-  | { readonly status: "listed"; readonly agents: readonly HerdrCoreAgent[] }
+  | { readonly status: "listed"; readonly agents: readonly HerdrCoreListed[] }
   | { readonly status: "unavailable"; readonly detail: string };
 type HerdrCoreRead =
   | { readonly status: "read"; readonly text: string; readonly detail?: string }
@@ -81,16 +91,25 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
   return {
     async list() {
       try {
-        const listed = (await call(socket(), "terminal.list", {})) as { terminals?: unknown };
+        const listed = (await call(socket(), "terminal.list", { all: true })) as { terminals?: unknown };
         const terminals = Array.isArray(listed.terminals) ? (listed.terminals as HcTerminal[]) : [];
         return {
           status: "listed",
-          agents: terminals
-            // A hire Clankie started and named a session for is a seat in his fleet (ADR 0319),
-            // listed and messaged there; listing it here too would show it twice.
-            .filter((terminal) => liveAgentOccupant(terminal) !== undefined && !clankieSeat(terminal))
-            .slice(0, LIST_MAX)
-            .map(toAgent),
+          agents: [
+            ...terminals
+              // A hire Clankie started and named a session for is a seat in his fleet (ADR 0319),
+              // listed and messaged there; listing it here too would show it twice.
+              .filter((terminal) => liveAgentOccupant(terminal) !== undefined && !clankieSeat(terminal))
+              .map(toAgent),
+            // Once its program ends it is no seat, but the window still shows it until Clankie
+            // removes it (#584), so it is listed as a leftover.
+            ...terminals.flatMap((terminal) => {
+              const leftover = finishedHire(terminal);
+              return leftover === undefined
+                ? []
+                : [{ ...toAgent(terminal), harness: leftover.agent, status: "finished", leftover }];
+            }),
+          ].slice(0, LIST_MAX),
         };
       } catch (error) {
         return { status: "unavailable", detail: unavailableDetail(error) };
@@ -159,6 +178,18 @@ function clankieSeat(terminal: HcTerminal): boolean {
     typeof (labels as Record<string, unknown>)[SEAT_LABEL] === "string" &&
     typeof (labels as Record<string, unknown>)[SESSION_LABEL] === "string"
   );
+}
+
+/** A finished terminal Clankie started for a hire, with the session it named for it. */
+function finishedHire(terminal: HcTerminal): HerdrCoreLeftover | undefined {
+  if (terminal.state !== "finished" || typeof terminal.address !== "string" || !clankieSeat(terminal))
+    return undefined;
+  const labels = terminal.labels as Record<string, unknown>;
+  const agent = labels[AGENT_LABEL];
+  const session = labels[SESSION_LABEL];
+  return typeof agent === "string" && typeof session === "string"
+    ? { seatId: `${DESKTOP_SEAT_FLEET}/${terminal.address}`, agent: agent.slice(0, 128), session }
+    : undefined;
 }
 
 interface HcTerminal {

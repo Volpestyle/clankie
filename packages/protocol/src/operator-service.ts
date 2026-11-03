@@ -305,8 +305,13 @@ export const HerdrCoreAgentSchema = z
     machine: z.string().max(64).optional(),
     workingDirectory: z.string().max(4096).optional(),
     title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
-    /** The program's own word: idle, working, done, blocked or error. */
+    /**
+     * The program's own word: idle, working, done, blocked or error; `finished` for a hire's
+     * terminal whose program ended, left in the window until Clankie removes it (#584).
+     */
     status: z.string().max(32).optional(),
+    /** Who asked for a finished hire Clankie recorded: the owner, Clankie, or a connected app's name. */
+    startedBy: z.string().max(256).optional(),
   })
   .strict();
 export type HerdrCoreAgent = z.infer<typeof HerdrCoreAgentSchema>;

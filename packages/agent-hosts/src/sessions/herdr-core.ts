@@ -10,7 +10,8 @@ import { screenLines } from "./terminal-text.ts";
 // agent's own output as a Herdr pane's is (ADR 0307). Read-only: herdr-core's
 // only way to message an agent is to paste into its terminal, which ADR 0207
 // rules out, so send always refuses. Clankie's own hires there are fleet seats,
-// listed and messaged through the Herdr source instead (ADR 0319).
+// listed and messaged through the Herdr source instead (ADR 0319); one whose program
+// ended is listed here as `finished`, with who started it, until Clankie removes it (#584).
 
 export interface HerdrCoreSessionSourceOptions {
   /** What a session on this Mac reads as its machine. */
@@ -39,6 +40,7 @@ export function createHerdrCoreSessionSource(
             : { project: lastSegment(agent.workingDirectory), workingDirectory: agent.workingDirectory }),
           ...(agent.status === undefined ? {} : { status: agent.status }),
           ...(agent.title === undefined ? {} : { title: agent.title }),
+          ...(agent.startedBy === undefined ? {} : { startedBy: agent.startedBy }),
           canMessage: false,
         }),
       );
