@@ -339,7 +339,8 @@ localIt(
 localIt("rechecks fresh native proof after census failure without admitting a real nonmember", async () => {
   const f = await fixture();
   try {
-    await writeFile(join(f.root, "fail-next-proof"), "fail\n");
+    // An empty first observation gets one more look (#574), so both looks fail.
+    await writeFile(join(f.root, "fail-next-proof"), "2\n");
     const unavailable = await f.initialize();
     expect(unavailable.status).toBe(503);
     expect(unavailable.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
@@ -347,7 +348,7 @@ localIt("rechecks fresh native proof after census failure without admitting a re
     expect(f.state.proofRefusals).toEqual(["native_initial_unavailable"]);
     expect((await f.initialize()).status).toBe(200);
     expect(f.state.controls).toBe(2);
-    expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(3);
+    expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(4);
     f.state.shell = 99;
     expect(await f.initialize()).toEqual({
       status: 403,
