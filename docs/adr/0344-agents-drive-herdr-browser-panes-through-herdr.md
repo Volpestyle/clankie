@@ -7,6 +7,8 @@ way to control the herdr browsers that herdr devs would agree with". Builds on
 modes and the sign-in vault) and keeps
 [ADR 0139](0139-clankie-rides-vanilla-herdr.md)'s rule that Clankie reaches
 Herdr through its CLI and socket, not a private patch of his own.
+Amended by [ADR 0349](0349-playwright-reaches-agent-browser-panes-through-a-guarded-pipe.md):
+`browser.cdp` adds one guarded loopback endpoint for Playwright on agent panes.
 
 ## Context
 

@@ -367,5 +367,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0346: The fleet says who is leading](0346-the-fleet-says-who-is-leading.md) — Proposed, 2026-11-02, from James's ask for a hoodie per active lead in the app's World.
 - [0347: A pull request merges on local checks and the quick checks](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md) — Accepted, 2026-11-03, on the owner's decisions relayed by the lead: "i wanna always be running app tests (in sim) and ci pipeline as we're merging work in, but i never wanna gate on it, just keep working, do sensible te…
 - [0348: The Linux socket census reads births as they appear](0348-the-linux-socket-census-reads-births-as-they-appear.md) — Proposed, 2026-11-03, from James's approval of the full fix for #440 ("Do the full fix").
+- [0349: Playwright reaches agent browser panes through a guarded DevTools pipe](0349-playwright-reaches-agent-browser-panes-through-a-guarded-pipe.md) — Accepted, 2026-11-03, implementing James's approved request relayed by his lead: "let agents drive the Herdr Browser with Playwright instead of reinventing it", with no open-to-anyone debug port, a token only Herdr hand…
 
 <!-- adr-index:end -->
