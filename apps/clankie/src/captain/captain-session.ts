@@ -189,7 +189,7 @@ function piRunFailure(state: PiRunState): PiRunError | undefined {
 export async function runDurableTurn(
   lane: {
     readonly session: Pick<AgentSession, "isStreaming" | "prompt"> &
-      Partial<Pick<AgentSession, "subscribe">> & { readonly state: PiRunState };
+      Partial<Pick<AgentSession, "subscribe" | "isCompacting">> & { readonly state: PiRunState };
     readonly capture: TurnContext;
     running?: Promise<boolean> | undefined;
     runningDeliveryId?: string | undefined;
@@ -211,6 +211,15 @@ export async function runDurableTurn(
   for (;;) {
     options?.signal?.throwIfAborted();
     const running = lane.running;
+    const { isCompacting, subscribe } = lane.session;
+    if (running === undefined && lane.starting === undefined && isCompacting === true && subscribe) {
+      // Pi refuses a prompt while the lane compacts before a run (#542): wait it out and re-decide.
+      await compactionSettled(
+        { subscribe: subscribe.bind(lane.session), session: lane.session },
+        options?.signal,
+      );
+      continue;
+    }
     if (running === undefined && lane.starting === undefined) {
       let prepared: (() => string) | undefined;
       let release: (() => void) | undefined;
@@ -304,6 +313,39 @@ export async function runDurableTurn(
     // down: wait it out and re-decide.
     await (lane.starting ?? running);
   }
+}
+
+/** Resolves once the session has no compaction in flight, or rejects when the turn is cancelled. */
+function compactionSettled(
+  {
+    subscribe,
+    session,
+  }: { subscribe: AgentSession["subscribe"]; session: { readonly isCompacting?: boolean } },
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const done = () => {
+      stop();
+      signal?.removeEventListener("abort", cancel);
+    };
+    const cancel = () => {
+      done();
+      reject(new Error("durable_turn_cancelled"));
+    };
+    // Pi clears its compacting state before it announces compaction_end.
+    const stop = subscribe((event) => {
+      if (event.type === "compaction_end" && session.isCompacting !== true) {
+        done();
+        resolve();
+      }
+    });
+    signal?.addEventListener("abort", cancel, { once: true });
+    if (signal?.aborted) cancel();
+    else if (session.isCompacting !== true) {
+      done();
+      resolve();
+    }
+  });
 }
 
 /**
