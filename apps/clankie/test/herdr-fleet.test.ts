@@ -645,14 +645,17 @@ describe("fleet routing", () => {
   it("reads a Claude Code agent from its own transcript, adding only a waiting prompt from its screen (#328)", async () => {
     // A PC's Claude Code pane the owner started, over the real remote runner and operator service.
     // Herdr's answers and the PC's transcript host are stood in.
-    // A three-row window over the pane's history.
+    // An eight-row window over the pane's history, so the owner's own rows are still on screen
+    // when the agent's menu appears; `drawn` is a full-screen redraw (Claude Code's own screen).
     let status = "idle";
+    let drawn: string | undefined;
+    let foreground: number[] = [401];
     let history = "$ cat .env\nTOKEN=owner-secret\n$ claude\n Claude Code\n> fix the build";
-    const window = () => history.split("\n").slice(-3).join("\n");
+    const window = () => drawn ?? history.split("\n").slice(-8).join("\n");
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", status)] } });
-      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, foreground);
       if (args[0] === "pane" && args[1] === "read") return args[4] === "visible" ? window() : history;
       throw new Error(`unexpected ${args.join(" ")}`);
     };
@@ -718,6 +721,46 @@ describe("fleet routing", () => {
     // No longer waiting: the screen is gone from the read again.
     status = "working";
     await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(transcript);
+
+    // Suspended with Ctrl-Z, the shell is in front: the owner's commands there are never read,
+    // not while it is stopped, not after `fg`, and not once it waits on a menu. Once with a read
+    // during the suspension (which drops the cut's anchor), once with none (the anchor holds and
+    // the agent draws its menu over the rows the shell work left on screen).
+    for (const [round, readWhileStopped] of [
+      [1, true],
+      [2, false],
+    ] as const) {
+      const secret = `FG-SECRET-${round}`;
+      status = "idle";
+      foreground = [];
+      history += `\n^Z\n[1]+  Stopped  claude\n$ echo ${secret}\n${secret}\n$ fg`;
+      if (readWhileStopped) {
+        const stopped = await read();
+        expect(stopped).toMatchObject({ status: "unavailable" });
+        expect(JSON.stringify(stopped)).not.toContain(secret);
+      }
+      foreground = [401];
+      // Back in front, it redraws its whole screen; the shell work stays in the scrollback.
+      history += `\nclaude\n Claude Code\n> round ${round}`;
+      drawn = ` Claude Code\n> round ${round}`;
+      await expect.poll(async () => JSON.stringify(await read())).not.toContain(TRANSCRIPT_WAITING_HEADING);
+      expect(JSON.stringify(await read())).not.toContain(secret);
+      status = "blocked";
+      history += `\nAllow edit to round${round}.ts?\n 1. Yes\n 2. No`;
+      drawn += `\nAllow edit to round${round}.ts?\n 1. Yes\n 2. No`;
+      await expect
+        .poll(async () => JSON.stringify(await read()))
+        .toContain(`Allow edit to round${round}.ts?`);
+      const menu = await read();
+      // The question always shows. After the anchor was dropped, option rows whose text an
+      // earlier menu already showed are held back by that text, as ADR 0307 says of repeats.
+      expect(menu).toMatchObject({ status: "read" });
+      const [own, waitingRows] = (menu as { text: string }).text.split(`\n\n${TRANSCRIPT_WAITING_HEADING}\n`);
+      expect(own).toBe(transcript);
+      expect(waitingRows?.split("\n")).toContain(`Allow edit to round${round}.ts?`);
+      expect(JSON.stringify(menu)).not.toContain(secret);
+      expect(JSON.stringify(menu)).not.toContain("owner-secret");
+    }
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

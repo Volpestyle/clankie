@@ -126,7 +126,10 @@ agent showed.
   multiline block, reprinted or reflowed lines and a hired session resumed by
   hand, except while the agent waits on input: then the visible rows the
   cut lets through are added, so shell text left visible below the anchor
-  after a suspend and `fg` can show there until the agent draws over it. A
+  after a suspend and `fg` can show there until the agent draws over it. The
+  same cut can hold back a menu's option rows whose text an earlier screen
+  already showed (` 1. Yes`) once its anchor was dropped; the question row
+  itself shows, and `answer_prompt` keys an option by its digit. A
   Claude Code or Codex agent whose transcript can't be found is now
   unreadable instead of read from its screen, and when it isn't waiting on
   input a read shows only what it wrote to its session, not its live screen.
