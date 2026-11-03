@@ -45,7 +45,10 @@ async function fixture(availableMemoryMb = 65_536) {
   const governor = createResourceGovernor({ directory, probe });
   const service = createResourceGovernor({ directory, probe });
   // Initially at the exact thrash cap; busyPolicy opens bounded progress.
-  const policy = { ...defaultResourcePolicy(), heavySlots: 4, maxLoadRatio: 1.125 };
+  // The sampler always measures the real disk, and a CI runner's can sit below
+  // the owner's floor (#227): these cases are about load and memory, so the
+  // disk floor is off and disk admission keeps its own tests.
+  const policy = { ...defaultResourcePolicy(), heavySlots: 4, maxLoadRatio: 1.125, minFreeDiskGb: 0 };
   const stop = new AbortController();
   const runs: Promise<number>[] = [];
   const files: string[] = [];
