@@ -120,3 +120,14 @@ auto|desktop|herdr` pins it per machine for the rare owner who wants the
 - To confirm on the Mac before the host lands: the core's socket and `hc
 --skill`, how a run's `env` merges with the core's, and whether events stream
   on the line socket.
+
+## Amendment, 2026-11-03 (#291)
+
+The core can only override a variable for a terminal, never unset it, and clearing
+the inherited Herdr variables to empty strings broke the stock `herdr` CLI in every
+desktop hire. A hire's terminal now gets Clankie's own Herdr session socket as
+`HERDR_SOCKET_PATH`, so the CLI there reaches his Herdr, while `HERDR_PANE_ID` and
+the rest stay empty. A seat is named by a Herdr pane id when there is one, else by
+the core terminal (`HC_TERMINAL_ID` beside `HC_TERMINAL_SOCKET`); a Herdr socket
+without a pane id no longer names a seat. The worker's link, the CLI's seat identity
+and the tool-catalog hook read it the same way.

@@ -524,7 +524,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         if (error instanceof NativePaneNotFoundError) paneGone(paneId);
       });
   };
-  const herdrCoreSeats = createHerdrCoreSeats();
+  const herdrCoreSeats = createHerdrCoreSeats(
+    fleetFeedSocket === undefined ? {} : { herdrSocket: fleetFeedSocket },
+  );
   const herdrCoreRunner = createHerdrCoreRunner({
     seats: herdrCoreSeats,
     window: createHerdrWindow(),
