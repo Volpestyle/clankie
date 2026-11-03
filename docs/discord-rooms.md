@@ -370,10 +370,15 @@ room's lane log (`~/.clankie/captain/lanes/<lane>~<target>.jsonl`), and the
 about 4,000 characters a call, paged by `offset`. The turn's context says how
 many earlier messages it can read. The host binds the tool to the current room
 and the turn's audience. Every lane log entry records its audience: `room` only
-when the turn had no private context and Discord proved that every server
-member can read the channel (the `@everyone` role may view channels and no
-`@everyone` overwrite denies it); anything else, including a failed or
-unavailable lookup, a DM or a private thread, records `private`. A turn without
+for a text turn with no private context in a channel Discord proves every
+server member can read back. That proof is conservative, not a permission
+evaluator: the channel type must be a known readable one (text, voice text
+chat, announcement, stage, forum or media, or a public thread under one),
+`@everyone` must have View Channel and Read Message History at the server level
+(or be an administrator), no overwrite of any kind on the channel or a thread's
+parent may deny either, and a closing re-read of the channel, parent and roles
+must match what was evaluated. Anything else, including a failed or unavailable
+lookup, a DM, a private thread and every voice transcript, records `private`. A turn without
 private context reads only `room` entries, so an owner-only exchange never
 reaches a channel after its audience widens, and entries logged before
 audiences were recorded are visible to private turns only. Results carry the

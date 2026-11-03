@@ -4816,8 +4816,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 // what this turn adds is proven on its own, never inferred from the turn
                 // lacking private context: a failed audience check also lacks it.
                 const historyReader = roomHistoryReader(laneLog, lane, targetId, access.privateContext);
+                // Voice is logged private: speech in a channel some members cannot join is
+                // not proven public by a text read check.
                 const roomAudience =
                   !access.privateContext &&
+                  lane === "discord_presence" &&
                   request.trigger.guildId !== undefined &&
                   (await roomTurns.everyoneCanRead(request.trigger.guildId, request.trigger.channelId))
                     ? ("room" as const)

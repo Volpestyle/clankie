@@ -26,6 +26,7 @@ const turn = (
   index: number,
   body: string,
   room: { guildId?: string; channelId: string; actorId: string },
+  kind: "message" | "voice_event" = "message",
 ): DiscordPresenceChannelTurnRequest => ({
   schemaVersion: 1,
   deliveryId: `delivery-${String(index)}`,
@@ -38,7 +39,7 @@ const turn = (
     profileHash: "fixture",
   },
   trigger: {
-    kind: "message",
+    kind,
     id: `message-${String(index)}`,
     ...(room.guildId === undefined ? {} : { guildId: room.guildId }),
     channelId: room.channelId,
@@ -135,7 +136,7 @@ it("a social room recalls a commitment from before its recent window through roo
           data: { id: "67890", guild_id: "12345", type: 0, permission_overwrites: [] },
         };
       if (action.path === "/guilds/12345/roles")
-        return { ok: true as const, data: [{ id: "12345", permissions: "1024" }] };
+        return { ok: true as const, data: [{ id: "12345", permissions: String(1024 | 65536) }] };
       return { ok: false as const, error: "not_found" };
     },
   };
@@ -177,6 +178,12 @@ it("a social room recalls a commitment from before its recent window through roo
       await captain.submitDiscordTurn(
         turn(index, `filler message ${String(index)}`, { ...room, actorId: "10002" }),
       );
+    // Speech in the voice channel of the same id stays private even with the text proof passing.
+    expect(
+      await captain.submitDiscordTurn(
+        turn(25, "voice line about the map", { ...room, actorId: "10002" }, "voice_event"),
+      ),
+    ).toMatchObject({ state: "settled" });
     // The owner's private DM is another room and runs with private context.
     expect(
       await captain.submitDiscordTurn(
@@ -202,11 +209,15 @@ it("a social room recalls a commitment from before its recent window through roo
       },
       { kind: "said", text: "Yes, I'll bring the map on Friday.", audience: "room" },
     ]);
+    const voice = await lanes.history("discord_voice", "12345:67890");
+    expect(voice.length).toBeGreaterThan(0);
+    expect(voice.every((entry) => entry.audience === "private")).toBe(true);
     const dm = await lanes.history("discord_presence", "dm:55555");
     expect(dm.map((entry) => entry.audience)).toEqual(["private", "private"]);
     expect((await readdir(join(root, "lanes"))).sort()).toEqual([
       "discord_presence~12345%3A67890.jsonl",
       "discord_presence~dm%3A55555.jsonl",
+      "discord_voice~12345%3A67890.jsonl",
     ]);
     // An owner-only exchange from an earlier era of this same channel stays out of its social turns,
     // and so does an entry from before audiences were recorded.
