@@ -302,20 +302,34 @@ class Proof:
         seen = set()
         read = {}
         denials = {}
+        # Listed instances whose read did not complete. Each must be read, or
+        # leave with a confirmed exit, before the census settles: absence from
+        # a later listing alone proves nothing.
+        unresolved = {}
         for _ in range(MAX_ROUNDS):
             listed = self.listing()
             # An owner that left, or whose PID now names another process,
             # discards the attempt: its socket may have moved with it.
             require(all(listed.get(pid) == read[pid] for pid in owners),
                     "census", "process_census_changed")
+            for pid, instance in list(unresolved.items()):
+                if listed.get(pid) == instance:
+                    continue  # Still listed: read it again below.
+                # A PID is reused only once its old process is reaped, so a new
+                # instance (read below) also ends the old one.
+                require(pid in listed or self.exited(pid), "census", "process_census_changed")
+                del unresolved[pid]
             pending = [pid for pid in sorted(listed) if read.get(pid) != listed[pid]]
             if not pending:
+                require(not unresolved, "census", "process_census_changed")
                 require(len(owners) == 1, "socket_owner", "multiple_owners" if owners else "owner_not_found")
                 return next(iter(owners.values()))
             for pid in pending:
                 self.bound()
+                unresolved[pid] = listed[pid]
                 try:
                     read[pid] = self.scan(pid, inode, seen, owners)
+                    del unresolved[pid]
                 except (FileNotFoundError, ProcessLookupError):
                     if pid in seen:
                         raise
@@ -323,6 +337,7 @@ class Proof:
                         # Gone, never seen holding the socket: what it held closed
                         # with it. A reused PID lists a new inode and is read.
                         read[pid] = listed[pid]
+                        del unresolved[pid]
                 except Refusal as error:
                     # A thread list that moved, or an identity that changed under
                     # the read (an orphan's new parent), is read again next

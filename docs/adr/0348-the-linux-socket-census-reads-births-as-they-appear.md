@@ -1,4 +1,4 @@
-# ADR 0347: The Linux socket census reads births as they appear
+# ADR 0348: The Linux socket census reads births as they appear
 
 Status: Proposed, 2026-11-03, from James's approval of the full fix for #440 ("Do the full fix"). Amends the Linux census described in [ADR 0217](0217-fleet-membership-gets-connected-tools.md) and [the fleet-proof README](../../integrations/fleet-proof/README.md).
 
@@ -65,7 +65,13 @@ Seeing the socket in a second instance is still terminal, at once.
 For one settled census attempt:
 
 1. Every instance in the settling listing was read during the attempt.
-2. Every instance named by any earlier listing of the attempt was either read, or confirmed exited without the socket ever being seen in it.
+2. Every instance named by any earlier listing of the attempt was either read, or confirmed exited without the socket ever being seen in it. An instance whose read did not complete stays unresolved until one of these is true:
+   - it is read;
+   - its exit is confirmed by pidfd, `ESRCH` or `EINVAL`;
+   - its PID lists a new instance, which is read. A PID is reused only after its old process is reaped.
+
+   An unresolved instance that is merely absent from a later listing still needs that confirmation, or the attempt is discarded.
+
 3. Exactly one instance showed the socket in any read, with a stable identity bracket around that read.
 4. That owner is listed in the settling listing as the same instance, with the same PID and the same inode.
 
@@ -77,6 +83,8 @@ The bracket around the census is unchanged:
 - the socket's inode and cookie are re-read;
 - the owner is pinned again;
 - the procfs namespace boundary is rechecked before any fact is emitted.
+
+This states who held the socket during the observation. It is not a guarantee of present-time ownership. An owner can pass the socket on (`SCM_RIGHTS`, `pidfd_getfd`) after the closing census read the process that receives it, and `socket_proof` still names that owner, which has by then handed it off. That has always been outside the boundary, on Darwin too.
 
 ## What it no longer guarantees
 
@@ -105,7 +113,8 @@ Real-kernel helper tests, in [the Linux helper tests](../../integrations/fleet-p
 - a birth after every listing refuses;
 - a birth that inherits the socket mid-census refuses `multiple_owners`;
 - a socket passed by `SCM_RIGHTS` to an already-read process is refused `multiple_owners` by the closing census;
-- a read PID freed and reused by a socket holder is read again and refuses `multiple_owners` within one census (root, via `ns_last_pid`);
+- a PID whose old instance the census had read, freed and reused by a socket holder before the next listing, has its new inode read, and refuses `multiple_owners` within the same attempt (root, via `ns_last_pid`);
+- a same-user unreadable (`PR_SET_DUMPABLE=0`) process reaped right after its denied read stays unresolved until the kernel confirms its exit;
 - an owner that hands its socket to a successor and exits is never admitted under its own fences: the census restarts on the owner change, and the original owner's fences refuse at `owner_pin`. As root, the successor takes the owner's own PID.
 
 The spawn-churn admission measurements are in #440 and the pull request that lands this ADR.

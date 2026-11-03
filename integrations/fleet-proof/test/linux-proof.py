@@ -212,10 +212,24 @@ class LinuxProof(unittest.TestCase):
         finally:
             ours.close()
 
+    def record_reads(self, proof):
+        """Each completed read: (PID, the instance inode it read)."""
+        reads = []
+        scan = proof.scan
+
+        def recorded(pid, *rest):
+            instance = scan(pid, *rest)
+            reads.append((pid, instance))
+            return instance
+
+        proof.scan = recorded
+        return reads
+
     @unittest.skipUnless(os.getuid() == 0, "PID reuse needs ns_last_pid, which only root may write")
     def test_reused_pid_of_a_read_process_is_read_again(self):
-        # A PID the census already read, freed and reused by a socket holder.
-        # Before #440 an unchanged PID list hid the new process from the census.
+        # A PID the census already read, freed and reused by a socket holder
+        # before the next listing. Before #440 an unchanged PID list hid the new
+        # process from the census; now its new inode is read in the same attempt.
         old = self.closed_child()
         reused = []
 
@@ -224,11 +238,49 @@ class LinuxProof(unittest.TestCase):
             reused.append(self.reuse_pid(old, self.holder))
 
         with module.Proof() as proof:
-            self.after_listing(proof, replace)
+            reads = self.record_reads(proof)
+            self.after_listing(proof, replace, before=1)
             with self.assertRaises(module.Refusal) as refused:
                 proof.census(proof.tcp(*map(int, self.ports))[0])
             self.assertEqual(refused.exception.reason, "multiple_owners")
             self.assertEqual(reused, [old])
+            self.assertEqual(proof.census_attempts, 1)
+            instances = [instance for pid, instance in reads if pid == old]
+            # The old instance's read completed; the reused PID's new inode was
+            # read next, and that read raised multiple_owners, so it is not recorded.
+            self.assertEqual(len(instances), 1)
+            directory = os.open(f"/proc/{old}", os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                self.assertNotEqual(os.fstat(directory).st_ino, instances[0])
+            finally:
+                os.close(directory)
+
+    @unittest.skipIf(os.getuid() == 0, "Root reads non-dumpable tables, so nothing is unreadable")
+    def test_unreadable_process_that_vanishes_mid_census_needs_a_confirmed_exit(self):
+        # A same-user table the census could not read, gone from the next
+        # listing: settling needs its exit confirmed, never mere absence.
+        def unobservable(_):
+            self.client.close(), self.peer.close(), self.server.close()
+            if ctypes.CDLL(None).prctl(4, 0, 0, 0, 0) != 0:  # PR_SET_DUMPABLE.
+                os._exit(98)
+
+        pid = self.child(unobservable)
+        with module.Proof() as proof:
+            confirmations = []
+            exited = proof.exited
+
+            def recorded(target, *rest, **options):
+                result = exited(target, *rest, **options)
+                if target == pid and not rest:
+                    confirmations.append(result)
+                return result
+
+            proof.exited = recorded
+            self.after_listing(proof, lambda _: self.reap(pid), before=1)
+            result = proof.socket_proof(self.ports)
+            self.assertEqual(result["owner"]["pid"], os.getpid())
+            # The denied read stayed unresolved until the kernel confirmed the exit.
+            self.assertIn(True, confirmations)
 
     def test_owner_that_exits_and_is_replaced_is_never_admitted_as_itself(self):
         # The only owner hands its socket on and exits mid-census, and (as root)
@@ -360,6 +412,7 @@ class LinuxProof(unittest.TestCase):
         self.reap(pid)
         self.admitted()
 
+    @unittest.skipIf(os.getuid() == 0, "Root reads non-dumpable tables, so nothing is unreadable")
     def test_unreadable_same_user_process_refuses_instead_of_guessing(self):
         self.admitted()
 

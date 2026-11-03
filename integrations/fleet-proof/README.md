@@ -38,12 +38,13 @@ Requests remain fresh and bounded to 600 ms, 16,384 PIDs, 64 ancestors and
 supplies missing authority.
 
 The census reads process instances, a PID with its `/proc/PID` directory inode,
-across repeated listings ([ADR 0347](../../docs/adr/0347-the-linux-socket-census-reads-births-as-they-appear.md)):
+across repeated listings ([ADR 0348](../../docs/adr/0348-the-linux-socket-census-reads-births-as-they-appear.md)):
 each listing reads only instances not yet read, and the census settles on the
 first listing in which every live instance has been read. A birth or reused PID
 is one more instance to read; a process whose read churned (`ENOENT`, `ESRCH`, a
 changed thread list or identity, or a same-user `EACCES` mid-exit, refused after
-three for one instance) is read again; a confirmed exit (pidfd whole-group
+three for one instance) is read again, and must be read or leave with a
+confirmed exit before the census settles; a confirmed exit (pidfd whole-group
 exit, no such PID, or `EINVAL` because the PID now names another process's
 thread) in which the target socket was never seen is skipped (#440). A denied
 `PF_EXITING` thread or an empty thread list waits up to 20 ms for its pidfd. Churn or exit of a process the socket was seen in, or an owner
