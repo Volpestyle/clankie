@@ -14,7 +14,9 @@ import { RepeatedWarnings } from "@clankie/observability";
 /**
  * Linear status stays true to the fleet (VUH-1990): In Progress only while a live
  * seat owns the issue. When a seat leaves, its issue moves to Done, Verifying or
- * Paused, or stays In Progress for a named successor, with a one-line comment.
+ * Paused, or stays In Progress for a named successor, with a one-line comment. A
+ * close with no outcome puts an issue still In Progress back to Todo when no other
+ * live seat holds it (#318, #462).
  * Verifying and Paused are picked up by name once the workspace has them; until
  * then the issue falls back to In Progress or Todo and the comment names the
  * intended status.
@@ -204,7 +206,8 @@ interface PendingRetirement {
 }
 
 // Done needs evidence; a stated Done without it is proof pending. No stated
-// outcome (auto-tidy, an owner close) changes no status: the comment records it.
+// outcome (auto-tidy, an owner close) changes no status, except that an unheld
+// issue still In Progress goes back to Todo (see `settle`); the comment records it.
 const retirementIntent = (input: Retirement): SeatIssueStatus | undefined =>
   input.outcome === "done" && input.evidence
     ? "Done"
@@ -625,6 +628,9 @@ export class SeatIssueKeeper {
         if (!canonicalId || canonicalId !== targetId)
           throw new Error("Tracker returned a different canonical issue identity");
         current = text(issue.status) ?? text(issue.state);
+        // The last live holder left without an outcome: an issue still In Progress goes
+        // back to the queue, so the tracker stops claiming someone works on it (#318, #462).
+        const requeue = intended === undefined && !successor && current?.toLowerCase() === "in progress";
         const retirement = [
           `${successor ? `Handed from ${input.seat} to ${successor.title}` : `${input.seat} left`}: ${oneLine(input.why)}.`,
           input.evidence ? ` Evidence: ${oneLine(input.evidence)}.` : "",
@@ -655,7 +661,7 @@ export class SeatIssueKeeper {
             ...stated(intended),
             detail: `Already ${current}.`,
           };
-        else if (intended === undefined || backward(intended, current)) {
+        else if (intended === undefined ? !requeue : backward(intended, current)) {
           if (!current) throw new Error("Tracker returned no current status");
           plan = {
             scope: scope.identity,
@@ -671,13 +677,18 @@ export class SeatIssueKeeper {
             },
           };
         } else {
-          const goal = intended;
+          const goal: SeatIssueStatus | "Todo" = intended ?? "Todo";
           const team = text(issue.teamId) ?? text(issue.team);
           const statuses = await call("list_issue_statuses", { team });
           const rows = (Array.isArray(statuses) ? statuses : (statuses.statuses ?? [])) as Row[];
           const named = (name: string) =>
             rows.find((row) => text(row.name)?.toLowerCase() === name.toLowerCase());
-          const fallback = goal === "Verifying" || goal === "Paused" ? FALLBACK[goal] : undefined;
+          const fallback =
+            goal === "Verifying" || goal === "Paused"
+              ? FALLBACK[goal]
+              : goal === "Todo"
+                ? FALLBACK.Paused
+                : undefined;
           const target =
             named(goal) ??
             (fallback && (named(fallback.name) ?? rows.find((row) => row.type === fallback.type))) ??
@@ -689,9 +700,13 @@ export class SeatIssueKeeper {
             scope: scope.identity,
             identity,
             status,
-            comment: `${retirement} Status: ${status}${missing ? ` (intended ${goal}; that status does not exist yet)` : ""}.`,
+            comment: requeue
+              ? `${retirement} Status: ${status} (back in the queue; no outcome stated and no one else holds it).`
+              : `${retirement} Status: ${status}${missing ? ` (intended ${goal}; that status does not exist yet)` : ""}.`,
             pause: goal === "Paused",
-            result: { outcome: "updated", issue: input.issue, intended: goal, status },
+            result: requeue
+              ? { outcome: "updated", issue: input.issue, status, detail: "Back in the queue." }
+              : { outcome: "updated", issue: input.issue, intended: goal as SeatIssueStatus, status },
           };
         }
       }

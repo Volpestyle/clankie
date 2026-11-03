@@ -241,7 +241,8 @@ Where Verifying or Paused does not exist, use In Progress or Todo and name the
 intended status in the comment. When a seat closes, hands off or exits, Clankie
 moves the issue it owned (its hire `deliverable` key) to Done, Verifying or
 Paused with a one-line comment, or keeps it In Progress when another live seat
-holds the same key. Built-in retirement never sets owner verification or moves
+holds the same key. A close that states no outcome puts an issue still In
+Progress back to Todo once no live seat holds it. Built-in retirement never sets owner verification or moves
 delivery backwards; report its refusal and let the lead settle the item.
 
 In Clankie's fleet, read the effective `fleet.closure` from "Your fleet" before

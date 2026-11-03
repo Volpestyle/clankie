@@ -218,6 +218,53 @@ it("closes Done only with evidence and keeps In Progress for a named successor",
   expect(status("VUH-1383")).toBe("Done");
 });
 
+it("an unheld In Progress issue goes back to the queue when its seat closes with no outcome (#318, #462)", async () => {
+  const { keeper, status, comments, issue, provider } = await setup();
+  const states = provider.rows.workflowStates!;
+  states.push({
+    ...states.find((row) => row.name === "In Progress")!,
+    id: "00000000-0000-4000-8000-000000000199",
+    name: "In Review",
+  });
+  issue("VUH-1385").state = states.find((row) => row.name === "In Review");
+  await keeper.observe([
+    seat("s1", "Ada", "VUH-1383"),
+    seat("s2", "Bo", "VUH-1384"),
+    seat("s3", "Cy", "VUH-1384 too"),
+    seat("s4", "Di", "VUH-1385"),
+  ]);
+
+  // Nobody else holds it: In Progress would claim work no agent is doing.
+  expect(await keeper.closed({ seatId: "s1", reason: "owner closed it" })).toMatchObject({
+    outcome: "updated",
+    issue: "VUH-1383",
+    status: "Todo",
+  });
+  expect(status("VUH-1383")).toBe("Todo");
+  expect(comments("VUH-1383")).toEqual([
+    "Ada left: owner closed it. Status: Todo (back in the queue; no outcome stated and no one else holds it).",
+  ]);
+
+  // Another live seat still holds it: handed over, still In Progress.
+  expect(await keeper.closed({ seatId: "s2", reason: "auto-tidy: idle" })).toMatchObject({
+    status: "In Progress",
+  });
+  expect(status("VUH-1384")).toBe("In Progress");
+  // Then the last holder goes: back to the queue.
+  expect(await keeper.closed({ seatId: "s3", reason: "auto-tidy: idle" })).toMatchObject({ status: "Todo" });
+  expect(status("VUH-1384")).toBe("Todo");
+
+  // Review is not a claim of work in progress: it is kept.
+  expect(await keeper.closed({ seatId: "s4", reason: "auto-tidy: idle and landed" })).toMatchObject({
+    status: "In Review",
+  });
+  expect(status("VUH-1385")).toBe("In Review");
+  expect(comments("VUH-1385").at(-1)).toBe(
+    "Di left: auto-tidy: idle and landed. Status kept: In Review (no outcome stated).",
+  );
+  expect(provider.validationErrors).toEqual([]);
+});
+
 it("pauses an exited seat's issue after the grace period and resumes it when a seat returns", async () => {
   const { keeper, status, comments, advance } = await setup();
   await keeper.observe([seat("s1", "Ada", "VUH-1383")]);
