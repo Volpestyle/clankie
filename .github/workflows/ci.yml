@@ -323,6 +323,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26.7.0
+      # The Mac CLIs the suites spawn (Claude, Codex, OpenCode), from the
+      # read-only tools folder the repo variable names; no path lives here.
+      - name: Mac CI tools
+        if: vars.CLANKIE_MAC_TOOLS != ''
+        env:
+          TOOLS: ${{ vars.CLANKIE_MAC_TOOLS }}
+        run: |
+          if [ -d "$TOOLS" ] && [ ! -L "$TOOLS" ]; then
+            echo "$TOOLS" >> "$GITHUB_PATH"
+            for cli in claude codex opencode; do
+              if version=$("$TOOLS/$cli" --version 2>&1); then echo "$cli: ${version%%$'\n'*}"; else echo "::warning::$cli in the Mac tools folder did not answer"; fi
+            done
+          else
+            echo "::warning::CLANKIE_MAC_TOOLS is set but is not a directory on this runner"
+          fi
       # The Mac is shared with the owner's agents: heavy steps take a permit
       # from Clankie's fleet scheduler when its CLI is installed. The pnpm
       # store stays on the Mac between runs (~/Library/pnpm/store), so there
@@ -404,6 +419,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 26.7.0
+      # The Mac CLIs the suites spawn (Claude, Codex, OpenCode), from the
+      # read-only tools folder the repo variable names; no path lives here.
+      - name: Mac CI tools
+        if: vars.CLANKIE_MAC_TOOLS != ''
+        env:
+          TOOLS: ${{ vars.CLANKIE_MAC_TOOLS }}
+        run: |
+          if [ -d "$TOOLS" ] && [ ! -L "$TOOLS" ]; then
+            echo "$TOOLS" >> "$GITHUB_PATH"
+            for cli in claude codex opencode; do
+              if version=$("$TOOLS/$cli" --version 2>&1); then echo "$cli: ${version%%$'\n'*}"; else echo "::warning::$cli in the Mac tools folder did not answer"; fi
+            done
+          else
+            echo "::warning::CLANKIE_MAC_TOOLS is set but is not a directory on this runner"
+          fi
       - name: Share the machine's heavy-work permits
         run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
       - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
