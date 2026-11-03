@@ -33,6 +33,10 @@ const InboxSchema = z
 
 type Inbox = z.infer<typeof InboxSchema>;
 
+/** One JSON string with no line break of any kind: JSON leaves U+2028 and U+2029 raw. */
+const oneLine = (text: string) =>
+  JSON.stringify(text).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
+
 /** The HTTP layer supplies this proof from socket ancestry, never the hook payload. */
 export function nextTurnReceiverProof(
   proof: (ProjectProcessProof & { readonly nativeSessionPending?: true }) | undefined,
@@ -263,7 +267,7 @@ export class NextTurnMailbox {
       additionalContext: pending
         .map(
           (mail) =>
-            `${mail.fromLead ? `Message from your lead (sender="lead", ${mail.id})` : `Message from Clankie (${mail.id})`}: ${JSON.stringify(mail.text)}`,
+            `${mail.fromLead ? `Message from your lead (sender="lead", ${mail.id})` : `Message from Clankie (${mail.id})`}: ${oneLine(mail.text)}`,
         )
         .join("\n\n"),
       messageIds: pending.map((mail) => mail.id),
