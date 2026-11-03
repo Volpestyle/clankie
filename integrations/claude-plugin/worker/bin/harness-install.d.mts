@@ -4,6 +4,8 @@ export interface HarnessInstallConsentContext {
   profile: string;
   source: string;
   managed: boolean;
+  /** Projects whose project-scoped copy the removal uninstalls from inside each one. */
+  projects?: readonly string[];
   sourceSetup?: { command: string; args: readonly string[] };
 }
 export interface HarnessInstallResult {

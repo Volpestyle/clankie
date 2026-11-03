@@ -1,3 +1,17 @@
+/** Where a settings entry keeps an old Claude worker copy that only its owner may drop. */
+export interface OldClaudeWorkerKeeper {
+  scope: "profile" | "project";
+  project?: string;
+  settings: string;
+}
+export function oldClaudeWorker(profile: string): Promise<{
+  found: boolean;
+  worker: boolean;
+  projects: string[];
+  marketplace: boolean;
+  keptBy: OldClaudeWorkerKeeper[];
+  settings?: unknown;
+}>;
 export function claudeProfileDirectories(env?: NodeJS.ProcessEnv): Promise<string[]>;
 export function inspectHarnessProfiles(options?: {
   env?: NodeJS.ProcessEnv;
