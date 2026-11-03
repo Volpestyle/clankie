@@ -148,8 +148,23 @@ bridge's bot presence runtime and discord.js REST, exactly once and threaded to 
 original message. A later bridge pass over that message posts nothing and asks the
 model nothing. The test loads the runtime from a fixture module that skips the
 credential broker, and its Discord is a loopback REST fixture. It therefore proves the
-service-to-bridge-to-REST hop, not Discord's API or gateway, and not a crash between
-Discord's send and its receipt.
+service-to-bridge-to-REST hop, not Discord's API or gateway.
+
+A second case in the same file covers a crash between Discord's send and its receipt
+(2026-11-03). The loopback Discord accepts the reply into the channel and never
+answers. The service is SIGKILLed at that moment, and both sides restart. On the
+bridge's redelivery, the mouth's reply reconciliation reads the channel back, finds
+the reply threaded to the owner's message, and settles the delivery. Discord has one
+post, the model is not asked again, and a further restart and redelivery post
+nothing. With reconciliation disabled, the case fails. The scratch service it runs is
+isolated by construction, and the fixture asserts this before it starts:
+
+- an environment built rather than inherited;
+- every path under its own temporary root;
+- file credentials, never the Keychain broker;
+- fresh loopback ports, never the live 4310 or 4321;
+- loopback addresses only;
+- Herdr off.
 
 ## Amendment: the room takes the normal handoff (2026-11-02, [#368](https://github.com/Volpestyle/clankie/issues/368))
 
@@ -306,8 +321,9 @@ A follow-up joined during an outage is not covered by a test.
 
 Before enabling more lanes:
 
-1. Obtain an approved private Discord test destination and prove the full mouth
-   hop, including a crash between send and receipt, through existing reconciliation.
+1. Prove the full mouth hop, including a crash between send and receipt, through
+   existing reconciliation. Done against a loopback Discord (above). Discord's real
+   API and gateway still need an approved private test destination.
 2. Exercise interrupted model/read, several tools in one round,
    media capture and changed/revoked room grants with real dependencies. Preserve
    corrupted/missing-state refusals. Audit connected reads individually rather
