@@ -34,6 +34,7 @@ let cwd = "";
 let go = "";
 let agent = "";
 let shell = "";
+let adopted = "";
 
 async function run(...args: string[]): Promise<string> {
   return (await exec(hc!, args, { env, cwd })).stdout;
@@ -69,6 +70,19 @@ setInterval(() => {}, 1 << 30);`,
   );
   // A program that reports nothing, named by nothing but what it is and where.
   shell = await started("--name", "plain", "--", "sh", "-c", "exec sleep 600");
+  // One the app adopted after it last saved its layout: only its labels place it.
+  adopted = await started(
+    "--name",
+    "adopted",
+    "--label",
+    "herdr.space=sp-work",
+    "--label",
+    "herdr.tab=tb-new",
+    "--",
+    "sh",
+    "-c",
+    "exec sleep 600",
+  );
   await run("wait", "agent");
   // The window's layout, as the desktop app keeps it, and the names it writes.
   await run("label", agent, "clankie.seat=clankie · Review bot", "where=work / 1");
@@ -133,7 +147,12 @@ coreIt("lists the desktop app's terminals by its own names, and the phone watche
     // hc reads a terminal's foreground about twice a second; the agent is one once it's known.
     let catalog = await terminals.catalog({ seatIds: true });
     for (const end = Date.now() + 10_000; Date.now() < end;) {
-      if (catalog[0]?.agent !== undefined && catalog[1]?.label.startsWith("sleep")) break;
+      if (
+        catalog[0]?.agent !== undefined &&
+        catalog[1]?.label.startsWith("sleep") &&
+        catalog[2]?.label.startsWith("sleep")
+      )
+        break;
       await new Promise((done) => setTimeout(done, 100));
       catalog = await terminals.catalog({ seatIds: true });
     }
@@ -156,6 +175,15 @@ coreIt("lists the desktop app's terminals by its own names, and the phone watche
         tab: { id: "tb-one", label: "1", number: 1 },
         pane: { id: `herdr-core/${shell}` },
         seatId: `herdr-core/${shell}`,
+      },
+      {
+        runtime: { id: "herdr-core", session: "Herdr app" },
+        terminalId: `herdr-core/${adopted}`,
+        label: `sleep · ${basename(cwd)}`,
+        workspace: { id: "sp-work", label: "work", number: 1 },
+        tab: { id: "tb-new", label: "2", number: 2 },
+        pane: { id: `herdr-core/${adopted}` },
+        seatId: `herdr-core/${adopted}`,
       },
     ]);
 

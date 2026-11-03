@@ -81,22 +81,58 @@ export async function readHerdrCoreCatalog(
   } catch {
     return [];
   }
+  // The window's layout as the app last saved it, then the terminals it has adopted since:
+  // a terminal labeled `herdr.space`/`herdr.tab` is shown in that space and tab even before
+  // the app writes its document again.
+  const layout = spaces.flatMap((space) =>
+    usableId(space.id)
+      ? [
+          {
+            id: space.id,
+            name: nonEmpty(space.name),
+            folder: space.folder,
+            tabs: (Array.isArray(space.tabs) ? (space.tabs as LayoutTab[]) : []).flatMap((tab) =>
+              usableId(tab.id)
+                ? [{ id: tab.id, name: nonEmpty(tab.name), addresses: terminalsIn(tab.root) }]
+                : [],
+            ),
+          },
+        ]
+      : [],
+  );
+  const shown = new Set(layout.flatMap((space) => space.tabs.flatMap((tab) => tab.addresses)));
+  for (const [address, record] of records) {
+    const spaceId = labelOf(record, "herdr.space");
+    // Only this Mac's own terminals; another machine's (`rohan/t7`) aren't listed yet.
+    if (shown.has(address) || !/^t[0-9a-z]{1,16}$/u.test(address)) continue;
+    if (spaceId === undefined || !usableId(spaceId)) continue;
+    let space = layout.find((candidate) => candidate.id === spaceId);
+    if (space === undefined) {
+      space = { id: spaceId, name: undefined, folder: record.cwd, tabs: [] };
+      layout.push(space);
+    }
+    const tabId = labelOf(record, "herdr.tab") ?? `${spaceId}:${address}`;
+    let tab = space.tabs.find((candidate) => candidate.id === tabId);
+    if (tab === undefined) {
+      tab = { id: tabId, name: undefined, addresses: [] };
+      space.tabs.push(tab);
+    }
+    tab.addresses.push(address);
+    shown.add(address);
+  }
   const sessions: OperatorTerminalSession[] = [];
-  spaces.forEach((space, spaceIndex) => {
-    const tabs = Array.isArray(space.tabs) ? (space.tabs as LayoutTab[]) : [];
-    if (!usableId(space.id)) return;
-    const placed = tabs.map((tab, tabIndex) => ({
+  layout.forEach((space, spaceIndex) => {
+    const placed = space.tabs.map((tab, tabIndex) => ({
       tab,
       number: tabIndex + 1,
-      name: nonEmpty(tab.name) ?? String(tabIndex + 1),
-      terminals: terminalsIn(tab.root).flatMap((address) => {
+      name: tab.name ?? String(tabIndex + 1),
+      terminals: tab.addresses.flatMap((address) => {
         const record = records.get(address);
         return record === undefined ? [] : [{ address, record }];
       }),
     }));
-    const spaceName = nonEmpty(space.name) ?? spaceNameFromWhere(placed) ?? folderName(space.folder);
+    const spaceName = space.name ?? spaceNameFromWhere(placed) ?? folderName(space.folder);
     for (const { tab, number, name, terminals } of placed) {
-      if (!usableId(tab.id)) continue;
       for (const { address, record } of terminals) {
         const terminalId = `${PREFIX}${address}`;
         const agent = desktopTerminalAgent(record);

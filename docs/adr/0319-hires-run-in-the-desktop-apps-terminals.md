@@ -139,7 +139,9 @@ app's terminals, where Clankie's hires now run, never appeared there.
 `terminal_catalog` now also lists every live terminal in the desktop app's window,
 from the layout the app keeps in the core's `herdr-app` document: its spaces,
 tabs and terminals as workspaces, tabs and panes, in the app's order, under the
-runtime `herdr-core` ("Herdr app"). A space or tab is named as the app names it
+runtime `herdr-core` ("Herdr app"). The app saves that document only now and then,
+so a terminal it has adopted since (labeled `herdr.space`/`herdr.tab`) is placed
+by its labels, after the tabs the document knows. A space or tab is named as the app names it
 (its own name, else the space part of the terminal's `where` label, else its
 folder; a tab's name, else its place). A pane is named by the seat Clankie gave
 it (`clankie.seat`), else its title, else its program and folder, never a bare
