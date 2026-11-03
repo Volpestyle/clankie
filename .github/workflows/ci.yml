@@ -44,13 +44,18 @@ jobs:
       - run: brew install cmake
         if: github.event_name == 'workflow_dispatch'
       - run: pnpm install --frozen-lockfile
+      # Swallowed rejections are checked against the pull request's base here, so
+      # a new one fails before the merge instead of turning main's landing red (#632).
       - name: Fast formatting and lint
         if: github.event_name != 'workflow_dispatch'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           pnpm exec oxfmt --check .
           pnpm exec oxlint --deny-warnings .
           node scripts/check-retired-claims.mjs
           node scripts/check-chromium-sandbox.mjs
+          node scripts/check-swallowed-rejections.mjs ${BASE:+"$BASE"}
       # No new proof folders, no search-flooding lines, a lean AGENTS.md.
       - name: Docs hygiene
         if: github.event_name != 'workflow_dispatch'
