@@ -2562,6 +2562,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.hiredProjectContext(pane, seat, occupant);
   }
   /**
+   * Like `hireRetained`, but a settled original no longer counts: only a launch that may still
+   * be running unconfirmed (#614). A folder whose hire settled takes new work elsewhere.
+   */
+  public hireUnresolved(input: {
+    readonly fleet?: string | undefined;
+    readonly workingDirectory: string;
+  }): boolean {
+    return this.launchHeld(input, (key) => this.hireReceipts.pending(key) !== undefined);
+  }
+
+  /**
    * Whether a new launch into this folder is still unresolved or was settled by recovery. A retry
    * of that launch must arrive at the same folder (ADR 0207, ADR 0306). With a harness, only that
    * harness's launches count: a launch under another harness is never this one's retry, so it
@@ -2572,6 +2583,20 @@ export class HerdrWatchStore implements HerdrWatchPort {
     readonly workingDirectory: string;
     readonly harness?: string | undefined;
   }): boolean {
+    return this.launchHeld(
+      input,
+      (key) => this.hireReceipts.pending(key) !== undefined || this.hireReceipts.settled(key) !== undefined,
+    );
+  }
+
+  private launchHeld(
+    input: {
+      readonly fleet?: string | undefined;
+      readonly workingDirectory: string;
+      readonly harness?: string;
+    },
+    held: (key: string) => boolean,
+  ): boolean {
     if (this.projectHires.unresolved(input)) return true;
     let receipts: ReturnType<DeliveryFence["all"]>;
     try {
@@ -2593,7 +2618,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         (input.harness === undefined || harness === input.harness) &&
         workingDirectory === input.workingDirectory &&
         session === "new" &&
-        (this.hireReceipts.pending(key) !== undefined || this.hireReceipts.settled(key) !== undefined)
+        held(key)
       );
     });
   }

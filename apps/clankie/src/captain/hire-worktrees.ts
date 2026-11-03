@@ -16,7 +16,7 @@ export type HireWorktreeRelocation = z.infer<typeof RelocationSchema>;
 const StateSchema = z.record(z.string(), RelocationSchema);
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** The scope a hire's retry is recognised by before relocation: machine and start folder. */
+/** The start folder a hire queues in before relocation: machine and start folder. */
 export function hireWorktreeScope(input: {
   readonly fleet?: string | undefined;
   readonly workingDirectory: string;
@@ -25,7 +25,23 @@ export function hireWorktreeScope(input: {
 }
 
 /**
- * Where each start folder's last hire was moved to (ADR 0306). A retry of a launch that is
+ * The launch a relocation belongs to: its start folder, harness and the caller's brief (#614).
+ * Only a retry of that same launch finds it; new work from the folder gets its own worktree.
+ * Entries recorded before this carry the start folder alone (`hireWorktreeScope`).
+ */
+export function hireRetryScope(
+  input: {
+    readonly fleet?: string | undefined;
+    readonly workingDirectory: string;
+    readonly harness?: string;
+  },
+  briefSha256: string,
+): string {
+  return JSON.stringify([input.fleet ?? "local", input.workingDirectory, input.harness ?? "", briefSha256]);
+}
+
+/**
+ * Where each launch from a start folder was moved to (ADR 0306). A retry of a launch that is
  * still unresolved must reuse that worktree, so its allocation and receipt keys match the
  * first attempt and the retry inspects it instead of starting a second agent (ADR 0207).
  */
