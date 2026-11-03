@@ -8512,6 +8512,12 @@ components:
         scopes: { type: array, maxItems: 64, items: { type: string, maxLength: 128 } }
         connectedAt: { type: string, format: date-time }
         manageUrl: { type: string, format: uri }
+        installUrl:
+          {
+            type: string,
+            format: uri,
+            description: Where the owner installs the connected GitHub App on more repositories; set only for the Clankie GitHub App.,
+          }
     AccountsResponse:
       type: object
       additionalProperties: false

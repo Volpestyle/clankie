@@ -28,6 +28,7 @@ import {
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
+import { runAccountsCommand } from "../../tui/src/command/accounts.ts";
 
 const TOKEN = "gho_MARKER_github_token_never_leaves_7f3a";
 const OTHER_BODY_TOKEN = "gho_MARKER_other_body_token_stays_valid_b47c";
@@ -1179,5 +1180,41 @@ describe("GitHub App user tokens (#185)", () => {
         bearers: writes.length === 0 ? [] : [`Bearer ${tokenB}`],
       });
     }
+  });
+
+  it("`accounts connect github` names the Clankie app's install page once connected, never an owner's own app's", async () => {
+    const original = { ...CLANKIE_GITHUB_APP };
+    Object.assign(CLANKIE_GITHUB_APP, { clientId: "Iv23liClankieApp", slug: "clankie-test" });
+    cleanups.push(() => Object.assign(CLANKIE_GITHUB_APP, original));
+    const connect = async (clientId: string) => {
+      const { json, advance } = await setup({
+        device: ["authorization_pending", "token"],
+        apps: { github: { clientId } },
+      });
+      const lines: string[] = [];
+      const result = (await runAccountsCommand(["connect", "github"], {
+        request: async (path, body) => (await json(path, body)).body,
+        prompt: (line) => lines.push(line),
+        sleep: async (ms) => void advance(ms),
+      })) as Record<string, unknown>;
+      return {
+        result,
+        lines,
+        listed: (await json("/v1/accounts")).body.connections as Record<string, unknown>[],
+      };
+    };
+    const installUrl = "https://github.com/apps/clankie-test/installations/new";
+    const clankie = await connect("Iv23liClankieApp");
+    expect(clankie.result).toMatchObject({ ok: true, status: "connected", connection: { installUrl } });
+    expect(clankie.lines).toEqual([
+      "Open https://github.com/login/device and enter WDJB-MJHT",
+      `Install the Clankie GitHub App on the repositories it should reach: ${installUrl}`,
+    ]);
+    expect(clankie.listed).toContainEqual(expect.objectContaining({ provider: "github", installUrl }));
+
+    const own = await connect("Iv23liOwnersApp");
+    expect(own.result).toMatchObject({ ok: true, status: "connected" });
+    expect(JSON.stringify([own.result, own.listed])).not.toContain("installUrl");
+    expect(own.lines).toEqual(["Open https://github.com/login/device and enter WDJB-MJHT"]);
   });
 });

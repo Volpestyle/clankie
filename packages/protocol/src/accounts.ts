@@ -96,6 +96,12 @@ export const AccountConnectionSchema = z
     connectedAt: z.string().datetime().optional(),
     /** Where the owner can review or revoke the grant at the provider. */
     manageUrl: z.url().optional(),
+    /**
+     * Where the owner installs the connected app on more repositories: a GitHub
+     * App's token reaches only repositories it is installed on (#622). Read with
+     * `safeParseProtocolResponse`, as every response addition.
+     */
+    installUrl: z.url().optional(),
   })
   .strict();
 export type AccountConnection = z.infer<typeof AccountConnectionSchema>;

@@ -242,7 +242,13 @@ export async function runAccountsCommand(
     for (;;) {
       await sleep(interval * 1000);
       const poll = await request("/v1/accounts/github/poll", { flowId: start.flowId });
-      if (poll.ok !== true || poll.status !== "pending") return poll;
+      if (poll.ok !== true || poll.status !== "pending") {
+        // A GitHub App reaches only the repositories it is installed on (#622).
+        const installUrl = (poll.connection as { installUrl?: unknown } | undefined)?.installUrl;
+        if (poll.status === "connected" && typeof installUrl === "string")
+          prompt(`Install the Clankie GitHub App on the repositories it should reach: ${installUrl}`);
+        return poll;
+      }
       interval = Number(poll.interval);
     }
   }

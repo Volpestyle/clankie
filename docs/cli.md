@@ -2846,6 +2846,10 @@ refresh token runs out, the row reads `reconnect_required` (`invalid_grant`)
 until the owner connects again; while GitHub is unreachable the current token
 stays in use until it expires. When GitHub refuses a write (HTTP 403/404) made
 with the Clankie GitHub App's token, the error names the app's install page.
+A Clankie GitHub App connection's row also carries that page as `installUrl`,
+and `accounts connect github` and `/connect accounts` print it once connected;
+an owner's own app has no such field
+([#622](https://github.com/Volpestyle/clankie/issues/622)).
 `accounts disconnect PROVIDER` revokes at the provider when it can and
 always deletes the local token; `revoked: false` comes with the `manageUrl`
 to revoke by hand. Disconnecting Linear clears its API and legacy MCP/app lanes
