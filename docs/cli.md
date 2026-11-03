@@ -5315,9 +5315,12 @@ service measured before waking the lead, and whether that wake was delivered
 - `correctionCheck`: the next round's independent check of that choice.
   `issueStarted` reads the tracker started state/history; `productLines` counts
   project product churn landed after the response, independent of milestone
-  window changes. `state` is `satisfied`, `unresolved` or `unknown`; reasons
-  distinguish missing progress from unreadable sources. Unresolved choices remain
-  in subsequent normal rounds until satisfied. Product churn is project-wide,
+  window changes. `state` is `satisfied`, `in_progress`, `unresolved` or
+  `unknown`; reasons distinguish missing progress from unreadable sources. A
+  choice stays `in_progress` until `graceUntil`: the later of the end of the
+  local day it was recorded on and four hours after it (#353). Until then, drift
+  on days before it shows as "correction in progress" and asks for no new
+  correction. Unresolved choices remain in subsequent normal rounds until satisfied. Product churn is project-wide,
   not attribution to the issue.
 
 - `report`: newly seen `milestones` requesting one combined project status update,
