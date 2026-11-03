@@ -27,6 +27,22 @@ export const MARKER = "codex-review:v1";
 const PRIORITIES = ["P0", "P1", "P2", "P3"];
 const OK_CONCLUSIONS = new Set(["success", "neutral", "skipped"]);
 
+// Run from a git hook or `rebase --exec` in a worktree, an inherited GIT_DIR would turn the
+// mirror's clone and `config` onto that checkout (#411). Same list as @clankie/settings'
+// GIT_REPOSITORY_ENVIRONMENT; gh's own git children inherit this too.
+for (const name of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_PREFIX",
+  "GIT_CONFIG",
+])
+  delete process.env[name];
+
 const home = process.env.CODEX_REVIEW_HOME ?? join(homedir(), "dev", ".clankie-checks", "codex-review");
 
 function gh(args, input) {
