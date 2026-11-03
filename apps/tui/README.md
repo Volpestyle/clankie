@@ -3,7 +3,7 @@
 The terminal console is a full client for Clankie: conversation, project work,
 configuration, and inspection of connected agents. It talks to the Clankie
 service on this machine. The app reaches the same service through
-Messages, Commons, and Terminal. For first setup, use
+Sessions, the Feed, the World, and Terminal. For first setup, use
 [Get started](https://docs.clankie.bot/get-started/); this README owns terminal
 interaction, workspace selection, and launcher behavior.
 
