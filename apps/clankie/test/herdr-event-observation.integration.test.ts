@@ -1,3 +1,5 @@
+import { once } from "node:events";
+import { createConnection, createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
@@ -80,3 +82,105 @@ it("subscribes the fleet feed on the pinned Herdr and hears a pane close", { tim
     await herdr.close();
   }
 });
+
+/**
+ * A relay in front of the pinned Herdr that replays the order seen on a loaded
+ * runner (#655): a pane's status stream ends before the feed's `pane_closed`
+ * for it arrives. Everything else passes through to the real Herdr.
+ */
+async function statusStreamRelay(herdrSocket: string, path: string) {
+  const statusStreams = new Map<string, Set<Socket>>();
+  const held: (() => void)[] = [];
+  let holdClose: string | undefined;
+  const server = createServer((client) => {
+    const upstream = createConnection(herdrSocket);
+    let request = "";
+    let kind: { status: string | undefined; feed: boolean | undefined } | undefined;
+    client.on("data", (chunk) => {
+      upstream.write(chunk);
+      if (kind !== undefined) return;
+      request += chunk.toString("utf8");
+      if (!request.includes("\n")) return;
+      const subscriptions = (
+        JSON.parse(request.slice(0, request.indexOf("\n"))) as {
+          params?: { subscriptions?: { type: string; pane_id?: string }[] };
+        }
+      ).params?.subscriptions;
+      const status = subscriptions?.find((entry) => entry.type === "pane.agent_status_changed")?.pane_id;
+      kind = { status, feed: subscriptions?.some((entry) => entry.type === "pane.closed") };
+      if (status !== undefined) {
+        const streams = statusStreams.get(status) ?? new Set();
+        streams.add(client);
+        statusStreams.set(status, streams);
+        client.on("close", () => streams.delete(client));
+      }
+    });
+    let buffer = "";
+    upstream.on("data", (chunk) => {
+      if (kind?.feed !== true) return void client.write(chunk);
+      buffer += chunk.toString("utf8");
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (holdClose !== undefined && line.includes('"pane_closed"') && line.includes(`"${holdClose}"`)) {
+          // Herdr ends the closing pane's status stream first; the close follows.
+          for (const stream of statusStreams.get(holdClose) ?? []) stream.destroy();
+          held.push(() => client.write(`${line}\n`));
+          setTimeout(() => held.splice(0).forEach((send) => send()), 300);
+        } else client.write(`${line}\n`);
+      }
+    });
+    const end = () => {
+      client.destroy();
+      upstream.destroy();
+    };
+    client.on("error", end).on("close", end);
+    upstream.on("error", end).on("close", end);
+  });
+  server.listen(path);
+  await once(server, "listening");
+  return {
+    holdCloseOf: (paneId: string) => {
+      holdClose = paneId;
+    },
+    endStatusStream: (paneId: string) => {
+      for (const stream of statusStreams.get(paneId) ?? []) stream.destroy();
+    },
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+it(
+  "hears a pane close whose status stream Herdr ends first, and still rebuilds for a live pane's",
+  { timeout: 30_000 },
+  async () => {
+    const herdr = await isolatedHerdr(join(tmpdir(), `clankie-herdr-order-${process.pid}`));
+    const relay = await statusStreamRelay(herdr.socketPath, join(herdr.root, "relay.sock"));
+    const closed: string[] = [];
+    let subscribed = 0;
+    const stop = watchHerdrFleetChanges(new FleetChangeClock(), {
+      socketPath: join(herdr.root, "relay.sock"),
+      summariesPath: join(herdr.root, "summaries.json"),
+      reconnectMs: 50,
+      onPaneClosed: (paneId) => closed.push(paneId),
+      onSubscribed: () => subscribed++,
+    });
+    try {
+      await until(() => subscribed > 0);
+      relay.holdCloseOf(herdr.foreignPane);
+      await herdr.cli("pane", "close", herdr.foreignPane);
+      await until(() => closed.length > 0);
+      expect(closed).toEqual([herdr.foreignPane]);
+      // The ended stream belonged to a pane that is gone: the feed was kept.
+      expect(subscribed).toBe(1);
+
+      // A live pane's stream ending leaves the subscription incomplete: rebuild.
+      relay.endStatusStream(herdr.pane);
+      await until(() => subscribed > 1);
+    } finally {
+      stop();
+      await relay.close();
+      await herdr.close();
+    }
+  },
+);

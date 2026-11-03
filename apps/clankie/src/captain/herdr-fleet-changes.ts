@@ -157,11 +157,61 @@ export function watchHerdrFleetChanges(
     paneSocket.on("error", () => paneSocket.destroy());
     paneSocket.on("close", () => {
       if (paneSockets.get(paneId) === paneSocket) paneSockets.delete(paneId);
-      // One dead status stream makes the subscription incomplete. Rebuild the
-      // snapshot and every stream together unless this pane was just closed.
-      if (!closed && paneIds.has(paneId)) socket?.destroy();
+      if (closed || !paneIds.has(paneId)) return;
+      // Herdr can end a pane's status stream as the pane closes, before the
+      // feed delivers that pane's `pane_closed` (#655). Rebuilding then would
+      // drop the close, so ask whether the pane is gone: the live feed still
+      // carries its close. Any other dead stream makes the subscription
+      // incomplete; rebuild the snapshot and every stream together.
+      const feed = socket;
+      void paneGone(paneId).then((gone) => {
+        if (closed || socket !== feed || !paneIds.has(paneId)) return;
+        if (gone) paneIds.delete(paneId);
+        else feed?.destroy();
+      });
     });
   };
+
+  /** True only when Herdr answers that the pane no longer exists. */
+  const paneGone = (paneId: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      if (socketPath === undefined) return resolve(false);
+      const id = `clankie-fleet-pane-get-${randomUUID()}`;
+      let buffer = "";
+      let answered = false;
+      const answer = (gone: boolean) => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(timer);
+        probe.destroy();
+        resolve(gone);
+      };
+      const timer = setTimeout(() => answer(false), 2_000);
+      timer.unref?.();
+      const probe = createConnection(socketPath);
+      probe.setEncoding("utf8");
+      probe.on("connect", () => {
+        probe.write(`${JSON.stringify({ id, method: "pane.get", params: { pane_id: paneId } })}\n`);
+      });
+      probe.on("data", (chunk: string) => {
+        buffer += chunk;
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          try {
+            const message = JSON.parse(line) as {
+              readonly id?: unknown;
+              readonly error?: { readonly code?: unknown };
+            };
+            if (message.id === id) answer(message.error?.code === "pane_not_found");
+          } catch {
+            // Skip a malformed frame; the timeout still answers.
+          }
+        }
+      });
+      probe.on("error", () => answer(false));
+      probe.on("close", () => answer(false));
+    });
 
   const connectEvents = (): void => {
     if (closed || socketPath === undefined || socketPath.length === 0) return;
