@@ -65,6 +65,8 @@ type JournalNote = z.infer<typeof JournalSchema>["notes"][number];
 
 export class NoteWakes {
   private readonly notes = new Map<number, JournalNote>();
+  /** The wake chains still running, by note. */
+  private readonly running = new Map<number, Promise<void>>();
   private readonly clock: () => Date;
   private readonly options: NoteWakesOptions;
 
@@ -84,16 +86,38 @@ export class NoteWakes {
 
   /**
    * Wakes each addressed lead of one just-posted note, once. The addressees are
-   * journaled before any wake goes, so a restart part-way through never sends a
-   * lead the same note twice: it settles the interrupted one as uncertain.
+   * journaled, each pending, before any wake goes, so a restart part-way through never
+   * sends a lead the same note twice: it settles the interrupted one as uncertain.
+   * It answers as soon as they are journaled and the chains run on (#623): a chain can
+   * take most of a caller's deadline, and a post that timed out and was sent again
+   * would be a new note waking its leads twice. Receipts appear on later reads.
    */
-  async wake(note: AppNote, to: readonly string[]): Promise<AppNote> {
+  wake(note: AppNote, to: readonly string[]): AppNote {
     if (this.notes.has(note.sequence)) return this.decorate(note);
     const record: JournalNote = { sequence: note.sequence, to: [...to], wakes: [], pending: [] };
+    const pending = to.map((lead) => ({
+      receiptId: `note:${note.sequence}:${lead}`,
+      lead,
+      steps: [] as AppNoteWakeStep[],
+      trying: (lead === APP_NOTE_CLANKIE ? "clankie" : "webhook") as AppNoteWakeStep["via"],
+    }));
+    record.pending.push(...pending);
     this.notes.set(note.sequence, record);
     this.save();
-    await Promise.all(to.map((lead) => this.chain(record, note, lead)));
+    const running = Promise.all(pending.map((item) => this.chain(record, note, item))).then(
+      () => undefined,
+      (error: unknown) => {
+        this.options.log?.({ sequence: note.sequence, error: String(error) }, "Board note wakes failed");
+      },
+    );
+    this.running.set(note.sequence, running);
+    void running.finally(() => this.running.delete(note.sequence));
     return this.decorate(note);
+  }
+
+  /** Resolves once every wake of that note has settled; at once for a note with none running. */
+  async settled(sequence: number): Promise<void> {
+    await this.running.get(sequence);
   }
 
   /** Adds each note's addressees and settled receipts to a read of the board. */
@@ -108,11 +132,12 @@ export class NoteWakes {
     return { ...note, to: record.to, ...(record.wakes.length === 0 ? {} : { wakes: record.wakes }) };
   }
 
-  private async chain(record: JournalNote, note: AppNote, lead: string): Promise<void> {
-    const receiptId = `note:${note.sequence}:${lead}`;
-    const steps: AppNoteWakeStep[] = [];
-    const pending = { receiptId, lead, steps, trying: "webhook" as AppNoteWakeStep["via"] };
-    record.pending.push(pending);
+  private async chain(
+    record: JournalNote,
+    note: AppNote,
+    pending: JournalNote["pending"][number],
+  ): Promise<void> {
+    const { receiptId, lead, steps } = pending;
     const settle = (reached: AppNoteWake["reached"], held = false) => {
       record.pending = record.pending.filter((item) => item !== pending);
       record.wakes.push({

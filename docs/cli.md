@@ -2036,7 +2036,11 @@ unless its webhook took it. Connected apps send one with the connector's
 `wake_lead` tool; the lead answers on the notes board. A stored lead's name is
 also a name a board note can be addressed to. Such a note wakes it with kind
 `board_note`, carrying only the note's number, its author and a `read_notes`
-hint.
+hint. `post_note` answers once the note is posted and its addressees are
+journaled, before any wake runs (#623), so a relay timeout can't lead an app to
+repost and wake its leads twice. Each addressee's receipt appears on later
+`read_notes` and `clankie connector notes` reads once its wake settles; one in
+`to` without a receipt is still pending.
 
 Connected hires may opt into that webhook with `start_agent`'s
 `notify: {lead: "duet", ref: "thread-id"}`. Worker reports and settled watches
