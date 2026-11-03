@@ -10,17 +10,18 @@ import { build } from "esbuild";
 import { promisify } from "node:util";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { chmod, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import type { SeatRef, SeatView } from "@clankie/agent-hosts";
 import { createCodexSeatAdapter } from "../src/captain/codex-seat-adapter.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import type { HerdrCoreSeats, HerdrCoreTerminal } from "../src/captain/herdr-core-seats.ts";
 import { SEAT_LABEL } from "../src/captain/herdr-core-seats.ts";
+import { SESSION_LABEL } from "../src/captain/herdr-core.ts";
 import {
   HERDR_CORE_FLEET,
   createHerdrCoreRunner,
@@ -607,3 +608,100 @@ processIt("delivers and reports once across a desktop Codex service restart", as
   });
   expect(native.requests.filter(({ method }) => method === "thread/queue/add")).toHaveLength(6);
 });
+
+// The view can outlive its app-server (it then shows "Reconnect failed"). Its history is
+// still the session Clankie recorded for that live hire, read from its own file.
+processIt(
+  "reads a desktop Codex hire's history from its recorded session once its server is gone",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "desktop-history-"));
+    roots.push(root);
+    const codexHome = join(root, "codex-home");
+    const sessions = join(codexHome, "sessions", "2026", "10", "05");
+    await mkdir(sessions, { recursive: true });
+    vi.stubEnv("CODEX_HOME", codexHome);
+    vi.stubEnv("CLANKIE_SETTINGS_FILE", join(root, "settings.json"));
+    cleanups.push(async () => {
+      vi.unstubAllEnvs();
+    });
+    const seats = core();
+    const runner = createHerdrCoreRunner({
+      seats,
+      launchDirectory: join(root, "launches"),
+      seatDirectory: join(root, "seats"),
+      harnessCommand: async () => [await realpath(process.execPath), codex],
+    });
+    const native = await codex0160Protocol(sessions, {
+      socketPath: join(root, "rpc.sock"),
+      workingDirectory: root,
+    });
+    cleanups.push(native.close);
+    await chmod(join(root, "rpc.sock"), 0o600);
+    const adapter = createCodexSeatAdapter({
+      desktop: desktopCodexViews(runner),
+      server: native.launch,
+      trackerOverrides: async () => [],
+    });
+    const address = await runner.createTab({ cwd: root, harness: "codex", label: "history proof" });
+    const paneId = `${HERDR_CORE_FLEET}/${address}`;
+    const started = await adapter.start(
+      { harness: "codex", cwd: root, brief: "" },
+      {
+        paneId,
+        name: "history-proof",
+        run: async () => {
+          throw new Error("No terminal fallback");
+        },
+        start: async (kind, argv) => {
+          native.startView();
+          await runner.startAgent({ name: "history-proof", kind, paneId: address, args: argv });
+        },
+      },
+    );
+    expect(started.outcome).toBe("started");
+    const routed = routeHerdrFleets(
+      {
+        get: async () => {
+          throw new Error("No legacy pane");
+        },
+        resolveTerminal: async () => undefined,
+        wait: async () => {
+          throw new Error("No terminal fallback");
+        },
+      },
+      new Map([[HERDR_CORE_FLEET, runner]]),
+    );
+    const store = new HerdrWatchStore(join(root, "watch.json"), { runner: routed, seatAdapters: [adapter] });
+    cleanups.push(async () => {
+      store.close();
+      if (started.outcome === "started") await started.control.close();
+    });
+    const queued = { stableReceiptKey: "history-proof", delivery: "queue" as const };
+    expect(await store.deliverToSeat(paneId, "Before the server went away", undefined, queued)).toMatchObject(
+      {
+        outcome: "delivered",
+      },
+    );
+    const said = (entries: readonly { type: string; text?: string }[]) =>
+      entries.some((entry) => entry.type === "message" && entry.text === "Before the server went away");
+
+    await native.close();
+    expect(existsSync(join(root, "rpc.sock"))).toBe(false);
+    const chat = await store.readNativeChat(paneId);
+    expect(chat?.agent.status).not.toBe("unavailable");
+    expect(said(chat!.transcript.entries)).toBe(true);
+
+    // A label names no history: only the session Clankie recorded for this live hire does.
+    const terminal = seats.terminals.get(address)!;
+    seats.terminals.set(address, {
+      ...terminal,
+      labels: { ...terminal.labels, [SESSION_LABEL]: randomUUID() },
+    });
+    expect(await runner.transcript!(await runner.get(address))).toBeUndefined();
+    seats.terminals.set(address, terminal);
+    expect(said((await runner.transcript!(await runner.get(address)))!.entries)).toBe(true);
+    // Nor does a terminal whose program is no longer the one Clankie recorded.
+    seats.terminals.set(address, { ...terminal, pid: process.pid });
+    expect(await runner.transcript!(await runner.get(address))).toBeUndefined();
+  },
+);
