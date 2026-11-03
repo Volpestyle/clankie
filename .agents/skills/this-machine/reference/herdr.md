@@ -115,6 +115,16 @@ simulator leases and admissions fail as `missing_binding`). Never use it to look
 at another session's roster; read remote rosters through worker reports,
 `list_fleet_seats` or `clankie herdr agent list`.
 
+## In a desktop-app hire
+
+A hire in a Herdr desktop app terminal has an empty `HERDR_PANE_ID`; its seat is
+`herdr-core/$HC_TERMINAL_ID`. Its `HERDR_SOCKET_PATH` names Clankie's own Herdr
+session, so the stock `herdr` CLI (`herdr pane list`, `herdr api snapshot`) works
+there and shows his Herdr panes, not the desktop app's terminals. Always pass an
+explicit pane there; never use `--current` or a focus-based target, which resolve
+to the owner's focused pane, not yours. The desktop app's terminals are reached
+through `hc` and its core socket (`HC_TERMINAL_SOCKET`).
+
 ## Messages to external Codex sessions
 
 `message_seat` first tries the existing Codex app-server proxy on the selected

@@ -29,13 +29,13 @@ const childActivity = new Map();
 
 /**
  * Where this session sits, as the worker's link names it: its Herdr pane, else the
- * Herdr desktop app's terminal Clankie started it in (ADR 0319). Clankie clears the
- * Herdr variables a desktop terminal would inherit, so empty ones are none.
+ * Herdr desktop app's terminal Clankie started it in (ADR 0319). Empty variables are
+ * none, and a desktop hire's Herdr socket without a pane id (#291) names no seat.
  */
 async function seatOf($) {
   const pane = (await $.env.get("HERDR_PANE_ID"))?.trim();
   const socket = (await $.env.get("HERDR_SOCKET_PATH"))?.trim();
-  if (pane || socket) return pane && socket ? { pane, socket } : undefined;
+  if (pane) return socket ? { pane, socket } : undefined;
   const terminal = (await $.env.get("HC_TERMINAL_ID"))?.trim();
   const core = (await $.env.get("HC_TERMINAL_SOCKET"))?.trim();
   return terminal && core && /^t[0-9a-z]+$/u.test(terminal)

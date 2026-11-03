@@ -17,9 +17,11 @@ export { SEAT_LABEL };
 /**
  * The core starts a terminal with its own environment and the run's values on top.
  * A core started from a Herdr pane carries that pane's identity, which would make a
- * hire's worker think it sits in that pane, so a hire's terminal clears it.
+ * hire's worker think it sits in that pane, so a hire's terminal clears it. HERDR_ENV
+ * goes too: it switches on Herdr's own in-pane reporting, and a desktop hire is no pane.
  */
 const INHERITED_HERDR_IDENTITY = [
+  "HERDR_ENV",
   "HERDR_PANE_ID",
   "HERDR_SOCKET_PATH",
   "HERDR_SESSION",
@@ -93,6 +95,12 @@ export interface HerdrCoreSeats {
 export interface HerdrCoreSeatsOptions {
   readonly socketPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Clankie's own Herdr session socket. A hire's terminal gets it as HERDR_SOCKET_PATH
+   * so the `herdr` CLI there reaches a Herdr server rather than failing on an empty
+   * path (#291); its pane id stays empty, so the worker still knows its seat from the core.
+   */
+  readonly herdrSocket?: string;
 }
 
 export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): HerdrCoreSeats {
@@ -119,6 +127,7 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
         ...Object.fromEntries(
           [...INHERITED_HERDR_IDENTITY, ...INHERITED_COLOR_OPT_OUTS].map((key) => [key, ""]),
         ),
+        ...(options.herdrSocket?.trim() ? { HERDR_SOCKET_PATH: options.herdrSocket.trim() } : {}),
         ...request.env,
       };
       const started = (await call("terminal.run", {

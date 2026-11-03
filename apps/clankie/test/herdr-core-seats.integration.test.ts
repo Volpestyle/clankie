@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -64,6 +64,12 @@ async function until(check: () => Promise<boolean>, ms = 10_000): Promise<void> 
 }
 
 const coreIt = it.skipIf(hc === undefined || process.platform === "win32");
+const herdr = (process.env.PATH ?? "")
+  .split(delimiter)
+  .map((dir) => join(dir, "herdr"))
+  .find((path) => existsSync(path));
+// A desktop hire beside a private legacy Herdr server needs both binaries.
+const coreAndHerdrIt = it.skipIf(hc === undefined || herdr === undefined || process.platform === "win32");
 
 beforeAll(async () => {
   if (hc === undefined || process.platform === "win32") return;
@@ -239,6 +245,80 @@ coreIt(
     expect((await seats.get(stranger))?.state).toBe("finished");
     expect((await seats.get(own))?.state).toBe("finished");
     for (const address of [stranger, own]) await seats.remove(address);
+  },
+);
+
+// #291: the desktop app's core can only override a variable, never unset it, and an empty
+// HERDR_SOCKET_PATH made the stock `herdr` CLI fail in every desktop hire. A hire now gets
+// Clankie's own Herdr session socket, so the CLI works there, and its worker still names its
+// seat from the core. The legacy Herdr here is a private server, never the owner's.
+coreAndHerdrIt(
+  "a desktop hire's herdr CLI reaches Clankie's Herdr while its worker keeps its core seat",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "clankie-hire-herdr-"));
+    const herdrEnv: NodeJS.ProcessEnv = {
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_"))),
+      HERDR_SOCKET_PATH: join(root, "herdr.sock"),
+      HERDR_CONFIG_PATH: join(root, "config/config.toml"),
+      XDG_CONFIG_HOME: join(root, "config"),
+      XDG_STATE_HOME: join(root, "state"),
+      XDG_DATA_HOME: join(root, "data"),
+      XDG_CACHE_HOME: join(root, "cache"),
+      SHELL: "/bin/sh",
+    };
+    const server = spawn(herdr!, ["server"], { env: herdrEnv, stdio: "ignore" });
+    try {
+      await until(async () => existsSync(herdrEnv.HERDR_SOCKET_PATH!));
+      const seats = createHerdrCoreSeats({ env, herdrSocket: herdrEnv.HERDR_SOCKET_PATH! });
+      const report = join(root, "hire.json");
+      const address = await seats.start({
+        argv: [
+          process.execPath,
+          "--input-type=module",
+          "-e",
+          [
+            `const { seatIdentity } = await import(${JSON.stringify(workerLink)});`,
+            `const { spawnSync } = await import("node:child_process");`,
+            // The stock CLI, as a hire's shell runs it: no flags, only the terminal's environment.
+            `const listed = spawnSync(${JSON.stringify(herdr)}, ["pane", "list"], { encoding: "utf8" });`,
+            `(await import("node:fs")).writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,
+            `  identity: seatIdentity(), status: listed.status, stdout: listed.stdout, stderr: listed.stderr,`,
+            `  socket: process.env.HERDR_SOCKET_PATH, pane: process.env.HERDR_PANE_ID, herdrEnv: process.env.HERDR_ENV }));`,
+            `setInterval(() => {}, 1000);`,
+          ].join("\n"),
+        ],
+        cwd,
+        // The probe's own Herdr client log stays in the scratch root.
+        env: { XDG_CONFIG_HOME: herdrEnv.XDG_CONFIG_HOME!, XDG_STATE_HOME: herdrEnv.XDG_STATE_HOME! },
+        seat: "linus",
+      });
+      try {
+        await until(async () => existsSync(report), 20_000);
+        const seen = JSON.parse(await readFile(report, "utf8")) as {
+          identity: { pane?: string; socket?: string };
+          status: number | null;
+          stdout: string;
+          stderr: string;
+          socket?: string;
+          pane?: string;
+          herdrEnv?: string;
+        };
+        expect(seen.socket).toBe(herdrEnv.HERDR_SOCKET_PATH);
+        expect(seen.pane ?? "").toBe("");
+        // Herdr's own in-pane reporting stays off: a desktop hire is no Herdr pane.
+        expect(seen.herdrEnv ?? "").toBe("");
+        expect(seen.status, seen.stderr).toBe(0);
+        expect(JSON.parse(seen.stdout)).toMatchObject({ result: { type: "pane_list" } });
+        expect(seen.identity.pane).toBe(`herdr-core/${address}`);
+        expect(seen.identity.socket).not.toBe(herdrEnv.HERDR_SOCKET_PATH);
+        expect(seen.identity.socket).toMatch(/\.sock$/u);
+      } finally {
+        await seats.kill(address);
+      }
+    } finally {
+      await exec(herdr!, ["server", "stop"], { env: herdrEnv }).catch(() => server.kill("SIGKILL"));
+      await rm(root, { recursive: true, force: true });
+    }
   },
 );
 
