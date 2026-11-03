@@ -6,6 +6,7 @@ import {
   type OperatorSeatEventKind,
 } from "@clankie/protocol";
 import { type ClankieSettings } from "@clankie/settings";
+import { operatorTurnSurfaceContext } from "@clankie/protocol/settings-proposals";
 import { SessionManager, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import { type CaptainOptions, type LaneSession } from "./captain-types.ts";
 import {
   authorizeQuestion,
   questionWorkspaceContext,
+  settingChangeQuestion,
   sameQuestionWorkspace,
 } from "./conversation-questions.ts";
 import { ConversationServiceRun } from "./conversation-run.ts";
@@ -452,6 +454,14 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 current: bodyIdentity.current,
                 authorize: bodyIdentity.authorize,
               });
+        // Only records an owner ask; the owner's app applies the change on his tap (ADR 0351).
+        lane.capture.proposeSettingChange = socialContinuation
+          ? undefined
+          : (draft) =>
+              ctx.conversations.requestSurfaceQuestion(conversationId, settingChangeQuestion(draft), {
+                current: bodyIdentity.current,
+                authorize: bodyIdentity.authorize,
+              });
         lane.capture.cancelQuestion = socialContinuation
           ? undefined
           : (target) =>
@@ -666,6 +676,8 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                   questionWorkspaceContext(cwd, async () => (await ctx.settings()).projects),
                 )
               : "";
+          const surfaceNote =
+            !socialContinuation && context.surface ? operatorTurnSurfaceContext(context.surface) : "";
           if (context.ownerAuthority && context.questionBinding) {
             await run.wait("question authority", authorizeQuestion(context.ownerAuthority));
             if (context.questionBinding.workspace && !ctx.conversations.questionEligible(conversationId))
@@ -697,7 +709,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
             "Pi execution",
             runDurableTurn(
               lane,
-              [seed?.text, workspaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
+              [seed?.text, workspaceNote, surfaceNote, prompt.prompt].filter(Boolean).join("\n\n"),
               attached?.images ?? [],
               {
                 expandPromptTemplates: context.inputAnswer === undefined && prompt.skillName !== undefined,

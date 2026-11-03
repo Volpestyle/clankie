@@ -2858,6 +2858,7 @@ export class ConversationStore {
       meta.scope.kind === "channel" ? this.channelRound(true) : this.runner,
       {
         surfaceClientId: turn.surfaceClientId,
+        ...(turn.surface === undefined || meta.scope.kind === "channel" ? {} : { surface: turn.surface }),
         ...(authority === undefined ? {} : { ownerAuthority: authority }),
         ...(leadOwner === undefined ? {} : { leadOwner }),
         ...(questionBinding === undefined ? {} : { questionBinding }),
@@ -3278,6 +3279,7 @@ export class ConversationStore {
       ConversationTurnContext,
       | "origin"
       | "surfaceClientId"
+      | "surface"
       | "attachments"
       | "ownerAuthority"
       | "leadOwner"
@@ -3528,6 +3530,7 @@ export class ConversationStore {
           ...(provenance.surfaceClientId === undefined
             ? {}
             : { surfaceClientId: provenance.surfaceClientId }),
+          ...(provenance.surface === undefined ? {} : { surface: provenance.surface }),
           ...(meta.parentConversationId === undefined ? {} : { side: true as const }),
           ...(provenance.attachments === undefined ? {} : { attachments: provenance.attachments }),
           ...(workspace === undefined ? {} : { workspace }),
