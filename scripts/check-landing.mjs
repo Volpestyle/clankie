@@ -162,6 +162,7 @@ run("lint", ["pnpm", "lint"]);
 run("deadcode", ["pnpm", "deadcode"]);
 run("doc-links", ["node", "scripts/check-doc-links.mjs"]);
 run("retired-claims", ["node", "scripts/check-retired-claims.mjs"]);
+run("chromium-sandbox", ["node", "scripts/check-chromium-sandbox.mjs"]);
 run("swallowed-rejections", ["node", "scripts/check-swallowed-rejections.mjs", base]);
 run("extension-boundary", ["node", "scripts/check-extension-boundary.mjs"]);
 run("docs-hygiene", ["node", "scripts/check-docs-hygiene.mjs", base]);

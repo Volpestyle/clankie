@@ -547,6 +547,7 @@ async function run() {
     }
     browser = await chromium.launch({
       executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      chromiumSandbox: true,
       headless: true,
       args: ["--disable-background-networking", "--disable-component-update", "--no-first-run"],
     });

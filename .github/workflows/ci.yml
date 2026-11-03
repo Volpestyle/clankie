@@ -50,6 +50,7 @@ jobs:
           pnpm exec oxfmt --check .
           pnpm exec oxlint --deny-warnings .
           node scripts/check-retired-claims.mjs
+          node scripts/check-chromium-sandbox.mjs
       # No new proof folders, no search-flooding lines, a lean AGENTS.md.
       - name: Docs hygiene
         if: github.event_name != 'workflow_dispatch'

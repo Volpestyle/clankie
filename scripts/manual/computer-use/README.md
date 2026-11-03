@@ -85,6 +85,6 @@ isolated headless Chromium page. They do not invoke this comparison runner,
 launch a model, select a winner, or run the eight-task comparison.
 
 Run that separate contract lane explicitly with `pnpm test:computer-integration`.
-It requires installed Chrome on macOS; on other systems, supply the path to a
-real Chromium executable with `CLANKIE_TEST_CHROMIUM`. It is excluded from the
+It requires installed Chrome on macOS; on other systems it uses installed Google
+Chrome, or the Chromium executable named by `CLANKIE_TEST_CHROMIUM`. It is excluded from the
 default Vitest run and `pnpm check`; no CI workflow selects this lane.

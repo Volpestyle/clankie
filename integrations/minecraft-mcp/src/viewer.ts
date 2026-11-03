@@ -128,7 +128,10 @@ export class BrowserViewer {
         "/usr/bin/google-chrome",
       ].find((path) => existsSync(path));
     const browser = await chromium.launch({
-      ...(executablePath ? { executablePath } : {}),
+      // Installed Chrome only, never a Playwright-downloaded Chromium, and always
+      // sandboxed: Playwright turns the sandbox off unless chromiumSandbox is set.
+      ...(executablePath ? { executablePath } : { channel: "chrome" }),
+      chromiumSandbox: true,
       headless: true,
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-dev-shm-usage"],
     });
