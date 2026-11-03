@@ -1052,7 +1052,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (fleet !== undefined && !/^[a-z][a-z0-9-]{0,63}$/u.test(fleet))
       return context.json({ error: "invalid_fleet" }, 400);
     try {
-      return context.json(await dependencies.workerAccounts(fleet));
+      // `unanswered` is the service's own re-read signal, not part of the wire shape.
+      const { unanswered: _unanswered, ...report } = await dependencies.workerAccounts(fleet);
+      return context.json(report);
     } catch (error) {
       return context.json(
         { error: "worker_accounts_failed", detail: error instanceof Error ? error.message : "Unavailable" },
