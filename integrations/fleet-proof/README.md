@@ -37,16 +37,23 @@ Requests remain fresh and bounded to 600 ms, 16,384 PIDs, 64 ancestors and
 4,194,304 descriptors per thread. No `ps`, `lsof`, header PID or bearer fallback
 supplies missing authority.
 
-Census-only PID/FD churn (`ENOENT`, `ESRCH` or a changed list) may restart the
-whole census, discarding every partial owner and descriptor observation. A
-confirmed exit does not (#440): a process whose pidfd shows whole-group exit, or
-whose PID the kernel no longer has, is skipped when the target socket was never
-seen in it, since its descriptors closed with it, and the closing PID list may
-lack it. A PID that appears, a changed thread list, or an exit of a process that
-held the socket still restarts or refuses as before. At most
-16 total census attempts share the original 600 ms request deadline. Seeing a
-second holder is immediately terminal; permission, lifetime, ancestry, cookie
-and namespace failures do not enter this retry. Exhaustion refuses, never returns
+The census reads process instances, a PID with its `/proc/PID` directory inode,
+across repeated listings ([ADR 0347](../../docs/adr/0347-the-linux-socket-census-reads-births-as-they-appear.md)):
+each listing reads only instances not yet read, and the census settles on the
+first listing in which every live instance has been read. A birth or reused PID
+is one more instance to read; a process whose read churned (`ENOENT`, `ESRCH`, a
+changed thread list or identity, or a same-user `EACCES` mid-exit, refused after
+three for one instance) is read again; a confirmed exit (pidfd whole-group
+exit, no such PID, or `EINVAL` because the PID now names another process's
+thread) in which the target socket was never seen is skipped (#440). A denied
+`PF_EXITING` thread or an empty thread list waits up to 20 ms for its pidfd. Churn or exit of a process the socket was seen in, or an owner
+missing from a later listing or listed with another inode, discards the whole
+attempt with every partial owner and descriptor observation. At most 1,024 listings
+per attempt and 16 total census attempts share the original 600 ms request
+deadline. Seeing a
+second holder is immediately terminal; permission, ancestry, cookie and
+namespace failures, and a lifetime change in a process the socket was seen in,
+do not enter this retry. Exhaustion refuses, never returns
 the last partial attempt. Successful Linux receipts retain `census.attempts` and
 fixed refusal reasons; opt-in native diagnostics retain each retry and the final
 attempt count. The body validates this telemetry separately from identity, so

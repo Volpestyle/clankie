@@ -366,5 +366,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0345: A pull request rebases onto main once, before it merges](0345-a-pull-request-rebases-onto-main-once-before-it-merges.md) — Accepted, 2026-11-02, on James's approval of the rule Grok proposed on the connected-apps notes board, which he confirmed to Claude Duet ("he left u a note").
 - [0346: The fleet says who is leading](0346-the-fleet-says-who-is-leading.md) — Proposed, 2026-11-02, from James's ask for a hoodie per active lead in the app's World.
 - [0347: A pull request merges on local checks and the quick checks](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md) — Accepted, 2026-11-03, on the owner's decisions relayed by the lead: "i wanna always be running app tests (in sim) and ci pipeline as we're merging work in, but i never wanna gate on it, just keep working, do sensible te…
+- [0347: The Linux socket census reads births as they appear](0347-the-linux-socket-census-reads-births-as-they-appear.md) — Proposed, 2026-11-03, from James's approval of the full fix for #440 ("Do the full fix").
 
 <!-- adr-index:end -->
