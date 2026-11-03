@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, relative } from "node:path";
 
 // Release recovery needs completed file results, not a grep of console output.
@@ -9,11 +9,29 @@ export default class ReleaseTestReporter {
 
   onTestRunStart(specifications) {
     this.selected = specifications.map((spec) => relative(this.root, spec.moduleId));
+    // A fresh CI checkout has no .local yet.
+    mkdirSync(dirname(process.env.CLANKIE_RELEASE_TEST_REPORT), { recursive: true });
+    this.running = new Set();
+  }
+
+  // The report is written only when the run ends. A run killed first, such as a hung
+  // file at the job's timeout, leaves this list of the files still running (#593).
+  onTestModuleStart(module) {
+    this.running.add(relative(this.root, module.moduleId));
+    this.writeRunning();
+  }
+
+  onTestModuleEnd(module) {
+    this.running.delete(relative(this.root, module.moduleId));
+    this.writeRunning();
+  }
+
+  writeRunning() {
+    writeFileSync(`${process.env.CLANKIE_RELEASE_TEST_REPORT}.running`, JSON.stringify([...this.running]));
   }
 
   onTestRunEnd(modules, errors, reason) {
-    // A fresh CI checkout has no .local yet.
-    mkdirSync(dirname(process.env.CLANKIE_RELEASE_TEST_REPORT), { recursive: true });
+    rmSync(`${process.env.CLANKIE_RELEASE_TEST_REPORT}.running`, { force: true });
     writeFileSync(
       process.env.CLANKIE_RELEASE_TEST_REPORT,
       JSON.stringify({

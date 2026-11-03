@@ -3,6 +3,9 @@
 // failure comments on the issue already open for it instead of filing another.
 //
 //   node scripts/ci-finding.mjs --job checkpoint [--report .local/checkpoint-run.json] [--dry-run]
+//
+// A run stopped before its report was written (a hang reaching the step's timeout) files
+// each test file the reporter recorded as still running.
 //   node scripts/ci-finding.mjs --after mac,real-run [--run ID --attempt N] [--dry-run]
 //
 // `--after` runs from a job that always checks out, after self-hosted jobs whose own
@@ -40,9 +43,19 @@ if (!repo) throw new Error("GITHUB_REPOSITORY is required");
 const runUrl = process.env.RUN_URL ?? "(run URL unavailable)";
 const dryRun = values["dry-run"];
 
-/** Failing tests from the release test reporter's JSON, or nothing when it is absent or unreadable. */
+/**
+ * Failing tests from the release test reporter's JSON. A run stopped before it ended
+ * has no report, only the reporter's list of files still running then (#593).
+ */
 function failures(path) {
-  if (path === undefined || !existsSync(path)) return [];
+  if (path === undefined) return [];
+  if (!existsSync(path)) {
+    try {
+      return JSON.parse(readFileSync(`${path}.running`, "utf8")).map((file) => `${file} did not finish`);
+    } catch {
+      return [];
+    }
+  }
   let report;
   try {
     report = JSON.parse(readFileSync(path, "utf8"));

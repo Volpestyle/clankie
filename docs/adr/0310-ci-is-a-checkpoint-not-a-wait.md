@@ -51,7 +51,9 @@ checkpoints the rest on the side.
 - **Main gets the whole suite nightly.** A pull request runs only the test
   files it edits and the checkpoint the tests its merge reaches, so the `Nightly` workflow runs every test on `main` once
   a night, release-only tests included, and names each failure in its summary.
-  A red night is a bug to file at the front of the queue, not a gate.
+  A red night is a bug to file at the front of the queue, not a gate. A hung
+  file stops the test step at its own timeout, inside the job's, and each file
+  still running then is filed as not finishing (#593).
 - **The typecheck starts warm.** The typecheck keeps each program's compiler
   state (`.local/tsbuildinfo`), so a later check rechecks only what changed.
   CI caches it per pull request, seeded from every push to `main`.
