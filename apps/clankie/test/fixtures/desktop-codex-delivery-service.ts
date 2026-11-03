@@ -99,7 +99,17 @@ const local = new LocalFleetLink({
     coreBinding: async () => binding,
     coreTerminal: (_binding, address) => liveDesktopTerminal(seats, address),
     herdrBinary: "herdr",
-    privateSeat: (...args) => registry.allowsAdmission(args[0], args[1], args[2], undefined, args[3]),
+    privateSeat: async (...args) => {
+      try {
+        return await registry.allowsAdmission(args[0], args[1], args[2], undefined, args[3]);
+      } catch (error) {
+        // Name the refused private-seat observation for the parent test (#564).
+        process.stderr.write(`private seat refused: ${String(error)}\n`);
+        throw error;
+      }
+    },
+    // The service's own fixed-stage proof diagnostics, for the parent test (#564).
+    diagnostics: (event) => process.stderr.write(`proof diagnostic: ${JSON.stringify(event)}\n`),
   }),
 });
 const conversations = new ConversationStore(join(root, "conversations"), async () => {});
