@@ -30,8 +30,10 @@ KERNEL_PROC_MOUNTS = {("/proc/sys/fs/binfmt_misc", "autofs"), ("/proc/sys/fs/bin
 
 
 class Refusal(Exception):
-    def __init__(self, stage, reason, error=0):
+    def __init__(self, stage, reason, error=0, denied=None):
         self.stage, self.reason, self.error = stage, reason, error
+        # Diagnostics only: the same-user process whose FD table was denied.
+        self.denied = denied
 
 
 def require(value, stage, reason):
@@ -425,7 +427,8 @@ class Proof:
                             if (found or self.uid in before[2][:2] or
                                     self.uid in original[2][:2] or
                                     original != self.identity(thread, tid)):
-                                raise Refusal("fd_list", "fd_list_unavailable", 13)
+                                raise Refusal("fd_list", "fd_list_unavailable", 13,
+                                              self.denied(directory, pid, original[2]))
                         finally:
                             os.close(thread)
                     require(tids == self.entries(task, MAX_PIDS), "census", "process_census_changed")
@@ -443,6 +446,14 @@ class Proof:
                 os.close(handle)
         finally:
             os.close(directory)
+
+    def denied(self, directory, pid, uids):
+        """Name a denied table's process for diagnostics; never consulted by the proof."""
+        try:
+            comm = self.read(directory, "comm", 64).rstrip(b"\n").decode("utf-8", "replace")
+        except (OSError, Refusal):
+            comm = ""
+        return {"pid": pid, "comm": comm[:16], "uids": list(uids)}
 
     def ancestry(self, owner):
         chain = []
@@ -642,7 +653,8 @@ def execute(args):
     except Exception as error:
         refusal = error if isinstance(error, Refusal) else Refusal("process", "process_unavailable", getattr(error, "errno", 0) or 0)
         detail = {"schemaVersion": 1, "stage": refusal.stage, "reason": refusal.reason,
-                  "errno": max(0, refusal.error), "attempt": proof.census_attempts, "retry": False}
+                  "errno": max(0, refusal.error), "attempt": proof.census_attempts, "retry": False,
+                  **({"deniedProcess": refusal.denied} if refusal.denied else {})}
         explanation = ("Linux native worker proof requires the initial PID namespace; containers are unsupported"
                        if refusal.reason == "unsupported_pid_namespace" else "Native process proof unavailable")
         return None, retries() + (PREFIX + json.dumps(detail, separators=(",", ":")) + "\n" if diagnostics else "") + explanation + "\n"

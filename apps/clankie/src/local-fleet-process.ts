@@ -313,6 +313,14 @@ export const NativeProcessDiagnosticSchema = z
           .max(1 << 22),
       })
       .optional(),
+    // The same-user process whose FD table the Linux census could not read (#564).
+    deniedProcess: z
+      .strictObject({
+        pid: z.number().int().min(1).max(2_147_483_647),
+        comm: z.string().max(16),
+        uids: z.array(z.number().int().min(0).max(4_294_967_295)).length(4),
+      })
+      .optional(),
   })
   .strict();
 

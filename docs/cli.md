@@ -454,7 +454,10 @@ discarded, and a truly stalled observer closes with an explicit log reason.
 When that timeout refuses a seat route's pane proof, the service answers with the
 retryable `fleet_admission_unavailable` (the observer code in `observation`), so
 a worker's `message_clankie` retries its binding lookup instead of failing with
-`binding_unavailable` (VUH-2208).
+`binding_unavailable` (VUH-2208). A local fleet request refused the same way
+carries its fixed refusal code there too, such as `native_initial_unavailable`,
+`connection_changed` or `private_seat_lifetime_unavailable`; the code is a
+diagnostic and grants nothing (#564).
 No expired proof or uncertain tool call is replayed.
 
 Doctor observes operator bridges separately from worker bridges; an operator

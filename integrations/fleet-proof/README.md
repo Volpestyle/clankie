@@ -445,6 +445,10 @@ to stderr; its successful stdout schema and generic failure stderr remain the
 default contract. An ancestry failure additionally records private `ancestryFailure` facts:
 walk/recheck phase, zero-based chain position, failed PID, claimant PID/birth pin
 and its freshly checked status (`same`, `exited`, `changed`, `unavailable`).
+A Linux census refused by a same-user FD table it cannot read (`fd_list_unavailable`,
+errno 13) names that process in `deniedProcess`: its PID, `comm` and the four
+`Uid:` values (real, effective, saved, filesystem). The proof never reads it, and
+it goes only to the private request log (#564).
 An empty `KERN_PROC_PID` result is classified as ESRCH; a separate native exit
 check confirms absence before it can trigger the re-walk.
 `caller_exited` confirms the claimant exited; `ancestor_exited` confirms an

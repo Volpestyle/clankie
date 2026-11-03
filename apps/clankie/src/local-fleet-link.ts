@@ -177,10 +177,15 @@ export class LocalFleetLink {
         validate: async (signal?: AbortSignal) => {
           const cancelled = cancellation(signal);
           cancelled.throwIfAborted();
-          if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection is unavailable");
+          if (!current())
+            throw new FleetAdmissionUnavailableError(
+              "Local fleet connection is unavailable",
+              "connection_unavailable",
+            );
           const admitted = await this.options.prove(socket, pane, cancelled, context);
           cancelled.throwIfAborted();
-          if (!current()) throw new FleetAdmissionUnavailableError("Local fleet connection changed");
+          if (!current())
+            throw new FleetAdmissionUnavailableError("Local fleet connection changed", "connection_changed");
           return admitted;
         },
         projectProof: async (signal?: AbortSignal) => {
@@ -226,7 +231,8 @@ export class LocalFleetLink {
         } catch (error) {
           if (request.signal.aborted)
             return Response.json({ error: "local_admission_cancelled" }, { status: 504 });
-          if (error instanceof FleetAdmissionUnavailableError) return fleetAdmissionUnavailableResponse();
+          if (error instanceof FleetAdmissionUnavailableError)
+            return fleetAdmissionUnavailableResponse(error.code ? { observation: error.code } : {});
           throw error;
         }
       }
