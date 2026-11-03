@@ -345,18 +345,23 @@ jobs:
           fi
           "$toolchain/bin/cargo" --version
           echo "$toolchain/bin" >> "$GITHUB_PATH"
-      # Tests spawn the pinned Herdr by name; activity tests decode media with
-      # the Mac's own ffmpeg.
-      - name: Pinned Herdr
+      # Tests spawn the pinned Herdr by name and read processes through the
+      # compiled process-proof helper; activity tests decode media with the
+      # Mac's own ffmpeg.
+      - name: Pinned Herdr and the process-proof helper
         run: |
           pnpm herdr:build
           echo "$PWD/.data/herdr/bin" >> "$GITHUB_PATH"
+          pnpm fleet-proof:build
           command -v ffmpeg || echo "::warning::ffmpeg is not on this Mac's PATH"
       # Vitest's changed selection plus the declared consumers of changed
-      # filesystem inputs, as the landing gate selects them.
+      # filesystem inputs, as the landing gate selects them. The native
+      # host-receipt suites run here when a change selects them (#647).
       - name: Changed tests against the base
         env:
           BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          HIRE_RECEIPT_NATIVE_TEST: "1"
+          ORPHAN_HIRE_NATIVE_TEST: "1"
         run: |
           # A push compares with the branch's previous tip; a pull request's
           # merge commit has its base as the first parent.
