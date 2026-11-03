@@ -203,7 +203,7 @@ function connectorServer(
       capabilities: { tools: {} },
       instructions:
         "Clankie's agents are the coding agents running in Herdr panes on the owner's machines, and in the Herdr desktop app on this Mac. " +
-        "list_agents shows each one with its machine and project. read_agent shows what its screen says now. " +
+        "list_agents shows each one with its machine and project. read_agent shows what it has said lately. " +
         "message_agent sends it one message, as the owner would from the Clankie app, with up to four images it opens from its own workspace. " +
         "read_image returns an image an agent saved in its working directory, such as a screenshot, for you to look at. " +
         "list_places lists where an agent can start; start_agent starts one there. " +
@@ -246,9 +246,9 @@ function connectorServer(
       },
       {
         name: "read_agent",
-        title: "Read an agent's screen",
+        title: "Read an agent",
         description:
-          "Read the current text of one agent's terminal pane, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out. An agent Clankie or a connected app hired is read whole, so a quiet one (waiting on CI, say) still shows its last screen. For an agent the owner started by hand, what its pane showed before it was first read is held back and a note says so; read again once it has printed more.",
+          "Read what one agent has said lately, newest lines last. Works for any agent id from list_agents, including panes that can't be messaged. Only a pane with a coding agent running in it now can be read. A Claude Code or Codex agent in a Herdr pane is read from its own session (prompts marked ›, its replies, a · line per tool call), never its screen, and a note says so; while it waits on a menu or question, the rows of its screen showing it are added; if its session can't be read, the read is refused. Other agents are read from their screen, and only what that agent showed: shell work from before it started, or from an earlier agent in the same pane, is left out. An agent Clankie or a connected app hired is read whole, so a quiet one (waiting on CI, say) still shows its last screen. For an agent the owner started by hand, what its pane showed before it was first read is held back and a note says so; read again once it has printed more.",
         inputSchema: {
           type: "object" as const,
           properties: {
