@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -101,6 +101,39 @@ async function scriptedModel(reply: (messages: readonly ChatMessage[]) => Script
 }
 
 /**
+ * The scratch service can reach nothing of the live service or fleet: its
+ * environment is built here rather than inherited, every path it names lies in
+ * its own temporary root, its credentials are a file there (never the Keychain
+ * broker), its ports are fresh and never the live 4310/4321, and Herdr is off.
+ */
+function assertIsolated(env: NodeJS.ProcessEnv, root: string): void {
+  expect(env.CLANKIE_SCRATCH).toBe("1");
+  expect(root.startsWith(tmpdir())).toBe(true);
+  for (const name of [
+    "HOME",
+    "CLANKIE_STATE",
+    "CLANKIE_SETTINGS_FILE",
+    "CLANKIE_CREDENTIALS_FILE",
+    "XDG_CONFIG_HOME",
+    "CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY",
+  ])
+    expect(env[name]?.startsWith(`${root}/`), name).toBe(true);
+  for (const name of ["PORT", "CLANKIE_RELAY_PORT", "CLANKIE_DEVICE_PORT"])
+    expect(["4310", "4321"]).not.toContain(env[name]);
+  for (const name of ["CLANKIE_CAPTAIN_URL", "CLANKIE_CONTROL_PLANE_URL", "CLANKIE_RELAY_URL"])
+    expect(new URL(env[name]!).hostname, name).toBe("127.0.0.1");
+  expect(new URL(env.CLANKIE_CAPTAIN_URL!).port).toBe(env.PORT);
+  // Every network address it is handed, including a test's Discord or model, is loopback.
+  for (const [name, value] of Object.entries(env))
+    if (value !== undefined && /^https?:\/\//u.test(value))
+      expect(["127.0.0.1", "localhost"], name).toContain(new URL(value).hostname);
+  const settings = JSON.parse(readFileSync(env.CLANKIE_SETTINGS_FILE!, "utf8")) as {
+    herdr?: { runtime?: string };
+  };
+  expect(settings.herdr?.runtime).toBe("disabled");
+}
+
+/**
  * `env` adds to the child's environment, e.g. a Discord presence runtime
  * module. `requestId` is the delivery ID; a bridge uses the Discord message ID.
  */
@@ -166,6 +199,7 @@ setTimeout(() => {}, 300000);
     CLANKIE_CAPTAIN_STEER_SOURCE_LANE: "discord_text",
     ...options.env,
   };
+  assertIsolated(env, root);
   const url = preset.CLANKIE_CAPTAIN_URL!;
   const authorization = `Bearer ${preset.CLANKIE_CAPTAIN_TOKEN}`;
   let child: ChildProcess | undefined;
