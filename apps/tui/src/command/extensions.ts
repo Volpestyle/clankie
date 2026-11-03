@@ -25,6 +25,7 @@ import {
   InstalledExtensionSchema,
   SettingsStore,
   defaultSettingsPath,
+  withoutGitRepository,
   type InstalledExtension,
 } from "@clankie/settings";
 import { commandHost } from "./io.ts";
@@ -292,7 +293,13 @@ function gitUrl(source: string): string | undefined {
 
 const git = async (cwd: string, ...args: string[]) =>
   (
-    await run("git", ["-C", cwd, ...args], { timeout: 300_000, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })
+    await run("git", ["-C", cwd, ...args], {
+      timeout: 300_000,
+      encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
+      // An inherited GIT_DIR would make `init` here rewrite another checkout's config (#411).
+      env: withoutGitRepository(),
+    })
   ).stdout.trim();
 
 /**

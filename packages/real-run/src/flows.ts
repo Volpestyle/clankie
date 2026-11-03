@@ -238,8 +238,12 @@ export const flows: readonly Flow[] = [
         const workspace = join(stack.directory, "workspaces", "garden");
         const origin = join(stack.directory, "workspaces", "garden.git");
         mkdirSync(workspace, { recursive: true });
-        const git = (...args: string[]) => execFileSync("git", args, { cwd: workspace, stdio: "pipe" });
-        execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin]);
+        // No inherited GIT_DIR may turn these inits onto the checkout running the proof (#411).
+        const env = Object.fromEntries(
+          Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")),
+        );
+        const git = (...args: string[]) => execFileSync("git", args, { cwd: workspace, stdio: "pipe", env });
+        execFileSync("git", ["init", "-q", "--bare", "-b", "main", origin], { env });
         git("init", "-q", "-b", "main");
         git(
           "-c",

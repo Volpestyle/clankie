@@ -6,6 +6,29 @@ import { promisify } from "node:util";
 import type { CheckoutStatus, WorktreeReconciliation } from "@clankie/protocol";
 
 const exec = promisify(execFile);
+/**
+ * Variables that point git at a repository other than its `-C` directory. A git hook or
+ * `rebase --exec` in a linked worktree exports `GIT_DIR=<checkout>/.git/worktrees/<name>`,
+ * and a non-bare `git init` of any path under it rewrites the shared checkout config with
+ * `core.bare=true` (#411). Git Clankie runs for a path of its own never inherits them.
+ */
+export const GIT_REPOSITORY_ENVIRONMENT = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_PREFIX",
+  "GIT_CONFIG",
+] as const;
+/** `env` without the variables that redirect git to another repository or config file. */
+export function withoutGitRepository(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const clean = { ...env };
+  for (const name of GIT_REPOSITORY_ENVIRONMENT) delete clean[name];
+  return clean;
+}
 export async function checkoutGit(path: string, args: readonly string[]): Promise<string> {
   const { stdout } = await exec("git", ["--no-optional-locks", "-C", path, ...args], {
     encoding: "utf8",
@@ -401,6 +424,29 @@ async function startHireWorktree(
  * With `worktree`, a start checkout that is dirty, diverged, or can't safely be advanced is
  * left exactly as it is and the hire gets a new worktree from origin/main inside it.
  */
+/** Why git can't read a start checkout, specific enough for the owner to repair it (#411). */
+async function unreadableCheckout(path: string, stderr: string): Promise<string> {
+  const said =
+    stderr
+      .split("\n")
+      .map((line) => line.trim())
+      .find(Boolean)
+      ?.slice(0, 300) ?? "no error text";
+  try {
+    const [bare, gitDir] = (
+      await checkoutGit(path, ["rev-parse", "--is-bare-repository", "--absolute-git-dir"])
+    )
+      .trim()
+      .split("\n");
+    // A `.git` directory, or a linked worktree's, belongs to a working tree, so `true` is a mislabel.
+    if (bare === "true" && gitDir !== undefined && /(?:^|\/)\.git(?:\/worktrees\/[^/]+)?$/u.test(gitDir))
+      return `Start checkout is marked bare (core.bare=true) although it has a working tree, so git refuses to work in it; restore it with \`git -C ${JSON.stringify(path)} config core.bare false\``;
+    if (bare === "true") return "Start directory is a bare repository; start the hire in a checkout";
+  } catch {
+    /* The original git error below is the most specific thing known. */
+  }
+  return `Git can't read the start checkout: ${said}`;
+}
 export async function verifyHireCheckout(
   path: string,
   beforeAdvance: (root: string) => Promise<void> = async () => {},
@@ -410,8 +456,9 @@ export async function verifyHireCheckout(
   try {
     root = (await checkoutGit(path, ["rev-parse", "--show-toplevel"])).trim();
   } catch (error) {
-    if (!/not a git repository/iu.test(String((error as { stderr?: unknown }).stderr ?? "")))
-      return { outcome: "refused", path, reason: "Git checkout observation is unavailable" };
+    const stderr = String((error as { stderr?: unknown }).stderr ?? "");
+    if (!/not a git repository/iu.test(stderr))
+      return { outcome: "refused", path, reason: await unreadableCheckout(path, stderr) };
     // Missing/inaccessible directories are not usable non-Git workspaces.
     try {
       if (!(await stat(path)).isDirectory()) throw Error("Not a directory");
