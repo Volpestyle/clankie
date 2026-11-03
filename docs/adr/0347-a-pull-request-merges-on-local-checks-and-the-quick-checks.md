@@ -43,7 +43,10 @@ clankie-app and clankie-ops). They are not a product rule.
   any simulator or on-device integration job do not run per pull request, not
   per push and not on ready. They run on `main` after merges, coalesced so a
   burst of merges runs once on the newest tip, and on a cadence such as nightly.
-  The post-merge jobs and the nightly suite stay as ADR 0310 set them.
+  The post-merge jobs and the nightly suite stay as ADR 0310 set them. Suites
+  that need the Mac (the native host-receipt suites, which skip on Linux) also
+  run nightly on the Mac runner with their gates set, and a skip there fails
+  the job (2026-11-03, #647).
 - **A red background run is a `ci-finding`, not a stop.** A failure in a run on
   `main` or a scheduled run becomes a GitHub issue labelled `ci-finding` that
   links the failing run. A workflow files it, one issue per failing test or
