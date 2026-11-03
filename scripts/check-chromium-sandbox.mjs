@@ -12,9 +12,11 @@
 // legitimate one carries its own allow comment) and any re-export of Playwright. A launch passes only with an inline object literal whose
 // `chromiumSandbox` is the literal `true`, whose spreads are inline literals that
 // can't carry `chromiumSandbox` or `args`, and whose `args` are literal strings.
-// A launch that truly cannot keep the sandbox (a Linux CI runner, say) says why
-// on its own line or the line above, and keeps that exception scoped:
-//   // allow-no-sandbox -- this runner's kernel denies the user namespaces Chrome needs
+// A Playwright launch is never excused. Only a load the check can't name, or a
+// sandbox flag outside any Playwright launch (a raw Chrome spawn, say), may be,
+// by a real comment giving the reason, on its own line directly before that one
+// statement or trailing it:
+//   // allow-no-sandbox -- loads this checkout's own module by path, not Playwright
 // Usage: node scripts/check-chromium-sandbox.mjs [ROOT]
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -80,11 +82,9 @@ function checkFile(path, source, report) {
       ? ts.ScriptKind.JSX
       : ts.ScriptKind.JS;
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, kind);
-  const lines = source.split("\n");
   const lineOf = (node) => file.getLineAndCharacterOfPosition(node.getStart(file)).line;
-  // An exception sits on the line itself or on the line above the statement holding it.
-  const fail = (node, message) => {
-    const line = lineOf(node);
+  // The innermost statement holding a node: an exception covers exactly that one.
+  const statementOf = (node) => {
     let statement = node;
     while (
       statement.parent &&
@@ -94,8 +94,34 @@ function checkFile(path, source, report) {
       !ts.isCaseOrDefaultClause(statement.parent)
     )
       statement = statement.parent;
-    for (let at = lineOf(statement) - 1; at <= line; at += 1) if (allowed.test(lines[at] ?? "")) return;
-    report(`${path}:${line + 1}: ${message}`);
+    return statement;
+  };
+  // Statements holding a Playwright launch: no comment excuses anything in them.
+  const launchStatements = new Set();
+  /**
+   * A real comment that gives a reason, bound to one statement: on its own line
+   * directly before it (not trailing an earlier statement), or trailing it on its
+   * last line. Strings never count.
+   */
+  const excused = (statement) => {
+    const comments = [
+      ...(ts.getLeadingCommentRanges(source, statement.getFullStart()) ?? []).filter((range) => {
+        const start = source.lastIndexOf("\n", range.pos - 1) + 1;
+        return source.slice(start, range.pos).trim() === "";
+      }),
+      ...(ts.getTrailingCommentRanges(source, statement.getEnd()) ?? []),
+    ];
+    return comments.some((range) => allowed.test(source.slice(range.pos, range.end)));
+  };
+  // Only a load the check can't name, or a flag outside any Playwright launch, may be excused.
+  const pending = [];
+  const fail = (node, message, excusable = false) =>
+    pending.push({ node, message, excusable, statement: statementOf(node) });
+  const flush = () => {
+    for (const { node, message, excusable, statement } of pending) {
+      if (excusable && !launchStatements.has(statement) && excused(statement)) continue;
+      report(`${path}:${lineOf(node) + 1}: ${message}`);
+    }
   };
 
   // Names bound to a Playwright module, and names bound to its Chromium, by declaration only.
@@ -178,6 +204,7 @@ function checkFile(path, source, report) {
     );
   };
   const checkLaunch = (call, method) => {
+    launchStatements.add(statementOf(call));
     const given = call.arguments[method === "launchPersistentContext" ? 1 : 0];
     const options = given && unwrap(given);
     if (!options || !ts.isObjectLiteralExpression(options))
@@ -225,22 +252,22 @@ function checkFile(path, source, report) {
   const visit = (node) => {
     const flag = (text) => text !== undefined && unsandboxed.test(text);
     if (literalText(node) !== undefined && flag(literalText(node)))
-      fail(node, `passes a sandbox-disabling flag: ${literalText(node)}`);
+      fail(node, `passes a sandbox-disabling flag: ${literalText(node)}`, true);
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.PlusToken &&
       !(ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) &&
       flag(folded(node))
     )
-      fail(node, `passes a sandbox-disabling flag: ${folded(node)}`);
+      fail(node, `passes a sandbox-disabling flag: ${folded(node)}`, true);
     if (ts.isTemplateExpression(node) && flag(node.getText(file)))
-      fail(node, "passes a sandbox-disabling flag in a template");
+      fail(node, "passes a sandbox-disabling flag in a template", true);
 
     // A loader the check can't read in a file that names Playwright, or a Playwright
     // load anywhere but a declaration.
     if (loader(node)) {
       const specifier = literalText(node.arguments[0]);
-      if (specifier === undefined) fail(node, "loads a module the check can't name");
+      if (specifier === undefined) fail(node, "loads a module the check can't name", true);
       else if (playwright.test(specifier)) {
         let at = node.parent;
         while (ts.isParenthesizedExpression(at) || ts.isAwaitExpression(at)) at = at.parent;
@@ -273,6 +300,7 @@ function checkFile(path, source, report) {
     ts.forEachChild(node, visit);
   };
   visit(file);
+  flush();
 }
 
 const failures = [];

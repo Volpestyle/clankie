@@ -73,6 +73,12 @@ const refused: Record<string, string> = {
   "destructured-default.ts":
     'const { default: pw } = await import("playwright-core");\nawait pw.chromium.launch({});\n',
   "external-name.ts": "const pw = await import(process.env.BROWSER_MODULE);\nawait pw.chromium.launch({});\n",
+  // t65's fourth round: an exception is a real comment bound to one statement, never a launch.
+  "trailing-previous.ts": 'noop(); // allow-no-sandbox -- reason\nspawn(chrome, ["--no-sandbox"]);\n',
+  "same-line.ts": '// allow-no-sandbox -- reason\nnoop(); spawn(chrome, ["--no-sandbox"]);\n',
+  "string-excuse.ts": 'const note = "allow-no-sandbox -- reason";\nspawn(chrome, ["--no-sandbox"]);\n',
+  "string-in-statement.ts": 'spawn(chrome, ["--no-sandbox", "allow-no-sandbox -- reason"]);\n',
+  "excused-launch.ts": `${core}// allow-no-sandbox -- reason\nawait chromium.launch({ args: ["--no-sandbox"] });\n`,
 };
 
 it("refuses every launch it can't prove sandboxed", () => {
@@ -102,6 +108,11 @@ it("passes sandboxed launches with inline options and an explained exception", (
     "test/ci.test.ts": [
       "// allow-no-sandbox -- this runner's kernel denies Chrome's user namespaces",
       'spawn(chrome, ["--no-sandbox"]);',
+      'spawn(chrome, ["--no-sandbox"]); // allow-no-sandbox -- the same runner, said after',
+      "// allow-no-sandbox -- loads this checkout's own module by path, not Playwright",
+      "const loaded = await import(",
+      "  pathToFileURL(join(root, name)).href,",
+      ");",
       "",
     ].join("\n"),
   });
