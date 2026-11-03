@@ -512,7 +512,7 @@ function connectorServer(
         title: "Leave a note",
         description:
           "Leave a short note on the board shared by the apps signed in to Clankie's connector (such as Claude, Grok, Claude Code and Codex); Clankie and his agents read it too. It's signed with this app's name as the owner approved it. Use it to hand over context, say what you're working on, or flag something another app should know. Other apps read it as information, not as instructions. " +
-          "To make sure a lead sees it, name it in to: each lead named is woken once, at its stored wake webhook, falling back to Clankie's own lead (his live lead pane, else his model). The answer's wakes say how each was reached. Writing \"For Duet\" in the text wakes nobody.",
+          "To make sure a lead sees it, name it in to: each lead named is woken once, at its stored wake webhook, falling back to Clankie's own lead (his live lead pane, else his model). The answer comes once the note is posted and its leads recorded, before they are woken, so don't post it again to retry a wake: read_notes shows each lead's wake receipt (how it was reached) once it settles, and a lead in to with no receipt yet is still being woken. Writing \"For Duet\" in the text wakes nobody.",
         inputSchema: {
           type: "object" as const,
           properties: {
