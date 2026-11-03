@@ -82,7 +82,10 @@ Pick the first that fits:
    ```js
    const { endpoint } = JSON.parse(execSync(`herdr-browser do browser.cdp --pane ${pane}`));
    const browser = await chromium.connectOverCDP(endpoint);
-   const page = browser.contexts()[0].pages().find((p) => p.url().startsWith(myUrl));
+   const page = browser
+     .contexts()[0]
+     .pages()
+     .find((p) => p.url().startsWith(myUrl));
    ```
 
    Only agent-profile pages are visible there, and `newPage()` opens a pane the
