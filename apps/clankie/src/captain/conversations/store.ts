@@ -9,7 +9,7 @@ import { PendingNativeMessages, type NativeMessageHost } from "../pending-native
 import { OwnerUpdates } from "../owner-updates.ts";
 import { CurrentActivities, safeCurrentActivityText } from "./current-activity.ts";
 import type { OperatorCurrentActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
-import type { OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
+import type { OperatorServiceNotice, OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
 import type {
   ConversationQuestion,
@@ -1674,8 +1674,10 @@ export class ConversationStore {
    * ordinary chat as received context. It is durable and shown by every
    * conversation surface, and it never queues a turn (VUH-1702, VUH-1698).
    * The same text is recorded once, so a retried notice cannot duplicate it.
+   * A tagged `notice` lets surfaces group it or leave it out of the chat; the
+   * text, the model's context, is the same either way.
    */
-  public recordServiceNotice(conversationId: string, text: string): boolean {
+  public recordServiceNotice(conversationId: string, text: string, notice?: OperatorServiceNotice): boolean {
     const meta = this.metas.get(conversationId);
     if (meta === undefined || !text.trim() || text.length > OPERATOR_CONVERSATION_TEXT_MAX) return false;
     if (
@@ -1685,7 +1687,13 @@ export class ConversationStore {
     )
       return true;
     meta.revision += 1;
-    this.append(meta, { type: "message", role: "external", text, streaming: false });
+    this.append(meta, {
+      type: "message",
+      role: "external",
+      text,
+      streaming: false,
+      ...(notice ? { notice } : {}),
+    });
     meta.updatedAt = new Date().toISOString();
     this.saveMeta(meta);
     return true;

@@ -4,13 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, expect, it } from "vitest";
-import { FLEET_SEAT_RESTARTS_PATH } from "@clankie/protocol";
+import { FLEET_SEAT_RESTARTS_PATH, type OperatorServiceNotice } from "@clankie/protocol";
 import {
   createHiredSeatRestarts,
   RestartRefusal,
   type RestartCandidate,
 } from "../src/captain/hired-seat-restarts.ts";
 import { readHiredRestartObservation } from "../src/captain/hired-restart-observation.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { replayConversation } from "./conversation-requests.ts";
 import { registerSeatRestartRoutes } from "../src/app/seat-restart-routes.ts";
 import { createBearerAuthenticator } from "../src/app/http-auth.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -130,6 +132,7 @@ async function fixture() {
     },
   };
   const notices: string[] = [];
+  const tags: OperatorServiceNotice[] = [];
   const deps = {
     path: join(root, "policy.json"),
     signal: controller.signal,
@@ -147,8 +150,9 @@ async function fixture() {
       if (!item.saved || !item.body.includes(nonce)) throw new RestartRefusal("work_item_handoff_not_saved");
       return item;
     },
-    notice: (_owner: unknown, text: string) => {
+    notice: (_owner: unknown, text: string, tag: OperatorServiceNotice) => {
       notices.push(text);
+      tags.push(tag);
     },
   };
   const policy = createHiredSeatRestarts(deps);
@@ -158,6 +162,7 @@ async function fixture() {
     deps,
     candidate,
     notices,
+    tags,
     native,
     setTokens: (value: number | undefined) => {
       tokens = value;
@@ -245,6 +250,29 @@ it.each(["resource_held", "resource_queued", "resource_native_unknown"])(
   },
 );
 
+it("tags the two-hour wait for the owner's chat and keeps its words as the conversation's text", async () => {
+  const f = await fixture();
+  f.blockResource("resource_held");
+  await f.policy.tick();
+  f.advance(2 * 3_600_000);
+  await f.policy.tick();
+  expect(f.tags).toEqual([{ kind: "seat_restart_waiting", attention: "owner", worker: "fixture" }]);
+  const store = new ConversationStore(join(f.root, "conversations"), async () => {});
+  expect(store.recordServiceNotice("global-default", f.notices[0]!, f.tags[0])).toBe(true);
+  const replay = await replayConversation(store, {
+    conversationId: "global-default",
+    surfaceClientId: "owner",
+  });
+  if (replay.op !== "replay" || replay.result.status !== "page") throw new Error("Replay page required");
+  expect(replay.result.events.at(-1)).toMatchObject({
+    type: "message",
+    role: "external",
+    text: f.notices[0],
+    notice: { kind: "seat_restart_waiting", attention: "owner", worker: "fixture" },
+  });
+  await store.close();
+});
+
 it.each(["file", "tracker", "tracker_read", "symlink"])(
   "immediately notices replied handoff uncertainty once when %s proof is missing",
   async (gap) => {
@@ -269,6 +297,7 @@ it.each(["file", "tracker", "tracker_read", "symlink"])(
     expect(failed.receiptId).toBe("original-handoff");
     expect(f.notices).toHaveLength(1);
     expect(f.notices[0]).toContain("handoff recovery proof is unconfirmed");
+    expect(f.tags[0]).toMatchObject({ kind: "seat_handoff_unconfirmed", attention: "owner" });
     expect(f.notices[0]).toContain("original-handoff");
     const resumed = createHiredSeatRestarts(f.deps);
     await resumed.tick();
@@ -293,6 +322,7 @@ it("reconsiders only a definite pre-exit refusal with the same kept handoff; unc
   expect(f.restarts()).toBe(2);
   expect(f.notices).toHaveLength(1);
   expect(f.notices[0]).toContain("restart is unconfirmed");
+  expect(f.tags[0]).toMatchObject({ kind: "seat_restart_unconfirmed", attention: "owner" });
 });
 
 it("retires a definitely superseded kept handoff and requests exactly one fresh nonce after new input becomes quiet", async () => {
@@ -336,6 +366,7 @@ it("completes successor recovery after the setting, owner activity and resources
   expect((await f.policy.status()).seats[0]!.handoff!.state).toBe("restarted");
   expect(f.notices).toHaveLength(1);
   expect(f.notices[0]).toContain("restarted fresh");
+  expect(f.tags[0]).toMatchObject({ kind: "seat_restarted", attention: "none" });
 });
 
 it.each(["authority_revoked", "shutdown"])(

@@ -11,7 +11,12 @@ import {
 } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { SeatRestartStatusSchema, type SeatRestartStatus } from "@clankie/protocol";
+import {
+  SeatRestartStatusSchema,
+  type OperatorServiceNotice,
+  type OperatorServiceNoticeKind,
+  type SeatRestartStatus,
+} from "@clankie/protocol";
 import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { ConversationOwner } from "./conversation-owner.ts";
 
@@ -56,6 +61,14 @@ export class RestartRefusal extends Error {
 }
 const QUIET_MS = 15 * 60_000;
 const NOTICE_MS = 2 * 60 * 60_000;
+function tag(
+  kind: OperatorServiceNoticeKind,
+  attention: OperatorServiceNotice["attention"],
+  candidate: RestartCandidate,
+): OperatorServiceNotice {
+  const worker = candidate.name?.trim().slice(0, 120);
+  return { kind, attention, ...(worker ? { worker } : {}) };
+}
 
 /** Service-owned policy; native controllers own termination, launch and their original receipts. */
 export function createHiredSeatRestarts(deps: {
@@ -72,7 +85,8 @@ export function createHiredSeatRestarts(deps: {
   lastOwnerMessageAt(owner: ConversationOwner): number | undefined;
   /** Reads the exact hire's saved tracker scope. It must find this request's durable comment. */
   workItem(candidate: RestartCandidate, nonce: string, requestedAt: string): Promise<unknown>;
-  notice(owner: ConversationOwner, text: string): void;
+  /** `notice` is how chat surfaces group or leave out the line; `text` is the model's context. */
+  notice(owner: ConversationOwner, text: string, notice: OperatorServiceNotice): void;
   signal?: AbortSignal;
   now?: () => number;
 }) {
@@ -125,6 +139,7 @@ export function createHiredSeatRestarts(deps: {
       deps.notice(
         candidate.owner,
         `Hired seat ${candidate.agent.terminalId} has waited two hours for a fresh restart: ${reason}${detail ? ` (${detail.slice(0, 512)})` : ""}. Its session and original receipts are preserved.`,
+        tag("seat_restart_waiting", "owner", candidate),
       );
     }
     save();
@@ -160,6 +175,7 @@ export function createHiredSeatRestarts(deps: {
       phase === "handoff"
         ? `Hired seat ${candidate.agent.terminalId} handoff recovery proof is unconfirmed: ${reason}. Its session and original receipt ${row.receiptId ?? row.handoff!.id} are preserved; no native restart was attempted. Check the saved handoff and work item before taking further action.`
         : `Hired seat ${candidate.agent.terminalId} fresh restart is unconfirmed: ${reason}. Its original receipt ${row.receiptId ?? row.handoff!.id} and recovery inputs are preserved; check the original controller before taking further action.`,
+      tag(phase === "handoff" ? "seat_handoff_unconfirmed" : "seat_restart_unconfirmed", "owner", candidate),
     );
   }
   async function restartKept(candidate: RestartCandidate, row: StatusSeat) {
@@ -237,6 +253,7 @@ export function createHiredSeatRestarts(deps: {
     deps.notice(
       candidate.owner,
       `Hired seat ${candidate.agent.terminalId} restarted fresh in its own pane; original receipt ${restarted.receiptId}, handoff ${saved.path}, work item ${candidate.workItem}.`,
+      tag("seat_restarted", "none", candidate),
     );
   }
   async function tick() {

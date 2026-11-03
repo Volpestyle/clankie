@@ -275,6 +275,7 @@ export function createWorkerReports(ctx: WorkerReportsContext) {
       ctx.conversations.recordServiceNotice(
         conversationId,
         `Retired ${deliveryIds.length === 1 ? "an unread worker report" : `${deliveryIds.length} unread worker reports`} whose seat has closed, so worker_reports shows live seats. Their full text is kept in ${ctx.retiredReportsPath}.`,
+        { kind: "worker_reports_retired", attention: "none" },
       );
     }
     return retired;
