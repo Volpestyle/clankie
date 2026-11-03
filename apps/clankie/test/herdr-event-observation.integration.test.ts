@@ -95,7 +95,7 @@ async function statusStreamRelay(herdrSocket: string, path: string) {
   const server = createServer((client) => {
     const upstream = createConnection(herdrSocket);
     let request = "";
-    let kind: { status?: string; feed?: boolean } | undefined;
+    let kind: { status: string | undefined; feed: boolean | undefined } | undefined;
     client.on("data", (chunk) => {
       upstream.write(chunk);
       if (kind !== undefined) return;
