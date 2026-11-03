@@ -1,4 +1,5 @@
-// Every compaction of his lanes asks Pi's summary to keep people and commitments (#542).
+// Every compaction of his lanes asks Pi's summary to keep people and commitments (#542),
+// and his turn context says when one is near (#605).
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -63,7 +64,7 @@ async function lane(focused: boolean) {
     agentDir: dir,
     systemPrompt: "You are under test.",
     noExtensions: true,
-    extensionFactories: focused ? [captainCompactionExtension()] : [],
+    extensionFactories: focused ? [captainCompactionExtension(settingsManager)] : [],
     noPromptTemplates: true,
     settingsManager,
   });
@@ -81,7 +82,7 @@ async function lane(focused: boolean) {
   await session.bindExtensions({ mode: "print" });
   core.setResponses(Array.from({ length: 40 }, () => fauxAssistantMessage("noted")));
   const summaries = () => requests.filter((request) => request.includes("<conversation>"));
-  return { session, summaries };
+  return { session, summaries, requests };
 }
 
 const say = (n: number) => `message ${String(n)}: ${"we planned the trip in detail ".repeat(180)}`;
@@ -111,4 +112,39 @@ it("asks every compaction, threshold and manual, to keep people, commitments and
     }
     if (focused) expect(manual.length).toBeGreaterThan(0);
   }
+}, 60_000);
+
+it("says a compaction is near above 80% of Pi's threshold, not below it, and not right after one", async () => {
+  const { session, requests } = await lane(true);
+  // Pi compacts past the window minus reserveTokens: 12,000 - 4,000.
+  const mark = (12_000 - 4_000) * 0.8;
+  const near = "of the way to its next compaction";
+  const seen = { below: 0, above: 0, afterCompaction: 0 };
+  let compacted = false;
+  session.subscribe((event) => {
+    if (event.type === "compaction_end" && !event.aborted) compacted = true;
+  });
+  for (let n = 1; n <= 14 && seen.afterCompaction < 2; n += 1) {
+    const usage = session.getContextUsage();
+    const start = requests.length;
+    const afterCompaction = compacted;
+    await session.prompt(`turn ${String(n)}: ${"we planned the trip in detail ".repeat(70)}`, {
+      expandPromptTemplates: false,
+    });
+    await session.waitForIdle();
+    // The turn's own request, not a compaction summary; Pi carries the system prompt in it.
+    const system = requests.slice(start).find((request) => !request.includes("<conversation>"))!;
+    const tokens = usage?.tokens ?? null;
+    const expected = tokens !== null && tokens >= mark;
+    expect({ n, tokens, said: system.includes(near) }).toEqual({ n, tokens, said: expected });
+    if (afterCompaction && tokens === null) seen.afterCompaction += 1;
+    else if (expected) seen.above += 1;
+    else seen.below += 1;
+    if (expected) expect(system).toMatch(/about \d+% of the way to its next compaction/u);
+    if (expected) expect(system).toContain("`memory`");
+  }
+  expect(compacted).toBe(true);
+  expect(seen.below).toBeGreaterThan(0);
+  expect(seen.above).toBeGreaterThan(0);
+  expect(seen.afterCompaction).toBeGreaterThan(0);
 }, 60_000);
