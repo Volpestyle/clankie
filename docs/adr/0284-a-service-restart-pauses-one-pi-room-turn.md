@@ -329,8 +329,9 @@ the restart interrupts surfaces as "possibly ran" and is never requested again.
 proves both with the real service killed and started again. Its image provider is a
 loopback stand-in reached through `CLANKIE_TEST_MEDIA_API`, a test seam in
 `media-extension.ts`. The seam is honoured only when both `CLANKIE_SCRATCH=1` and
-`NODE_ENV=test`, and the product code refuses any address that is not plain-http
-loopback. Any other run ignores it. A video render that comes back `pending` keeps
+`NODE_ENV=test`. The product code refuses any address that is not plain http on
+`127.0.0.1` or `[::1]`, and strips every credential header and `key` query
+parameter, so the seam never carries a credential. Any other run ignores it. A video render that comes back `pending` keeps
 rendering outside the turn, and that path is not covered.
 
 ### A revoked model credential (2026-11-03, [#368](https://github.com/Volpestyle/clankie/issues/368))

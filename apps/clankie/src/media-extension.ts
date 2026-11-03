@@ -82,18 +82,24 @@ export const mediaExtension: ClankieExtension<undefined, CorePorts, MediaNeeds, 
  * requests to a loopback stand-in, path and query kept, so a real-restart test
  * can make pictures without a provider. It is honoured only when both
  * `CLANKIE_SCRATCH=1` and `NODE_ENV=test`; any other run ignores the variable
- * and reaches the real provider. A set address that is not plain-http loopback
- * is refused, so the seam can never send a request off this machine.
+ * and reaches the real provider. A set address that is not plain http on
+ * 127.0.0.1 or [::1] is refused, so the seam can never send a request off this
+ * machine, and every credential header and `key` query parameter is stripped, so
+ * it never carries a credential, by construction.
  */
 export function scratchMediaFetch(env: NodeJS.ProcessEnv): MediaFetch | undefined {
   const target = env.CLANKIE_TEST_MEDIA_API;
   if (target === undefined || env.CLANKIE_SCRATCH !== "1" || env.NODE_ENV !== "test") return undefined;
   const base = new URL(target);
-  if (base.protocol !== "http:" || !["127.0.0.1", "[::1]", "localhost"].includes(base.hostname))
-    throw new Error("CLANKIE_TEST_MEDIA_API must be a plain-http loopback address");
+  if (base.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(base.hostname))
+    throw new Error("CLANKIE_TEST_MEDIA_API must be plain http on 127.0.0.1 or [::1]");
   return (input, init) => {
     const requested = new URL(input);
-    return fetch(new URL(`${requested.pathname}${requested.search}`, base.origin), init);
+    const url = new URL(`${requested.pathname}${requested.search}`, base.origin);
+    url.searchParams.delete("key");
+    const headers = new Headers(init?.headers);
+    for (const name of ["authorization", "x-api-key", "x-goog-api-key", "api-key"]) headers.delete(name);
+    return fetch(url, { ...init, headers });
   };
 }
 

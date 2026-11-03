@@ -22,6 +22,7 @@ const PIXELS = Buffer.from("loopback-picture");
 /** OpenAI's image endpoint on loopback; `hold` accepts a request and never answers it. */
 async function imageProvider(options: { hold?: boolean } = {}) {
   const requests: string[] = [];
+  const headers: Record<string, string | string[] | undefined>[] = [];
   let arrived!: () => void;
   const first = new Promise<void>((resolve) => {
     arrived = resolve;
@@ -29,6 +30,7 @@ async function imageProvider(options: { hold?: boolean } = {}) {
   const server = createServer(async (request, response) => {
     for await (const _chunk of request);
     requests.push(`${request.method} ${request.url}`);
+    headers.push(request.headers);
     arrived();
     if (options.hold === true) return;
     response.writeHead(200, { "content-type": "application/json" });
@@ -42,7 +44,7 @@ async function imageProvider(options: { hold?: boolean } = {}) {
     server.closeAllConnections();
     await new Promise<void>((done) => server.close(() => done()));
   });
-  return { url: `http://127.0.0.1:${address.port}`, requests, first };
+  return { url: `http://127.0.0.1:${address.port}`, requests, headers, first };
 }
 
 const toolResults = (messages: readonly ChatMessage[]) =>
@@ -92,6 +94,8 @@ it("a picture made before the restart still attaches to the resumed turn's reply
   expect(result).toMatchObject({ state: "settled", media: { artifactRef: made.artifactRef } });
   // Made once, before the restart; the resumed turn took it from the journal.
   expect(provider.requests).toEqual(["POST /v1/images/generations"]);
+  // The seam carried no credential: the service's provider key never reached the stand-in.
+  expect(provider.headers[0]).not.toHaveProperty("authorization");
   expect(await f.effects()).toHaveLength(1);
 }, 240_000);
 
@@ -141,14 +145,28 @@ it("honours the media test seam only in a scratch test run, and only for a loopb
     "http://api.openai.com",
     "http://10.0.0.2:9",
     "http://127.0.0.1.example.com",
+    "http://localhost:9",
   ])
     expect(() => scratchMediaFetch({ ...scratch, CLANKIE_TEST_MEDIA_API: target }), target).toThrow(
-      /loopback/u,
+      /plain http on 127\.0\.0\.1 or \[::1\]/u,
     );
   const provider = await imageProvider();
   const fetch = scratchMediaFetch({ ...scratch, CLANKIE_TEST_MEDIA_API: provider.url })!;
   await (
-    await fetch("https://api.openai.com/v1/images/generations?x=1", { method: "POST", body: "{}" })
+    await fetch("https://api.openai.com/v1/images/generations?x=1&key=query-secret", {
+      method: "POST",
+      body: "{}",
+      headers: {
+        authorization: "Bearer header-secret",
+        "x-goog-api-key": "goog-secret",
+        "content-type": "application/json",
+      },
+    })
   ).json();
   expect(provider.requests).toEqual(["POST /v1/images/generations?x=1"]);
+  // Credentials are stripped by construction; the rest of the request goes through.
+  expect(provider.headers[0]).not.toHaveProperty("authorization");
+  expect(provider.headers[0]).not.toHaveProperty("x-goog-api-key");
+  expect(provider.headers[0]).toMatchObject({ "content-type": "application/json" });
+  expect(JSON.stringify(provider.headers)).not.toContain("secret");
 });
