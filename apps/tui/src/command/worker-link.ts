@@ -40,6 +40,7 @@ export async function workerTrackerCall(
 ) {
   // The standalone bridge reads its manifest beside itself; keep it out of the console bundle.
   const root = options.repoRoot ?? fileURLToPath(new URL("../../../../", import.meta.url));
+  // allow-no-sandbox -- loads the worker plugin's seat-channel module by path, not Playwright
   const { callNativeConnectedTool } = (await import(
     pathToFileURL(join(root, "integrations/claude-plugin/worker/bin/seat-channel.mjs")).href
   )) as typeof import("../../../../integrations/claude-plugin/worker/bin/seat-channel.mjs");
