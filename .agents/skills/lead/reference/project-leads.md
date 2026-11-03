@@ -28,7 +28,7 @@ account; cards show the signed-in name or email. Existing profile aliases stay
 bound to their original identity after a home re-signs. Saved preferences, holds
 and usage follow the identity. A hire or remote lead picks a current home signed
 into that identity and verifies it before launch; an absent or changed identity
-refuses with a sign-in prompt. Never create a profile, copy credentials or
+refuses with a sign-in prompt. A re-read the machine didn't answer is not a change. Never create a profile, copy credentials or
 substitute another account. A deliberate relaunch into the same conversation,
 fleet and workspace reuses its recorded identity when `account` is omitted;
 a fresh launch chooses a usable, unheld identity from the account list.
