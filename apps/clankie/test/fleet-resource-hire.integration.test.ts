@@ -40,6 +40,7 @@ import {
   nativeHireProject,
   selectHireProject,
 } from "../src/captain/project-hire-context.ts";
+import { routedProjects } from "../src/captain/auto-projects.ts";
 import type { ProjectHirePolicy } from "../src/captain/herdr-watch.ts";
 import { serve } from "@hono/node-server";
 import { createProjectRoutes } from "../src/project-routes.ts";
@@ -286,9 +287,7 @@ async function autoFixture(
             conversationId,
             workspace: sourceDirectory,
             machine: "local",
-            projects: routes
-              .filter((route) => route.conversationId === conversationId)
-              .map((route) => ({ id: route.projectId })),
+            projects: routedProjects(projects.projects, routes, conversationId),
           })),
           defaultConversationId: "global-default",
         }),

@@ -62,6 +62,29 @@ function autoProjectStates(
     }));
 }
 
+/**
+ * The Clankie projects a lead chat leads. Its routes name tracker projects (a Linear
+ * project's id, or a built-in tracker project's); clients and Auto routing read Clankie
+ * project ids, so each route maps through the project bound to it, and a route no
+ * project binds names none (#662).
+ */
+export function routedProjects(
+  projects: readonly Project[],
+  routes: readonly { readonly projectId: string; readonly conversationId: string }[],
+  conversationId: string,
+): { id: string; name: string }[] {
+  const routed = new Set(
+    routes.filter((route) => route.conversationId === conversationId).map((route) => route.projectId),
+  );
+  return projects
+    .filter(
+      (project) =>
+        (project.trackerProjectId !== undefined && routed.has(project.trackerProjectId)) ||
+        (project.linearProjectBinding !== undefined && routed.has(project.linearProjectBinding.projectId)),
+    )
+    .map((project) => ({ id: project.id, name: project.name }));
+}
+
 /** Explicit tracker ownership wins; assigned leads never take another project by workspace. */
 export function autoProjectRounds(
   projects: readonly Project[],
@@ -77,8 +100,7 @@ export function autoProjectRounds(
   const rounds = new Map<string, AutoProjectState[]>();
   for (const state of autoProjectStates(projects, workers)) {
     const project = projects.find((candidate) => candidate.id === state.id)!;
-    const boundIds = [project.trackerProjectId, project.linearProjectBinding?.projectId];
-    const explicit = leads.filter((lead) => lead.projects.some((entry) => boundIds.includes(entry.id)));
+    const explicit = leads.filter((lead) => lead.projects.some((entry) => entry.id === project.id));
     const matches = explicit.length
       ? explicit
       : leads.filter(

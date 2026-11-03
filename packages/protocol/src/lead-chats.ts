@@ -7,6 +7,7 @@ export const LeadChatSchema = z
   .object({
     conversationId: z.string().min(1),
     title: z.string(),
+    /** Clankie projects (their project-settings IDs), never tracker or Linear project IDs. */
     projects: z.array(z.object({ id: z.string(), name: z.string() }).strict()),
     workspace: z.string(),
     machine: z.string(),

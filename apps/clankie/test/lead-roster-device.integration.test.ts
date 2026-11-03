@@ -8,10 +8,12 @@ import {
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import { runFleetRosterCommand } from "../../tui/src/command/fleet-roster.ts";
 import { randomBytes, randomUUID } from "node:crypto";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
+  createOperatorConversationServiceClient,
   OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceResultSchema,
   TAKE_CONTROL_GRANTS,
@@ -103,6 +105,46 @@ it("reuses the private roster for an owner device and refuses visitors, guests, 
     schemaVersion: 1,
     result: { outcome: "ready", chats: await f.captain.leadChats!() },
   });
+  // #662: a chat's projects are Clankie project ids, as the app's project filters read
+  // them, never the Linear project ids its routes are keyed by.
+  const [globalLead, workLead] = f.leads as [string, string];
+  const linear = randomUUID();
+  await f.settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      ...current.projects,
+      projects: [
+        ...current.projects.projects,
+        {
+          id: "clankie-work",
+          name: "Clankie Work",
+          workspaces: [{ id: "local", machineId: "local", platform: "posix", path: f.root }],
+          linearProjectBinding: { provider: "linear", projectId: linear },
+        },
+      ],
+    }),
+    linearWebhook: {
+      ...current.linearWebhook,
+      projectChats: [
+        { projectId: linear, name: "Clankie (Linear)", conversationId: workLead },
+        // A route no Clankie project binds names no project.
+        { projectId: randomUUID(), name: "Unbound", conversationId: globalLead },
+      ],
+    },
+  }));
+  const phone = createOperatorConversationServiceClient(async (request) => {
+    const response = await service.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token("owner")}`, "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    return OperatorConversationServiceResultSchema.parse(await response.json());
+  });
+  const listed = await phone.leadChats!();
+  if (listed.outcome !== "ready") throw new Error(JSON.stringify(listed));
+  const projectsOf = (id: string) => listed.chats.find((chat) => chat.conversationId === id)?.projects;
+  expect(projectsOf(workLead)).toEqual([{ id: "clankie-work", name: "Clankie Work" }]);
+  expect(projectsOf(globalLead)).toEqual([]);
   for (const bearer of [
     token("visitor"),
     token("guest"),
