@@ -89,8 +89,9 @@ observations. The reason names which: `busy` (load or memory guard), `slots`
 (ceiling), `queued` (FIFO turn), or `service` (the service is deciding for you).
 Under pressure, `consumers` names the heaviest processes, each charged to its
 permit or marked unleased with the agent that started it, and each heavy permit
-carries `processUsage` (its process group's CPU and memory). A busy wait, a
-refused hire and a queued hire's notice name the same consumers: when it is your
+carries `processUsage` (its process group's CPU and memory). A busy wait names
+the same consumers. A refused or queued hire and a simulator wait name only
+permits and agent-started work, and sum the rest as "N other processes": when it is your
 own unleased run, finish it or move it into `clankie heavy`. Keep the request
 open; repair an unavailable installation through the existing setup route rather
 than selecting another registry.

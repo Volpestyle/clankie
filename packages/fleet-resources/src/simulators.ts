@@ -1721,7 +1721,7 @@ function hintFor(
   if (reason === "pressure")
     return [
       `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available).`,
-      describeConsumers(snapshot?.consumers ?? []),
+      describeConsumers(snapshot?.consumers ?? [], "caller"),
       retryLater(snapshot?.loadRetryAfterMs),
     ]
       .filter(Boolean)

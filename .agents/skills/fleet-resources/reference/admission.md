@@ -47,6 +47,11 @@ permit's lane and seat, or unleased with the nearest agent harness above it
 (`claude`, `codex`, …). Under load pressure, `loadRetryAfterMs` estimates how
 long the one-minute load average takes to fall to the limit once that work
 stops. The census is diagnostic only; it never admits, charges or stops anything.
+Local surfaces (`clankie heavy`'s wait, doctor, the snapshot) name every consumer.
+Hire refusals, queued-hire notices and simulator pressure hints reach callers that
+may be off the Mac (a connected app reads `start_agent`'s detail verbatim), so they
+name only permits and harness-started work and sum every other process as
+"N other processes, X% CPU, Y GiB".
 
 `clankie fleet resources --machine ID` selects a registered host, with its own
 specs, capacity, holders and queue. `local` and `default` select this service's

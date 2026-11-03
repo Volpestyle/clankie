@@ -35,7 +35,7 @@ it("a pressure refusal names the top consumers, unleased work and who started it
     "-o",
     burn,
   ]);
-  for (const name of ["claude", "vitest", "tsc"]) await copyFile(burn, join(root, name));
+  for (const name of ["claude", "vitest", "tsc", "foreignburn"]) await copyFile(burn, join(root, name));
 
   let sample: ResourcePressureInput = { loadRatio: 0.1, availableMemoryMb: 64_000 };
   const governor = createResourceGovernor({ directory: join(root, "governor"), probe: async () => sample });
@@ -61,8 +61,22 @@ it("a pressure refusal names the top consumers, unleased work and who started it
   );
   // Unleased work: a "worker" (claude) starting a test run outside `clankie heavy`.
   const outside = spawn(join(root, "claude"), [join(root, "vitest"), "20"], { stdio: "ignore" });
+  // Foreign work: a process no agent started (orphaned to launchd, as this test itself
+  // runs under an agent harness), whose name must not leave the Mac.
+  const foreign = {
+    pid: Number(
+      (
+        await exec("/bin/sh", ["-c", `"${join(root, "foreignburn")}" 20 >/dev/null 2>&1 & echo $!`])
+      ).stdout.trim(),
+    ),
+  };
   cleanups.push(async () => {
     outside.kill("SIGKILL");
+    try {
+      process.kill(foreign.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
   });
   const permit = (snapshot: ResourceSnapshot) =>
     [...snapshot.leases, ...snapshot.lightLeases, ...(snapshot.serverLeases ?? [])].find(
@@ -76,7 +90,13 @@ it("a pressure refusal names the top consumers, unleased work and who started it
   const named = (executable: string) => snapshot.consumers?.find((entry) => entry.executable === executable);
   for (const deadline = Date.now() + 15_000; ;) {
     snapshot = await governor.snapshot();
-    if (named("vitest") && named("tsc") && (permit(snapshot)?.processUsage?.cpuPercent ?? 0) > 50) break;
+    if (
+      named("vitest") &&
+      named("tsc") &&
+      named("foreignburn") &&
+      (permit(snapshot)?.processUsage?.cpuPercent ?? 0) > 50
+    )
+      break;
     if (Date.now() > deadline) break;
     await delay(1_000);
   }
@@ -86,6 +106,9 @@ it("a pressure refusal names the top consumers, unleased work and who started it
     startedBy: { executable: "claude", pid: outside.pid },
   });
   expect(named("vitest")).not.toHaveProperty("holder");
+  // The local snapshot names everything, foreign work included.
+  expect(named("foreignburn"), JSON.stringify(snapshot.consumers)).toMatchObject({ pid: foreign.pid });
+  expect(named("foreignburn")).not.toHaveProperty("startedBy");
   expect(named("tsc")).toMatchObject({ holder: { seatId: "w1:p9", executable: "tsc" } });
   // Each permit is charged its own process group, as `clankie fleet resources` shows.
   expect(permit(snapshot)?.processUsage).toMatchObject({
@@ -105,6 +128,16 @@ it("a pressure refusal names the top consumers, unleased work and who started it
   expect(refused).toContain("Local hire refused: available memory 10 MiB");
   expect(refused).toMatch(/Top consumers: .*vitest PID \d+ \(unleased, started under claude PID \d+\)/u);
   expect(refused).toMatch(/tsc PID \d+ \(\w+ permit of seat w1:p9\)/u);
+  // The refusal is the hire result's detail, which connected apps read: no foreign executable
+  // names, only an anonymous sum of everything no agent started.
+  const foreignNames = (await governor.snapshot())
+    .consumers!.filter((consumer) => !consumer.holder && !consumer.startedBy)
+    .map((consumer) => consumer.executable);
+  expect(foreignNames).toContain("foreignburn");
+  for (const name of foreignNames) expect(refused).not.toContain(name);
+  expect(refused).toMatch(/\d+ other process(es)?, \d+% CPU, [\d.]+ (MiB|GiB)/u);
   sample = { loadRatio: 9, availableMemoryMb: 64_000 };
-  expect(await resources.admitHire({})).toMatch(/Machine load is high.*Top consumers: .*vitest PID/u);
+  const queued = await resources.admitHire({});
+  expect(queued).toMatch(/Machine load is high.*Top consumers: .*vitest PID/u);
+  expect(queued).not.toContain("foreignburn");
 });

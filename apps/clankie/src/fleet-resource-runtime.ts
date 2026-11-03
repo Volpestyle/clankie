@@ -484,7 +484,7 @@ export async function createFleetResourceRuntime(input: {
         // Who is using the machine, named only when it matters (#332).
         const consumers =
           (!admission.allowed && admission.reason !== "probe-unavailable") || admission.heavyQueued
-            ? describeConsumers((await governor.snapshot().catch(() => undefined))?.consumers ?? [])
+            ? describeConsumers((await governor.snapshot().catch(() => undefined))?.consumers ?? [], "caller")
             : undefined;
         const naming = consumers ? ` ${consumers}` : "";
         if (!admission.allowed)

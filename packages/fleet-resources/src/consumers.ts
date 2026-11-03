@@ -172,17 +172,31 @@ const size = (bytes: number) =>
   bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
 const clean = (text: string) => text.replace(/\p{Cc}/gu, "");
 
-/** "Top consumers: fseventsd PID 88928, unleased, 100% CPU, 31.2 GiB; …" */
-export function describeConsumers(consumers: readonly ResourceConsumer[]): string | undefined {
-  if (!consumers.length) return undefined;
-  return `Top consumers: ${consumers
-    .map((consumer) => {
-      const owner = consumer.holder
-        ? `${consumer.holder.lane === "full" ? "heavy" : consumer.holder.lane} permit${consumer.holder.seatId ? ` of seat ${clean(consumer.holder.seatId)}` : ""}`
-        : `unleased${consumer.startedBy ? `, started under ${clean(consumer.startedBy.executable)} PID ${consumer.startedBy.pid}` : ""}`;
-      return `${clean(consumer.executable)} PID ${consumer.pid} (${owner}), ${Math.round(consumer.cpuPercent)}% CPU, ${size(consumer.rssBytes)}`;
-    })
-    .join("; ")}.`;
+const describe = (consumer: ResourceConsumer) => {
+  const owner = consumer.holder
+    ? `${consumer.holder.lane === "full" ? "heavy" : consumer.holder.lane} permit${consumer.holder.seatId ? ` of seat ${clean(consumer.holder.seatId)}` : ""}`
+    : `unleased${consumer.startedBy ? `, started under ${clean(consumer.startedBy.executable)} PID ${consumer.startedBy.pid}` : ""}`;
+  return `${clean(consumer.executable)} PID ${consumer.pid} (${owner}), ${Math.round(consumer.cpuPercent)}% CPU, ${size(consumer.rssBytes)}`;
+};
+
+/**
+ * "Top consumers: fseventsd PID 88928 (unleased), 100% CPU, 31.2 GiB; …" for local surfaces
+ * (`clankie heavy`, doctor, the snapshot). Text a hire or simulator caller receives may leave
+ * the Mac (a connected app reads `start_agent`'s detail verbatim), so `caller` names only
+ * fleet work, permits and harness-started processes, and sums every other process anonymously.
+ */
+export function describeConsumers(
+  consumers: readonly ResourceConsumer[],
+  audience: "local" | "caller" = "local",
+): string | undefined {
+  const named = audience === "local" ? consumers : consumers.filter((c) => c.holder || c.startedBy);
+  const others = consumers.filter((consumer) => !named.includes(consumer));
+  const parts = named.map(describe);
+  if (others.length)
+    parts.push(
+      `${String(others.length)} other process${others.length === 1 ? "" : "es"}, ${Math.round(others.reduce((sum, c) => sum + c.cpuPercent, 0))}% CPU, ${size(others.reduce((sum, c) => sum + c.rssBytes, 0))}`,
+    );
+  return parts.length ? `Top consumers: ${parts.join("; ")}.` : undefined;
 }
 
 /**
