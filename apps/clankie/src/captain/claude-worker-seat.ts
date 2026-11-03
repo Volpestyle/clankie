@@ -22,6 +22,7 @@ import type { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { redactSensitiveText } from "@clankie/observability";
 import type {
   HarnessSeatAdapter,
   SeatControl,
@@ -646,7 +647,10 @@ async function receipt(
   ms: number,
   pollMs: number,
 ): Promise<string | undefined> {
-  const expected = text.replace(/\r\n?/gu, "\n").trim();
+  const sent = text.replace(/\r\n?/gu, "\n").trim();
+  // The transcript reader scrubs credential-shaped text ("password: …", "session id: …"),
+  // so a brief that merely mentions one reads back scrubbed. Match it as it reads back (#616).
+  const scrubbed = redactSensitiveText(sent);
   let rejectingRule = "transcript_unavailable";
   const id = await until(
     async () => {
@@ -669,8 +673,10 @@ async function receipt(
       return candidates.find(
         (entry) =>
           entry.type === "message" &&
-          (channelBody(entry.text)?.replace(/\r\n?/gu, "\n").trim() === expected ||
-            entry.text.replace(/\r\n?/gu, "\n").trim() === expected),
+          [channelBody(entry.text), entry.text].some((body) => {
+            const read = body?.replace(/\r\n?/gu, "\n").trim();
+            return read !== undefined && (read === sent || read === scrubbed);
+          }),
       )?.id;
     },
     ms,
