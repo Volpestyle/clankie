@@ -48,6 +48,22 @@ const refused: Record<string, string> = {
   "method-escape.ts": `${core}const start = chromium.launch;\nawait start({ chromiumSandbox: true });\n`,
   "computed.ts": `${core}await chromium[method]({ chromiumSandbox: true });\n`,
   "options-variable.ts": `${core}let options = { chromiumSandbox: true };\nawait chromium.launch(options);\n`,
+  // t65's second round: nothing outside the call's own literal is trusted.
+  "mutated-const.ts": `${core}const opts = { chromiumSandbox: true };\nopts.chromiumSandbox = false;\nawait chromium.launch(opts);\n`,
+  "assigned-const.ts": `${core}const opts = { chromiumSandbox: true };\nObject.assign(opts, { chromiumSandbox: false });\nawait chromium.launch(opts);\n`,
+  "shadowed-const.ts": `${core}const opts = { chromiumSandbox: true };\nexport async function go(opts) {\n  await chromium.launch(opts);\n}\n`,
+  "mutated-spread.ts": `${core}const extra = {};\nextra.chromiumSandbox = false;\nawait chromium.launch({ chromiumSandbox: true, ...extra });\n`,
+  "namespace-passed.ts":
+    'import * as pw from "playwright-core";\nconst start = (api) => api.chromium.launch({ headless: true });\nawait start(pw);\n',
+  "named-variable.ts":
+    'const name = "playwright-core";\nconst pw = await import(name);\nawait pw.chromium.launch({});\n',
+  "named-composed.ts": 'const pw = await import("play" + "wright");\nawait pw.chromium.launch({});\n',
+  "then.ts": 'await import("playwright-core").then((m) => m.chromium.launch({}));\n',
+  "computed-name.ts": 'import * as pw from "playwright-core";\nawait pw["chrom" + "ium"].launch({});\n',
+  "no-keyword.ts":
+    'import * as pw from "playwright-core";\nconst key = "chrom" + "ium";\nawait pw[key].launch({ headless: true });\n',
+  "re-export.ts": 'export * from "playwright-core";\n',
+  "untracked.ts": "const browserType = loaded.chromium;\nawait browserType.launch({});\n",
 };
 
 it("refuses every launch it can't prove sandboxed", () => {
@@ -58,7 +74,7 @@ it("refuses every launch it can't prove sandboxed", () => {
   for (const name of Object.keys(refused)) expect(result.stderr, name).toContain(`src/${name}:`);
 });
 
-it("passes sandboxed launches, a const options object and an explained exception", () => {
+it("passes sandboxed launches with inline options and an explained exception", () => {
   const result = check({
     "src/viewer.ts": [
       core,
@@ -70,7 +86,6 @@ it("passes sandboxed launches, a const options object and an explained exception
       "type Launched = ReturnType<typeof chromium.launch>;",
       "",
     ].join("\n"),
-    "src/const-options.ts": `${core}const options = { headless: true, chromiumSandbox: true } as const;\nawait chromium.launch(options);\n`,
     "src/persistent.ts": `import * as pw from "playwright-core";\nawait pw.chromium.launchPersistentContext("/tmp/p", { chromiumSandbox: true });\n`,
     "src/dynamic.ts":
       'const { chromium } = await import("playwright-core");\nawait chromium.launchServer({ chromiumSandbox: true, headless: true });\n',

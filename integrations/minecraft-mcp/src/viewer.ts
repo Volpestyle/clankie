@@ -56,6 +56,7 @@ export class BrowserViewer {
 
   async start(): Promise<void> {
     const viewerRoot = dirname(require.resolve("prismarine-viewer/package.json"));
+    // allow-no-sandbox -- loads prismarine-viewer's own worldView module, not Playwright
     const { WorldView: WorldViewClass } = require(join(viewerRoot, "viewer/lib/worldView.js")) as {
       WorldView: new (...args: unknown[]) => WorldView;
     };
