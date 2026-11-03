@@ -42,7 +42,9 @@ admission. A project socket that closes during asynchronous observation maps to
 `closed_socket`, separately from changes in binding or native observations.
 
 `native-ancestry-exit.integration.test.ts` adds real scheduled claimant and
-intermediate exits: `caller_exited` is terminal and never replayed;
+intermediate exits: `caller_exited` is terminal and never replayed (a claimant
+found gone only after its own read failed keeps that read's refusal and budget
+retry, now named `caller_exited`, #526);
 `ancestor_exited` permits one re-walk only with the same live claimant. A second
 intermediate exit is terminal. The fixture controls owned exit timing while
 returning only real libproc/sysctl/socket observations. It also checks stale

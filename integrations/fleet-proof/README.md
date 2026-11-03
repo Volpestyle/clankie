@@ -448,7 +448,12 @@ and its freshly checked status (`same`, `exited`, `changed`, `unavailable`).
 An empty `KERN_PROC_PID` result is classified as ESRCH; a separate native exit
 check confirms absence before it can trigger the re-walk.
 `caller_exited` confirms the claimant exited; `ancestor_exited` confirms an
-intermediate exited while the same claimant lifetime remains live. Unknown and
+intermediate exited while the same claimant lifetime remains live. A claimant
+whose own re-read fails (an expired budget, or a mid-exit read) is checked once
+more through `KERN_PROC_PID` for absence, a zombie, `P_WEXIT` or another birth
+at its PID, and named `caller_exited` when it has gone (#526). That changes the
+reason only: the refusal and its budget retry stay as they were, and the retry
+finds no owner. Unknown and
 changed identities remain distinct fail-closed observations. The body joins
 these facts to the existing private request ID. Only fixed reason labels enter
 metrics or alert text; no PID/birth, endpoint, command, path, environment or

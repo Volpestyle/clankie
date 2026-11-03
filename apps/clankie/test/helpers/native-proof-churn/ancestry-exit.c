@@ -17,7 +17,7 @@ static int scheduled_pidinfo(int, int, uint64_t, void *, int);
 #undef proc_pidinfo
 
 static pid_t root, middle, leaf;
-static int armed, fired, leaf_reads, caller_exit, twice, external;
+static int armed, fired, leaf_reads, caller_exit, twice, external, late, late_live;
 static uint64_t root_sec, root_usec;
 static char target_path[PATH_MAX];
 
@@ -75,14 +75,20 @@ static int scheduled_sysctl(int *mib, u_int count, void *out, size_t *size, void
 
 static int scheduled_pidinfo(int pid, int flavor, uint64_t arg, void *out, int size) {
   /* Two census observations precede the first ancestry observation. */
-  if (armed && caller_exit && pid == leaf && flavor == PROC_PIDTBSDINFO && ++leaf_reads == 3) {
+  if (armed && (caller_exit || late_live) && pid == leaf && flavor == PROC_PIDTBSDINFO &&
+      ++leaf_reads == 3) {
     fired = 1;
-    if (kill(leaf, SIGTERM)) abort();
-    for (int i = 0; i < 1000; ++i) {
-      struct proc_bsdshortinfo b;
-      if (proc_pidinfo(leaf, PROC_PIDT_SHORTBSDINFO, 1, &b, sizeof(b)) != sizeof(b) || b.pbsi_status == SZOMB) break;
-      usleep(100);
+    if (caller_exit) {
+      if (kill(leaf, SIGTERM)) abort();
+      for (int i = 0; i < 1000; ++i) {
+        struct proc_bsdshortinfo b;
+        if (proc_pidinfo(leaf, PROC_PIDT_SHORTBSDINFO, 1, &b, sizeof(b)) != sizeof(b) || b.pbsi_status == SZOMB) break;
+        usleep(100);
+      }
     }
+    /* Real time past the 200 ms scan budget: the claimant re-read meets an expired
+     * budget, as a slow check on a loaded machine does (#526). */
+    if (late) usleep(250000);
   }
   return proc_pidinfo(pid, flavor, arg, out, size);
 }
@@ -124,7 +130,9 @@ int main(int argc, char **argv) {
   }
   twice = strcmp(argv[1], "twice") == 0;
   int direct = strcmp(argv[1], "direct") == 0;
-  caller_exit = strcmp(argv[1], "caller") == 0;
+  late = strcmp(argv[1], "caller-late") == 0 || strcmp(argv[1], "live-late") == 0;
+  caller_exit = strcmp(argv[1], "caller") == 0 || strcmp(argv[1], "caller-late") == 0;
+  late_live = strcmp(argv[1], "live-late") == 0;
   int stable = strcmp(argv[1], "live") == 0;
   int listener = socket(AF_INET, SOCK_STREAM, 0), report[2];
   struct sockaddr_in address = {0};
@@ -140,7 +148,7 @@ int main(int argc, char **argv) {
     pid_t child = fork();
     if (child < 0) _exit(5);
     if (!child) {
-      if (direct || caller_exit || stable) client(ntohs(address.sin_port), report[1], 0);
+      if (direct || caller_exit || stable || late_live) client(ntohs(address.sin_port), report[1], 0);
       pid_t owner = fork();
       if (owner < 0) _exit(6);
       if (!owner) client(ntohs(address.sin_port), report[1], getppid());

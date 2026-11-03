@@ -249,13 +249,32 @@ static int same_lifetime(const struct identity *a, const struct identity *b) {
          a->sec == b->sec && a->usec == b->usec;
 }
 
+/* Whether the claimant has exited, for naming a refusal only (#526). It reads the
+ * kernel even after the budget ends: observe() then answers -1 without looking, and
+ * a mid-exit process (P_WEXIT, not yet a zombie) can fail proc_pidinfo without
+ * ESRCH. A same-pid process with another birth means the claimant is gone. It never
+ * admits anything: every caller has already refused. */
+static int claimant_exited(const struct identity *claimant) {
+  int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, claimant->pid};
+  struct kinfo_proc k;
+  size_t bytes = sizeof(k);
+  if (claimant->pid <= 1 || sysctl(mib, 4, &k, &bytes, NULL, 0) != 0) return 0;
+  if (bytes == 0) return 1;
+  if (bytes != sizeof(k) || k.kp_proc.p_pid != claimant->pid) return 0;
+  if ((uint64_t)k.kp_proc.p_starttime.tv_sec != claimant->sec ||
+      (uint64_t)k.kp_proc.p_starttime.tv_usec != claimant->usec) return 1;
+  return k.kp_proc.p_stat == SZOMB || (k.kp_proc.p_flag & P_WEXIT) != 0;
+}
+
 /* Private failure-time facts. Never substitute them for a complete proof. */
 static int ancestry_failure(const struct owner *owner, pid_t failed_pid, int index,
                             const char *phase, int observed, int error,
                             const char *fallback) {
   struct identity claimant;
   int live = observe(owner->process.pid, &claimant);
-  const char *status = live == 0 ? "exited" : live < 0 ? "unavailable" :
+  /* Only the reason changes: the outcome below stays this path's refusal. */
+  int exited_late = live < 0 && claimant_exited(&owner->process);
+  const char *status = live == 0 || exited_late ? "exited" : live < 0 ? "unavailable" :
                        same_lifetime(&owner->process, &claimant) ? "same" : "changed";
   int ancestor_dead = index > 0 && (observed == 0 ||
                       (error == ESRCH && exited(failed_pid)));
@@ -266,6 +285,7 @@ static int ancestry_failure(const struct owner *owner, pid_t failed_pid, int ind
   struct ancestry_failure_observation failure = {owner, failed_pid, index, phase, status};
   failure_observation = &failure;
   if (live == 0) diagnostic("ancestry", "caller_exited", error, 0);
+  else if (exited_late) diagnostic("ancestry", "caller_exited", error, budget_expired);
   else if (live == 1 && !same_lifetime(&owner->process, &claimant))
     diagnostic("ancestry", "ancestry_changed", error, budget_expired);
   else if (live == 1 && ancestor_dead)
