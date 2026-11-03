@@ -486,8 +486,11 @@ processIt("delivers and reports once across a desktop Codex service restart", as
       },
     );
     const result = { status: response.status, body: await response.json() };
-    // A refusal names its cause in the assertion diff (#564).
-    return response.status === 200 ? result : { ...result, service: service.stderr().slice(-4000) };
+    // An unavailable admission prints the service's own account of it (#564). An assertion diff
+    // would not: toMatchObject leaves out keys the expectation does not name.
+    if (response.status === 503)
+      console.error(`report ${response.status}:\n${service.stderr().slice(-4000)}`);
+    return result;
   };
   const firstService = await startService(true);
   expect(await report(firstService, randomUUID(), "Before restart report")).toMatchObject({
