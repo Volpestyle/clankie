@@ -7429,7 +7429,8 @@ function startupSignIn(
     (entry) =>
       entry.harness === chosen.harness &&
       holds(entry) &&
-      (entry.signedIn === false || (entry.accountKey !== undefined && entry.accountKey !== chosen.accountKey)),
+      (entry.signedIn === false ||
+        (entry.accountKey !== undefined && entry.accountKey !== chosen.accountKey)),
   )
     ? "changed"
     : "unknown";
