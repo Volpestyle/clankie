@@ -2040,7 +2040,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   captainMemoryExtension(deps.memory, lane),
                   captainModelExtension(async () => (await resolveRoute(purpose)).selection),
                 ]),
-          captainCompactionExtension(),
+          captainCompactionExtension(piSettings),
           captainRequestExtension({
             lane,
             cacheSalt,

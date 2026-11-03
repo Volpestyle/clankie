@@ -1060,6 +1060,10 @@ asked for what: [compaction-focus](../apps/clankie/src/captain/compaction-focus.
 hands Pi those instructions through `session_before_compact`, which Clankie's Pi
 patch (`patches/@earendil-works__pi-coding-agent@1.0.0.patch`) lets return
 `customInstructions` for threshold, overflow and manual compactions alike (#542).
+Once a lane's context passes 80% of Pi's threshold (the window minus
+`reserveTokens`), the same extension adds one line to his turn context saying a
+compaction is near and that `memory` keeps what he writes; it is information,
+not a gate, and it is absent right after a compaction (#605).
 The service lane's latest summary also travels with each driver switch
 ([ADR 0218](adr/0218-native-seats-drive-their-attached-conversation.md)).
 The repo's tracker or task files hold work and results. The service exposes one
