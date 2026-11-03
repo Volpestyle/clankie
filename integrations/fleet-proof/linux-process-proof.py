@@ -730,7 +730,9 @@ class Proof:
             raise Unattested("cgroup_layout")
 
     def every_thread_denied(self, directory):
-        """Every thread's FD table refuses this uid; one readable table is not this case."""
+        """Every thread's FD table refuses this uid, as the census met it: at the listing
+        (a non-dumpable process) or at the links (one holding capabilities this uid lacks,
+        like newer systemd's CAP_WAKE_ALARM). One readable table is not this case."""
         task = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=directory)
         try:
             tids = self.entries(task, MAX_PIDS)
@@ -741,7 +743,11 @@ class Proof:
                     fds = os.open("fd", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
                                   dir_fd=thread)
                     try:
-                        os.listdir(fds)
+                        for name in os.listdir(fds)[:MAX_FDS]:
+                            try:
+                                os.readlink(name, dir_fd=fds)
+                            except FileNotFoundError:
+                                continue  # closed since the listing: says nothing either way
                     finally:
                         os.close(fds)
                     return False
@@ -819,7 +825,9 @@ class Proof:
         # main with MAINPID=; "main" (the vendor default) and "none" cannot.
         if notify not in ("main", "none"):
             raise Unattested("notify_access")
-        if drop_ins or reload or not self.vendor_unit_file(fragment):
+        # The vendor definition, which may carry the distribution's own drop-ins (Debian 13
+        # ships user@.service.d/10-login-barrier.conf); a drop-in anywhere else is a change.
+        if reload or not all(map(self.vendor_unit_file, [fragment, *drop_ins])):
             raise Unattested("unit_modified")
 
     def attest_manager(self, pid):
