@@ -87,8 +87,14 @@ holders, queue and pressure; `--machine ID` selects a registered host. A wait
 can mean a full pool, high load, low available memory or unavailable native
 observations. The reason names which: `busy` (load or memory guard), `slots`
 (ceiling), `queued` (FIFO turn), or `service` (the service is deciding for you).
-Keep the request open; repair an unavailable installation through the existing
-setup route rather than selecting another registry.
+Under pressure, `consumers` names the heaviest processes, each charged to its
+permit or marked unleased with the agent that started it, and each heavy permit
+carries `processUsage` (its process group's CPU and memory). A busy wait names
+the same consumers. A refused or queued hire and a simulator wait name only
+permits and agent-started work, and sum the rest as "N other processes": when it is your
+own unleased run, finish it or move it into `clankie heavy`. Keep the request
+open; repair an unavailable installation through the existing setup route rather
+than selecting another registry.
 
 Before stopping a queued job, verify its exact command, working directory and
 your own launch record. A matching seat or holder alone does not identify the job.

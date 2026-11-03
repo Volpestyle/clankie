@@ -1,7 +1,9 @@
 import {
   createResourceGovernor,
+  describeConsumers,
   heavyJobLane,
   resourceHolderIdentity,
+  retryLater,
   type FleetResourceGovernor,
   type ResourceSnapshot,
 } from "@clankie/fleet-resources";
@@ -46,6 +48,7 @@ export async function runHeavyCommand(
   }
   const governor = options.governor ?? createResourceGovernor();
   let waiting = false;
+  let namedConsumers = false;
   const shownAlerts = new Set<string>();
   const lane = server ? "server" : heavyJobLane(command, args.slice(separator + 2));
   try {
@@ -62,6 +65,14 @@ export async function runHeavyCommand(
               : lane === "light"
                 ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
                 : `clankie heavy: waiting for machine capacity (${waitReason(snapshot, detail?.arbiter === true)}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
+          );
+        }
+        // Who is using the machine, once, when pressure is what holds this job (#332).
+        const consumers = describeConsumers(snapshot.consumers ?? []);
+        if (!namedConsumers && consumers && !snapshot.pressure.healthy) {
+          namedConsumers = true;
+          (options.stderr ?? process.stderr).write(
+            `  ${consumers} ${retryLater(snapshot.loadRetryAfterMs)}\n`,
           );
         }
         for (const alert of snapshot.holderAlerts ?? []) {

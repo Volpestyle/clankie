@@ -1,4 +1,11 @@
 import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
+import {
+  chargeHolders,
+  loadRetryAfterMs,
+  observeProcessTable,
+  topConsumers,
+  type HolderGroup,
+} from "./consumers.ts";
 import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
@@ -444,6 +451,42 @@ export function createResourceGovernor(
       ? await observeSimulatorUsage()
       : new Map();
     const sampledPressure = await pressure.sample(state.policy);
+    // Each permit is charged its runner's process group; under pressure the heaviest
+    // processes are named, leased or not (#332). One cached census, only when needed.
+    const groups: HolderGroup[] = (
+      [
+        { lane: "full", from: state },
+        { lane: "light", from: light },
+        { lane: "server", from: server },
+      ] as const
+    ).flatMap(({ lane, from }) =>
+      from.leases.flatMap((lease) =>
+        lease.kind === "heavy" && lease.runner
+          ? [
+              {
+                id: lease.id,
+                pgid: lease.runner.pgid,
+                lane,
+                ...(lease.seatId ? { seatId: lease.seatId } : {}),
+                ...(lease.holderId ? { holderId: lease.holderId } : {}),
+                executable: lease.executable,
+              },
+            ]
+          : [],
+      ),
+    );
+    const table =
+      groups.length || !sampledPressure.healthy
+        ? await observeProcessTable().catch(() => undefined)
+        : undefined;
+    const charged = table ? chargeHolders(table, groups) : new Map();
+    const processUsage = (id: string) => (charged.has(id) ? { processUsage: charged.get(id)! } : {});
+    const consumers =
+      table && !sampledPressure.healthy ? topConsumers(table, groups, { exclude: [process.pid] }) : [];
+    const retryAfterMs =
+      sampledPressure.reason === "load"
+        ? loadRetryAfterMs(sampledPressure.loadRatio, state.policy.maxLoadRatio)
+        : undefined;
     return {
       schemaVersion: 1,
       policy: state.policy,
@@ -459,6 +502,8 @@ export function createResourceGovernor(
         serverCpuCores: serverCapacity.cpuCores,
       },
       pressure: sampledPressure,
+      ...(consumers.length ? { consumers } : {}),
+      ...(retryAfterMs === undefined ? {} : { loadRetryAfterMs: retryAfterMs }),
       serverLeases: server.leases.flatMap((lease) =>
         lease.kind === "heavy"
           ? [
@@ -476,6 +521,7 @@ export function createResourceGovernor(
                 cpuCores: serverCapacity.jobCpuCores,
                 ...serverCpuStatus(serverStore.directory, lease),
                 ...(lease.runner ? { pid: lease.runner.pid } : {}),
+                ...processUsage(lease.id),
               },
             ]
           : [],
@@ -535,6 +581,7 @@ export function createResourceGovernor(
         createdAtMs: lease.createdAtMs,
         lastUsedAtMs: lease.lastUsedAtMs,
         ...(lease.kind === "heavy" && lease.runner ? { pid: lease.runner.pid } : {}),
+        ...processUsage(lease.id),
       })),
       lightLeases: light.leases.flatMap((lease) =>
         lease.kind === "heavy"
@@ -547,6 +594,7 @@ export function createResourceGovernor(
                 executable: lease.executable,
                 createdAtMs: lease.createdAtMs,
                 ...(lease.runner ? { pid: lease.runner.pid } : {}),
+                ...processUsage(lease.id),
               },
             ]
           : [],

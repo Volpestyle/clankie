@@ -2,6 +2,7 @@ import {
   automaticSimulatorSlots,
   createResourceGovernor,
   createSimulatorManager,
+  describeConsumers,
   longHeldJobMs,
   observeSimulatorReferents,
   unprovenSeatDetail,
@@ -168,11 +169,12 @@ export async function createFleetResourceRuntime(input: {
         reason: snapshot.pressure.reason,
         diskWarning: snapshot.pressure.diskWarning,
       },
-      leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, ...lease }) => lease),
+      // Usage readings move every sample; like load, they never wake the fleet (#332).
+      leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, processUsage: _usage, ...lease }) => lease),
       queue: snapshot.queue,
-      lightLeases: snapshot.lightLeases,
+      lightLeases: snapshot.lightLeases.map(({ processUsage: _usage, ...lease }) => lease),
       lightQueue: snapshot.lightQueue,
-      serverLeases: snapshot.serverLeases,
+      serverLeases: snapshot.serverLeases?.map(({ processUsage: _usage, ...lease }) => lease),
       serverQueue: snapshot.serverQueue,
       holderAlerts: snapshot.holderAlerts,
     });
@@ -479,15 +481,21 @@ export async function createFleetResourceRuntime(input: {
         const admission = await governor.admitBuilder();
         const pressure = admission.pressure;
         if (cached) publish({ ...cached, pressure });
+        // Who is using the machine, named only when it matters (#332).
+        const consumers =
+          (!admission.allowed && admission.reason !== "probe-unavailable") || admission.heavyQueued
+            ? describeConsumers((await governor.snapshot().catch(() => undefined))?.consumers ?? [], "caller")
+            : undefined;
+        const naming = consumers ? ` ${consumers}` : "";
         if (!admission.allowed)
           throw new ResourceAdmissionError(
             admission.reason === "probe-unavailable"
               ? "Local hire refused: machine pressure could not be verified. Recheck clankie doctor."
-              : `Local hire refused: available memory ${Math.round(pressure.availableMemoryMb)} MiB is below the ${String(admission.minAvailableMemoryMb)} MiB floor. Wait for memory to free up or review the owner's fleet resource policy.`,
+              : `Local hire refused: available memory ${Math.round(pressure.availableMemoryMb)} MiB is below the ${String(admission.minAvailableMemoryMb)} MiB floor.${naming} Wait for memory to free up or review the owner's fleet resource policy.`,
             admission.reason ?? "probe-unavailable",
           );
         return admission.heavyQueued
-          ? `Machine load is high (load/core ${pressure.loadRatio.toFixed(2)}, heavy limit ${admission.heavyQueued.maxLoadRatio.toFixed(2)}): this seat's \`clankie heavy\` builds, tests and simulator leases will queue until load drops.`
+          ? `Machine load is high (load/core ${pressure.loadRatio.toFixed(2)}, heavy limit ${admission.heavyQueued.maxLoadRatio.toFixed(2)}): this seat's \`clankie heavy\` builds, tests and simulator leases will queue until load drops.${naming}`
           : undefined;
       } catch (error) {
         if (error instanceof ResourceAdmissionError) throw error;

@@ -1,4 +1,5 @@
 import { observeSimulatorUsage, simulatorUsageFor, type SimulatorUsage } from "./simulator-usage.ts";
+import { describeConsumers, retryLater } from "./consumers.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SimulatorsDisabledError } from "./governor.ts";
@@ -742,7 +743,7 @@ export function createSimulatorManager(input: {
       reason,
       blockers,
       retryAfterMs: RETRY_MS,
-      hint: hint ?? hintFor(reason, blockers),
+      hint: hint ?? hintFor(reason, blockers, snapshot),
     };
   };
 
@@ -1711,13 +1712,20 @@ const externalHint = (external: readonly ExternalSimulatorView[]) =>
 function hintFor(
   reason: "simulator_capacity" | "shared_capacity" | "pressure",
   blockers: SimulatorBlockers,
+  snapshot?: Pick<ResourceSnapshot, "consumers" | "loadRetryAfterMs">,
 ): string {
   const leases = blockers.leases.map(
     (lease) =>
       `seat ${lease.seatId}${lease.holderId ? ` holder ${lease.holderId}` : ""} (${lease.deviceName ?? "device pending"}, ${lease.phase})`,
   );
   if (reason === "pressure")
-    return `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available). Retry later.`;
+    return [
+      `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available).`,
+      describeConsumers(snapshot?.consumers ?? [], "caller"),
+      retryLater(snapshot?.loadRetryAfterMs),
+    ]
+      .filter(Boolean)
+      .join(" ");
   if (reason === "shared_capacity") {
     const heavy = blockers.heavy.map((entry) =>
       `${entry.seatId ?? (entry.pid ? `PID ${entry.pid}` : "unattributed")} ${entry.executable ?? ""}`.trim(),
