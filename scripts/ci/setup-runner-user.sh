@@ -2,7 +2,7 @@
 # Sets up this repository's self-hosted Mac runners under their own standard
 # (non-admin) macOS user, so a CI job runs with none of the owner's login
 # keychain, ~/.ssh, harness homes, Clankie state or package store.
-# Guide: docs/testing/mac-runner.md.
+# Guide: docs/mac-runner.md.
 #
 # It prints every step first and changes nothing without --apply. Running it
 # again is safe: each step checks what is already there. The owner runs it,

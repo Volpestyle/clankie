@@ -1,8 +1,8 @@
 # Mac runner
 
-The `mac` and `real-run` jobs ([quality gates](quality-gates.md)) run on the
+The `mac` and `real-run` jobs ([quality gates](testing/quality-gates.md)) run on the
 owner's Mac. Their runners run as a dedicated standard macOS user behind a guard
-on the runner itself ([ADR 0351](../adr/0351-mac-runners-run-as-their-own-user-behind-a-runner-side-guard.md)).
+on the runner itself ([ADR 0351](adr/0351-mac-runners-run-as-their-own-user-behind-a-runner-side-guard.md)).
 
 ```mermaid
 flowchart LR

@@ -36,9 +36,9 @@
  */
 
 /** Non-blank lines at the bottom of the screen read as the open prompt. */
-export const PROMPT_REGION_LINES = 30;
+const PROMPT_REGION_LINES = 30;
 
-export interface RiskyScreenRule {
+interface RiskyScreenRule {
   readonly id: string;
   /** Names the reason in the refusal the app reads. */
   readonly reason: string;
@@ -48,7 +48,7 @@ export interface RiskyScreenRule {
 }
 
 /** The reviewable deny-list: a screen matching any of these is the owner's to answer. */
-export const RISKY_SCREEN_RULES: readonly RiskyScreenRule[] = [
+const RISKY_SCREEN_RULES: readonly RiskyScreenRule[] = [
   {
     id: "permission-mode",
     reason: "it changes the agent's permission mode",
@@ -94,7 +94,7 @@ export const RISKY_SCREEN_RULES: readonly RiskyScreenRule[] = [
 ];
 
 /** A numbered option that would approve beyond this one prompt. */
-export const PERSISTENT_OPTION_PATTERN =
+const PERSISTENT_OPTION_PATTERN =
   /\bdon'?t\s+ask\b|\bdo\s+not\s+ask\b|\balways\b|\b(?:for|during)\s+(?:this|the)\s+session\b|\bfor\s+the\s+rest\b|\ballow\s+all\b|\byes\s+to\s+all\b|\bremember\b|\bauto[- ]?accept|\baccept\s+edits\b|\bbypass\b|\bfull[- ]access\b/iu;
 
 /** Typed text that would run a command or change the agent's mode, not answer a question. */
@@ -108,7 +108,7 @@ const BOX_RULE = /^[\s╭╮╰╯─━┌┐└┘]*$/u;
 const OPTION_LINE = /^(?:([❯›▶➤>→])\s*)?(?:\[[ x✔]\]\s*)?(\d{1,2})[.)]\s+(\S.*)$/u;
 const YES_NO = /\((?:y\/n|yes\/no)\)|\[(?:y\/n|yes\/no)\]/iu;
 
-export interface PromptOption {
+interface PromptOption {
   readonly number: number;
   readonly text: string;
   readonly pointed: boolean;

@@ -9,7 +9,7 @@ The `mac` and `real-run` jobs run on the owner's Mac through self-hosted runners
 ## Decision
 
 - The guard lives on the runner. Each Mac runner runs `scripts/ci/runner-job-guard.sh` as its job-started hook (`ACTIONS_RUNNER_HOOK_JOB_STARTED`), from a root-owned copy outside any checkout. It allows a push or manual dispatch on `main`, a merge-queue run, and a pull request whose head is a branch of this repository, optionally only by listed logins. Anything else fails before its first step, closed when the job context is missing.
-- The runners run as a dedicated standard macOS user (`clankie-ci`) with no admin rights, no login keychain items, no `~/.ssh`, no harness homes, no Clankie state and its own pnpm store, started by LaunchDaemons. `scripts/ci/setup-runner-user.sh` sets this up idempotently, and the owner runs it; [Mac runner](../testing/mac-runner.md) has the steps.
+- The runners run as a dedicated standard macOS user (`clankie-ci`) with no admin rights, no login keychain items, no `~/.ssh`, no harness homes, no Clankie state and its own pnpm store, started by LaunchDaemons. `scripts/ci/setup-runner-user.sh` sets this up idempotently, and the owner runs it; [Mac runner](../mac-runner.md) has the steps.
 - Every workflow pins third-party actions by commit SHA, with the tag in a comment.
 - Fork pull requests need an owner's approval before any workflow runs (`all_external_contributors`), as a repository setting.
 - Merging on green (0332) covers only the owner's and the fleet's own branches; a fork's pull request waits for the owner, and no agent approves a fork's workflow run.

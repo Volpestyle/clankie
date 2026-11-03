@@ -88,7 +88,7 @@ export function paneShellScript(owner: NodeJS.ProcessEnv): string {
 }
 
 /** Clankie's own bearers: a service, bridge, joined-host or gateway token in any spelling. */
-export function isClankieBearerName(name: string): boolean {
+function isClankieBearerName(name: string): boolean {
   return /^CLANKIE_[A-Z0-9_]*TOKENS?(?:_JSON|_FILE)?$/u.test(name);
 }
 
@@ -99,10 +99,7 @@ export function isClankieBearerName(name: string): boolean {
  * root `.env.local` (`withheld`) may ride in it. The service keeps both in its
  * own memory; a pane that needs a credential asks the broker for its own.
  */
-export function herdrFleetEnvironment(
-  env: NodeJS.ProcessEnv,
-  withheld: Iterable<string> = [],
-): NodeJS.ProcessEnv {
+function herdrFleetEnvironment(env: NodeJS.ProcessEnv, withheld: Iterable<string> = []): NodeJS.ProcessEnv {
   const out = { ...env };
   for (const name of Object.keys(out)) if (isClankieBearerName(name)) delete out[name];
   for (const name of withheld) delete out[name];

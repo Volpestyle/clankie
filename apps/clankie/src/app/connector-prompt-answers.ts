@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { z } from "zod";
 
 /** Agents the owner granted one app beyond its own hires, at most this many in all. */
-export const PANE_GRANTS_MAX = 256;
+const PANE_GRANTS_MAX = 256;
 
 const DeviceIdSchema = z.string().min(1).max(256);
 const PaneGrantSchema = z

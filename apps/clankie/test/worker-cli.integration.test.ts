@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -218,7 +219,7 @@ it("uses a pane link through real HTTP for evidence and receipts, and scopes sim
         process.execPath,
         "--import",
         import.meta.resolve("tsx/esm"),
-        join(import.meta.dirname, "fixtures/worker-cli-sandbox-probe.ts"),
+        fileURLToPath(import.meta.resolve("./fixtures/worker-cli-sandbox-probe.ts")),
         denied,
         deliveryId,
       ],
