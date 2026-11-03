@@ -92,7 +92,8 @@ const CLAUDE_CHANNEL_RECORDS = [
       role: "user",
       content: channel(
         'source="plugin:clankie-worker:worker" kind="message" conversation="herdr-core/t2x" source="captain" event_id="seat-1" created_at="2026-11-03T18:00:00.000Z"',
-        "kiwi check: reply when you have this",
+        // A credential-shaped value in a delivered message is redacted as any transcript text is.
+        "kiwi check: reply when you have this, token ghp_KIWISECRET0123456789",
       ),
     },
   },
@@ -295,7 +296,7 @@ test("Claude Code and Codex panes read their own transcript, never the owner's s
         status: "read",
         text: `› Fix issue 328\n${harness} transcript: reading the pane from its session${
           harness === "claude"
-            ? "\n› [channel from captain] kiwi check: reply when you have this\nkiwi-t2x received"
+            ? "\n› [channel from captain] kiwi check: reply when you have this, token [REDACTED]\nkiwi-t2x received"
             : ""
         }`,
         detail: TRANSCRIPT_READ_DETAIL,
@@ -303,6 +304,7 @@ test("Claude Code and Codex panes read their own transcript, never the owner's s
       expect(JSON.stringify(answer)).not.toContain(secret);
       expect(JSON.stringify(answer)).not.toContain("screen:");
       expect(JSON.stringify(answer)).not.toContain("FORGED");
+      expect(JSON.stringify(answer)).not.toContain("KIWISECRET");
     }
 
     // Suspend it, do shell work in its pane, bring it back: same process, same session.

@@ -1636,6 +1636,31 @@ function claudeInterrupt(entry: Record<string, unknown>): boolean {
   );
 }
 
+/**
+ * A delivery's rendered fields, each through the same normalize, redact and bound pipeline as
+ * any transcript text (#220): a credential in a delivered message reads `[REDACTED]` here too.
+ */
+function channelDelivery(text: string, server: string | undefined): TranscriptChannelDelivery | undefined {
+  const envelope = channelEnvelope(text);
+  const body = envelope === undefined ? undefined : cleanText(envelope.body);
+  if (envelope === undefined || body === undefined) return undefined;
+  const field = (value: string | undefined) => {
+    const clean = value === undefined ? undefined : cleanText(value);
+    return clean === undefined ? undefined : clean.slice(0, CHANNEL_FIELD_MAX);
+  };
+  const sender = field(envelope.sender);
+  const origin = field(server);
+  return {
+    kind: "channel",
+    ...(origin === undefined ? {} : { server: origin }),
+    ...(sender === undefined ? {} : { sender }),
+    body,
+  };
+}
+
+/** A delivery's sender or server name is an identifier, never a message. */
+const CHANNEL_FIELD_MAX = 128;
+
 /** The native record's own word that a channel delivered it: `origin.kind: "channel"`, from a server. */
 function channelOrigin(origin: unknown, system: boolean): { readonly server?: string } | undefined {
   const native = record(origin);
@@ -1652,11 +1677,11 @@ function claudePrompt(
   channel?: { readonly server?: string },
 ): HerdrTranscriptMessage[] {
   if (includeChannelPrompts && CLAUDE_CHANNEL_PROMPT.test(text.trimStart())) {
-    const envelope = channel === undefined ? undefined : channelEnvelope(text);
+    const delivery = channel === undefined ? undefined : channelDelivery(text, channel.server);
     return transcriptMessage(id, "operator", text, at).map((item) => ({
       ...item,
       internal: true as const,
-      ...(envelope === undefined ? {} : { delivery: { kind: "channel" as const, ...channel, ...envelope } }),
+      ...(delivery === undefined ? {} : { delivery }),
     }));
   }
   // Bash mode (`! cmd`) records the owner's shell command and its output, never a prompt.
