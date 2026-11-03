@@ -191,6 +191,12 @@ export interface RoomTurns {
     guildId: string,
     channelId: string,
   ): Promise<boolean>;
+  /**
+   * Proof that every server member can read this channel, which is what lets
+   * room history be shared with its social turns (#340). False without a
+   * Discord body, on any failed lookup, and for anything private.
+   */
+  everyoneCanRead(guildId: string, channelId: string): Promise<boolean>;
   /** A watch or worker report wakes the room it was armed from; the reply posts there. */
   runDiscordWatchTurn(
     owner: ConversationOwner,

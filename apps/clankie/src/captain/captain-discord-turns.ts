@@ -1,4 +1,8 @@
-import { discordActorOwnsServer, discordOwnerAudience } from "@clankie/discord-presence-core";
+import {
+  discordActorOwnsServer,
+  discordEveryoneCanRead,
+  discordOwnerAudience,
+} from "@clankie/discord-presence-core";
 import { boundedDiscordReply } from "@clankie/discord-presence-core";
 import {
   CAPTAIN_LANE_ENTRIES_MAX,
@@ -1097,6 +1101,13 @@ export function createDiscordTurns(ctx: RoomTurnsHost): RoomTurns {
       (await discordOwnerAudience(discord, guildId, channelId, async (action) => {
         const result = await ctx.deps.discordActions!.serverAction(action);
         if (!result.ok) throw new Error("Discord audience unavailable");
+        return result.data;
+      })),
+    everyoneCanRead: async (guildId, channelId) =>
+      ctx.deps.discordActions !== undefined &&
+      (await discordEveryoneCanRead(guildId, channelId, async (action) => {
+        const result = await ctx.deps.discordActions!.serverAction(action);
+        if (!result.ok) throw new Error("Discord channel unavailable");
         return result.data;
       })),
     runDiscordWatchTurn,

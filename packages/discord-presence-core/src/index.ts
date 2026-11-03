@@ -342,6 +342,7 @@ export {
   executeDiscordServerAction,
   discordActorOwnsServer,
   discordOwnerAudience,
+  discordEveryoneCanRead,
   type DiscordServerAuthority,
   type DiscordServerRequest,
 } from "./server-actions.ts";

@@ -369,11 +369,15 @@ room's lane log (`~/.clankie/captain/lanes/<lane>~<target>.jsonl`), and the
 `room_history` tool searches or reads them, newest first, at most 8 entries and
 about 4,000 characters a call, paged by `offset`. The turn's context says how
 many earlier messages it can read. The host binds the tool to the current room
-and the turn's audience: every lane log entry records whether its turn had
-private context, and a turn without it reads only entries written for the room.
-An owner-only exchange therefore never reaches a channel after its audience
-widens, and entries logged before audiences were recorded are visible to private
-turns only. Results carry the untrusted-context label (#340).
+and the turn's audience. Every lane log entry records its audience: `room` only
+when the turn had no private context and Discord proved that every server
+member can read the channel (the `@everyone` role may view channels and no
+`@everyone` overwrite denies it); anything else, including a failed or
+unavailable lookup, a DM or a private thread, records `private`. A turn without
+private context reads only `room` entries, so an owner-only exchange never
+reaches a channel after its audience widens, and entries logged before
+audiences were recorded are visible to private turns only. Results carry the
+untrusted-context label (#340).
 
 Owner outreach, room relays, tracking messages and fleet webhooks require an
 owner-only audience. Everyone-owned servers satisfy that ownership condition;

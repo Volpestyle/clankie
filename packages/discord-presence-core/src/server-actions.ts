@@ -372,6 +372,45 @@ export async function discordOwnerAudience(
   }
 }
 
+/**
+ * Positive proof that every member of the server can read this channel: its
+ * `@everyone` role may view channels and no `@everyone` overwrite denies it here
+ * (or on a thread's parent). Anything unreadable, missing or private fails
+ * closed. What such a channel says, any later member can scroll back to.
+ */
+export async function discordEveryoneCanRead(
+  guildId: string,
+  channelId: string,
+  request: DiscordServerRequest,
+): Promise<boolean> {
+  try {
+    let channel = record(await request({ method: "GET", path: `/channels/${channelId}` }));
+    if (channel?.guild_id !== guildId) return false;
+    // A private thread is readable only by its members.
+    if (Number(channel.type) === 12) return false;
+    if ([10, 11].includes(Number(channel.type))) {
+      if (typeof channel.parent_id !== "string") return false;
+      channel = record(await request({ method: "GET", path: `/channels/${channel.parent_id}` }));
+      if (channel?.guild_id !== guildId) return false;
+    }
+    const overwrites = channel.permission_overwrites;
+    if (!Array.isArray(overwrites)) return false;
+    for (const input of overwrites) {
+      const entry = record(input);
+      if (!entry || typeof entry.id !== "string") return false;
+      if (entry.id !== guildId) continue;
+      if (typeof entry.deny !== "string" || (BigInt(entry.deny) & 1024n) !== 0n) return false;
+    }
+    const roles = await request({ method: "GET", path: `/guilds/${guildId}/roles` });
+    if (!Array.isArray(roles)) return false;
+    const everyone = roles.map(record).find((role) => role?.id === guildId);
+    if (typeof everyone?.permissions !== "string") return false;
+    return (BigInt(everyone.permissions) & (1024n | 8n)) !== 0n;
+  } catch {
+    return false;
+  }
+}
+
 /** Only host-owned REST membership evidence may authorize a Discord role. */
 export async function discordActorOwnsServer(
   authority: Pick<DiscordServerAuthority, "servers" | "ownerUserId">,

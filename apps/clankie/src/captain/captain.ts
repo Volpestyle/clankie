@@ -4812,8 +4812,16 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   burst.handoff.grant = key;
                   burst.handoff.sessionKey = sessionKey;
                 }
-                // This room's own log, for this turn's audience only (#340).
+                // This room's own log, for this turn's audience only (#340). Who may read
+                // what this turn adds is proven on its own, never inferred from the turn
+                // lacking private context: a failed audience check also lacks it.
                 const historyReader = roomHistoryReader(laneLog, lane, targetId, access.privateContext);
+                const roomAudience =
+                  !access.privateContext &&
+                  request.trigger.guildId !== undefined &&
+                  (await roomTurns.everyoneCanRead(request.trigger.guildId, request.trigger.channelId))
+                    ? ("room" as const)
+                    : ("private" as const);
                 const heard = await roomTurns.normalize(request, deps, {
                   ...(sender === undefined ? {} : { sender }),
                   systemTools: plan.systemTools,
@@ -4829,7 +4837,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 const normalized: NormalizedDiscordTurn = {
                   ...heard,
                   historyReader,
-                  roomAudience: access.privateContext ? "private" : "room",
+                  roomAudience,
                   sessionKey,
                   durable: loopKey !== undefined,
                   handoffConversationId: child.conversationId,
@@ -4896,6 +4904,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                     });
                   nativeCapture.room = roomKey(normalized.lane, normalized.targetId);
                   nativeCapture.targetId = normalized.targetId;
+                  nativeCapture.roomHistory = normalized.historyReader;
                   nativeCapture.actorId = normalized.actorId;
                   nativeCapture.guildId = normalized.guildId;
                   nativeCapture.channelId = normalized.channelId;
