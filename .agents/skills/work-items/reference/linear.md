@@ -109,6 +109,9 @@ Read `clankie doctor` for the active backend and reason; local records do not
 automatically migrate when Linear is connected. A failed connected Linear call
 stays a failure and never writes locally. GitHub connection failures still name
 the recorded convention with `backend_unavailable`; report them to your lead.
+A write the Clankie GitHub App's token is refused for (HTTP 403/404) carries the
+app's install page: pass that link to the owner, since installing the app on a
+repository is theirs to do.
 Do not create another queue to compensate for an uncertain write. Explicit
 export/import identity mapping is designed in ADR 0226; migration is not yet
 implemented.

@@ -364,6 +364,13 @@ export interface WorkItemsServiceOptions {
    * owner's `gh` login on this machine (ADR 0191, #98); a hosted body has none.
    */
   readonly githubToken?: () => Promise<string | undefined>;
+  /**
+   * The connected account's identity across token refreshes (else the token
+   * is its own), and the GitHub App install page named when a write is refused.
+   */
+  readonly githubAccount?: () => Promise<
+    { readonly binding?: string; readonly installUrl?: string } | undefined
+  >;
   readonly hosted?: boolean;
   /** Test seams; production shells out to git and gh and calls api.github.com. */
   readonly run?: CommandRunner;
@@ -918,6 +925,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
     const token = await options.githubToken?.();
+    const installUrl = token === undefined ? undefined : (await options.githubAccount?.())?.installUrl;
     const checkpoint = checkpointAccess(token);
     const builtIn = await builtInBinding(path, projectId);
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
@@ -936,6 +944,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
                 token,
                 ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
                 ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+                ...(installUrl === undefined
+                  ? {}
+                  : {
+                      refusedWriteHint: `If the Clankie GitHub App is not installed on this repository, install it: ${installUrl}`,
+                    }),
               }),
               createHash("sha256").update(token).digest("hex"),
             ),
@@ -1148,7 +1161,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (kind === "github") {
       const token = await options.githubToken?.();
       // Owner writes use the connected account, else the owner's gh login on this machine.
-      if (token) return deliveryFingerprint(token);
+      if (token) return deliveryFingerprint((await options.githubAccount?.())?.binding ?? token);
       const login = options.hosted === true ? undefined : await ghLogin();
       if (login === undefined)
         throw new Error(

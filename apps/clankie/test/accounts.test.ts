@@ -16,8 +16,10 @@ import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@cla
 import { writeConvention } from "@clankie/work-items";
 import { bodyTelemetryFromEnv } from "@clankie/observability/body-telemetry";
 import {
+  CLANKIE_GITHUB_APP,
   createAccounts,
   GITHUB_OAUTH_APP_PROVIDER_ID,
+  githubConnectionAccount,
   githubConnectionToken,
   oauthAppsFrom,
   type OauthApps,
@@ -49,6 +51,23 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
   const seen: Seen[] = [];
   const issues: Record<string, unknown>[] = [];
   const validTokens = new Set([TOKEN, OTHER_BODY_TOKEN]);
+  // A GitHub App client (`Iv…`) gets expiring user tokens; each refresh rotates both.
+  const app = { generation: 0, refresh: "", down: false };
+  const appPair = () => {
+    app.generation += 1;
+    const access = `ghu_MARKER_app_access_${String(app.generation)}`;
+    app.refresh = `ghr_MARKER_app_refresh_${String(app.generation)}`;
+    for (const token of validTokens) if (token.startsWith("ghu_")) validTokens.delete(token);
+    validTokens.add(access);
+    return {
+      access_token: access,
+      expires_in: 28_800,
+      refresh_token: app.refresh,
+      refresh_token_expires_in: 15_897_600,
+      token_type: "bearer",
+      scope: "",
+    };
+  };
   const server: Server = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk) => (body += String(chunk)));
@@ -69,7 +88,15 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
           interval: 5,
         });
       if (route === "POST /login/oauth/access_token") {
+        const form = new URLSearchParams(body);
+        if (form.get("grant_type") === "refresh_token") {
+          if (app.down) return json(502, { message: "unavailable" });
+          if (form.get("refresh_token") !== app.refresh || app.refresh === "")
+            return json(200, { error: "bad_refresh_token", error_description: `echo ${app.refresh}` });
+          return json(200, appPair());
+        }
         const next = device.shift() ?? "authorization_pending";
+        if (next === "token" && form.get("client_id")?.startsWith("Iv")) return json(200, appPair());
         if (next === "token") return json(200, { access_token: TOKEN, token_type: "bearer", scope: "repo" });
         return json(200, { error: next, error_description: `echo ${TOKEN}`, interval: 10 });
       }
@@ -87,8 +114,15 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
         response.writeHead(revokeStatus);
         return response.end();
       }
+      // The app is not installed on this repository: GitHub refuses its user token's writes.
+      if (url.pathname === "/repos/owner/uninstalled/issues")
+        return request.method === "GET"
+          ? json(200, [])
+          : json(403, { message: "Resource not accessible by integration" });
       if (url.pathname === "/repos/owner/repo/issues") {
-        if (request.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: TOKEN });
+        const bearer = (request.headers.authorization ?? "").replace(/^Bearer /u, "");
+        if (bearer !== TOKEN && !(bearer.startsWith("ghu_") && validTokens.has(bearer)))
+          return json(401, { message: TOKEN });
         if (request.method === "POST") {
           const created = {
             number: issues.length + 1,
@@ -151,6 +185,7 @@ async function fakeProviders(device: string[] = ["authorization_pending", "token
     origin,
     seen,
     issues,
+    app,
     fetch: routed,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
@@ -244,6 +279,7 @@ async function setup(
     json,
     pair,
     telemetryDir,
+    now: () => clock,
     advance: (ms: number) => (clock += ms),
   };
 }
@@ -820,5 +856,149 @@ describe("work tracker on a hosted body", () => {
       message: "This repo tracks work in GitHub issues (owner/repo); connect GitHub to Clankie to use it",
     });
     expect(gh).not.toHaveBeenCalled();
+  });
+});
+
+describe("GitHub App user tokens (#185)", () => {
+  const EIGHT_HOURS = 28_800_000;
+  const connectApp = async (clientId = "Iv23liFakeApp") => {
+    const context = await setup({ device: ["token"], apps: { github: { clientId } } });
+    const flowId = (await context.json("/v1/accounts/github/start", {})).body.flowId;
+    context.advance(1);
+    const polled = await context.json("/v1/accounts/github/poll", { flowId });
+    const token = () =>
+      githubConnectionToken(context.store, {
+        fetch: context.providers.fetch,
+        githubWeb: context.providers.origin,
+        now: context.now,
+      });
+    const refreshes = () =>
+      context.providers.seen.filter(
+        (entry) =>
+          entry.path === "/login/oauth/access_token" &&
+          new URLSearchParams(entry.body).get("grant_type") === "refresh_token",
+      );
+    return { ...context, polled, token, refreshes };
+  };
+
+  it("connects without the repo scope and keeps the rotating pair on the body", async () => {
+    const { polled, providers, store, json, token, refreshes, now } = await connectApp();
+    const deviceRequest = providers.seen.find((entry) => entry.path === "/login/device/code")!;
+    expect(Object.fromEntries(new URLSearchParams(deviceRequest.body))).toEqual({
+      client_id: "Iv23liFakeApp",
+    });
+    expect(polled.body).toMatchObject({
+      ok: true,
+      status: "connected",
+      connection: { provider: "github", status: "connected", account: "octo-owner", scopes: [] },
+    });
+    const stored = await store.get("github");
+    expect(stored).toMatchObject({
+      type: "oauth",
+      access: "ghu_MARKER_app_access_1",
+      refresh: "ghr_MARKER_app_refresh_1",
+      expires: now() + EIGHT_HOURS,
+      clientId: "Iv23liFakeApp",
+    });
+    const listed = await json("/v1/accounts");
+    expect(listed.body.connections).toContainEqual(
+      expect.objectContaining({
+        provider: "github",
+        status: "connected",
+        access: "Read and write issues in repositories where the GitHub App is installed.",
+      }),
+    );
+    expect(JSON.stringify([polled.body, listed.body])).not.toMatch(/gh[ur]_MARKER/u);
+    expect(await token()).toBe("ghu_MARKER_app_access_1");
+    expect(refreshes()).toHaveLength(0);
+  });
+
+  it("refreshes before the 8-hour expiry once for concurrent callers, keeping the account binding", async () => {
+    const { store, token, refreshes, advance, providers } = await connectApp();
+    const before = await githubConnectionAccount(store);
+    expect(before?.binding).toMatch(/^github-connection:/u);
+    advance(EIGHT_HOURS - 4 * 60_000);
+    expect(await Promise.all([token(), token(), token()])).toEqual([
+      "ghu_MARKER_app_access_2",
+      "ghu_MARKER_app_access_2",
+      "ghu_MARKER_app_access_2",
+    ]);
+    expect(refreshes()).toHaveLength(1);
+    // A device-flow token refreshes with no client secret.
+    expect(Object.fromEntries(new URLSearchParams(refreshes()[0]!.body))).toEqual({
+      client_id: "Iv23liFakeApp",
+      grant_type: "refresh_token",
+      refresh_token: "ghr_MARKER_app_refresh_1",
+    });
+    expect(await store.get("github")).toMatchObject({ refresh: "ghr_MARKER_app_refresh_2" });
+    expect(await githubConnectionAccount(store)).toEqual(before);
+    // The refreshed token works against the API; the rotated-out one does not.
+    const user = async (bearer: string) =>
+      (await fetch(`${providers.origin}/user`, { headers: { authorization: `Bearer ${bearer}` } })).status;
+    expect(await user("ghu_MARKER_app_access_2")).toBe(200);
+    expect(await user("ghu_MARKER_app_access_1")).toBe(401);
+  });
+
+  it("keeps a valid token while GitHub is unreachable and asks for a reconnect once refresh is refused", async () => {
+    const { providers, token, refreshes, advance, json } = await connectApp();
+    providers.app.down = true;
+    advance(EIGHT_HOURS - 60_000);
+    expect(await token()).toBe("ghu_MARKER_app_access_1");
+    advance(2 * 60_000);
+    await expect(token()).rejects.toThrow("GitHub is unavailable to refresh");
+    providers.app.down = false;
+    providers.app.refresh = "ghr_revoked_elsewhere";
+    expect(await token()).toBeUndefined();
+    const attempts = refreshes().length;
+    expect(await token()).toBeUndefined();
+    expect(refreshes()).toHaveLength(attempts);
+    expect((await json("/v1/accounts")).body.connections).toContainEqual(
+      expect.objectContaining({ provider: "github", status: "reconnect_required", reason: "invalid_grant" }),
+    );
+  });
+
+  it("defaults to Clankie's app, keeps an owner's own client id, and names the install page on a refused write", async () => {
+    expect(oauthAppsFrom({}, {}).github.clientId).toBeUndefined();
+    const original = { ...CLANKIE_GITHUB_APP };
+    Object.assign(CLANKIE_GITHUB_APP, { clientId: "Iv23liClankieApp", slug: "clankie-test" });
+    cleanups.push(() => Object.assign(CLANKIE_GITHUB_APP, original));
+    expect(oauthAppsFrom({}, {}).github.clientId).toBe("Iv23liClankieApp");
+    expect(oauthAppsFrom({ github: { clientId: "Ov23liOwnersOwn" } }, {}).github.clientId).toBe(
+      "Ov23liOwnersOwn",
+    );
+
+    const own = await connectApp("Iv23liOwnersApp");
+    expect((await githubConnectionAccount(own.store))?.installUrl).toBeUndefined();
+
+    const { dir, store, providers, token } = await connectApp(oauthAppsFrom({}, {}).github.clientId);
+    expect((await githubConnectionAccount(store))?.installUrl).toBe(
+      "https://github.com/apps/clankie-test/installations/new",
+    );
+    const repo = join(dir, "uninstalled");
+    await writeConvention(repo, {
+      schemaVersion: 1,
+      backend: "github",
+      github: { repo: "owner/uninstalled" },
+      decidedBy: "owner",
+      decidedAt: "2026-09-26T12:00:00Z",
+    });
+    const service = createWorkItemsService({
+      stateDirectory: dir,
+      workspace: () => repo,
+      githubToken: token,
+      githubAccount: () => githubConnectionAccount(store),
+      hosted: true,
+      gh: async () => {
+        throw new Error("a hosted body never runs gh");
+      },
+      fetch,
+      githubApiBase: providers.origin,
+    });
+    const failure = await service
+      .handle({ action: "create", repo: "workspace", title: "Needs the app", criteria: ["Installed"] }, true)
+      .catch((error: unknown) => error);
+    expect(String((failure as Error).message)).toContain(
+      "If the Clankie GitHub App is not installed on this repository, install it: https://github.com/apps/clankie-test/installations/new",
+    );
   });
 });

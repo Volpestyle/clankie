@@ -64,6 +64,11 @@ export function githubRestApi(options: {
   readonly token: string;
   readonly baseUrl?: string;
   readonly fetch?: typeof fetch;
+  /**
+   * Appended when GitHub refuses a write (403/404): a GitHub App's user token
+   * writes only where the app is installed, so this names its install page.
+   */
+  readonly refusedWriteHint?: string;
 }): GithubApi {
   const base = (options.baseUrl ?? "https://api.github.com").replace(/\/+$/u, "");
   const request = options.fetch ?? fetch;
@@ -79,8 +84,13 @@ export function githubRestApi(options: {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!response.ok)
-      throw new Error(`GitHub ${method} ${new URL(url).pathname}: HTTP ${String(response.status)}`);
+    if (!response.ok) {
+      const refusedWrite =
+        method !== "GET" && (response.status === 403 || response.status === 404) && options.refusedWriteHint;
+      throw new Error(
+        `GitHub ${method} ${new URL(url).pathname}: HTTP ${String(response.status)}${refusedWrite ? `. ${refusedWrite}` : ""}`,
+      );
+    }
     const text = await response.text();
     return { response, value: text.trim().length === 0 ? undefined : (JSON.parse(text) as unknown) };
   };

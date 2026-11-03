@@ -29,7 +29,9 @@ screen: check the current client before sending the owner there.
 
 The same devices link the owner's GitHub, Linear and Google accounts through
 `/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow
-and browser OAuth with PKCE, run by this machine, tokens only in its broker. Google
+and browser OAuth with PKCE, run by this machine, tokens only in its broker. A
+GitHub App connection's 8-hour token refreshes itself; `reconnect_required` means
+the owner connects GitHub again. Google
 offers separate Gmail, Calendar and selected-file Drive consent using the body
 catalog. Gmail and Calendar grants are read-only; Drive's selected-file grant
 permits edits, while Clankie's implemented tools only read. Refresh and grouped revocation
