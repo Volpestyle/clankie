@@ -3,9 +3,9 @@ import {
   decodeInboundReportShard,
 } from "./conversations/inbound-report-store.ts";
 import { isDeepStrictEqual } from "node:util";
-import { createReadStream, constants } from "node:fs";
-import { readFile, readdir, stat, realpath, open } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { createReadStream } from "node:fs";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { resolveHerdrSeatTranscriptPathAsync, sessionIdFromPath } from "@clankie/agent-transcript";
 import {
   CaptainTurnSettledMetricsSchema,
@@ -16,6 +16,7 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import { SeatLedgerRowSchema } from "./seat-ledger.ts";
+import { pointedBrief } from "./brief-file.ts";
 import { ReceiptSchema } from "./delivery-fence.ts";
 import { HireOwnersStateSchema } from "./hire-owners.ts";
 import { PaneTidyStateSchema } from "./pane-tidy.ts";
@@ -403,23 +404,13 @@ async function projectNative(
         if (row.prompt) {
           // Only the service-owned brief named by a native user assignment can
           // supply a brief. Never follow arbitrary paths or tool-result mentions.
-          const ref = row.prompt.match(
-            /^Execute the assignment in the clankieBrief JSON field of @([^\n]+)$/u,
-          )?.[1];
-          if (ref) {
+          const pointed = await pointedBrief(row.prompt, stateDir);
+          if (pointed) {
             row.brief = true;
-            const name = basename(ref);
-            const directory = await realpath(join(stateDir, "claude-briefs")).catch(() =>
-              join(stateDir, "claude-briefs"),
-            );
-            if (ref === join(directory, name) && /^clankie-brief-[a-f0-9-]+\.json$/u.test(name)) {
-              try {
-                const brief = obj(JSON.parse(await readBrief(ref)));
-                if (typeof brief.clankieBrief === "string") row.prompt = brief.clankieBrief;
-              } catch {
-                warnings.push(`Saved assignment brief unavailable: ${name}`);
-              }
-            } else warnings.push(`Saved assignment brief outside retained directory: ${name}`);
+            if (pointed.kind === "brief") row.prompt = pointed.brief;
+            else if (pointed.kind === "outside")
+              warnings.push(`Saved assignment brief outside retained directory: ${pointed.name}`);
+            else warnings.push(`Saved assignment brief unavailable: ${pointed.name}`);
           }
         }
         const key =
@@ -1166,26 +1157,4 @@ async function* nativeLines(stream: ReturnType<typeof createReadStream>): AsyncG
     if (pending.length > 16 * 1024 * 1024) throw new Error("Native row exceeds 16 MiB");
   }
   if (pending) yield pending;
-}
-
-/** The same no-follow descriptor supplies both the file check and its bytes.
- * A canonical-looking final-component symlink must never select an assignment. */
-async function readBrief(path: string): Promise<string> {
-  if (typeof constants.O_NOFOLLOW !== "number") throw new Error("No-follow brief reads unavailable");
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0));
-  try {
-    const info = await handle.stat();
-    if (!info.isFile() || info.size > 1024 * 1024) throw new Error("Brief is not a bounded regular file");
-    const buffer = Buffer.alloc(1024 * 1024 + 1);
-    let used = 0;
-    while (used < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, used, buffer.length - used, null);
-      if (!bytesRead) break;
-      used += bytesRead;
-    }
-    if (used > 1024 * 1024) throw new Error("Brief exceeds 1 MiB");
-    return buffer.subarray(0, used).toString("utf8");
-  } finally {
-    await handle.close();
-  }
 }
