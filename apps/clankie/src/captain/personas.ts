@@ -514,6 +514,10 @@ export class PersonaStore {
       kept !== undefined &&
       (kept === adoptedName(seat.personaId, herdrAgentName(name, "0000")) ||
         (/-[0-9a-f]{4}$/u.test(kept) && kept === herdrAgentName(name, kept.slice(-4))));
+    // A census that saw the pane before this hire recorded its title can't tell the handle
+    // Clankie minted from a name the owner typed, and marks it as the owner's (#653). The
+    // handle minted from this very title is never the owner's, so the hire's name wins.
+    if (fromHandle) this.ownerNamed.delete(seat.personaId);
     this.records.set(seat.personaId, {
       schemaVersion: 1,
       personaId: seat.personaId,

@@ -779,6 +779,28 @@ it("names a hire by the title Clankie hired it under, whichever census files it 
   }
 });
 
+it("names a hire by its title when a census saw its handle before the hire was recorded (#653)", () => {
+  const root = mkdtempSync(join(tmpdir(), "clankie-hire-race-personas-"));
+  try {
+    const occupant = `session-${"8".repeat(64)}`;
+    // The census runs between the pane starting and the hire recording its title, so the hire
+    // ledger doesn't know it yet and the handle reads as a name someone typed.
+    const pane = claudePane("w4:p1", occupant);
+    const named = herdrNamed(pane, "core-worker-1f7b");
+    const personas = new PersonaStore(root);
+    const early = personas.reconcile([named], () => undefined)[0]!;
+    expect(early.title).toBe("core-worker-1f7b");
+    expect(markers(root).ownerNamed).toEqual([early.personaId]);
+    // The hire adopts it under the title it was started with: that handle was Clankie's own.
+    const hired = personas.adoptSpawn({ ...pane, subject: named.subject }, "Core worker");
+    expect(hired).toMatchObject({ personaId: early.personaId, title: "Core worker" });
+    expect(markers(root).ownerNamed).toEqual([]);
+    expect(new PersonaStore(root).reconcile([named], () => "Core worker")[0]!.title).toBe("Core worker");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 it("keeps the persona file readable by the previous runtime, with its markers beside it (LOCAL-VUH-59 review)", () => {
   const root = mkdtempSync(join(tmpdir(), "clankie-persona-rollback-"));
   try {
