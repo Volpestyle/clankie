@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { redactSensitiveText } from "@clankie/observability";
 import { z } from "zod";
 import {
   DeliveryStageSchema,
@@ -31,6 +32,8 @@ export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),
+    /** The text's fingerprint as a session transcript reads it back, when the reader scrubs part of it (#639). */
+    scrubbedFingerprint: z.string().optional(),
     /** Explicit fresh admission keeps its UUID, original location and host-authored owner forever. */
     freshHire: FreshHireReceiptSchema.optional(),
     /** Original location of a completed ordinary hire archived outside its reusable recipient key. */
@@ -660,4 +663,54 @@ export class DeliveryFence {
 
 export function deliveryFingerprint(text: string): string {
   return createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
+}
+
+/**
+ * What was sent, as a transcript may read it back. The session transcript reader
+ * scrubs credential-shaped spans ("password: …", "session id: …") with
+ * `redactSensitiveText`, so a message that merely mentions one is stored scrubbed
+ * (#616, #639). `scrubbedFingerprint` is present only when scrubbing changes it.
+ */
+export function sentFingerprints(text: string): { fingerprint: string; scrubbedFingerprint?: string } {
+  const normalized = text.replace(/\r\n?/gu, "\n").trim();
+  const scrubbed = redactSensitiveText(normalized);
+  return {
+    fingerprint: deliveryFingerprint(normalized),
+    ...(scrubbed !== normalized && distinctiveWhenScrubbed(normalized, scrubbed)
+      ? { scrubbedFingerprint: deliveryFingerprint(scrubbed) }
+      : {}),
+  };
+}
+
+/** Text that must survive outside the redacted spans for a scrubbed read-back to identify a message. */
+const SCRUBBED_MATCH_MIN_CHARS = 16;
+
+/**
+ * Two messages that differ only inside redacted spans read back the same, so a
+ * scrubbed match proves only what survives around them. A message that is mostly
+ * credential ("password: x", or a bare key) would match any other such turn, so it
+ * is never confirmed by its scrubbed form: at least 16 characters, and over half of
+ * the message, must remain. Otherwise its delivery stays uncertain (#642 review).
+ */
+function distinctiveWhenScrubbed(sent: string, scrubbed: string): boolean {
+  const surviving = scrubbed.replaceAll("[REDACTED]", "").replace(/\s+/gu, " ").trim().length;
+  return surviving >= SCRUBBED_MATCH_MIN_CHARS && surviving * 2 > sent.length;
+}
+
+/**
+ * Whether a transcript entry's text is the sent message: exactly, or exactly the
+ * sent text with the reader's scrubbing applied. The second is the same message
+ * deterministically scrubbed, so the redacted spans are the only possible difference;
+ * any other change to the text fails both. It is offered only when enough of the
+ * message survives scrubbing to tell it from another (`distinctiveWhenScrubbed`).
+ */
+export function readsBackAs(
+  read: string,
+  sent: { readonly fingerprint: string; readonly scrubbedFingerprint?: string | undefined },
+): boolean {
+  const fingerprint = deliveryFingerprint(read);
+  return (
+    fingerprint === sent.fingerprint ||
+    (sent.scrubbedFingerprint !== undefined && fingerprint === sent.scrubbedFingerprint)
+  );
 }

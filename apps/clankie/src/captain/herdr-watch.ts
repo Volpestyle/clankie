@@ -39,6 +39,8 @@ import {
   adoptedOccupant,
   DeliveryFence,
   deliveryFingerprint,
+  readsBackAs,
+  sentFingerprints,
   type UncertainReceipt,
 } from "./delivery-fence.ts";
 import { channelBody, claudeWorkerPermissionMode } from "./claude-worker-seat.ts";
@@ -3411,7 +3413,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
                   entry.role === "operator" &&
                   pending.beforeIds !== undefined &&
                   !pending.beforeIds.includes(entry.id) &&
-                  deliveryFingerprint(channelBody(entry.text) ?? entry.text) === pending.fingerprint,
+                  readsBackAs(
+                    channelBody(entry.text) ?? entry.text,
+                    pending.fingerprint === deliveryFingerprint(brief) ? sentFingerprints(brief) : pending,
+                  ),
               ) === true;
         if (
           exact &&
