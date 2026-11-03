@@ -75,8 +75,10 @@ exact patch from native seat proof, hashes it with `git patch-id`, routes it to 
 live reviewer seat and binds the verdict to that hash. The
 [owner routes](../apps/clankie/src/review-routes.ts) serve `clankie review`;
 `clankie review status` says whether this checkout's patch may land.
-Clankie's own repositories land through pull requests that merge on green checks
-([ADR 0332](adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+Clankie's own repositories land through pull requests that merge on the worker's
+local checks plus the quick PR checks
+([ADR 0332](adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+[ADR 0347](adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
 
 Deploy holds (`clankie update holds|hold|release`, `POST /v1/deploy-holds`) keep
 runtime updates off the running service for at most an hour, or until the

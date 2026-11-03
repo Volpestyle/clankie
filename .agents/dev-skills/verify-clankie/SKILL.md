@@ -30,17 +30,20 @@ for new work, in this order:
 Do not add unit tests by default. Existing ones are not mass-deleted; pruning is
 a separate reviewed effort. Choose checks for the changed claim and risk, reuse
 valid evidence for unchanged inputs, and record what actually ran. Every change lands
-through a pull request, and its full checks run in CI when it is marked ready
-([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)), so the
-same checks never run twice. The full `pnpm check` runs for releases and on
-request.
+through a pull request that merges on those scoped local checks plus the quick
+pull request checks; the real-app run, the post-merge checks and the nightly
+suite run on `main` in the background and never gate
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md),
+[ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
+The full `pnpm check` runs for releases and on request.
 
 The real-app run is the first check for any change to how Clankie starts,
 answers or keeps state: `clankie heavy -- pnpm real-run` starts this checkout's
 real service, relay and private Herdr in a scratch home and checks the owner's
 key flows through the CLI, HTTP, files and the service's own log
-([ADR 0309](../../../docs/adr/0309-the-real-app-runs-on-every-change.md)). The Mac
-runs it on every change. A new owner-facing flow adds a flow to
+([ADR 0309](../../../docs/adr/0309-the-real-app-runs-on-every-change.md)). Run
+it yourself when your change is there; CI runs it on `main` after merges, and a
+red run there files a `ci-finding` issue. A new owner-facing flow adds a flow to
 [`packages/real-run`](../../../packages/real-run/README.md) instead of a mocked test;
 read `report.json` and `run.jsonl` in its output directory when it fails.
 

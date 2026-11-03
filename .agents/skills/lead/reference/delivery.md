@@ -56,8 +56,16 @@ and product defaults are never weakened to pass.
 
 In Clankie's own repositories every change lands through a pull request, one
 worker per task, never two on the same files. A ready pull request merges once
-its checks and real-app run are green
-([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+the worker's local checks pass on its final rebased head (the tests for what it
+changed, typecheck, oxlint, oxfmt, deadcode and doc links, through
+`clankie heavy --`) and the quick checks (`check`, and `build` where it runs)
+are green. The real-app and simulator runs never run per pull request: they run
+on `main` after merges and nightly, never gate, and a red one files a
+`ci-finding` issue. A change to a security or trust check (admission, auth, read
+boundaries) comes back to you with its head, and you have it reviewed
+independently before it merges
+([ADR 0332](../../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+[ADR 0347](../../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
 The worker rebases onto `origin/main` once, right before it merges, never by
 merging `main` in over and over, pushes with `--force-with-lease` to its own
 branch only, and flags a rebase conflict in files it didn't touch instead of

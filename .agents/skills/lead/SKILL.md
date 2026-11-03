@@ -206,8 +206,16 @@ fleet stands behind
   A seat idle on a run is a fault to fix.
 - File each bug as an issue in the project's tracker at the front of the queue,
   ordered by how badly it blocks the current goals, and staff it.
-- Run the full checks once, when the work is ready to merge: open pull requests
-  as drafts and mark them ready when done, or follow the project's own trigger.
+- Follow the project's own merge rule. In Clankie's own repos a worker merges on
+  its scoped local checks plus the quick pull request checks; the real-app,
+  simulator and full-suite runs happen on `main` and nightly, never per pull
+  request and never as a gate
+  ([ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
+- Work two queues in parallel. Red background runs there become `ci-finding`
+  issues (filed automatically, deduped by test). Keep some workers on the
+  `ci-finding` queue beside the regular issue queue so neither starves the
+  other, sized to the queues, and at least one on `ci-finding` while any are
+  open.
 - A failure already on the main branch never blocks other work. File it and
   get it fixed there; don't hold unrelated changes behind it.
 - Each change gets its full checks once, in one place: CI for a pull request,

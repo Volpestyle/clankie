@@ -4,8 +4,13 @@
 root landing gate in ADR 0240. The full gate includes the
 HTTP journey, unit, integration, Rust, IPC, type, lint and documentation checks.
 Pushes and pull requests run fast formatting, lint and native MCP contracts on Linux.
-Ready pull requests add the real-app run; `check` and `real-run` are all a
-merge waits on ([ADR 0332](../adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+A merge waits on the worker's local checks on the rebased head (changed tests,
+typecheck, lint, format, deadcode and doc links) and the quick `check` job
+(plus the docs `build` when docs change). The real-app run runs on `main` after
+merges, never per pull request, and a red background run files a `ci-finding`
+issue through `scripts/ci-finding.mjs`
+([ADR 0332](../adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+[ADR 0347](../adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
 Each push to `main` runs the landing gate's checks on Linux against `main`
 before the push, after the merge; a red run is a bug to file, not a gate, and
 exit 3, green checks waiting for the standing reviewer, passes there.

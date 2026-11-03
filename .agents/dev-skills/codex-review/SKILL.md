@@ -10,9 +10,11 @@ reviewed by a Codex worker on the owner's Mac, not by the cloud Codex bot
 ([ADR 0329](../../../docs/adr/0329-codex-reviews-on-the-owners-mac.md)). The
 review posts under the Mac's `gh` login as one GitHub review headed
 **Codex review**, and sets the `codex-clean` commit status on the exact commit
-it read. The review is advisory: a pull request merges once its checks are
-green, with or without it, and findings become follow-up issues
-([ADR 0332](../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)).
+it read. The review is advisory: a pull request merges once its local checks
+and quick checks are green, with or without it, and findings become follow-up
+issues ([ADR 0332](../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md),
+[ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)). A change to a security or trust check is the
+exception: the lead has it reviewed independently before it merges.
 
 `scripts/codex-review.mjs` does the GitHub side. Run it from a clean clone of
 clankie's `main` at `~/dev/.clankie-checks/codex-review/tools`
