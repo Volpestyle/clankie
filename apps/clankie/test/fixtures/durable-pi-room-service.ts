@@ -159,6 +159,8 @@ export async function privateService(
   options: {
     env?: NodeJS.ProcessEnv;
     requestId?: string;
+    /** Added to the scratch user config, e.g. an `image_model`. */
+    config?: Record<string, unknown>;
     /** Replaces the default script; `root` is this service's scratch root, `script` its blocking effect. */
     reply?: (
       messages: readonly ChatMessage[],
@@ -196,6 +198,7 @@ setTimeout(() => {}, 300000);
   await writeFile(
     join(root, "config/clankie/clankie.json"),
     JSON.stringify({
+      ...options.config,
       model: "fixture/scripted",
       provider: {
         fixture: {

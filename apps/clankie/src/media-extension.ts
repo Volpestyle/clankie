@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { ClankieExtension } from "@clankie/extension";
+import type { MediaFetch } from "@clankie/media-connector";
 import type { CorePorts, CoreProjection, MediaProjection } from "./extension-host.ts";
 import { ConfiguredMediaGenerator } from "./media-generation.ts";
 import { mediaRoutes } from "./media-routes.ts";
@@ -75,11 +76,39 @@ export const mediaExtension: ClankieExtension<undefined, CorePorts, MediaNeeds, 
   },
 };
 
+/**
+ * Test seam (#368), the media counterpart of the Discord runtime module's
+ * `CLANKIE_TEST_DISCORD_API`: a scratch test service sends its media provider
+ * requests to a loopback stand-in, path and query kept, so a real-restart test
+ * can make pictures without a provider. It is honoured only when both
+ * `CLANKIE_SCRATCH=1` and `NODE_ENV=test`; any other run ignores the variable
+ * and reaches the real provider. A set address that is not plain http on
+ * 127.0.0.1 or [::1] is refused, so the seam can never send a request off this
+ * machine, and every credential header and `key` query parameter is stripped, so
+ * it never carries a credential, by construction.
+ */
+export function scratchMediaFetch(env: NodeJS.ProcessEnv): MediaFetch | undefined {
+  const target = env.CLANKIE_TEST_MEDIA_API;
+  if (target === undefined || env.CLANKIE_SCRATCH !== "1" || env.NODE_ENV !== "test") return undefined;
+  const base = new URL(target);
+  if (base.protocol !== "http:" || !["127.0.0.1", "[::1]"].includes(base.hostname))
+    throw new Error("CLANKIE_TEST_MEDIA_API must be plain http on 127.0.0.1 or [::1]");
+  return (input, init) => {
+    const requested = new URL(input);
+    const url = new URL(`${requested.pathname}${requested.search}`, base.origin);
+    url.searchParams.delete("key");
+    const headers = new Headers(init?.headers);
+    for (const name of ["authorization", "x-api-key", "x-goog-api-key", "api-key"]) headers.delete(name);
+    return fetch(url, { ...init, headers });
+  };
+}
+
 /** His generators and the owner's skin drafts. Provider and model come from operator config. */
 function createMedia(host: Readonly<Pick<CorePorts, MediaNeeds>>): MediaProjection {
   const { repoRoot, deliveredFiles } = host;
   if (repoRoot === undefined || deliveredFiles === undefined)
     throw new Error("media needs the full service's repo root and delivered files");
+  const fetchImpl = scratchMediaFetch(host.env);
   const skinDraftOwner = host.env.CLANKIE_OPERATOR_ID ?? "local-operator";
   const skinMediaRoot = join(
     host.stateRoot,
@@ -95,6 +124,7 @@ function createMedia(host: Readonly<Pick<CorePorts, MediaNeeds>>): MediaProjecti
         credentials: host.credentials,
         attachmentRoot: skinMediaRoot,
         configCwd: repoRoot,
+        ...(fetchImpl === undefined ? {} : { fetchImpl }),
       }),
       attachmentRoot: skinMediaRoot,
       // VUH-2041: hosted credit admission is still an owner decision. Neither
@@ -107,6 +137,7 @@ function createMedia(host: Readonly<Pick<CorePorts, MediaNeeds>>): MediaProjecti
     credentials: host.credentials,
     attachmentRoot: host.attachmentRoot,
     configCwd: repoRoot,
+    ...(fetchImpl === undefined ? {} : { fetchImpl }),
   });
   return { generator, skinDrafts };
 }
