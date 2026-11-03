@@ -12,6 +12,7 @@ import type { ObservedHeadSeat } from "./herdr-census.ts";
 import type { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner, HerdrWatchStore } from "./herdr-watch.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
+import { createWorkerAskService, WorkerAskStore } from "./worker-asks.ts";
 import { PeerSeatMessages } from "./peer-seat-messages.ts";
 import { localWorkspaceProject, reviewCheckoutProject } from "./project-hire-context.ts";
 import { ReviewGate } from "./review-gate.ts";
@@ -34,7 +35,7 @@ export interface PeersContext {
   readonly leadParty: (conversationId: string) => FleetRoomParty;
 }
 
-/** Huddles, peer messages between seats, and the standing review gate. */
+/** Huddles, workers' structured asks, peer messages between seats, and the standing review gate. */
 export function createPeers(ctx: PeersContext) {
   const {
     options,
@@ -114,6 +115,14 @@ export function createPeers(ctx: PeersContext) {
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.huddles = huddleService;
+  // A worker's ask is answered down the same lane a lead's message takes (#604).
+  const workerAsks = createWorkerAskService({
+    store: new WorkerAskStore(join(options.stateDir, "worker-asks.json")),
+    deliver: (seatId, text, conversationId) =>
+      deliverToSeat(seatId, text, { conversationId, source: "worker-ask" }),
+    changed: () => fleetChanges.touch(),
+  });
+  herdrWatches.workerAsks = workerAsks;
 
   const peerMessages = new PeerSeatMessages({
     path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
@@ -255,5 +264,5 @@ export function createPeers(ctx: PeersContext) {
 
   herdrWatches.reviews = reviews;
 
-  return { huddleService, peerMessages, reviews };
+  return { huddleService, workerAsks, peerMessages, reviews };
 }

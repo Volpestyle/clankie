@@ -144,6 +144,8 @@ import { createCheckoutMaintenance } from "./captain-checkouts.ts";
 import { createHealthAlerts } from "./captain-health-alerts.ts";
 import { createAutoRounds } from "./captain-auto-rounds.ts";
 import { createPeers } from "./captain-peers.ts";
+import { workerAskLines } from "./worker-asks.ts";
+import { workerAskIn } from "@clankie/protocol/worker-asks";
 import { createCaptainAutoTidy } from "./captain-auto-tidy.ts";
 import { createNativeSources } from "./captain-native-sources.ts";
 import { createFleetRounds } from "./captain-fleet-rounds.ts";
@@ -4240,7 +4242,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     leadParty,
   });
 
-  const { huddleService, peerMessages, reviews } = createPeers({
+  const { huddleService, workerAsks, peerMessages, reviews } = createPeers({
     options,
     settings,
     conversations,
@@ -4261,6 +4263,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
   return {
     huddles: huddleService,
+    workerAsks,
     reviews,
     listFleetPeerSeats: (authority) => peerMessages.list(authority),
     sendFleetPeerMessage: (authority, input) => peerMessages.send(authority, input),
@@ -6582,6 +6585,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const persona = liveSeats.find((seat) => seat.occupantId === occupant)?.personaId;
             if (persona !== undefined) workHistory.noteDone(persona, text);
           }
+          // A structured ask rides in the report's own text (#604).
+          const ask = workerAskIn(text);
           const message = [
             `An agent wrote to you from a fleet pane${fleet === undefined ? "" : ` on ${fleet}`}: ` +
               `${agent.agent} in ${agent.paneId}, seat ${agent.terminalId}${agent.title ? ` ("${agent.title}")` : ""}.`,
@@ -6589,6 +6594,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               `Answer with message_seat to that seat if you choose to.${reportKindLine(options?.kind)}`,
             "",
             text,
+            ...(ask === undefined ? [] : [workerAskLines(delivery.id, ask)]),
           ].join("\n");
           const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
           if (previous.received || previous.definitive) return previous;
@@ -6809,7 +6815,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               conversationId: target.conversationId,
             },
             route.native ?? { kind: "conversation", owner: target },
-            options?.urgent === true || options?.kind === "blocked",
+            options?.urgent === true || options?.kind === "blocked" || ask !== undefined,
             agent.terminalId,
             starter?.kind === "app"
               ? {
@@ -6820,6 +6826,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             options?.kind,
           );
           if (accepted.received) {
+            if (ask !== undefined)
+              try {
+                workerAsks.raise({
+                  askId: delivery.id,
+                  seatId: agent.terminalId,
+                  paneId: agent.paneId,
+                  conversationId: target.conversationId,
+                  ask,
+                });
+              } catch (error) {
+                // The report itself is accepted; the lead still reads the ask in it.
+                console.warn("Worker ask could not be recorded", String(error));
+              }
             try {
               if (starter?.kind === "app" && starter.notify)
                 deps.leadWakes?.workerReport(starter.notify.lead, {
