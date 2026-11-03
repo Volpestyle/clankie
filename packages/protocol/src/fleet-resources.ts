@@ -36,6 +36,35 @@ const FleetSimulatorUsageSchema = z.strictObject({
   cpuPercent: z.number().finite().nonnegative().optional(),
   intervalMs: z.number().finite().positive().optional(),
 });
+/** A heavy permit's process group now: CPU (100 = one core), resident memory, process count (#332). */
+const FleetProcessGroupUsageSchema = z.strictObject({
+  cpuPercent: z.number().finite().nonnegative(),
+  rssBytes: z.number().finite().nonnegative(),
+  processes: z.number().int().nonnegative(),
+});
+
+/** Under pressure, one of the heaviest processes, charged to its permit or unleased (#332). Diagnostic only. */
+const FleetResourceConsumerSchema = z.strictObject({
+  pid: z.number().int().min(1).max(2_147_483_647),
+  executable: z.string().min(1).max(1024),
+  cpuPercent: z.number().finite().nonnegative(),
+  rssBytes: z.number().finite().nonnegative(),
+  holder: z
+    .strictObject({
+      lane: z.enum(["full", "light", "server"]),
+      seatId: reference.optional(),
+      holderId: reference.optional(),
+      executable: z.string().min(1).max(1024),
+    })
+    .optional(),
+  startedBy: z
+    .strictObject({
+      pid: z.number().int().min(1).max(2_147_483_647),
+      executable: z.string().min(1).max(1024),
+    })
+    .optional(),
+});
+
 export const FleetResourceSnapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -69,6 +98,10 @@ export const FleetResourceSnapshotSchema = z
         reason: z.enum(["load", "memory", "disk", "probe-unavailable"]).optional(),
       })
       .strict(),
+    /** Under pressure only; absent from older servers (#332). */
+    consumers: z.array(FleetResourceConsumerSchema).max(64).optional(),
+    /** Under load pressure, how long the load average takes to reach the limit once the load stops. */
+    loadRetryAfterMs: z.number().int().positive().optional(),
     leases: z
       .array(
         z
@@ -84,6 +117,7 @@ export const FleetResourceSnapshotSchema = z
             lastUsedAtMs: timestamp,
             deviceId: reference.optional(),
             usage: FleetSimulatorUsageSchema.optional(),
+            processUsage: FleetProcessGroupUsageSchema.optional(),
           })
           .strict(),
       )
@@ -122,6 +156,7 @@ export const FleetResourceSnapshotSchema = z
             pid: z.number().int().min(2).max(2_147_483_647).optional(),
             executable: z.string().min(1).max(256),
             createdAtMs: timestamp,
+            processUsage: FleetProcessGroupUsageSchema.optional(),
           })
           .strict(),
       )
@@ -155,6 +190,7 @@ export const FleetResourceSnapshotSchema = z
           createdAtMs: timestamp,
           cpuCores: z.number().finite().positive().max(64),
           cpuLimitUnenforcedSinceMs: timestamp.optional(),
+          processUsage: FleetProcessGroupUsageSchema.optional(),
         }),
       )
       .max(128)
