@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, expect, it } from "vitest";
 
-// #560: the PR check refuses a Chromium launch without its sandbox. The real
-// script runs over a real git checkout.
+// #560: the PR check refuses a Chromium launch it can't prove sandboxed. The real
+// script runs over a real git checkout; each fixture is one file.
 const script = resolve(import.meta.dirname, "../../../scripts/check-chromium-sandbox.mjs");
 const roots: string[] = [];
 afterEach(() => {
@@ -23,36 +23,61 @@ function check(files: Record<string, string>) {
   return spawnSync(process.execPath, [script, root], { encoding: "utf8" });
 }
 
-it("refuses launches that leave Chromium unsandboxed", () => {
-  const result = check({
-    "apps/one/src/default.ts": "await chromium.launch({ headless: true });\n",
-    "apps/one/src/server.ts": "await chromium.launchServer({\n  chromiumSandbox: false,\n});\n",
-    "apps/one/test/flag.test.ts":
-      'await chromium.launch({ chromiumSandbox: true, args: ["--no-sandbox"] });\n',
-    "apps/one/src/spawn.ts": 'spawn(chrome, ["--disable-setuid-sandbox"]);\n',
-  });
-  expect(result.status).toBe(1);
-  expect(result.stderr).toContain("apps/one/src/default.ts:1: chromium.launch without chromiumSandbox: true");
-  expect(result.stderr).toContain(
-    "apps/one/src/server.ts:1: chromium.launchServer without chromiumSandbox: true",
+const core = 'import { chromium } from "playwright-core";\n';
+const refused: Record<string, string> = {
+  "default.ts": `${core}await chromium.launch({ headless: true });\n`,
+  "false.ts": `${core}await chromium.launchServer({ chromiumSandbox: false });\n`,
+  "renamed.ts": 'import { chromium as chrome } from "playwright-core";\nawait chrome.launch({});\n',
+  "namespace-alias.ts":
+    'import * as pw from "playwright";\nconst bt = pw.chromium;\nawait bt.launch({ headless: true });\n',
+  "element.ts":
+    'import pw from "playwright-core";\nawait pw["chromium"].launchPersistentContext("/tmp/p", {});\n',
+  "persistent-alias.ts":
+    'import { chromium as c } from "playwright-core";\nconst d = c;\nawait d.launchPersistentContext("/tmp/p", { headless: true });\n',
+  "dynamic.ts":
+    'const { chromium: c } = await import("playwright-core");\nawait c.launch({ headless: true });\n',
+  "later-spread.ts": `${core}await chromium.launch({ chromiumSandbox: true, ...{ chromiumSandbox: false } });\n`,
+  "unknown-spread.ts": `${core}await chromium.launch({ chromiumSandbox: true, ...extra });\n`,
+  "nested-decoy.ts": `${core}await chromium.launch({ env: { chromiumSandbox: true } });\n`,
+  "string-decoy.ts": `${core}await chromium.launch({ headless: true, title: "chromiumSandbox: true" });\n`,
+  "composed-flag.ts": `${core}await chromium.launch({ chromiumSandbox: true, args: ["--no-" + "sandbox"] });\n`,
+  "variable-args.ts": `${core}await chromium.launch({ chromiumSandbox: true, args: flags });\n`,
+  "spawn-flag.ts": 'spawn(chrome, ["--disable-setuid-sandbox"]);\n',
+  "spawn-composed.ts": 'spawn(chrome, ["--no-" + "sandbox"]);\n',
+  "escape.ts": `${core}hand(chromium);\n`,
+  "method-escape.ts": `${core}const start = chromium.launch;\nawait start({ chromiumSandbox: true });\n`,
+  "computed.ts": `${core}await chromium[method]({ chromiumSandbox: true });\n`,
+  "options-variable.ts": `${core}let options = { chromiumSandbox: true };\nawait chromium.launch(options);\n`,
+};
+
+it("refuses every launch it can't prove sandboxed", () => {
+  const result = check(
+    Object.fromEntries(Object.entries(refused).map(([name, text]) => [`src/${name}`, text])),
   );
-  expect(result.stderr).toContain("apps/one/test/flag.test.ts:1: passes a sandbox-disabling flag");
-  expect(result.stderr).toContain("apps/one/src/spawn.ts:1: passes a sandbox-disabling flag");
+  expect(result.status).toBe(1);
+  for (const name of Object.keys(refused)) expect(result.stderr, name).toContain(`src/${name}:`);
 });
 
-it("passes sandboxed launches and an explained exception", () => {
+it("passes sandboxed launches, a const options object and an explained exception", () => {
   const result = check({
-    "apps/one/src/viewer.ts": [
+    "src/viewer.ts": [
+      core,
       "const browser = await chromium.launch({",
       '  ...(path ? { executablePath: path } : { channel: "chrome" }),',
       "  chromiumSandbox: true,",
+      '  args: ["--use-angle=swiftshader"],',
       "});",
       "type Launched = ReturnType<typeof chromium.launch>;",
       "",
     ].join("\n"),
-    "apps/one/test/ci.test.ts": [
+    "src/const-options.ts": `${core}const options = { headless: true, chromiumSandbox: true } as const;\nawait chromium.launch(options);\n`,
+    "src/persistent.ts": `import * as pw from "playwright-core";\nawait pw.chromium.launchPersistentContext("/tmp/p", { chromiumSandbox: true });\n`,
+    "src/dynamic.ts":
+      'const { chromium } = await import("playwright-core");\nawait chromium.launchServer({ chromiumSandbox: true, headless: true });\n',
+    "src/unrelated.ts": "await Browser.chromium({ profileDir, headless: true });\n",
+    "test/ci.test.ts": [
       "// allow-no-sandbox -- this runner's kernel denies Chrome's user namespaces",
-      'await chromium.launch({ args: ["--no-sandbox"] });',
+      'spawn(chrome, ["--no-sandbox"]);',
       "",
     ].join("\n"),
   });
