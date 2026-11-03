@@ -224,6 +224,11 @@ export interface CaptainPort {
       hired?: boolean;
     }[]
   >;
+  /**
+   * Whether a claimed proof pane holds a Clankie hire (still starting, or bound);
+   * undefined for any other pane. Decides only what fleet-health alerts count (#324).
+   */
+  fleetProofCaller?(pane: string): "starting" | "hired" | undefined;
   /** One seat's row from its own Herdr record, without a census of every fleet. */
   workerCatalogSeat?(paneId: string): Promise<{ harness: string; status?: string } | undefined>;
   refreshNativeWorkerCatalog?(

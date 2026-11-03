@@ -2246,6 +2246,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.starter(seatId, occupantId);
   }
 
+  /** Whether a pane holds a Clankie hire, for fleet-health alert attribution only (#324). */
+  public paneHire(paneId: string): "starting" | "hired" | undefined {
+    return this.hireOwners.paneHire(paneId);
+  }
+
   /** The persisted lead of this exact native occupant, for the census; grants nothing. */
   public seatClaim(agent: HerdrAgentSnapshot): { owner: ConversationOwner; hired: boolean } | undefined {
     return agent.session === undefined

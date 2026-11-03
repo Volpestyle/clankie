@@ -31,7 +31,10 @@ export function proofAlertCallerSummary(callers: ProofAlertCallers): string {
 type ProofAlertResult = boolean | FleetHealthAlertDelivery;
 
 type Counters = FleetHealthMetricsSnapshot["totals"];
+/** Whether a claimed pane holds a Clankie hire; undefined for any other pane. */
+export type FleetProofCaller = (pane: string) => "starting" | "hired" | undefined;
 type AlertState = {
+  /** Only what pages: see FleetHealthMetrics.countsTowardAlerts. */
   buckets: Map<number, Counters>;
   lastSeen: number;
   alertAt?: number;
@@ -41,6 +44,8 @@ type AlertState = {
   elevatedSince?: number;
 };
 const MINUTE = 60_000;
+/** A new hire's own calls are refused not_member until its admission completes (#324). */
+const HIRE_ADMISSION_GRACE_MS = MINUTE;
 function empty(): Counters {
   return {
     proof: { attempts: 0, refusals: 0, byReason: {} },
@@ -92,13 +97,18 @@ export class FleetHealthMetrics {
   private readonly now: () => number;
   private readonly startedAt: string;
   private readonly totals = empty();
+  /** Everything observed, for clankie metrics --fleet. */
   private readonly buckets = new Map<number, Counters>();
-  private readonly seats = new Map<string, AlertState>();
-  private readonly aggregate: AlertState = { buckets: this.buckets, lastSeen: 0 };
+  private readonly seats = new Map<string, AlertState & { shown: Map<number, Counters> }>();
+  private readonly aggregate: AlertState = { buckets: new Map(), lastSeen: 0 };
+  /** When each hire pane was first seen, bounding its admission grace. */
+  private readonly hiresSeen = new Map<string, number>();
   private readonly proofCauses = new Map<string, { seat: AlertState; attemptAt: number }>();
   private readonly reports = new Map<string, { signature: string; lastSeen: number }>();
   private readonly options: {
     now?: () => number;
+    /** Which claimed panes hold Clankie hires; without it every refusal counts. */
+    caller?: FleetProofCaller;
     onAggregateProofAlert?(
       window: FleetHealthMetricsWindow,
       callers: ProofAlertCallers,
@@ -112,6 +122,7 @@ export class FleetHealthMetrics {
   constructor(
     options: {
       now?: () => number;
+      caller?: FleetProofCaller;
       onAggregateProofAlert?(
         window: FleetHealthMetricsWindow,
         callers: ProofAlertCallers,
@@ -128,14 +139,19 @@ export class FleetHealthMetrics {
     this.startedAt = new Date(this.now()).toISOString();
   }
   private prune(minute: number) {
-    for (const at of this.buckets.keys()) if (at <= minute - 60 || at > minute) this.buckets.delete(at);
+    for (const map of [this.buckets, this.aggregate.buckets])
+      for (const at of map.keys()) if (at <= minute - 60 || at > minute) map.delete(at);
+    for (const [pane, seen] of this.hiresSeen)
+      if (this.now() - seen > 5 * HIRE_ADMISSION_GRACE_MS) this.hiresSeen.delete(pane);
     for (const [pane, seat] of this.seats) {
       // Inactivity is not receipt settlement. Retain an in-flight/unconfirmed
       // original even when its rate buckets expire, or a new observation could
       // dispatch a distinct alert into the same unresolved recipient. The 512
       // slot admission cap refuses new seats instead of evicting held originals.
       if (!seat.alertPending && seat.lastSeen <= minute - 5) this.seats.delete(pane);
-      else for (const at of seat.buckets.keys()) if (at <= minute - 5 || at > minute) seat.buckets.delete(at);
+      else
+        for (const map of [seat.buckets, seat.shown])
+          for (const at of map.keys()) if (at <= minute - 5 || at > minute) map.delete(at);
     }
     for (const [key, report] of this.reports) if (report.lastSeen <= minute - 60) this.reports.delete(key);
   }
@@ -173,11 +189,17 @@ export class FleetHealthMetrics {
       }
     };
     const minute = this.record(update);
-    const seat = this.recordCaller(pane, minute, update);
-    const fleet = window(5, this.buckets, minute);
+    const counted = this.countsTowardAlerts(event, pane);
+    const seat = this.recordCaller(pane, minute, update, counted);
+    // Telemetry keeps every observation; only counted ones can page.
+    if (!counted) return;
+    let alertBucket = this.aggregate.buckets.get(minute);
+    if (!alertBucket) this.aggregate.buckets.set(minute, (alertBucket = empty()));
+    update(alertBucket);
+    const fleet = window(5, this.aggregate.buckets, minute);
     if (this.options.onAggregateProofAlert)
       this.observeAlert(event, minute, this.aggregate, (rates) =>
-        this.options.onAggregateProofAlert!(rates, this.snapshot().callers ?? []),
+        this.options.onAggregateProofAlert!(rates, this.alertCallers(minute)),
       );
     if (seat && pane && this.options.onProofAlert) {
       const aggregateActive =
@@ -200,7 +222,7 @@ export class FleetHealthMetrics {
           return this.options.onProofAlert?.(
             pane,
             rates,
-            (this.snapshot().callers ?? []).filter(
+            this.alertCallers(minute).filter(
               (caller) => this.workerCause(caller.window, aggregateActive ? fleet : undefined) === cause,
             ),
           );
@@ -263,19 +285,62 @@ export class FleetHealthMetrics {
     pane: string | undefined,
     minute: number,
     update: (counts: Counters) => void,
+    counted = true,
   ): AlertState | undefined {
     if (!pane || !/^w\w{1,64}:p\w{1,64}$/u.test(pane)) return;
     let seat = this.seats.get(pane);
     if (!seat) {
       // Unknown caller panes cannot grow this internal alert map without bound.
       if (this.seats.size >= 512) return;
-      this.seats.set(pane, (seat = { buckets: new Map(), lastSeen: minute }));
+      this.seats.set(pane, (seat = { buckets: new Map(), shown: new Map(), lastSeen: minute }));
     }
     seat.lastSeen = minute;
-    let bucket = seat.buckets.get(minute);
-    if (!bucket) seat.buckets.set(minute, (bucket = empty()));
-    update(bucket);
+    for (const map of counted ? [seat.shown, seat.buckets] : [seat.shown]) {
+      let bucket = map.get(minute);
+      if (!bucket) map.set(minute, (bucket = empty()));
+      update(bucket);
+    }
     return seat;
+  }
+  /**
+   * Whether a proof observation can page (#324). Every observation stays in
+   * clankie metrics --fleet. Not counted: a caller that exited before its own
+   * check finished; any request from a pane that holds no Clankie hire (the
+   * owner's own sessions, the operator seat, a hand-started pane); and a hire's
+   * not_member in its first minute, while its admission completes. Requests
+   * with no claimed pane, or when hires can't be read, still count.
+   */
+  private countsTowardAlerts(event: LocalFleetProofDiagnostic, pane?: string): boolean {
+    if (event.source === "proof" && event.reason === "caller_exited") return false;
+    if (pane === undefined || this.options.caller === undefined) return true;
+    let hire: ReturnType<FleetProofCaller> | "unknown";
+    try {
+      hire = this.options.caller(pane);
+    } catch {
+      hire = "unknown";
+    }
+    if (hire === undefined) return false;
+    if (hire === "unknown") return true;
+    let seen = this.hiresSeen.get(pane);
+    if (seen === undefined) {
+      if (this.hiresSeen.size >= 1024) this.hiresSeen.delete(this.hiresSeen.keys().next().value!);
+      this.hiresSeen.set(pane, (seen = this.now()));
+    }
+    return !(
+      event.source === "proof" &&
+      event.reason === "not_member" &&
+      this.now() - seen < HIRE_ADMISSION_GRACE_MS
+    );
+  }
+  /** Each caller's counted window, for the panes an alert names. */
+  private alertCallers(minute: number): ProofAlertCallers {
+    return [...this.seats]
+      .map(([claimedPane, seat]) => ({ claimedPane, window: window(5, seat.buckets, minute) }))
+      .sort(
+        (left, right) =>
+          right.window.proof.refusals - left.window.proof.refusals ||
+          left.claimedPane.localeCompare(right.claimedPane),
+      );
   }
   private reconcileAlert(seat: AlertState, minute: number): void {
     if (seat.alertPending && seat.acknowledged) {
@@ -371,7 +436,7 @@ export class FleetHealthMetrics {
       callers: [...this.seats]
         .map(([claimedPane, seat]) => ({
           claimedPane,
-          window: window(5, seat.buckets, minute),
+          window: window(5, seat.shown, minute),
         }))
         .sort(
           (left, right) =>

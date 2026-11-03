@@ -1403,6 +1403,8 @@ const fleetResources = await createServiceFleetResourceRuntime({
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
 const fleetHealthMetrics = new FleetHealthMetrics({
+  // Created below; until then a lookup throws and the refusal counts as before.
+  caller: (pane) => captain.fleetProofCaller?.(pane),
   onAggregateProofAlert: async (window, callers) => {
     let delivery: import("./captain/port.ts").FleetHealthAlertDelivery = { outcome: "unavailable" };
     const reasons = Object.entries(window.proof.byReason)
@@ -1422,7 +1424,7 @@ const fleetHealthMetrics = new FleetHealthMetrics({
     await captain
       .notifyFleetHealthAlert(
         undefined,
-        `Fleet proof refusals stayed above 1% for a minute. Aggregate 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). Reasons: ${reasons}. Affected workers: ${proofAlertCallerSummary(callers)}. This is the clankie metrics --fleet source and includes requests without a current owned seat.`,
+        `Fleet proof refusals stayed above 1% for a minute. Aggregate 5-minute window at ${new Date().toISOString()}: ${window.proof.refusals}/${window.proof.attempts} (minimum 100 checks and 5 refusals). Reasons: ${reasons}. Affected workers: ${proofAlertCallerSummary(callers)}. It counts Clankie hires' checks and requests that claim no pane; exited callers, a new hire's first minute of not_member and panes that aren't hires (your own sessions) are in clankie metrics --fleet but don't page.`,
         (result) => {
           delivery = result;
         },
