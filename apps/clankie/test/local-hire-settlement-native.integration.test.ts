@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { expect, it } from "vitest";
+import { beforeAll, expect, it } from "vitest";
 import { DeliveryFence, deliveryFingerprint, ReceiptSchema } from "../src/captain/delivery-fence.ts";
 import { createHerdrWatchRunner, HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
@@ -15,9 +15,13 @@ import { createProjectProcessObserver } from "../src/project-process-proof.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 
 const exec = promisify(execFile);
-const nativeIt = it.skipIf(
-  process.platform !== "darwin" || process.env.LOCAL_HIRE_SETTLE_NATIVE_TEST !== "1",
-);
+const native = process.platform === "darwin" && process.env.LOCAL_HIRE_SETTLE_NATIVE_TEST === "1";
+const nativeIt = it.skipIf(!native);
+// The process proof reads the checkout's native helper, which a fresh worktree lacks.
+beforeAll(async () => {
+  if (native)
+    await exec(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")]);
+});
 
 nativeIt(
   "settles a never-launched local hire from host inventory and frees its directory",
@@ -77,7 +81,15 @@ nativeIt(
         store!.settleHireReceipt(receiptId, async () => {}, disposition);
       const shell = () => runner.paneShell!(herdr.pane);
 
-      // The live failure: every later hire into the directory is held.
+      // Any foreground process other than the pane's own shell refuses settlement,
+      // including the one a later hire tries itself for a pane holding only its
+      // shell (#166), so that hire into the directory is held.
+      await herdr.cli("pane", "run", herdr.pane, "sleep 600");
+      await expect
+        .poll(async () => (await shell()).foreground.some((process) => process.name === "sleep"), {
+          timeout: 10_000,
+        })
+        .toBe(true);
       const held = await store.spawnSeat(request, undefined, brief, undefined, authority);
       evidence.push({ phase: "held-before-settlement", result: held });
       expect(held).toMatchObject({ outcome: "failed", reason: "delivery_unconfirmed" });
@@ -85,14 +97,6 @@ nativeIt(
         state: "refused",
         detail: expect.stringContaining("Settle it as abandoned"),
       });
-
-      // Any foreground process other than the pane's own shell refuses.
-      await herdr.cli("pane", "run", herdr.pane, "sleep 600");
-      await expect
-        .poll(async () => (await shell()).foreground.some((process) => process.name === "sleep"), {
-          timeout: 10_000,
-        })
-        .toBe(true);
       const busy = await settle(id, "abandoned");
       evidence.push({ phase: "foreground-process", shell: await shell(), result: busy });
       expect(busy).toMatchObject({
