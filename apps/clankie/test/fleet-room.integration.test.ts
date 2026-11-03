@@ -2,7 +2,12 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { FleetRoomJournal, type FleetRoomRecord } from "../src/captain/fleet-room.ts";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import {
+  FleetRoomJournal,
+  serviceNoticeFleetRoomRecord,
+  type FleetRoomRecord,
+} from "../src/captain/fleet-room.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -132,4 +137,41 @@ it("keeps app notes out of every page that doesn't opt in, and reads the board a
   expect(restarted.readAppNotes({ cursor: "2" })).toMatchObject({ notes: [{ sequence: 4 }], newer: "4" });
   expect(restarted.readAppNotes({ cursor: "5" })).toEqual({ outcome: "ready", notes: [], newer: "5" });
   expect(restarted.readAppNotes({ limit: 1 })).toMatchObject({ notes: [{ sequence: 4 }] });
+});
+
+it("keeps each service notice whole in the room for readers that opt in, once per notice", async () => {
+  const root = mkdtempSync(join(tmpdir(), "fleet-room-notices-"));
+  roots.push(root);
+  const journal = new FleetRoomJournal(join(root, "room"));
+  const store = new ConversationStore(join(root, "conversations"), async () => {});
+  store.onServiceNotice = (notice) => journal.record(serviceNoticeFleetRoomRecord(notice, lead));
+  const text =
+    "Hired seat herdr-core/t6p has waited two hours for a fresh restart: remote_restart_unavailable (Error: token=sk-live-1234567890abcdef). Its session and original receipts are preserved.";
+  expect(
+    store.recordServiceNotice("global-default", text, {
+      kind: "seat_restart_waiting",
+      attention: "owner",
+      worker: "Quiet chat",
+    }),
+  ).toBe(true);
+  // The same words again are one notice in the chat, so one line in the room.
+  expect(store.recordServiceNotice("global-default", text)).toBe(true);
+  journal.record(report("report:a", new Date()));
+
+  const plain = await journal.read({});
+  if (plain.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(plain.entries.map((entry) => entry.kind)).toEqual(["worker_report"]);
+  const opted = await journal.read({ include: ["service_notice"] });
+  if (opted.outcome !== "ready") throw new Error("Fleet room unavailable");
+  expect(opted.entries.map((entry) => entry.kind)).toEqual(["service_notice", "worker_report"]);
+  expect(opted.entries[0]).toMatchObject({
+    from: { kind: "clankie", label: "Clankie" },
+    to: lead,
+    thread: { conversationId: "global-default" },
+  });
+  expect(opted.entries[0]!.text).toContain(
+    "has waited two hours for a fresh restart: remote_restart_unavailable",
+  );
+  expect(opted.entries[0]!.text).not.toContain("sk-live-1234567890abcdef");
+  await store.close();
 });

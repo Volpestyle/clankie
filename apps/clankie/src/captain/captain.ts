@@ -185,6 +185,7 @@ import { PromptEdgeWindow, SeatMessageWindow, LeadVisitWindow, type EdgeSeat } f
 import {
   FleetRoomJournal,
   inboundFleetRoomRecord,
+  serviceNoticeFleetRoomRecord,
   type AppNotesReadInput,
   type FleetRoomRecord,
 } from "./fleet-room.ts";
@@ -2495,6 +2496,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   });
   conversations.nativeTurnDelivery = (id) => seatOutboxes.get(id)?.takesInput() === true;
   conversations.executionHeld = (id) => options.operatorSeatMigrationHeld?.(id) === true;
+  // The chat may group a tagged notice or leave it out; the room keeps it whole.
+  conversations.onServiceNotice = (notice) =>
+    noteFleetRoom(serviceNoticeFleetRoomRecord(notice, leadParty(notice.conversationId)));
   // Only an idle native seat gains from waiting: a turn already running hears
   // reports for free, and the service lane is not woken per report.
   conversations.reportRoundMs = (id) => {

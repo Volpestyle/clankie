@@ -14,6 +14,7 @@ import {
   type FleetRoomEntry,
   type FleetRoomInbound,
   type FleetRoomKind,
+  type FleetRoomParty,
   type FleetRoomRequest,
   type FleetRoomResult,
 } from "@clankie/protocol";
@@ -102,6 +103,35 @@ export function inboundFleetRoomRecord(arrival: InboundArrival): FleetRoomRecord
         ? { url: arrival.url }
         : {}),
     },
+  };
+}
+
+/** A service notice a conversation recorded, as the store reports it. */
+export interface RecordedServiceNotice {
+  readonly conversationId: string;
+  /** The notice's cursor in its conversation, so a replay never duplicates it. */
+  readonly cursor: string;
+  readonly at: string;
+  readonly text: string;
+}
+
+/**
+ * The whole notice for the owner's fleet room: the chat may fold a tagged one
+ * into a line or leave it out, and the room keeps its detail. Opt-in, so a
+ * reader that predates the kind never sees it.
+ */
+export function serviceNoticeFleetRoomRecord(
+  notice: RecordedServiceNotice,
+  lead: FleetRoomParty,
+): FleetRoomRecord {
+  return {
+    id: `service_notice:${notice.conversationId}:${notice.cursor}`,
+    at: notice.at,
+    kind: "service_notice",
+    from: { kind: "clankie", label: "Clankie" },
+    to: lead,
+    text: notice.text,
+    thread: { conversationId: notice.conversationId },
   };
 }
 

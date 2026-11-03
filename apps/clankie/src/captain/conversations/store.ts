@@ -11,6 +11,7 @@ import { CurrentActivities, safeCurrentActivityText } from "./current-activity.t
 import type { OperatorCurrentActivity, OperatorPresenceSnapshot } from "@clankie/protocol/presence";
 import type { OperatorServiceNotice, OwnerUpdateDraft, OwnerUpdate } from "@clankie/protocol";
 import type { InboundReport } from "../conversations.ts";
+import type { RecordedServiceNotice } from "../fleet-room.ts";
 import type {
   ConversationQuestion,
   ConversationQuestionAnswer,
@@ -304,6 +305,8 @@ export class ConversationStore {
   public executionHeld?: (conversationId: string) => boolean;
   /** A bounded explicit continuation declaration in a lead's settled report. */
   public reportBoundary?: (conversationId: string, text: string, at: string) => void;
+  /** Each newly recorded service notice, in full, for the fleet room. */
+  public onServiceNotice?: (notice: RecordedServiceNotice) => void;
   /** Roster/inbox observers see progress independently of a worker's pane lifetime. */
   public onInboundReportChange?: () => void;
   private readonly inboundReportListeners = new Set<() => void>();
@@ -1694,8 +1697,14 @@ export class ConversationStore {
       streaming: false,
       ...(notice ? { notice } : {}),
     });
-    meta.updatedAt = new Date().toISOString();
+    const at = new Date().toISOString();
+    meta.updatedAt = at;
     this.saveMeta(meta);
+    try {
+      this.onServiceNotice?.({ conversationId, cursor: this.lastCursor(meta), at, text });
+    } catch (error) {
+      console.warn("Service notice observer failed", conversationId, String(error));
+    }
     return true;
   }
 

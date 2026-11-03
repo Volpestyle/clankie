@@ -40,6 +40,12 @@ export const FleetRoomKindSchema = z.enum([
    * A reader sees it only when it opts in with `include`.
    */
   "app_note",
+  /**
+   * A service notice the host recorded in a lead's chat, in full: a worker
+   * waiting for a restart, finished hires tidied. The chat may group or leave
+   * it out; the room keeps the detail. A reader sees it only with `include`.
+   */
+  "service_notice",
 ]);
 export type FleetRoomKind = z.infer<typeof FleetRoomKindSchema>;
 
@@ -130,7 +136,7 @@ const cursor = z.string().regex(/^\d{1,15}$/u);
  * pages strictly with the protocol it shipped with, so a kind added after it
  * stays out of every page that doesn't name it.
  */
-export const FLEET_ROOM_OPT_IN_KINDS = ["app_note"] as const;
+export const FLEET_ROOM_OPT_IN_KINDS = ["app_note", "service_notice"] as const;
 
 export const FleetRoomRequestSchema = z.strictObject({
   op: z.literal("fleet_room"),
