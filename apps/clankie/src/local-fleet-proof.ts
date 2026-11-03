@@ -364,8 +364,16 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
       const binding = await bindingOf();
       signal?.throwIfAborted();
       if (!binding) return refuse("missing_binding");
-      const initial = await snapshot("initial", options.expectedOwner?.(socket) ?? owners.get(socket));
+      const expected = options.expectedOwner?.(socket) ?? owners.get(socket);
+      let initial = await snapshot("initial", expected);
       signal?.throwIfAborted();
+      // A machine-wide census can run out of its budget under load, failing every caller at
+      // once with nothing said about any of them (#574). Look once more, with every fence
+      // unchanged, before refusing; a terminal reason or a closed socket is never retried.
+      if (!initial && nativeReason === undefined && alive()) {
+        initial = await snapshot("initial", expected);
+        signal?.throwIfAborted();
+      }
       if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");
       emit({ source: "socket_owner", owner: initial.owner });
       if (!alive()) return refuse("closed_socket");
@@ -680,16 +688,15 @@ export function localProjectProof(options: LocalFleetProofOptions) {
       const proof = await observe("default", pane);
       signal?.throwIfAborted();
       if (!proof) return refuse(projectRefusalReason(projectRefusal));
-      const initial = await observeSocket(
-        socket,
-        "initial",
-        pane,
-        options.expectedOwner?.(socket) ?? owners.get(socket),
-        signal,
-        context,
-        report,
-      );
+      const expected = options.expectedOwner?.(socket) ?? owners.get(socket);
+      const look = () => observeSocket(socket, "initial", pane, expected, signal, context, report);
+      let initial = await look();
       signal?.throwIfAborted();
+      // As for the fleet proof: once more, fences unchanged, before refusing (#574).
+      if (!initial && nativeReason === undefined && alive()) {
+        initial = await look();
+        signal?.throwIfAborted();
+      }
       if (!initial) return refuse(nativeReason ?? "native_initial_unavailable");
       emit({ source: "socket_owner", owner: initial.owner });
       const chain = initial.ancestors.map((ancestor) => ancestor.pid);
