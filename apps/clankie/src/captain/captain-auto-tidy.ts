@@ -7,6 +7,7 @@ import {
   createAutoTidy,
   reviewerSeatIds,
 } from "./auto-tidy.ts";
+import type { FinishedHire } from "./herdr-core-runner.ts";
 import type { createCheckoutMaintenance } from "./captain-checkouts.ts";
 import type { CaptainOptions } from "./captain-types.ts";
 import type { createWorkerReports } from "./captain-worker-reports.ts";
@@ -34,6 +35,15 @@ export interface AutoTidyContext {
   readonly retireClosedSeatReports: WorkerReports["retireClosedSeatReports"];
   readonly validateConversationOwner: (owner: ConversationOwner) => Promise<boolean>;
   readonly pruneWorktree: ReturnType<typeof createCheckoutMaintenance>["pruneWorktree"];
+  /** The desktop app's terminals, whose hires auto-tidy closes too while it runs (#584). */
+  readonly desktop?: {
+    readonly fleet: string;
+    readonly available: () => Promise<boolean>;
+    readonly removeFinished: (
+      ageMs: number,
+      hired: (hire: FinishedHire) => boolean,
+    ) => Promise<readonly string[]>;
+  };
 }
 
 /** Auto-tidy of finished hires and landed worktrees, and history from seats that are gone. */
@@ -58,6 +68,19 @@ export function createCaptainAutoTidy(ctx: AutoTidyContext) {
     // Watch closes nothing and prunes nothing (ADR 0308).
     setting: async () => ((await watch.watching()) ? "off" : (await settings()).fleet.autoTidy),
     runner: herdrRunner,
+    ...(ctx.desktop === undefined
+      ? {}
+      : {
+          fleets: async () => [undefined, ...((await ctx.desktop!.available()) ? [ctx.desktop!.fleet] : [])],
+          removeFinished: async (ageMs: number, eligible: (hire: FinishedHire) => boolean) =>
+            (await ctx.desktop!.available())
+              ? ctx.desktop!.removeFinished(
+                  ageMs,
+                  (hire) =>
+                    herdrWatches.hiredSession(hire.seatId, hire.agent, hire.session) && eligible(hire),
+                )
+              : [],
+        }),
     tidy: paneTidy,
     reviewerSeats: async () => reviewerSeatIds((await settings()).projects),
     provenance: (agent) => herdrWatches.tidyProvenance(agent),

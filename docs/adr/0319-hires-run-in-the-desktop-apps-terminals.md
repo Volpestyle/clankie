@@ -71,7 +71,15 @@ auto|desktop|herdr` pins it per machine for the rare owner who wants the
 - **The core reports life and death.** Finished, lost and removed events end
   or park the seat as a closed pane does now; status and turn events stand in
   for Herdr's agent status; `terminal.read` backs `terminal_read`.
-  `terminal.kill` closes a seat after the usual parking. Nothing is ever sent
+  `terminal.kill` closes a seat after the usual parking, and `terminal.rm`
+  then takes its ended terminal out of the window, which the core otherwise
+  keeps (#584). Auto-tidy lists the desktop app's hires beside Herdr's, and
+  removes a finished terminal of a hire Clankie recorded (by its seat and
+  session) once it has sat ended for the auto-tidy window; the owner's own
+  terminals are never removed. Until then `list_agents` lists it as
+  `finished`, with who started it. A desktop hire's owner record names its
+  session as this machine's (`local`), as the hire binds it before the router
+  places it, and every lookup reads it that way. Nothing is ever sent
   through `terminal.attach`: messages reach a worker through its channel, as
   [ADR 0207](0207-work-records-and-native-agent-delivery.md) requires.
 - **Mac first, then the PCs through the core.** The first step places Mac

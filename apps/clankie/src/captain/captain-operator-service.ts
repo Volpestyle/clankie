@@ -54,7 +54,7 @@ import {
 } from "./herdr-census.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
-import { createHerdrCore, type HerdrCore } from "./herdr-core.ts";
+import { createHerdrCore, type HerdrCore, type HerdrCoreLeftover } from "./herdr-core.ts";
 import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { connectedHireName } from "./hire-name.ts";
@@ -111,6 +111,11 @@ export interface CreateOperatorServiceContext {
   }) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }>>;
   /** Who started each agent in a fleet read (ADR 0321). */
   readonly observeConnectorLead?: (input: import("./fleet-lead-activity.ts").LeadActivityObservation) => void;
+  /**
+   * Who asked for a finished desktop hire this service recorded, in a list's words; undefined
+   * when it recorded none (#584). Display only, like seatStarters.
+   */
+  readonly leftoverStarter?: (leftover: HerdrCoreLeftover) => string | undefined;
   readonly seatStarters?: (
     snapshot: import("@clankie/protocol").OperatorFleetSnapshot,
   ) => (
@@ -1144,9 +1149,14 @@ export function createOperatorService(
             op: "herdr_core_list",
             schemaVersion: 1,
             status: "listed",
-            agents: listed.agents.map((agent) =>
-              agent.machine === undefined && local.length > 0 ? { ...agent, machine: local } : agent,
-            ),
+            agents: listed.agents.map(({ leftover, ...agent }) => {
+              const startedBy = leftover === undefined ? undefined : ctx.leftoverStarter?.(leftover);
+              return {
+                ...agent,
+                ...(agent.machine === undefined && local.length > 0 ? { machine: local } : {}),
+                ...(startedBy === undefined ? {} : { startedBy: startedBy.slice(0, 256) }),
+              };
+            }),
           }
         : {
             op: "herdr_core_list",

@@ -42,6 +42,8 @@ import { PaneKeeps, type PaneKeep } from "./pane-keeps.ts";
 import { RestoredHireRetirementSchema, type RetirementGuard } from "./retirement-guard.ts";
 
 const UNDO_MS = 5 * 60_000;
+/** How long a close waits on the GitHub main checkpoint before it holds as unknown (#607). */
+const MAIN_CHECKPOINT_MS = 20_000;
 const HandoffSchema = z
   .object({
     path: z.string(),
@@ -212,6 +214,8 @@ export class PaneTidy {
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     retirementGuard?(agent: HerdrAgentSnapshot): Promise<RetirementGuard>;
     mainCheckpoint?(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined>;
+    /** Overrides how long a close waits on mainCheckpoint; tests shorten it. */
+    checkpointMs?: number;
     worktreeHold?(
       agent: HerdrAgentSnapshot,
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
@@ -777,10 +781,31 @@ export class PaneTidy {
     return { held, handoffs };
   }
   async mainCheckpointHold(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined> {
+    let timer: NodeJS.Timeout | undefined;
     try {
-      return await this.ports.mainCheckpoint?.(agent);
+      const read = this.ports.mainCheckpoint?.(agent);
+      if (read === undefined) return undefined;
+      // A first read of a busy repository's runs can outlast a caller's tool budget (#607). The
+      // read goes on and its cache answers the next close; this one holds, as unknown evidence does.
+      return await Promise.race([
+        read,
+        new Promise<MainCheckpointHold>((resolve) => {
+          timer = setTimeout(
+            () =>
+              resolve({
+                reason: "main_unknown",
+                failingJobs: [],
+                detail: "GitHub checkpoint is still being read; close again in a minute",
+              }),
+            this.ports.checkpointMs ?? MAIN_CHECKPOINT_MS,
+          );
+          timer.unref?.();
+        }),
+      ]);
     } catch {
       return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint observation unavailable" };
+    } finally {
+      clearTimeout(timer);
     }
   }
   async close(

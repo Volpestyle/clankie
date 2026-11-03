@@ -2279,6 +2279,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Who asked for this exact occupant's hire (ADR 0321); display only. */
+  /** Whether Clankie recorded hiring this seat with this native session (#584). */
+  public hiredSession(seatId: string, harness: string, sessionId: string): boolean {
+    return this.hireOwners.hiredSession(seatId, JSON.stringify([ownerKeyFleet(seatId), harness, sessionId]));
+  }
+
   public seatStarter(seatId: string, occupantId: string): HireStarter | undefined {
     return this.hireOwners.starter(seatId, occupantId);
   }
@@ -2374,7 +2379,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       authority.owner,
       sessionId === undefined
         ? undefined
-        : JSON.stringify([splitFleetQualified(latest.paneId)?.fleet ?? "local", latest.agent, sessionId]),
+        : JSON.stringify([ownerKeyFleet(latest.paneId), latest.agent, sessionId]),
     );
     return { adopted: true };
   }
@@ -2433,7 +2438,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const sessionId = nativeSessionId(agent);
     return sessionId === undefined
       ? undefined
-      : JSON.stringify([splitFleetQualified(agent.paneId)?.fleet ?? "local", agent.agent, sessionId]);
+      : JSON.stringify([ownerKeyFleet(agent.paneId), agent.agent, sessionId]);
   }
 
   private retireReboundWatches(
@@ -4387,7 +4392,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           agent.terminalId,
           undefined,
           occupantId,
-          sessionId === undefined ? undefined : JSON.stringify([paneFleet ?? "local", harness, sessionId]),
+          sessionId === undefined ? undefined : JSON.stringify([ownerKeyFleet(paneId), harness, sessionId]),
           allocation?.projectId,
         );
       let evidence: LocalHireSettlementEvidence | undefined;
@@ -6259,7 +6264,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       agent.paneId,
       agent.terminalId,
       occupant,
-      JSON.stringify([splitFleetQualified(agent.paneId)?.fleet ?? "local", agent.agent, sessionId]),
+      JSON.stringify([ownerKeyFleet(agent.paneId), agent.agent, sessionId]),
     );
     if (record === "unknown") return "unknown" as const;
     if (!record) return "owner_interactive" as const;
@@ -7675,6 +7680,16 @@ function hireProfileBrief(profile: HireProfile, brief?: string): string | undefi
 function effortFreeDefaults(profile: HireProfile): HireProfile {
   const { effort: _retired, ...rest } = profile;
   return rest;
+}
+
+/**
+ * The machine a native session's owner record names. The desktop app's terminals are this
+ * machine's, and a hire there records its session as local (it is placed after its owner
+ * is bound), so every lookup reads it the same way (#584).
+ */
+function ownerKeyFleet(paneId: string): string {
+  const fleet = splitFleetQualified(paneId)?.fleet;
+  return fleet === undefined || fleet === HERDR_CORE_FLEET ? "local" : fleet;
 }
 
 /** A hire receipt this machine's own inventory can settle: Herdr's local panes or the desktop app's. */

@@ -249,7 +249,10 @@ devices carry for that op alone. The tools go through the session-source layer o
 `@clankie/agent-hosts/sessions`, so agent ids read `herdr:<id>` for Herdr and
 `herdr-core:<terminal>` for the Herdr desktop app's agents on this Mac. Those
 are read-only: `message_agent` refuses them, because herdr-core can only type
-into their terminal (ADR 0207), and their reads pass through the same
+into their terminal (ADR 0207). A Clankie hire's terminal there is a fleet seat
+under `herdr:`; once its program ends it is listed under `herdr-core:` with
+status `finished` and who started it, until auto-tidy removes it (#584). Their
+reads pass through the same
 agent-only scope as Herdr's (ADR 0307). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 It answers only for a pane with a live coding agent, and only with what that

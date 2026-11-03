@@ -302,6 +302,12 @@ export class HireOwners {
     });
     return id;
   }
+  /** Whether Clankie recorded hiring this seat with this native session. */
+  public hiredSession(seatId: string, sessionKey: string): boolean {
+    return this.state.hires.some(
+      (entry) => entry.hired === true && entry.seatId === seatId && entry.sessionKey === sessionKey,
+    );
+  }
   /** Who asked for this exact occupant's hire; display only, never authority (ADR 0321). */
   public starter(seatId: string, occupantId: string): HireStarter | undefined {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);

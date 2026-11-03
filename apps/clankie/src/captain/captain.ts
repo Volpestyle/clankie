@@ -4120,6 +4120,11 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       retireClosedSeatReports,
       validateConversationOwner,
       pruneWorktree,
+      desktop: {
+        fleet: HERDR_CORE_FLEET,
+        available: () => herdrCoreSeats.available(),
+        removeFinished: (ageMs, hired) => herdrCoreRunner.removeFinished(ageMs, hired),
+      },
     },
   );
 
@@ -5389,6 +5394,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return fleetSnapshot;
       },
       seatStarters: (snapshot) => seatStarters(snapshot),
+      leftoverStarter: (leftover) => {
+        if (!herdrWatches.hiredSession(leftover.seatId, leftover.agent, leftover.session)) return undefined;
+        const asked = herdrWatches.seatStarter(
+          leftover.seatId,
+          occupantIdForHerdrSession({
+            source: `herdr:${leftover.agent}`,
+            kind: "id",
+            value: leftover.session,
+          }),
+        );
+        if (asked?.kind === "app") return deviceName?.(asked.deviceId) ?? "A connected app";
+        return asked?.kind === "owner" ? "the owner" : "Clankie";
+      },
       observeConnectorLead: (input) => fleetLeadActivity.record(input),
       get headSeat() {
         return headSeat;
