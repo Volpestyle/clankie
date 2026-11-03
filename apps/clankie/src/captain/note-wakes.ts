@@ -25,7 +25,7 @@ import { z } from "zod";
 const KEPT = 2000;
 
 /** What Clankie's lead lane did with a wake: his live pane took it, or his model's lane did. */
-export interface LeadLaneWake {
+interface LeadLaneWake {
   readonly via: "lead_pane" | "clankie";
   readonly outcome: "delivered" | "held" | "unavailable";
 }
