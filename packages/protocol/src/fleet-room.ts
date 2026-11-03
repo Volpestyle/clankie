@@ -62,6 +62,14 @@ export const FleetRoomPartySchema = z.strictObject({
    * Display only, and sent only to a reader that asks with `projects`.
    */
   projectId: id.optional(),
+  /**
+   * The GitHub `owner/name` of the checkout that worker was hired in, from its
+   * `origin`, so its bare `#123` and commit hashes can open. Sent with `projectId`.
+   */
+  repository: z
+    .string()
+    .regex(/^[\w.-]{1,100}\/[\w.-]{1,100}$/u)
+    .optional(),
 });
 export type FleetRoomParty = z.infer<typeof FleetRoomPartySchema>;
 
@@ -138,7 +146,7 @@ export const FleetRoomRequestSchema = z.strictObject({
   /** Opt-in kinds to show beside the default room; without it, none of them. */
   include: z.array(z.enum(FLEET_ROOM_OPT_IN_KINDS)).max(FLEET_ROOM_OPT_IN_KINDS.length).optional(),
   /**
-   * Parties carry `projectId` only when the reader asks for it. Apps parse
+   * Parties carry `projectId` and `repository` only when the reader asks for it. Apps parse
    * pages strictly with the protocol they shipped with, so a field added after
    * them stays out of every page that doesn't ask.
    */

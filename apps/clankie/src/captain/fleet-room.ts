@@ -28,8 +28,8 @@ function appNote(entry: FleetRoomEntry): AppNote {
 /** A page for a reader that didn't ask for projects carries none, as before they existed. */
 function withoutProjects(entry: FleetRoomEntry): FleetRoomEntry {
   const strip = <T extends FleetRoomEntry["to"]>(party: T): T => {
-    if (party === null || party.projectId === undefined) return party;
-    const { projectId: _projectId, ...rest } = party;
+    if (party === null || (party.projectId === undefined && party.repository === undefined)) return party;
+    const { projectId: _projectId, repository: _repository, ...rest } = party;
     return rest as T;
   };
   const from = strip(entry.from);

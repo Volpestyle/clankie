@@ -146,11 +146,15 @@ export class ProjectHires {
           ))
     )?.request.title;
   }
-  /** The project this exact seat and native occupant was hired into, for display only. */
-  public hiredProject(seat: string, occupantId: string): string | undefined {
-    return this.read().allocations.findLast(
-      (entry) => entry.started && entry.seat === seat && entry.occupantId === occupantId,
-    )?.projectId;
+  /** The project and directory this exact seat and native occupant was hired into, for display only. */
+  public hiredInto(
+    seat: string,
+    occupantId: string,
+  ): { readonly projectId: string; readonly workingDirectory: string } | undefined {
+    const entry = this.read().allocations.findLast(
+      (allocation) => allocation.started && allocation.seat === seat && allocation.occupantId === occupantId,
+    );
+    return entry && { projectId: entry.projectId, workingDirectory: entry.request.workingDirectory };
   }
   /**
    * Every roster projection reads this ledger once per seat. Parse a given

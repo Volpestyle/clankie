@@ -178,6 +178,12 @@ never read from the text and never guessed for a reused seat. A line from
 before this change, or from a worker Clankie didn't hire, has none. It is for
 display only and grants nothing.
 
-The owner's app parses pages strictly, so the field is opt-in like `app_note`:
-a `fleet_room` read gets `projectId` only when it sends `projects: true`.
+The same party carries `repository`, the GitHub `owner/name` of the checkout
+that hire was made in, read from that checkout's `origin` (a linked worktree
+reads its main repository's), so the app can open the worker's bare `#123`
+and commit hashes. Another forge, no origin, or a checkout on another machine
+leaves it out.
+
+The owner's app parses pages strictly, so both fields are opt-in like `app_note`:
+a `fleet_room` read gets them only when it sends `projects: true`.
 Without that, every page is what it was before.
