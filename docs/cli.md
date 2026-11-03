@@ -7207,10 +7207,18 @@ those held entries can have empty windows. Native/transport diagnostics remain
 separate from terminal refusal counts, including within each caller window.
 More than 1% terminal proof refusals in five
 minutes produces an alert once that window has at least 100 attempts and five
-refusals and stays elevated for at least one minute. Every refusal still counts;
-startup and high machine load do not exempt callers. Sparse or transient bursts
+refusals and stays elevated for at least one minute. Metrics count every
+refusal; the alert counts only what points at a fleet fault (#324). It leaves
+out `caller_exited` (the caller exited before its own check finished), every
+check from a pane that holds no Clankie hire (the owner's own sessions, the
+operator seat, a hand-started seat a lead adopted by messaging), and a hire's
+`not_member` during the first minute after Clankie first sees it, while its
+admission completes. A hire's later `not_member` and its observation failures
+count, and so does a request that claims no pane. Startup and high machine load
+do not exempt callers. Sparse or transient bursts
 remain visible in metrics without paging the owner. The aggregate alert goes to the owner's default conversation,
-including refusals without an identifiable or currently owned pane. A live seat
+including refusals without an identifiable or currently owned pane, and names
+only the hires whose counted refusals it includes. A live seat
 also alerts its current owning lead under the same sample/persistence rule.
 While an aggregate alert is pending or in its five-minute cooldown, workers
 sharing its cause are listed in that alert instead of paging separately.

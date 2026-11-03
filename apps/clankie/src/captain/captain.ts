@@ -6173,6 +6173,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       });
     },
 
+    fleetProofCaller(pane) {
+      return herdrWatches.paneHire(pane);
+    },
+
     async workerCatalogSeat(paneId) {
       // The seats workerCatalogSeats lists, read from this pane's own record (VUH-2062).
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return undefined;

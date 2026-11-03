@@ -131,6 +131,20 @@ export class HireOwners {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
     return held === undefined ? undefined : ConversationOwnerSchema.parse(held.owner);
   }
+  /**
+   * Whether this pane holds a Clankie hire, and whether it is still starting (no
+   * bound seat yet). Fleet-health alert attribution only (#324); grants nothing.
+   * A hand-started seat a conversation adopted (`hired: false`) is not a hire.
+   */
+  public paneHire(paneId: string): "starting" | "hired" | undefined {
+    let starting = false;
+    for (const entry of this.state.hires) {
+      if (entry.paneId !== paneId || entry.hired === false) continue;
+      if (entry.seatId !== undefined) return "hired";
+      starting = true;
+    }
+    return starting ? "starting" : undefined;
+  }
   /** Uncertain startup has only the pane allocated by this exact persisted intent. */
   public pendingOwner(paneId: string): ConversationOwner | undefined {
     const held = this.state.hires.find(
