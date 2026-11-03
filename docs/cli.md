@@ -9350,8 +9350,8 @@ See [worker access](worker-access.md) for restrictions and account bindings.
 ### `stance <working|thinking|stuck|hauling|resting|celebrate> [--activity KIND] [--note TEXT] [--for SECONDS]`
 
 For agents, not for people ([ADR 0148](adr/0148-an-agent-moves-its-own-figure.md)).
-Say what you are doing with your own figure in the commons; the operator's app
-poses it and moves it accordingly, and prints your note on your Messages row.
+Say what you are doing with your own figure in the World; the operator's app
+poses it and moves it accordingly, and prints your note on your Sessions row.
 
 Takes no seat argument by design: the seat is resolved from `HERDR_PANE_ID` in
 the caller's own environment against the live Herdr census, so this can only ever

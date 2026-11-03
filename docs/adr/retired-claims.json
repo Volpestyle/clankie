@@ -2,6 +2,11 @@
   "$comment": "Claims a later ADR retired. scripts/check-retired-claims.mjs fails when live code, skills or guides repeat one. ADRs, testing evidence, proposals and release notes keep history and are not scanned.",
   "claims": [
     {
+      "pattern": "account supports .*official Discord bot|\\bexisting hosted bod(y|ies)\\b",
+      "adr": "0326",
+      "now": "Clankie runs only on the owner's machines and joins Discord through the owner's own bot."
+    },
+    {
       "pattern": "tools (still )?requires? a verified project",
       "adr": "0217",
       "now": "Fleet membership gets connected tools; projects keep roles, caps, hiring and tracker binding."

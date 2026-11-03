@@ -2,8 +2,9 @@
 
 For using Clankie, start with the [public field guide](https://docs.clankie.bot):
 [get started](https://docs.clankie.bot/get-started/),
-[everyday use](https://docs.clankie.bot/using-clankie/), and
-[DIY customization](https://docs.clankie.bot/diy/).
+[everyday use](https://docs.clankie.bot/using-clankie/),
+[DIY customization](https://docs.clankie.bot/diy/), and
+[questions](https://docs.clankie.bot/faq/).
 This directory and the module READMEs hold the technical references.
 
 ## Operate and configure

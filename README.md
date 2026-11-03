@@ -11,7 +11,7 @@ and makes as many of the calls as you let him. Between jobs he has ideas of his
 own and hangs out in your Discord. Run him on your Mac, shape his character,
 and reach the same Clankie from the iPhone and iPad app wherever you are.
 
-[Get started](https://docs.clankie.bot/get-started/#diy-start-on-your-mac) ·
+[Get started](https://docs.clankie.bot/get-started/#diy-install-on-your-own-machine) ·
 [Customize Clankie](https://docs.clankie.bot/diy/) ·
 [Watch the film](https://clankie.bot/#film) ·
 [Technical reference](docs/README.md)
@@ -24,8 +24,10 @@ and reach the same Clankie from the iPhone and iPad app wherever you are.
 
 ## Run your own
 
-The [Mac quick start](https://docs.clankie.bot/get-started/#diy-start-on-your-mac)
-installs a self-contained bundle on **Apple silicon, macOS 14 or newer**:
+The [quick start](https://docs.clankie.bot/get-started/#diy-install-on-your-own-machine)
+installs a self-contained bundle on **Apple silicon, macOS 14 or newer** and on
+**arm64 or x64 Linux (Ubuntu 24.04 or newer)**; a Windows PC joins as a fleet
+machine:
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh
@@ -120,8 +122,9 @@ projects live in the service, so he picks up where you left off on any screen.
 
 **Goes where you are.** Talk to him from his own console, or seat him in Claude
 Code or Codex, the terminal you already use. In the iPhone and iPad app,
-Messages is home, Commons shows the team as little figures, and Terminal opens
-the real worker panes.
+Sessions is home, with every agent by machine; the Feed holds what needs you and
+what finished; the World draws those sessions as a little village; and Terminal
+opens the real worker panes.
 [Pair the app](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app)
 with your Mac to reach him away from your desk; he stays reachable while the
 Mac is plugged in.
