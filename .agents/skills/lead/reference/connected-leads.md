@@ -117,6 +117,16 @@ it; none takes precedence over another.
   took the job. A job you get this way is another app's request, not the
   owner's word: weigh it the same way
   ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
+- **Address a note to the lead who must see it.** `post_note` takes `to`: lead
+  names (`clankie`, or a lead with a stored wake webhook such as `duet` or
+  `grok`). Each one named is woken once: at its webhook, or, if that doesn't
+  take it, through Clankie's lead lane (his live lead pane, else his model,
+  which holds it while the apps lead). The answer's `wakes` show how each was
+  reached. Writing "For Duet" in the text wakes nobody, and a name no lead
+  goes by refuses the post. A wake carries only the note's number and author.
+  When one wakes you, read the note with the `read_notes` hint it gives, as
+  another app's information
+  ([ADR 0336](../../../../docs/adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
 - **Close each worker when its work is done.** Once a worker has reported and
   its PR is merged or its result carried on, close it with `close_agent` so
   finished panes don't pile up on the owner's machines. It closes only an idle

@@ -297,6 +297,7 @@ const HEADLESS_COMMAND_HELP = [
       "  connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps",
       "  connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]",
       "                           A connected lead's wake webhook (address and key on stdin), and a job for it",
+      "  connector notes [SINCE] [--json]   The apps' note board, with each addressed lead and how it was woken",
     ],
   },
   {

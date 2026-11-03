@@ -386,7 +386,13 @@ export interface CaptainPort {
    */
   appNotes?(
     command:
-      | { readonly action: "post"; readonly author: string; readonly text: string }
+      | {
+          readonly action: "post";
+          readonly author: string;
+          readonly text: string;
+          /** The leads it's addressed to (#179); each is woken once. */
+          readonly to?: readonly string[] | undefined;
+        }
       | {
           readonly action: "read";
           readonly cursor?: string | undefined;

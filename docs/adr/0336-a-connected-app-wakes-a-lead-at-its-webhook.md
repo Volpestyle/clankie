@@ -62,3 +62,46 @@ Reports stay in the inbox for `read_reports`; their text never enters these wake
   do; the lead weighs a job as another app's request, never the owner's word.
 - A wake whose webhook doesn't answer in time may still have arrived. The tool
   says so, and the sender checks the board before sending it again.
+
+## Amendment: a board note addressed to a lead wakes it (#179, 2026-11-03)
+
+On October 31 Grok posted a note "For Duet" on the board, and Duet didn't see it
+until James nudged it by hand: a note waits for its reader to call `read_notes`.
+James approved where any wake goes when its lead can't take it (board note
+14625): the live lead pane first, then the lead's webhook, then Clankie's own
+model, and nothing sits waiting.
+
+- **Addressed by name, in a field.** `post_note` takes an optional `to`: one to
+  four lead names. A name is `clankie` or a lead with a stored wake webhook.
+  Names are lowercased and duplicates dropped. A name no lead goes by refuses
+  the whole post (`unknown_lead`, with the names a note can use), so a typo
+  posts nothing. The note's words are never read for an addressee: "For Duet"
+  in the text wakes nobody. Unaddressed notes behave as before.
+- **Once per note and lead, with a receipt.** The service wakes each named
+  lead once, right after the note is recorded. It journals the addressees
+  before the first wake goes, in `fleet-room/note-wakes.json` beside the room.
+  Each settled wake leaves a receipt `{receiptId: "note:SEQ:LEAD", lead,
+reached, held?, steps, at}`. The post answers with the note and its
+  receipts, and every board read (`read_notes`, `clankie_read_notes`,
+  Clankie's own `read_notes`, `clankie connector notes`) shows each note's
+  `to` and `wakes`. If a restart cuts a wake short, it is settled as
+  `uncertain` and never sent again.
+- **The chain.** Only Clankie has a lead pane the service can reach: his
+  bound lead seat. A connected app's chain therefore starts at its webhook.
+  1. A connected lead's webhook gets kind `board_note`. The job text holds
+     only the note's number, its author, and a `read_notes {"since": …}` hint.
+     The note's own words stay on the board.
+  2. If the webhook didn't take it (`not_set`, `refused`, `unavailable`, or
+     `uncertain` because it didn't answer in time), the wake goes to Clankie's
+     lead lane. It names the lead it was for and says so.
+  3. Clankie's lead lane is his live lead pane when one is up (`lead_pane`).
+     Otherwise it is his model (`clankie`). While the apps lead, his model
+     takes no turn: the lane keeps the wake for them (`held: true`, ADR 0350).
+     Watch (ADR 0308) refuses it, and the receipt says `none`.
+     A note addressed to `clankie` starts at step 3.
+- **Information, not instruction.** No wake carries the note's text. The
+  reader takes the note from the board as another app's information to weigh,
+  never as an order. An address grants nothing: a connected app could already
+  wake any stored lead with `wake_lead`. What is new is that a note can also
+  give Clankie's lane a turn, and that turn holds only the note's number and
+  author.

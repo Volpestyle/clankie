@@ -26,13 +26,15 @@ interface WorkerWakeEvent {
 }
 
 export interface LeadWakes {
+  /** The leads with a stored webhook, by name. */
+  leads(): Promise<string[]>;
   workerReport(lead: string, event: WorkerWakeEvent): void;
   close(): void;
   send(input: {
     readonly lead: string;
     readonly from: string;
     readonly text: string;
-    readonly kind?: "lead_wake" | "worker_report";
+    readonly kind?: "lead_wake" | "worker_report" | "board_note";
   }): Promise<LeadWakeResult>;
 }
 
@@ -86,6 +88,7 @@ export function createLeadWakes(options: {
     windows.set(lead, { timer, pending });
   }
   const wakes: LeadWakes = {
+    leads: () => listLeadWakes(options.store),
     workerReport(lead, event) {
       // A blocked worker sits idle until its lead answers: never hold it for the batch window.
       if (event.kind === "blocked") {
@@ -155,7 +158,7 @@ export function createLeadWakes(options: {
             from,
             text,
             sentAt: clock().toISOString(),
-            ...(kind === "lead_wake" ? { reply: REPLY_HINT } : {}),
+            ...(kind === "worker_report" ? {} : { reply: REPLY_HINT }),
           }),
         });
       } catch {

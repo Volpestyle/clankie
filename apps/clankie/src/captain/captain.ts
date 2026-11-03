@@ -187,6 +187,7 @@ import {
   type AppNotesReadInput,
   type FleetRoomRecord,
 } from "./fleet-room.ts";
+import { NoteWakes } from "./note-wakes.ts";
 import { fenceFleetSeatAdapter } from "./fleet-seat-boundary.ts";
 import { fleetSeatMailbox } from "./fleet-seat.ts";
 import { createGrokSeatAdapter } from "./grok-seat-adapter.ts";
@@ -1295,10 +1296,37 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   // The fleet room (VUH-2184): the durable, owner-only record of the same
   // coordination, written where it happens. Recording never blocks delivery.
   const fleetRoom = new FleetRoomJournal(join(options.stateDir, "fleet-room"));
+  // Board notes addressed to a lead wake that lead once (#179): its webhook, then his lead lane.
+  const noteWakes =
+    deps.leadWakes === undefined
+      ? undefined
+      : new NoteWakes({
+          path: join(options.stateDir, "fleet-room", "note-wakes.json"),
+          webhookLeads: () => deps.leadWakes!.leads(),
+          webhook: (lead, text) => deps.leadWakes!.send({ lead, from: "clankie", text, kind: "board_note" }),
+          leadLane: async (text) => {
+            const conversationId = conversations.defaultGlobalConversationId();
+            // His live lead pane takes the wake first; without one his model's lane does,
+            // which keeps it for the apps while they lead (ADR 0350).
+            const pane = seatOutbox(conversationId).routesToSeat(text);
+            const held = !pane && lead.holds(conversations.conversation(conversationId)?.scope);
+            const accepted = await wakeConversation({ conversationId }, text, undefined, "machine", false);
+            return {
+              via: pane ? "lead_pane" : "clankie",
+              outcome: !accepted ? "unavailable" : held ? "held" : "delivered",
+            };
+          },
+          log: (fields, message) => console.warn(message, JSON.stringify(fields)),
+        });
   const desktopDeps = {
     ...deps,
     desktop,
-    appNotes: { read: async (input: AppNotesReadInput) => fleetRoom.readAppNotes(input) },
+    appNotes: {
+      read: async (input: AppNotesReadInput) => {
+        const result = fleetRoom.readAppNotes(input);
+        return noteWakes?.decorateResult(result) ?? result;
+      },
+    },
     ...(options.linearWakeEnabled === false
       ? {}
       : {
@@ -5222,10 +5250,32 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareFreeAgentIntent,
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
-    appNotes: async (command) =>
-      command.action === "post"
-        ? fleetRoom.postAppNote(command.author, command.text)
-        : fleetRoom.readAppNotes(command),
+    appNotes: async (command) => {
+      if (command.action === "read") {
+        const result = fleetRoom.readAppNotes(command);
+        return noteWakes?.decorateResult(result) ?? result;
+      }
+      const to = command.to ?? [];
+      if (to.length > 0) {
+        // Addressing is structured and checked before anything posts: a name no lead
+        // goes by is refused, never guessed (#179).
+        const leads = noteWakes === undefined ? ["clankie"] : await noteWakes.addressable();
+        const unknown = to.filter((name) => !leads.includes(name));
+        if (noteWakes === undefined || unknown.length > 0)
+          return {
+            outcome: "unknown_lead",
+            unknown: [...(unknown.length > 0 ? unknown : to)],
+            leads: leads.slice(0, 65),
+            message:
+              noteWakes === undefined
+                ? "This Clankie can't wake leads, so the note wasn't posted. Post it without to."
+                : `No lead goes by ${unknown.join(", ")}, so the note wasn't posted. A note can be for: ${leads.join(", ")}.`,
+          };
+      }
+      const posted = fleetRoom.postAppNote(command.author, command.text);
+      if (posted.outcome !== "posted" || to.length === 0 || noteWakes === undefined) return posted;
+      return { outcome: "posted", note: await noteWakes.wake(posted.note, to) };
+    },
     answerPrompt: createPromptAnswerer({
       paneAddress: (terminalId) => terminals.paneAddress(terminalId),
       runner: herdrRunner,
