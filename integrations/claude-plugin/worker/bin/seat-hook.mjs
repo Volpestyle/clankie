@@ -226,10 +226,8 @@ async function reportOverLink(link, pane) {
   process.exit(0);
 }
 
-/** The resume command for this session: the launch's own copy, or an older install's. */
+/** The resume command for this session, loading this worker for it (ADR 0317). */
 function restartCommand(sessionId) {
   const root = process.env.CLAUDE_PLUGIN_ROOT?.trim();
-  return root && !/[\\/]plugins[\\/]cache[\\/]/u.test(root)
-    ? `claude --resume ${sessionId} --plugin-dir "${root}" --channels plugin:clankie-worker@inline`
-    : `claude --resume ${sessionId} --channels plugin:clankie-worker@clankie`;
+  return `claude --resume ${sessionId} --plugin-dir "${root || "<Clankie's worker plugin folder>"}" --channels plugin:clankie-worker@inline`;
 }

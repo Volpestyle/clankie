@@ -142,10 +142,11 @@ per-profile receipts, since a healthy update can still report
 Codex configuration needs its source-owned setup (`clankie herdr prepare NAME
 --codex-source-setup ABSOLUTE_REMOTE_SCRIPT`), never TOML appends; never replace a
 settings symlink to work around a refusal. Claude profiles get nothing installed:
-setup removes an older `clankie-worker@clankie` copy (ADR 0317). A symlinked
-profile whose owning source (for example dotfiles) still declares that copy or the
-clankie marketplace is left alone; the refusal names those entries, and that
-source is edited through its owner. Preparation is incomplete while native
+setup and every update remove an older `clankie-worker@clankie` copy at user and
+project scope (ADR 0317). A symlinked profile whose owning source (for example
+dotfiles) still enables that copy is left alone; the refusal names the entry, and
+that source is edited through its owner. A source that only declares the clankie
+marketplace keeps it, and the copy is still removed. Preparation is incomplete while native
 version, activation, bridge, identity forwarding or skill checks fail. Read
 `clankie doctor --machine NAME` afterwards: installed files are static proof, so
 do not restart another lane's pane or claim native tools were tested. OpenCode,

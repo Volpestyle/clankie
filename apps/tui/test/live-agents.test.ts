@@ -746,7 +746,7 @@ it("flags next-turn-only Claude leads even before mail is queued", () => {
   lead.seat.harness = "claude";
   lead.seat.messageReceiver = {
     state: "next-turn-only",
-    detail: "Resume with claude --resume SESSION --channels plugin:clankie-worker@clankie",
+    detail: "Resume with claude --resume SESSION --channels plugin:clankie-worker@inline",
   };
   const strip = new LiveAgentStrip(() => [lead], theme);
   expect(expandedRows(strip, 240)).toContain("messages next-turn-only");

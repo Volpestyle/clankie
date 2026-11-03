@@ -287,7 +287,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
         `require("node:child_process").spawn(process.execPath, [${JSON.stringify(join(bin, bridge))}], { stdio: "inherit" }).on("exit", (c) => process.exit(c ?? 0))`,
         "--",
         "--channels",
-        "plugin:clankie-worker@clankie",
+        "plugin:clankie-worker@inline",
       ],
       { env: { PATH: process.env.PATH, HOME: home, HERDR_PANE_ID: "w8:p3", HERDR_SOCKET_PATH: SOCKET } },
     );
@@ -683,7 +683,7 @@ function rawReceiptBridge(
   expectedToolNames?: string,
 ) {
   const code = `import { runMcpCommand } from ${JSON.stringify(new URL("../src/command/mcp.ts", import.meta.url).href)}; await runMcpCommand(["--seat"], { readParentArgv: async () => "test" });`;
-  const parentArgv = channel ? "claude --channels plugin:clankie-worker@clankie" : "test";
+  const parentArgv = channel ? "claude --channels plugin:clankie-worker@inline" : "test";
   const fleetCode = `import {runSeatChannel} from ${JSON.stringify(pathToFileURL(join(bin, "seat-channel.mjs")).href)};runSeatChannel({paneId:"w8:p3",parentArgv:${JSON.stringify(parentArgv)},requestTimeoutMs:${String(requestTimeoutMs)}});`;
   const child = spawn(
     process.execPath,
@@ -701,7 +701,7 @@ function rawReceiptBridge(
         CLANKIE_OPERATOR_TOKEN: "test-only",
         CLANKIE_CONTROL_PLANE_URL: url,
         ...(expectedToolNames === undefined ? {} : { CLANKIE_EXPECTED_TOOL_NAMES: expectedToolNames }),
-        ...(channel ? { CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@clankie" } : {}),
+        ...(channel ? { CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@inline" } : {}),
       },
     },
   );

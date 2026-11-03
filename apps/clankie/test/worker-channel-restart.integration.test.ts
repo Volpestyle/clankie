@@ -133,7 +133,7 @@ async function bridge(root: string, pane: string) {
     [
       "--input-type=module",
       "-e",
-      `import {runSeatChannel} from ${JSON.stringify(module.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:'claude --channels plugin:clankie-worker@clankie',requestTimeoutMs:1000,unknownAckTimeoutMs:1000});`,
+      `import {runSeatChannel} from ${JSON.stringify(module.href)};runSeatChannel({paneId:${JSON.stringify(pane)},parentArgv:'claude --channels plugin:clankie-worker@inline',requestTimeoutMs:1000,unknownAckTimeoutMs:1000});`,
     ],
     { env: { ...environment(root), HERDR_PANE_ID: pane }, stdio: ["pipe", "pipe", "pipe"] },
   );

@@ -8187,9 +8187,9 @@ that agent (a DM from the app, or a group-chat turn) arrives as
 instead of being typed into the pane. Identity is `HERDR_PANE_ID`. On a local
 machine the `clankie-worker` Claude plugin's `worker` server runs this command,
 handing it Claude's argv, and it polls only when that session approved
-`plugin:clankie-worker@inline` (ADR 0317) or, from an older installed copy,
-`plugin:clankie-worker@clankie` through `--channels`. Hires and prepared Mac panes
-load the worker for each session.
+`plugin:clankie-worker@inline` (ADR 0317) through `--channels`. Hires and prepared
+Mac panes load the worker for each session; an older installed
+`clankie-worker@clankie` copy's channel does not bind the mailbox.
 
 Registering `clankie-seat` yourself (`claude mcp add -s user clankie-seat --
 clankie mcp --seat`, then starting Claude with
@@ -9727,8 +9727,7 @@ The service never repairs an unavailable channel by typing a draft into a pane.
 
 A hand-started Claude in a linked Herdr pane now shows a startup warning with
 `claude --resume SESSION_UUID --plugin-dir WORKER_DIR --channels
-plugin:clankie-worker@inline` when that session lacks the worker channel flag (a
-session started from an older installed copy is shown its `@clankie` form). This is the supported one-command
+plugin:clankie-worker@inline` when that session lacks the worker channel flag. This is the supported one-command
 restart fix; a plugin hook cannot change the already launched session's flags.
 The notice uses the exact native UUID, stays visible if the lifecycle report
 fails, and says “cannot confirm” if launch observation is unavailable. Existing
@@ -10280,12 +10279,14 @@ An existing canonical workspace with no project uses global policy. Missing, amb
 mismatched or unverified worktree context refuses.
 Claude profiles get nothing installed (ADR 0317): it removes an older
 `clankie-worker@clankie` copy from each discovered profile with Claude's own
-`plugin uninstall --scope user`, and the clankie marketplace when no other Clankie
-plugin uses it. A Claude profile whose settings come from a source the owner
-manages elsewhere, such as dotfiles, is left alone while that source still sets
-`enabledPlugins["clankie-worker@clankie"]` or `extraKnownMarketplaces.clankie`;
-the refusal names those entries, and setup fails if a native step changes that
-file. Refusals include each profile's setup result.
+`plugin uninstall`, at user scope and in each project it was installed in, and
+the clankie marketplace when no other Clankie plugin uses it. A Claude profile
+whose settings come from a source the owner manages elsewhere, such as dotfiles,
+is left alone while that source still sets `enabledPlugins["clankie-worker@clankie"]`;
+the refusal names that entry, and setup fails if a native step changes that
+file. A source that declares `extraKnownMarketplaces.clankie` (for the operator
+plugin) keeps the marketplace while the worker copy is removed. A project whose
+own `.claude` settings still enable the copy keeps its project-scoped entry. Refusals include each profile's setup result.
 Preparation uses native plugin installation for
 Codex and preserves managed Codex configuration. A source-managed Codex config needs the owning
 setup script on that remote machine. Select it explicitly; Clankie never writes

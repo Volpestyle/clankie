@@ -130,7 +130,7 @@ async function fixture(
 
 it("a briefed hire starts through the adapter under its agent name, and nothing types the brief", async () => {
   const { runner, adapter, hire } = await fixture(async (view) => {
-    await view.start?.("claude", ["--channels", "plugin:clankie-worker@clankie"]);
+    await view.start?.("claude", ["--channels", "plugin:clankie-worker@inline"]);
     return { outcome: "started", control: {} as SeatControl };
   });
   const result = await hire("the brief");
@@ -147,7 +147,7 @@ it("a briefed hire starts through the adapter under its agent name, and nothing 
     expect.objectContaining({
       kind: "claude",
       paneId: "w1:p1",
-      args: ["--channels", "plugin:clankie-worker@clankie"],
+      args: ["--channels", "plugin:clankie-worker@inline"],
     }),
   );
   expect(runner.promptAgent).not.toHaveBeenCalled();

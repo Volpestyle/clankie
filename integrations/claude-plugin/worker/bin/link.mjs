@@ -10,8 +10,8 @@ import { join } from "node:path";
 
 export const TEXT_MAX = 16_384;
 export const SUMMARY_MAX = 512;
-// A hire loads the worker per launch as `@inline` (ADR 0317); an older install's copy is `@clankie`.
-const WORKER_CHANNELS = ["plugin:clankie-worker@inline", "plugin:clankie-worker@clankie"];
+// A hire loads the worker per launch as `@inline` (ADR 0317).
+const WORKER_CHANNEL = "plugin:clankie-worker@inline";
 
 /** A socket path as this machine compares it: Windows paths are case-insensitive. */
 function normalSocket(path) {
@@ -221,14 +221,14 @@ export function approvesWorkerChannel(argv) {
         token
           .slice(flag.length + 1)
           .split(",")
-          .some((entry) => WORKER_CHANNELS.includes(entry))
+          .includes(WORKER_CHANNEL)
       )
         return true;
       continue;
     }
     for (const value of tokens.slice(index + 1)) {
       if (value.startsWith("-")) break;
-      if (value.split(",").some((entry) => WORKER_CHANNELS.includes(entry))) return true;
+      if (value.split(",").includes(WORKER_CHANNEL)) return true;
     }
   }
   return false;

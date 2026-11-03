@@ -59,7 +59,6 @@ import { resolveOperatorCredential, type CredentialStore } from "@clankie/creden
 import {
   CaptainSessionLaneV2Schema,
   CLAUDE_WORKER_PLUGIN_ID,
-  CLAUDE_WORKER_INSTALLED_PLUGIN_ID,
   FLEET_SEAT_MCP_SERVER,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_SEAT_BRIDGE_CLAIM_HEADER,
@@ -125,12 +124,9 @@ const MCP_USAGE =
 const FLEET_CHANNEL_SERVER = `server:${FLEET_SEAT_MCP_SERVER}`;
 /**
  * A hired seat's worker plugin channel (VUH-1458), approved under `--channels`: the launch's own
- * `@inline` copy (ADR 0317), or an older install's `@clankie` one.
+ * `@inline` copy (ADR 0317).
  */
-const WORKER_CHANNEL_PLUGINS = [
-  `plugin:${CLAUDE_WORKER_PLUGIN_ID}`,
-  `plugin:${CLAUDE_WORKER_INSTALLED_PLUGIN_ID}`,
-];
+const WORKER_CHANNEL_PLUGIN = `plugin:${CLAUDE_WORKER_PLUGIN_ID}`;
 const OPERATOR_CHANNEL_ENTRIES = [
   "plugin:clankie@inline",
   "plugin:clankie@clankie",
@@ -305,7 +301,7 @@ export function parentArgvLoadsFleetChannel(argv: string | undefined, workerPlug
   // Only the selected server may consume the mailbox; Claude drops events
   // from the other connection even though both advertise the capability.
   return workerPlugin
-    ? WORKER_CHANNEL_PLUGINS.some((entry) => parentArgvApprovesChannel(argv, entry))
+    ? parentArgvApprovesChannel(argv, WORKER_CHANNEL_PLUGIN)
     : parentArgvLoadsChannel(argv, FLEET_CHANNEL_SERVER);
 }
 
@@ -1449,7 +1445,7 @@ export async function runMcpCommand(
     OPERATOR_CHANNEL_ENTRIES.some((entry) => parentArgvLoadsChannel(parentArgv, entry)) ||
     // A joined worker loads the installed worker plugin as an approved channel (VUH-2607).
     (env.CLANKIE_JOINED_WORKER_SESSION !== undefined &&
-      WORKER_CHANNEL_PLUGINS.some((entry) => parentArgvApprovesChannel(parentArgv, entry)));
+      parentArgvApprovesChannel(parentArgv, WORKER_CHANNEL_PLUGIN));
   const journal =
     lane === "operator" && channel ? seatPumpJournal(env, conversationId ?? "global-default") : undefined;
   const upstream = await (options.connectUpstream ?? defaultUpstream)({

@@ -20,7 +20,7 @@ const child = spawn(process.execPath, [bridge], {
     ...process.env,
     // Exercise the channel's native 25-second mailbox long poll as well as its
     // five-second catalog watcher. No captain messages or model turns are sent.
-    CLANKIE_SEAT_PARENT_ARGV: "codex --dangerously-load-development-channels plugin:clankie-worker@clankie",
+    CLANKIE_SEAT_PARENT_ARGV: "codex --dangerously-load-development-channels plugin:clankie-worker@inline",
   },
 });
 child.stderr.on("data", (chunk) => {

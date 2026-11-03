@@ -242,7 +242,7 @@ setInterval(() => {}, 1 << 30);
     env: {
       ...launched.env,
       CLANKIE_CREDENTIALS_FILE: herdrEnv.CLANKIE_CREDENTIALS_FILE,
-      CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@clankie",
+      CLANKIE_SEAT_PARENT_ARGV: "claude --channels plugin:clankie-worker@inline",
     },
     transport: bridge,
     stderr: { write: () => true },

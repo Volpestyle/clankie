@@ -51,9 +51,10 @@ logins: `clankie harness login claude|codex` (or the app, or `/harness-login`)
 signs them into your Claude subscription or ChatGPT plan with no shell
 ([harness sign-in](../../docs/harness-logins.md)); an `ANTHROPIC_API_KEY` on the
 body also works, and a signed-in subscription takes precedence over it. Each body start prepares Claude for hires
-nobody watches (ADR 0238): the image approves the `clankie-worker` channel in
-`/etc/claude-code/managed-settings.json`, and the body installs that plugin
-(disabled until a hire enables it) and Herdr's Claude hook, marks onboarding
+nobody watches (ADR 0238): the image approves the inline `clankie-worker` channel
+in `/etc/claude-code/managed-settings.json`, each hire loads the release's worker
+plugin for its own session (ADR 0317) so nothing is installed in the profile, and
+the body removes an older installed copy, installs Herdr's Claude hook, marks onboarding
 done, trusts `/workspace` and sets Claude's default permission mode to `auto`
 unless the owner chose one.
 Pi workers use pi's own provider configuration under `/state/home/.pi/agent`

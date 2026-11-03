@@ -164,18 +164,20 @@ describe("clankie mcp", () => {
     // A hired seat's approved worker plugin channel (VUH-1458).
     expect(
       parentArgvLoadsFleetChannel(
-        'claude --settings {"enabledPlugins":{"clankie-worker@clankie":true}} --channels plugin:clankie-worker@clankie --model sonnet',
+        'claude --settings {"enabledPlugins":{"clankie-worker@inline":true}} --channels plugin:clankie-worker@inline --model sonnet',
         true,
       ),
     ).toBe(true);
     expect(
-      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@clankie", true),
+      parentArgvLoadsFleetChannel("claude --channels=plugin:other@x,plugin:clankie-worker@inline", true),
     ).toBe(true);
-    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie -p", true)).toBe(
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@inline -p", true)).toBe(
       false,
     );
     expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie@clankie")).toBe(false);
-    expect(parentArgvLoadsFleetChannel("claude --model plugin:clankie-worker@clankie")).toBe(false);
+    // An older installed copy's channel (ADR 0317) no longer binds the mailbox.
+    expect(parentArgvLoadsFleetChannel("claude --channels plugin:clankie-worker@clankie", true)).toBe(false);
+    expect(parentArgvLoadsFleetChannel("claude --model plugin:clankie-worker@inline")).toBe(false);
     for (const print of ["--print", "-p"]) {
       expect(
         parentArgvLoadsFleetChannel(
@@ -460,7 +462,7 @@ describe("clankie mcp", () => {
   it.each([false, true])(
     "only the worker plugin polls when its channel is selected (plugin: %s)",
     async (plugin) => {
-      const argv = "claude --channels plugin:clankie-worker@clankie --model haiku";
+      const argv = "claude --channels plugin:clankie-worker@inline --model haiku";
       const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
       let connected = false;
       const running = runMcpCommand(["--seat"], {

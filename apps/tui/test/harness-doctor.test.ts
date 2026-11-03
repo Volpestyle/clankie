@@ -111,7 +111,7 @@ it("names an older installed Claude worker copy for removal (ADR 0317)", async (
     const stale = report.remediation.filter((line) => line.includes(join(home, ".claude")));
     expect(stale).toHaveLength(1);
     expect(stale[0]).toMatch(
-      /^Remove the old clankie-worker 0\.2\.0 copy from .+: clankie harness install$/u,
+      /^Remove the old clankie-worker 0\.2\.0 copy from .+: clankie update, or clankie harness install --refresh-linked$/u,
     );
     // Nothing asks the owner to install or enable a Claude worker any more.
     expect(report.remediation.some((line) => /claude plugin (?:install|enable)/u.test(line))).toBe(false);

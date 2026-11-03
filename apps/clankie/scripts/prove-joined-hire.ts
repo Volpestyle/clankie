@@ -163,7 +163,7 @@ await writeFile(
 );
 await chmod(join(bin, "herdr"), 0o755);
 // PROOF_CLAUDE=stand-in replaces Claude with a recorder that reports itself to Herdr as
-// Claude does, and the runner then drives the installed worker plugin's MCP server
+// Claude does, and the runner then drives the launch's own worker plugin MCP server
 // itself, as Claude would: the whole chain except the model turn.
 const standIn = process.env.PROOF_CLAUDE === "stand-in";
 // PROOF_HARNESS=codex hires a Codex worker instead (VUH-2609), signed in with this Mac's
@@ -293,10 +293,14 @@ try {
   assert.equal(JSON.parse(String(hired.detail)).outcome, "started");
   if (standIn) {
     // Claude would start its plugin's MCP server with the pane's environment.
-    const launched = JSON.parse(readFileSync(claudeLaunch, "utf8")) as { env: Record<string, string> };
-    const installed = JSON.parse(
-      readFileSync(join(homedir(), ".claude/plugins/installed_plugins.json"), "utf8"),
-    ).plugins["clankie-worker@clankie"][0].installPath as string;
+    const launched = JSON.parse(readFileSync(claudeLaunch, "utf8")) as {
+      argv: string[];
+      env: Record<string, string>;
+    };
+    // The hire loads the worker for its own session (ADR 0317): the folder after --plugin-dir.
+    const pluginDir = launched.argv.indexOf("--plugin-dir");
+    assert(pluginDir >= 0, "The hire's Claude launch did not load the worker with --plugin-dir");
+    const installed = launched.argv[pluginDir + 1]!;
     const client = new Client({ name: "stand-in-claude", version: "1" }, { capabilities: {} });
     await client.connect(
       new StdioClientTransport({
@@ -311,7 +315,7 @@ try {
       name: "message_clankie",
       arguments: { text: `${marker}-done`, deliveryId: randomUUID() },
     });
-    step("the stand-in called message_clankie through the installed worker plugin", { installed, sent });
+    step("the stand-in called message_clankie through the launch's worker plugin", { installed, sent });
     await client.close();
     await writeFile(join(workspace, "proof.txt"), marker);
   }

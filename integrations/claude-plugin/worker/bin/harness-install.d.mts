@@ -35,7 +35,8 @@ export function installHarnessBridges(options: {
     detail: string,
     context?: HarnessInstallConsentContext,
   ): Promise<boolean>;
-  execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<unknown>;
+  /** `cwd` is set only where a native command acts on one project (a project-scoped uninstall). */
+  execute?(command: string, args: readonly string[], env?: NodeJS.ProcessEnv, cwd?: string): Promise<unknown>;
   prepareSkills?(workerRoot: string): Promise<void>;
   codexSourceSetup?: { command: string; args: readonly string[] };
 }): Promise<HarnessInstallResult[]>;

@@ -64,9 +64,11 @@ export async function inspectHarnessProfiles({ env = process.env, expectedVersio
       const settings = await json(join(profile, "settings.json")).catch(() => ({}));
       const registry = await json(join(profile, "plugins", "installed_plugins.json")).catch(() => ({}));
       const entries = registry.plugins?.["clankie-worker@clankie"];
-      const entry = Array.isArray(entries)
-        ? entries.find((value) => value.scope === "user" && typeof value.installPath === "string")
-        : undefined;
+      // An older installed copy (ADR 0317), at user scope or left in a project.
+      const copies = Array.isArray(entries)
+        ? entries.filter((value) => typeof value.installPath === "string")
+        : [];
+      const entry = copies.find((value) => value.scope === "user") ?? copies[0];
       const root = entry?.installPath;
       const manifest = root ? await json(join(root, ".claude-plugin", "plugin.json")).catch(() => ({})) : {};
       const mcp = root ? await json(join(root, ".mcp.json")).catch(() => ({})) : {};
