@@ -319,13 +319,28 @@ runs the real service against a model that answers 503. It covers three cases:
 
 A follow-up joined during an outage is not covered by a test.
 
+### A revoked model credential (2026-11-03, [#368](https://github.com/Volpestyle/clankie/issues/368))
+
+A provider that refuses the credential (401) is not an outage: Pi does not retry it
+and the journal does not defer the turn. A turn whose model credential is revoked
+while the service is down resumes from the journal on its redelivery. Its completed
+steps are served from the journal and its interrupted shell call surfaces as
+"possibly ran". Its one new model request is refused, so the turn settles failed,
+once. Restoring the credential does not reopen it. Later redeliveries, including
+after another restart, answer from the saved failure without asking the model, and
+no tool runs again. The owner sends a new message to continue.
+[`durable-pi-credential-revoked.integration.test.ts`](../../apps/clankie/test/durable-pi-credential-revoked.integration.test.ts)
+covers this with the real service killed mid-shell and a scripted model that answers
+401 after the restart.
+
 Before enabling more lanes:
 
 1. Prove the full mouth hop, including a crash between send and receipt, through
    existing reconciliation. Done against a loopback Discord (above). Discord's real
    API and gateway still need an approved private test destination.
 2. Exercise interrupted model/read, several tools in one round,
-   media capture and changed/revoked room grants with real dependencies. Preserve
+   media capture and changed/revoked room grants with real dependencies (changed
+   grants and a revoked model credential are done, above). Preserve
    corrupted/missing-state refusals. Audit connected reads individually rather
    than broadly blessing a transport.
 3. Done: retention and compaction, and provider outages (above). Keep the original request and uncertain intents until
