@@ -93,6 +93,7 @@ import {
   type WorkItemWriteReceiptRequest,
 } from "@clankie/protocol/work-item-write";
 import { WorkWriteReceipts } from "./work-write-receipts.ts";
+import { DraftPullHolds, githubPullOf, type DraftPullHold } from "./draft-pull-holds.ts";
 import {
   prepareWorkWriteTarget,
   type WorkWriteAuthority,
@@ -335,6 +336,19 @@ interface TrackerProjects {
   ): Promise<WorkResult>;
 }
 
+/** What a look at one remembered draft hold found (#541). */
+export interface DraftHoldSettlement {
+  readonly pull: string;
+  readonly issue?: string;
+  /**
+   * `requeued`: moved to Todo; `held`/`refused`: posting stopped it (ADR 0302, 0308);
+   * `unchanged`: not In Progress or held by someone else; `still_listed` and
+   * `unavailable` are looked at again next round.
+   */
+  readonly outcome: "requeued" | "held" | "refused" | "unchanged" | "still_listed" | "unavailable";
+  readonly detail?: string;
+}
+
 export interface WorkItemsServiceOptions {
   readonly projects?: () => Promise<ProjectsSettings>;
   /**
@@ -575,6 +589,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   });
   const run = options.run ?? defaultRun;
   const clock = options.clock ?? (() => new Date());
+  const draftHolds = new DraftPullHolds(join(options.stateDirectory, "draft-pull-holds.json"), clock);
 
   const linear: LinearToolCall | undefined =
     options.mcpHost === undefined
@@ -2657,6 +2672,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         );
       }
     },
+    /** Run each round: puts back issues whose draft pull request closed unmerged (#541). */
+    reconcileDraftHolds,
     async handle(
       request: WorkRequest,
       local: boolean,
@@ -2676,15 +2693,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
       if (request.action === "show") {
         const result = await handleTracker(request, local, posting, destination);
-        return "item" in result && "repo" in result
-          ? {
-              ...result,
-              item: withLiveHolders(result.repo.id, result.item, [
-                ...holders,
-                ...(await draftPullHolders([result.item])),
-              ]),
-            }
-          : result;
+        if (!("item" in result) || !("repo" in result)) return result;
+        const item = withLiveHolders(result.repo.id, result.item, [
+          ...holders,
+          ...(await draftPullHolders([result.item])),
+        ]);
+        noteDraftHolds(request.repo, local, [item]);
+        return { ...result, item };
       }
       // Filter on the live status: read the tracker statuses it can come from, then filter.
       const wanted = request.status;
@@ -2697,6 +2712,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (!("items" in result) || !("repo" in result)) return result;
       const held = [...holders, ...(await draftPullHolders(result.items))];
       const items = result.items.map((item) => withLiveHolders(result.repo.id, item, held));
+      noteDraftHolds(request.repo, local, items);
       return {
         ...result,
         items: (wanted === undefined ? items : items.filter((item) => wanted.includes(item.status))).slice(
@@ -2706,6 +2722,110 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       };
     },
   };
+  /** Remembers which draft pull requests held which items, to notice when one closes (#541). */
+  function noteDraftHolds(repo: string, local: boolean, items: readonly WorkItem[]): void {
+    for (const item of items)
+      for (const holder of item.heldBy ?? [])
+        if (githubPullOf(holder) !== undefined) draftHolds.note(holder, { repo, local, id: item.id });
+  }
+
+  /**
+   * Looks again at each draft pull request a read saw holding an issue (#541). One that
+   * closed unmerged puts each issue it held back to Todo when the tracker still says In
+   * Progress and nothing else holds it, through the same gated work update as Clankie's
+   * own (ADR 0302; Watch refuses it, ADR 0308). A merged one needs nothing: GitHub
+   * closes its issues. One still a draft is kept; one now ready for review is in review.
+   */
+  async function reconcileDraftHolds(): Promise<DraftHoldSettlement[]> {
+    const pulls = draftHolds.list();
+    if (pulls.length === 0) return [];
+    let api: NonNullable<TrackerDeps["github"]>;
+    try {
+      api = checkpointAccess((await githubSnapshot())?.token).api;
+    } catch {
+      // allow-swallowed-rejection -- no GitHub connection: the holds wait for the next round.
+      return [];
+    }
+    const settled: DraftHoldSettlement[] = [];
+    for (const pull of pulls) {
+      let read: { state?: string; draft?: boolean; merged?: boolean; merged_at?: string | null };
+      try {
+        read = (await api.request("GET", `repos/${pull.slug}/pulls/${String(pull.number)}`)) as typeof read;
+      } catch (error) {
+        settled.push({ pull: pull.url, outcome: "unavailable", detail: String(error) });
+        continue;
+      }
+      if (read.state === "open" && read.draft === true) continue;
+      if (read.state === "open" || read.merged === true || (read.merged_at ?? null) !== null) {
+        draftHolds.settle(pull.url);
+        continue;
+      }
+      // Closed unmerged. Without a live census nothing proves the issue unheld; try later.
+      let live: readonly IssueHolder[];
+      try {
+        live = (await options.liveHolders?.()) ?? [];
+      } catch {
+        // allow-swallowed-rejection -- without a live census the holds wait for the next round.
+        continue;
+      }
+      const remaining: DraftPullHold[] = [];
+      for (const hold of pull.holds) {
+        const outcome = await requeue(pull.url, hold, live).catch(
+          (error: unknown): DraftHoldSettlement => ({
+            pull: pull.url,
+            issue: hold.id,
+            outcome: "unavailable",
+            detail: String(error),
+          }),
+        );
+        settled.push(outcome);
+        if (outcome.outcome === "unavailable" || outcome.outcome === "still_listed") remaining.push(hold);
+      }
+      draftHolds.settle(pull.url, remaining);
+    }
+    return settled;
+  }
+
+  async function requeue(
+    url: string,
+    hold: DraftPullHold,
+    live: readonly IssueHolder[],
+  ): Promise<DraftHoldSettlement> {
+    const shown = await handleTracker({ action: "show", repo: hold.repo, id: hold.id }, hold.local);
+    if (!("item" in shown) || !("repo" in shown))
+      return { pull: url, issue: hold.id, outcome: "unavailable", detail: "The issue could not be read." };
+    if (shown.item.status !== "in_progress")
+      return {
+        pull: url,
+        issue: hold.id,
+        outcome: "unchanged",
+        detail: `Tracker says ${shown.item.status}.`,
+      };
+    const heldBy =
+      withLiveHolders(shown.repo.id, shown.item, [...live, ...(await draftPullHolders([shown.item]))])
+        .heldBy ?? [];
+    // GitHub's open-pull listing is read through a one-minute snapshot that may still show it.
+    if (heldBy.includes(url)) return { pull: url, issue: hold.id, outcome: "still_listed" };
+    if (heldBy.length > 0)
+      return { pull: url, issue: hold.id, outcome: "unchanged", detail: `Held by ${heldBy.join(", ")}.` };
+    try {
+      await handleTracker({ action: "update", repo: hold.repo, id: hold.id, status: "todo" }, hold.local);
+    } catch (error) {
+      if (
+        error instanceof WorkRequestError &&
+        (error.code === "posting_refused" || error.code === "posting_held")
+      )
+        return {
+          pull: url,
+          issue: hold.id,
+          outcome: error.code === "posting_held" ? "held" : "refused",
+          detail: error.message,
+        };
+      throw error;
+    }
+    return { pull: url, issue: hold.id, outcome: "requeued" };
+  }
+
   /**
    * An open draft pull request that closes an issue holds it (#318): the work is under way
    * even when the worker that opened it is between turns or gone. Read per GitHub repo the

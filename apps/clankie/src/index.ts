@@ -1335,6 +1335,24 @@ const serviceLogRotation = setInterval(() => {
   );
 }, 10 * 60_000);
 serviceLogRotation.unref();
+// A draft pull request that held an issue and closed unmerged puts it back in the queue (#541).
+let draftHoldsRunning = false;
+const draftHoldRounds = setInterval(() => {
+  if (draftHoldsRunning) return;
+  draftHoldsRunning = true;
+  void workItems
+    .reconcileDraftHolds()
+    .then((settled) => {
+      for (const entry of settled)
+        if (entry.outcome !== "unchanged" && entry.outcome !== "still_listed")
+          logger.info({ event: "work.draft_hold.settled", ...entry }, "Draft pull request hold settled");
+    })
+    .catch((error: unknown) =>
+      logger.warn({ event: "work.draft_hold.failed", error: String(error) }, "Draft hold round failed"),
+    )
+    .finally(() => (draftHoldsRunning = false));
+}, 10 * 60_000);
+draftHoldRounds.unref();
 try {
   const reconciled = runtimeUpdater?.reconcile?.();
   if (reconciled)
