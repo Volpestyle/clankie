@@ -4488,7 +4488,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const fleet = splitFleetQualified(allocation.paneId)?.fleet;
         const agent = (await this.runner.list(fleet)).find((entry) => entry.paneId === allocation.paneId);
         const claim =
-          agent?.session && agent.terminalId === allocation.terminalId && agent.session.value === allocation.sessionId
+          agent?.session &&
+          agent.terminalId === allocation.terminalId &&
+          agent.session.value === allocation.sessionId
             ? this.hireOwners.claim(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session))
             : undefined;
         if (!agent?.session || !claim)
@@ -4540,7 +4542,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const receipt = original?.[1];
       const paneId = receipt?.paneId ?? allocation?.pane;
       if (!paneId)
-        throw new Error("The original hire never recorded a pane; settle it as abandoned-unknown or not-launched");
+        throw new Error(
+          "The original hire never recorded a pane; settle it as abandoned-unknown or not-launched",
+        );
       if (splitFleetQualified(paneId)?.fleet !== fleet) throw new Error(`Pane ${paneId} is not on ${fleet}`);
       if (allocation?.pane !== undefined && allocation.pane !== paneId)
         throw new Error("The receipt and project allocation name different panes");
@@ -4646,7 +4650,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
       // No await follows the final observation before the durable adoption.
       if (this.closed) throw new Error("Native hire service is closed");
       const { agent, occupantId, sessionId } = final;
-      if (original && evidence) this.hireReceipts.settleRecovery(original[0], original[1].messageId, evidence);
+      if (original && evidence)
+        this.hireReceipts.settleRecovery(original[0], original[1].messageId, evidence);
       if (!claim)
         this.hireOwners.bind(
           paneId,
@@ -4675,7 +4680,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(allocation ? { allocationId: allocation.id } : {}),
         ...(evidence ? { evidence } : {}),
         detail: `Adopted the exact occupant on ${fleet} for its hiring conversation.${
-          original ? "" : " No original receipt matched this allocation; the census alone proved its occupant."
+          original
+            ? ""
+            : " No original receipt matched this allocation; the census alone proved its occupant."
         } Its brief's delivery stays unknown: the lead should message it to confirm its task. Nothing was sent, replayed or closed.`,
       };
     } catch (error) {

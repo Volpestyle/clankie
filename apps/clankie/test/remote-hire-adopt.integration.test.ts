@@ -90,18 +90,20 @@ setInterval(() => {}, 1 << 30);
     if (!shellOnly) {
       await runner.runInPane!(id, [join(home, "bin/claude")]);
       await expect
-        .poll(async () => {
-          const agent = await runner.get(`pc/${id}`);
-          return agent.agent === "claude" && agent.session !== undefined;
-        }, { timeout: 15_000 })
+        .poll(
+          async () => {
+            const agent = await runner.get(`pc/${id}`);
+            return agent.agent === "claude" && agent.session !== undefined;
+          },
+          { timeout: 15_000 },
+        )
         .toBe(true);
     }
     return `pc/${id}`;
   };
   const native = createRemoteHireReceipts({
     fleet: async () => pc,
-    shell: () => async (command) =>
-      (await exec("/bin/sh", ["-c", command], { env, timeout: 30_000 })).stdout,
+    shell: () => async (command) => (await exec("/bin/sh", ["-c", command], { env, timeout: 30_000 })).stdout,
   });
   const watches = join(home, "watches.json");
   const receipts = `${watches}.hire-receipts.json`;
@@ -157,7 +159,12 @@ nativeIt(
           evidence: {
             journal: "authenticated-recovery",
             disposition: "adopted",
-            allocation: { paneId, present: true, terminalId: agent.terminalId, sessionId: agent.session!.value },
+            allocation: {
+              paneId,
+              present: true,
+              terminalId: agent.terminalId,
+              sessionId: agent.session!.value,
+            },
           },
         });
         expect(adopted).not.toHaveProperty("evidence.delivery");
