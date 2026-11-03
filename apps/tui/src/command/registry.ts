@@ -590,7 +590,7 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]",
       "                           For agents: say what you are doing with your own figure",
-      "                           in the commons. Your seat comes from HERDR_PANE_ID.",
+      "                           in the World. Your seat comes from HERDR_PANE_ID.",
     ],
   },
   {

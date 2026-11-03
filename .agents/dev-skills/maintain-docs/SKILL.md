@@ -59,8 +59,8 @@ redrawn later to match today's system.
 - Retired systems stay out of current-tense prose: missions, the doctrine
   contract, the control plane/runner split, Swarm coordination (ADR 0213), terminal-delivered agent briefs (ADR 0207), the in-repo emulator and mGBA core
   (ADR 0145), and the app's canvas view. ADRs and dated test records may keep
-  describing them as history. The garden and the commons are the same living
-  room of agent sprites; either name is fine.
+  describing them as history. The app's places are Sessions, the Feed, the
+  World and Terminal; the old Messages and Commons names are history.
 - Say what ships. Mark a gated or planned capability as such; do not describe
   an unmerged or undeployed change as available.
 - Public pages never name James or his accounts. Describe a setting, not its
@@ -109,7 +109,7 @@ over it.
    vocabulary and read each hit in context; identifiers and history are fine:
    `rg -n -i -w 'captain|mission|doctrine|swarm|emulator|mgba' apps/docs/site apps/docs/content README.md ~/dev/clankie-landing/index.html`.
    App views retire in `~/dev/clankie-app/docs/adr`; check named app views
-   (Messages, Commons, Terminal) still exist there.
+   (Sessions, Feed, World, Terminal) still exist there.
 4. Read `docs/architecture.md` and `apps/docs/content/how-it-works.md` side by
    side: every how-it-works section should summarize an architecture section,
    and neither should state a fact the other contradicts.

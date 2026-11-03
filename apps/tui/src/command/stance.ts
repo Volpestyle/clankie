@@ -1,6 +1,6 @@
 import { sourceHerdrSocket } from "../session/herdr-report.ts";
 /**
- * `clankie stance` — how an agent moves its own figure in the commons
+ * `clankie stance` — how an agent moves its own figure in the World
  * ([ADR 0148](../../../../docs/adr/0148-an-agent-moves-its-own-figure.md)).
  *
  * This one is written for an agent to run, not for a person. An agent working
@@ -29,7 +29,7 @@ const POSES = OperatorAgentPoseSchema.options;
 const STANCE_USAGE = [
   `Usage: clankie stance <${POSES.join("|")}> [--activity ${OperatorAgentActivityKindSchema.options.join("|")}] [--note TEXT] [--for SECONDS]`,
   "",
-  "Says what you are doing with your own figure in the commons. The seat comes",
+  "Says what you are doing with your own figure in the World. The seat comes",
   "from HERDR_PANE_ID, so this only ever moves the figure you are sitting in.",
 ].join("\n");
 
