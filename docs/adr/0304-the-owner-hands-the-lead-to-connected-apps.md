@@ -4,6 +4,12 @@ Status: Accepted by James, 2026-10-30. Builds on
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md) and
 [ADR 0303](0303-connected-apps-answer-agents-prompts.md).
 
+Amended by [ADR 0350](0350-the-owner-switches-clankie-on-and-off-from-his-app.md):
+the owner may also set the lead, either way, from his own paired Take Control
+device; a captain bearer no longer hands it to the apps; and while the apps lead,
+every turn of Clankie's own is held, including owner-authority notices that are
+not the owner's words.
+
 ## Context
 
 James wants one lead for his agents. Today Clankie's own model turns answer

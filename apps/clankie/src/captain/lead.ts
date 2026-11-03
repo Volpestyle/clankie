@@ -66,6 +66,20 @@ export class LeadStore {
     return this.lead === "apps" && (scope?.kind === "global" || scope?.kind === "workspace");
   }
 
+  /**
+   * Whether the switch holds this turn (ADR 0350). While off, every turn Clankie
+   * would take himself is held, including notices that carry owner authority but
+   * are not the owner's words. The owner's own messages and answers are published
+   * operator input (`internal` unset) and still reach him: whether off should
+   * also stop those is this one condition.
+   */
+  public holdsTurn(
+    scope: OperatorConversation["scope"] | undefined,
+    turn: { readonly internal?: true },
+  ): boolean {
+    return turn.internal === true && this.holds(scope);
+  }
+
   public hold(item: Omit<OperatorLeadHeldItem, "seq" | "at">, at = new Date().toISOString()): void {
     const held: OperatorLeadHeldItem = {
       ...item,

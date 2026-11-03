@@ -1977,9 +1977,20 @@ the apps: a wake, a watch, or a worker's message or question that Clankie
 would have answered himself is held for them instead of running his model, and
 worker reports to his lead threads stay unread for them. The apps read both with
 `read_inbox`, `read_reports` and `acknowledge_reports`. Your own messages still
-reach Clankie. `clankie connector lead clankie` hands it back, and only you can.
+reach Clankie. `clankie connector lead clankie` hands it back. Only you set it,
+either way: this command with your operator credential, or your own paired
+Take Control device through the relay, which shows it as Clankie's on/off switch
+([ADR 0350](adr/0350-the-owner-switches-clankie-on-and-off-from-his-app.md)).
+A connected app, captain bearer or worker can't. Handing it back only flips the
+setting: held turns are not replayed. While the apps lead, every turn Clankie
+would take himself is held, including notices that carry your authority but are
+not your words; your own messages and answers still run.
 JSON: `{ "ok": true, "lead": "clankie" | "apps", "held": N, "error"?:
-"state_unreadable" }`.
+"state_unreadable" }`. Over the operator dispatch, `status` and `set` results
+also carry `status.clankie`: `{ "state": "on" | "off" | "cant_start", "reason"?:
+"no_model" | "no_credential" | "unavailable", "message"? }`, where `cant_start`
+and the reason come only from Clankie's own model readiness (`clankie doctor`'s
+`captain`).
 
 `clankie connector wake set LEAD` stores a connected lead's wake webhook
 ([ADR 0336](adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)): the
@@ -10771,8 +10782,9 @@ transcript. The digest is a convention, not secrecy.
 Reads `GET /v1/fleet/leads` through the same owner-only boundary as the roster.
 Prints each lead's id, registered name, active/inactive state and last activity
 when known; `--json` returns `{ schemaVersion: 1, observedAt, leads }`.
-Clankie is active while `connector lead` selects `clankie`, or for ten minutes
-following his own model activity. Each active connector device is listed as an
+Clankie is active exactly while `connector lead` selects `clankie`; a turn he
+takes while the apps lead updates his last activity but never marks him active
+([ADR 0350](adr/0350-the-owner-switches-clankie-on-and-off-from-his-app.md)). Each active connector device is listed as an
 app lead, active when seen within fifteen minutes. Revoked and expired devices
 are omitted. Rows are sorted by id, with no ranking or authority implied.
 Connector calls refresh their device's last seen time at most once per minute

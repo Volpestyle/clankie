@@ -288,6 +288,8 @@ export {
   type OperatorLeadHeldItem,
   OperatorLeadStatusSchema,
   type OperatorLeadStatus,
+  OperatorLeadSwitchSchema,
+  type OperatorLeadSwitch,
   OperatorLeadCommandSchema,
   type OperatorLeadCommand,
   OperatorLeadResultSchema,

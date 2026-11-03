@@ -99,7 +99,8 @@ export type DeviceConversationRequest = Extract<
       | "fleet_room"
       | "app_notes"
       | "presence"
-      | "autonomy";
+      | "autonomy"
+      | "lead";
   }
 >;
 export type DeviceConversationDispatch = (
@@ -152,9 +153,13 @@ export function createDeviceConversationDispatch(options: {
         "app_notes",
         "presence",
         "autonomy",
+        "lead",
       ].includes(request.op)
     )
       throw new Error("Unsupported device conversation operation");
+    // The owner's own device sets Clankie's switch; reads stay on the relay's route (ADR 0350).
+    if (request.op === "lead" && request.command.action !== "set")
+      throw new Error("Only the switch itself rides the device's identity");
     if (request.op === "presence" && request.includeCurrentActivity !== true)
       throw new Error("Private presence requires the current-activity opt-in");
     // A note is posted only by a connector app on the relay's own route; devices only read.

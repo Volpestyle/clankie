@@ -144,6 +144,8 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
         "work_item_write_receipt",
         "react",
         "autonomy",
+        // Clankie's on/off switch (ADR 0350); the service still requires the owner to set it.
+        "lead",
         "roster",
         "fleet",
         "presence",
