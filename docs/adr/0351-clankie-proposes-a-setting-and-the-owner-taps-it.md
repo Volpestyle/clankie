@@ -41,19 +41,23 @@ Clankie must gain no path to write owner settings at all.
   and on the owner's tap applies the change with the same call its own control
   makes, on the device's Take Control authority. Only then does it answer
   "Change it". "Leave it" answers without a write.
-- **Clankie hears the outcome as an answer.** The answer message says that
-  "Change it" from the app means the app applied the exact change on the
-  owner's tap, and that Clankie changed nothing himself and gained no settings
-  authority.
+- **An answer is never an application receipt.** "Change it" is only the
+  owner's answer. The answer message tells Clankie that his app applies the
+  change on his tap before it answers, that the same answer from any other
+  surface applies nothing, and that he must not say the setting changed until
+  he has read its current value. He changed nothing himself and gained no
+  settings authority. The app says "Changed" only after its own write
+  succeeded; for an ask answered anywhere else it reads the setting and says
+  what it is now.
 
 ## Consequences
 
 - No new write path to owner settings exists. The trust boundary is the
   owner's tap in his app, as it is for every other setting he flips.
-- Another surface can answer the same ask, such as the TUI or the feed. It shows
-  the ask's fixed step ("open this in the Clankie app and tap Change it"), so
-  "Change it" there is only the owner's word, not an applied change. Clankie
-  should not treat it as proof.
+- Another surface can answer the same ask, such as the TUI, the feed or an
+  older app. It shows the ask's fixed step ("open this in the Clankie app and
+  tap Change it"). Its "Change it" writes nothing, and neither Clankie nor the
+  new app treats it as a change.
 - An older app ignores `settingChange` and shows the ask as an ordinary choice.
   An older host refuses `surface` as an unknown field, and the app resends
   without it.

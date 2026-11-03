@@ -151,14 +151,17 @@ it("offers the tool only on the operator lane", () => {
   expect(questionTools({}, false).map((t) => t.name)).not.toContain("propose_setting_change");
 });
 
-it("tells Clankie the app applied a Change it, and that he changed nothing himself", async () => {
+it("tells Clankie a Change it answer is not proof of a change, and that he changed nothing himself", async () => {
   const f = await fixture();
   await f.send("propose");
   const result = f.result() as ConversationQuestionResult;
   const q = result.question!;
   const text = answerMessage(q, { kind: "choice", optionId: q.options[0]!.optionId });
-  expect(text).toContain("the app applied this exact change on his own tap");
+  expect(text).toContain("An answer is not proof that anything changed");
+  expect(text).toContain("the same answer from any other surface applies nothing");
+  expect(text).toContain("Don't tell him the setting changed unless you have read its current value");
   expect(text).toContain("You changed nothing yourself and gained no settings authority");
+  expect(text).not.toMatch(/app applied/u);
   expect(text).toContain('"settingChange":{"setting":"autonomy","value":"low"}');
 });
 
