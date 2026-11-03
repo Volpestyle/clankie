@@ -341,6 +341,8 @@ export interface ConversationTurnContext {
   readonly origin?: "wake" | "watch" | "message" | "hook" | "input";
   /** The surface a human send arrived from, as it named itself. */
   readonly surfaceClientId?: string;
+  /** The app page the owner sent from (ADR 0351); a context line for the turn, never authority. */
+  readonly surface?: import("@clankie/protocol").OperatorTurnSurface;
   /** Side conversations inherit a Pi branch but never continue their parent's active task. */
   readonly side?: true;
   /** Files the owner attached to this message (ADR 0209); owner content, never instructions. */

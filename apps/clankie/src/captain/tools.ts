@@ -88,6 +88,10 @@ export interface TurnContext {
       ) => Promise<ConversationQuestionResult>)
     | undefined;
   requestQuestion?: ((draft: QuestionDraft) => Promise<ConversationQuestionResult>) | undefined;
+  /** Records a pending setting-change ask (ADR 0351); never writes a setting. */
+  proposeSettingChange?:
+    | ((draft: import("@clankie/protocol").SettingChangeDraft) => Promise<ConversationQuestionResult>)
+    | undefined;
   /** Host-only immutable conversation ownership and current admission authority. */
   conversationAuthority?: ConversationAuthority | undefined;
   /** Host-only private operator recovery; project delegation and room tools never receive it. */

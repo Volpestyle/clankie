@@ -1,7 +1,9 @@
 import {
   ConversationQuestionTargetSchema,
   OwnerUpdateDraftSchema,
+  SettingChangeDraftSchema,
   type OwnerUpdateDraft,
+  type SettingChangeDraft,
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ProjectProposalDraftSchema, type ProjectProposalDraft } from "@clankie/protocol/projects";
@@ -47,15 +49,31 @@ export function questionTools(turn: TurnContext, projects = true): ToolDefinitio
       description:
         'Ask the owner from this source conversation. Use decision for options and a recommendation, with defaultAction and deadlineAt (UTC ISO timestamp) together: if unanswered then, the source lead is woken with that default and the owner is notified. Choose a default within existing authority. Omitting both uses a safe defer-change default after 24 hours. Expiry is never an owner answer or approval. Approval only applies to an action reserved to the owner by autonomy.fleet (supply its gate); owner_action carries exact steps only the owner can perform. Gates, approvals and native worker questions never default. Include waitingOn and optionally issue {tracker,key,url} for navigation. Answers never grant credentials or change settings. Returns pending metadata immediately; an authenticated answer wakes this source conversation. To escalate an observed worker question, supply workerQuestion with its exact seatId and requestId; the host copies the native question, and the owner answer returns by question ID without terminal typing. Keep the returned pending or uncertain ask; never duplicate it. To have the owner check something, use purpose verify with check: one line, at most 140 characters, saying exactly what to look at in about ten seconds ("Open Work, tap a house, tap back: taps work"); add evidence (one clankie://evidence link) when there is something to see, and longer: true when it honestly takes more than a ten-second look. The owner\'s feed shows the check line first.',
       parameters: Type.Unsafe<QuestionDraft>(
-        withoutPatterns(z.toJSONSchema(QuestionDraftSchema, { io: "input" })),
+        withoutSettingChange(withoutPatterns(z.toJSONSchema(QuestionDraftSchema, { io: "input" }))),
       ),
       execute: async (_id, input) => {
+        if (input !== null && typeof input === "object" && "settingChange" in input)
+          throw new Error("Propose a setting change with propose_setting_change");
         const draft = QuestionDraftSchema.parse(input);
         const request = turn.requestQuestion;
         if (!request) throw new ConversationRequiredError("Questions require a current source conversation");
         if (draft.workerQuestion && turn.shell !== true)
           throw new Error("Worker question escalation requires an admitted machine turn");
         return toolJson(await request(draft));
+      },
+    }),
+    defineTool({
+      name: "propose_setting_change",
+      label: "Propose a setting change",
+      description:
+        "Offer the owner one change to one of his settings: how much you do on your own (autonomy level), one extension's switch, pausing or resuming one routine, or the usage meters beside you. This only proposes: it records a pending ask and changes nothing. His app shows the setting, its current value and your new value with Change it and Leave it; only his tap there applies it, on his own authority. Give a short plain reason. Maximum trust, Watch, Advanced and CLI-only settings cannot be proposed. Use it when he asks you to change something, or when a change clearly answers what he asked; explain options in words without proposing when he only asks what they mean. Keep a pending proposal; do not repeat it, and never claim a change happened until his answer says so.",
+      parameters: Type.Unsafe<SettingChangeDraft>(
+        withoutPatterns(z.toJSONSchema(SettingChangeDraftSchema, { io: "input" })),
+      ),
+      execute: async (_id, input) => {
+        if (!turn.proposeSettingChange)
+          throw new ConversationRequiredError("Setting proposals require a current owner conversation");
+        return toolJson(await turn.proposeSettingChange(SettingChangeDraftSchema.parse(input)));
       },
     }),
     defineTool({
@@ -114,4 +132,13 @@ function withoutPatterns<T>(schema: T): T {
       .filter(([key, value]) => !(key === "pattern" && typeof value === "string"))
       .map(([key, value]) => [key, withoutPatterns(value)]),
   ) as T;
+}
+
+/** request_user_input never offers the host-only setting-change field (ADR 0351). */
+function withoutSettingChange<T>(schema: T): T {
+  if (schema === null || typeof schema !== "object") return schema;
+  const properties = (schema as { properties?: Record<string, unknown> }).properties;
+  if (!properties || !("settingChange" in properties)) return schema;
+  const { settingChange: _omitted, ...rest } = properties;
+  return { ...schema, properties: rest } as T;
 }

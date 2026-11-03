@@ -16,6 +16,7 @@ import { DeliveryStageSchema } from "./delivery.ts";
 import { isCanonicalBase64 } from "./base64.ts";
 import { FleetResourceSnapshotSchema } from "./fleet-resources.ts";
 import { TurnModelCallSchema, TurnRoutingDecisionSchema } from "./turn-model.ts";
+import { OperatorTurnSurfaceSchema, SettingChangeProposalSchema } from "./settings-proposals.ts";
 
 // ---------------------------------------------------------------------------
 // Operator conversations (ADR 0032, VUH-769).
@@ -1894,6 +1895,11 @@ export const ConversationQuestionSchema = z
       })
       .strict()
       .optional(),
+    /**
+     * A setting change Clankie proposed (ADR 0351). Untrusted data on an owner
+     * ask: the host never applies it; the owner's app applies it on his tap.
+     */
+    settingChange: SettingChangeProposalSchema.optional(),
   })
   .strict();
 export type ConversationQuestion = z.infer<typeof ConversationQuestionSchema>;
@@ -2429,6 +2435,8 @@ export const SubmitOperatorConversationTurnSchema = SubmitOperatorConversationTu
   message: z.string().trim().max(OPERATOR_CONVERSATION_MESSAGE_MAX),
   /** Steer a live Clankie turn or wait for a separate turn. Omitted preserves automatic admission. */
   delivery: z.enum(["steer", "queue"]).optional(),
+  /** The app page the owner sends from (ADR 0351): context for the turn, never authority. */
+  surface: OperatorTurnSurfaceSchema.optional(),
   /** Uploads committed to this conversation (ADR 0209). Owner content, never instructions. */
   attachments: z
     .array(OperatorConversationAttachmentRefSchema)
