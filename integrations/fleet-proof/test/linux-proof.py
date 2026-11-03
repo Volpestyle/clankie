@@ -426,6 +426,13 @@ class LinuxProof(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
         self.assertIn('"errno":13', result.stderr)
+        # The refusal names the denied process for diagnosis (#564).
+        prefix = "Native process proof diagnostic: "
+        final = [json.loads(line[len(prefix):]) for line in result.stderr.splitlines()
+                 if line.startswith(prefix) and '"retry":false' in line]
+        self.assertEqual(final[-1]["deniedProcess"]["pid"], pid)
+        self.assertEqual(final[-1]["deniedProcess"]["uids"], [os.getuid()] * 4)
+        self.assertTrue(final[-1]["deniedProcess"]["comm"])
         self.reap(pid)
         self.admitted()
 

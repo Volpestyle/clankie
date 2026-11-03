@@ -221,7 +221,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
         reason !== "not_member" &&
         reason !== "private_seat_expired"
       )
-        throw new FleetAdmissionUnavailableError("Local fleet observations are unavailable");
+        throw new FleetAdmissionUnavailableError("Local fleet observations are unavailable", reason);
       return false;
     };
     let nativeReason: FleetProofRefusalReason | undefined;

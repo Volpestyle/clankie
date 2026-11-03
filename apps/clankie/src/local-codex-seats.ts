@@ -460,14 +460,20 @@ export class LocalCodexSeats {
       const observed = start ? await this.observeStart(pid, start, signal).catch(() => undefined) : undefined;
       signal?.throwIfAborted();
       if (distinguishUnavailable && (!start || observed === undefined))
-        throw new FleetAdmissionUnavailableError("Private seat lifetime observation is unavailable");
+        throw new FleetAdmissionUnavailableError(
+          "Private seat lifetime observation is unavailable",
+          "private_seat_lifetime_unavailable",
+        );
       if (!start || observed !== start) continue;
       if (seat.restored) {
         if (!seat.nativeOccupantId) continue;
         const occupant = await this.durable?.observeOccupant(pane, signal).catch(() => undefined);
         signal?.throwIfAborted();
         if (distinguishUnavailable && occupant === undefined)
-          throw new FleetAdmissionUnavailableError("Private seat occupant observation is unavailable");
+          throw new FleetAdmissionUnavailableError(
+            "Private seat occupant observation is unavailable",
+            "private_seat_occupant_unavailable",
+          );
         if (occupant !== seat.nativeOccupantId) continue;
       }
       signal?.throwIfAborted();

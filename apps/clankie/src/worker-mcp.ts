@@ -1566,7 +1566,8 @@ export class WorkerMcp {
         );
       if (error instanceof LocalFleetAdmissionError)
         return Response.json({ error: "local_process_membership_required" }, { status: 403 });
-      if (error instanceof FleetAdmissionUnavailableError) return fleetAdmissionUnavailableResponse();
+      if (error instanceof FleetAdmissionUnavailableError)
+        return fleetAdmissionUnavailableResponse(error.code ? { observation: error.code } : {});
       return Response.json(
         { error: "worker_grant_unavailable", reason: "Worker access unavailable" },
         { status: 403 },

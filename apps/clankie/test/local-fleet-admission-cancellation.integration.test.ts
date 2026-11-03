@@ -321,6 +321,7 @@ localIt(
         expect(await f.initialize(path)).toEqual({
           status: 503,
           body: {
+            observation: "native_initial_unavailable",
             error: "fleet_admission_unavailable",
             retryable: true,
             reason:
@@ -343,7 +344,11 @@ localIt("rechecks fresh native proof after census failure without admitting a re
     await writeFile(join(f.root, "fail-next-proof"), "2\n");
     const unavailable = await f.initialize();
     expect(unavailable.status).toBe(503);
-    expect(unavailable.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(unavailable.body).toMatchObject({
+      observation: "native_initial_unavailable",
+      error: "fleet_admission_unavailable",
+      retryable: true,
+    });
     expect(f.state.controls).toBe(0);
     expect(f.state.proofRefusals).toEqual(["native_initial_unavailable"]);
     expect((await f.initialize()).status).toBe(200);
@@ -377,7 +382,11 @@ localIt("keeps a private seat's missing lifetime observation retryable and verif
     await writeFile(join(f.root, "fail-next-birth"), "fail\n");
     const unavailable = await f.initialize();
     expect(unavailable.status).toBe(503);
-    expect(unavailable.body).toMatchObject({ error: "fleet_admission_unavailable", retryable: true });
+    expect(unavailable.body).toMatchObject({
+      observation: "private_seat_lifetime_unavailable",
+      error: "fleet_admission_unavailable",
+      retryable: true,
+    });
     expect(f.state.proofRefusals).toEqual(["observation_failed"]);
     expect((await f.initialize()).status).toBe(200);
     expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(3);

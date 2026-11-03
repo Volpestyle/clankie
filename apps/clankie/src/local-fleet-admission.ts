@@ -1,5 +1,14 @@
-/** An observation failed before dispatch; no membership decision or effect was made. */
-export class FleetAdmissionUnavailableError extends Error {}
+/**
+ * An observation failed before dispatch; no membership decision or effect was made.
+ * `code` is fixed diagnostic vocabulary the 503 carries as `observation`; it grants nothing.
+ */
+export class FleetAdmissionUnavailableError extends Error {
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
 
 export function fleetAdmissionUnavailableResponse(
   diagnostic: { readonly observation?: string } = {},
