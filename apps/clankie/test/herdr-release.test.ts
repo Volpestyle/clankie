@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { installHerdrRelease, refreshOfficialHerdr } from "../src/herdr-release.ts";
@@ -59,4 +61,37 @@ it("never replaces the matching executable of a live fleet", async () => {
     join(root, "bin/herdr"),
   );
   expect(answers).toHaveBeenCalledTimes(1);
+});
+
+it("retries a transient release download and names the URL when it gives up (#628)", async () => {
+  const root = await temporary();
+  const statuses: number[] = [];
+  const server = createServer((_request, response) => {
+    const status = statuses.shift() ?? 200;
+    response.writeHead(status).end(status === 200 ? bytes : "busy");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  // The official URL is checked first; only the transport goes to this server.
+  const local = vi.fn<typeof fetch>((_url, init) => fetch(`http://127.0.0.1:${port}/herdr`, init));
+  try {
+    statuses.push(503, 502);
+    await installHerdrRelease(join(root, "herdr"), manifest, local, 3, 10);
+    expect(await readFile(join(root, "herdr"))).toEqual(bytes);
+    expect(local).toHaveBeenCalledTimes(3);
+
+    local.mockClear();
+    statuses.push(404);
+    await expect(installHerdrRelease(join(root, "other"), manifest, local, 3, 10)).rejects.toThrow(
+      `Herdr download of ${manifest.assets[target]} failed after 1 of 3 attempts: HTTP 404`,
+    );
+    expect(local).toHaveBeenCalledTimes(1);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+  // A refused connection is transient: every attempt is spent, then the URL is named.
+  await expect(installHerdrRelease(join(root, "closed"), manifest, local, 2, 10)).rejects.toThrow(
+    `Herdr download of ${manifest.assets[target]} failed after 2 of 2 attempts`,
+  );
+  expect(local).toHaveBeenCalledTimes(3);
 });

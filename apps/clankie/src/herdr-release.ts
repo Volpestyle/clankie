@@ -24,16 +24,30 @@ function releaseAsset(manifest: unknown): { version: string; url: string; sha256
   return { version, url, sha256: digest };
 }
 
-async function download(url: string, limit: number, fetchImpl: typeof fetch): Promise<Buffer> {
-  const response = await fetchImpl(url, { signal: AbortSignal.timeout(60_000) });
-  if (!response.ok || response.body === null)
-    throw new Error(`Herdr download failed: HTTP ${response.status}`);
+/** A failure another attempt may not repeat: a timeout, a dropped connection, 429 or 5xx. */
+class TransientDownloadError extends Error {}
+
+async function downloadOnce(url: string, limit: number, fetchImpl: typeof fetch): Promise<Buffer> {
+  let response: Response;
+  try {
+    response = await fetchImpl(url, { signal: AbortSignal.timeout(60_000) });
+  } catch (error) {
+    throw new TransientDownloadError(error instanceof Error ? error.message : String(error));
+  }
+  if (!response.ok || response.body === null) {
+    const message = `HTTP ${response.status}`;
+    throw response.status === 429 || response.status >= 500
+      ? new TransientDownloadError(message)
+      : new Error(message);
+  }
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   const reader = response.body.getReader();
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await reader.read().catch((error: unknown) => {
+        throw new TransientDownloadError(error instanceof Error ? error.message : String(error));
+      });
       if (done) break;
       bytes += value.length;
       if (bytes > limit) throw new Error("Herdr download exceeded its size limit");
@@ -44,6 +58,32 @@ async function download(url: string, limit: number, fetchImpl: typeof fetch): Pr
     reader.releaseLock();
   }
   return Buffer.concat(chunks);
+}
+
+/**
+ * Fetch `url` whole, retrying only transient failures with backoff (#628).
+ * Every failure names the URL.
+ */
+export async function download(
+  url: string,
+  limit: number,
+  fetchImpl: typeof fetch = fetch,
+  attempts = 1,
+  backoffMs = 2_000,
+): Promise<Buffer> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await downloadOnce(url, limit, fetchImpl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!(error instanceof TransientDownloadError) || attempt >= attempts)
+        throw new Error(
+          `Herdr download of ${url} failed${attempts > 1 ? ` after ${attempt} of ${attempts} attempts` : ""}: ${message}`,
+          { cause: error },
+        );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs * attempt));
+    }
+  }
 }
 
 const digest = (data: Buffer): string => createHash("sha256").update(data).digest("hex");
@@ -65,11 +105,14 @@ export async function installHerdrRelease(
   destination: string,
   manifest: unknown,
   fetchImpl: typeof fetch = fetch,
+  /** Builds retry a slow download; the service's own update check tries once. */
+  attempts = 1,
+  backoffMs?: number,
 ): Promise<string> {
   const asset = releaseAsset(manifest);
   const current = await readFile(destination).catch(() => undefined);
   if (current !== undefined && digest(current) === asset.sha256) return asset.version;
-  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl);
+  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl, attempts, backoffMs);
   if (digest(data) !== asset.sha256) throw new Error("Official Herdr checksum mismatch");
   await atomicWrite(destination, data, 0o700);
   return asset.version;
