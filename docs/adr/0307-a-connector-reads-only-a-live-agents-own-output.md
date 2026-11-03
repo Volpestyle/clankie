@@ -86,7 +86,10 @@ agent showed.
   For a live Claude Code or Codex occupant with a native session, the read
   is the tail of that session's own transcript instead of the pane: prompts
   marked `›`, the agent's replies, a `·` line per tool call or interruption;
-  internal channel deliveries and image paths are left out. It is found as
+  a channel message it received (a lead's, a peer's or a receipt) as
+  `› [channel from SENDER]` with its text, as its pane shows it (amended
+  2026-11-03, [#220](https://github.com/Volpestyle/clankie/issues/220));
+  a hire's launch brief and image paths are left out. It is found as
   the fleet already finds a seat's transcript (the harness's own session
   files on this Mac, the confined transcript host over ssh on a linked PC),
   and returned only if the same occupant (agent, session and process) holds

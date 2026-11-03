@@ -32,15 +32,35 @@ export const TRANSCRIPT_READ_REFUSED =
   "This agent's own session transcript can't be read now, and its screen is never shown in its place; read it again once it has written to its session.";
 
 /**
- * The transcript as plain lines, oldest first: prompts marked `›`, the agent's
- * replies as written, tool calls and interruptions as one short `·` line each.
- * Internal channel deliveries and viewed-image host paths are left out.
+ * A channel delivery (a lead's or peer's message, or a receipt) as one prompt line that names
+ * who sent it, the way the pane shows it (#220). Undefined for any other internal entry, such as
+ * the brief a hire was launched with.
+ */
+function channelDeliveryLine(text: string): string | undefined {
+  const match = /^<channel\b([^>]*)>([\s\S]*?)(?:<\/channel>)?\s*$/u.exec(text.trimStart());
+  if (match === null) return undefined;
+  // The plugin names itself first; the last `source` is the sender (`captain`, `peer`, a receipt).
+  const from = [...match[1]!.matchAll(/\bsource="([^"]*)"/gu)].at(-1)?.[1];
+  const body = match[2]!.trim();
+  return body ? `› [channel${from ? ` from ${from}` : ""}] ${body}` : undefined;
+}
+
+/**
+ * The transcript as plain lines, oldest first: prompts marked `›`, channel messages as
+ * `› [channel from …]`, the agent's replies as written, tool calls and interruptions as one short
+ * `·` line each. Other internal entries (a hire's launch brief) and viewed-image host paths are
+ * left out.
  */
 export function transcriptReadText(entries: readonly HerdrTranscriptEntry[]): string {
   const lines: string[] = [];
   for (const entry of entries) {
     if (entry.type === "message") {
-      if (entry.internal === true || !entry.text.trim()) continue;
+      if (!entry.text.trim()) continue;
+      if (entry.internal === true) {
+        const delivery = entry.role === "operator" ? channelDeliveryLine(entry.text) : undefined;
+        if (delivery !== undefined) lines.push(delivery);
+        continue;
+      }
       lines.push(entry.role === "operator" ? `› ${entry.text}` : entry.text);
     } else if (entry.type === "tool") {
       if (entry.phase === "started") lines.push(`· ${entry.name}`);

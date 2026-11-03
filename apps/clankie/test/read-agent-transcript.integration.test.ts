@@ -58,7 +58,19 @@ const write = (role, text, id) => {
 if (path) {
   mkdirSync(dirname(path), { recursive: true });
   write("user", "Fix issue 328", "u1");
-  write("assistant", "${harness} transcript: reading the pane from its session", "a1");
+  write("assistant", "${harness} transcript: reading the pane from its session", "a1");${
+    harness === "claude"
+      ? `
+  // A lead's channel message, recorded as Claude Code records one (#220), and the reply to it.
+  appendFileSync(path, JSON.stringify({ type: "user", uuid: "c1", parentUuid: last, isMeta: true,
+    promptSource: "system", origin: { kind: "channel", server: "plugin:clankie-worker:worker" },
+    message: { role: "user", content: '<channel source="plugin:clankie-worker:worker" kind="message" ' +
+      'conversation="herdr-core/t2x" source="captain" event_id="seat-1" created_at="2026-11-03T18:00:00.000Z">' +
+      '\\nkiwi check: reply when you have this\\n</channel>' } }) + "\\n");
+  last = "c1";
+  write("assistant", "kiwi-t2x received", "a1b");`
+      : ""
+  }
 }
 // The agent and its session, as the harness's Herdr integration reports them.
 const report = (state) =>
@@ -216,7 +228,11 @@ test("Claude Code and Codex panes read their own transcript, never the owner's s
       const answer = await read(id);
       expect(answer).toMatchObject({
         status: "read",
-        text: `› Fix issue 328\n${harness} transcript: reading the pane from its session`,
+        text: `› Fix issue 328\n${harness} transcript: reading the pane from its session${
+          harness === "claude"
+            ? "\n› [channel from captain] kiwi check: reply when you have this\nkiwi-t2x received"
+            : ""
+        }`,
         detail: TRANSCRIPT_READ_DETAIL,
       });
       expect(JSON.stringify(answer)).not.toContain(secret);

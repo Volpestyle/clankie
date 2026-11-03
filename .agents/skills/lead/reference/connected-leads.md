@@ -67,8 +67,10 @@ it; none takes precedence over another.
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
   don't watch another lead's worker. `read_agent` reads a Claude Code or Codex
-  worker from its own session transcript (prompts marked `›`, its replies, a `·`
-  line per tool call), never its screen, so it shows what the worker said even
+  worker from its own session transcript (prompts marked `›`, each channel message
+  it received as `› [channel from SENDER]`, its replies, a `·` line per tool call),
+  never its screen, so a delivered message and the worker's answer both show, and
+  it shows what the worker said even
   once it has gone quiet (waiting on CI, say); read it to tell waiting from stuck
   or done. While a worker hired as its pane's own command waits on a menu or
   question, the read adds its screen's rows under "Waiting on input, on its

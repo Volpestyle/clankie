@@ -212,6 +212,9 @@ describe("clankie fleet budget", () => {
       leadRestarts: "on",
       seatRestarts: "on",
     });
+    // Status is JSON either way; `--json` is accepted like `doctor --json` (#220).
+    for (const args of [["status", "--json"], ["--json"], ["show", "--json"]])
+      expect(await runFleetCommand(args, fleetSettingsClient(settings))).toEqual(status);
     const lines = formatFleetLines(status.fleet).join("\n");
     expect(lines).not.toContain("fleet size:");
     expect(lines).not.toContain("models: optimal");

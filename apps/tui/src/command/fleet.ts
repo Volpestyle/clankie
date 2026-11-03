@@ -50,7 +50,7 @@ import { z } from "zod";
 import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
-  "Usage: clankie fleet [status|show [--working-directory PATH]]",
+  "Usage: clankie fleet [status|show [--working-directory PATH] [--json]]",
   `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
@@ -673,10 +673,12 @@ export async function runFleetCommand(
     const workTracker = await workTrackerSettings(args.slice(1), options);
     return { ...(await fleetStatus(options)), workTracker };
   }
-  if (verb === undefined || verb === "status" || verb === "show") {
-    if (args.length <= 1) return await fleetStatus(options);
-    if (args.length === 3 && args[1] === "--working-directory" && args[2])
-      return await fleetStatus({ ...options, cwd: args[2] });
+  if (verb === undefined || verb === "status" || verb === "show" || verb === "--json") {
+    // Status always prints JSON; `--json` is accepted as other commands (`doctor --json`) take it (#220).
+    const rest = args.slice(verb === "--json" ? 0 : 1).filter((arg) => arg !== "--json");
+    if (rest.length === 0) return await fleetStatus(options);
+    if (rest.length === 2 && rest[0] === "--working-directory" && rest[1])
+      return await fleetStatus({ ...options, cwd: rest[1] });
     throw new Error(FLEET_USAGE);
   }
   // `clear` returns every field to its default: no notes, no plan limit.
