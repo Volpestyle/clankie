@@ -1053,7 +1053,10 @@ command never left. The host then seals its `launching` journal as
 hire's directory; a create that landed late leaves one, and the original stays
 fenced until that pane is closed. Over a fleet link a workspace create gets 60 s
 rather than the 20 s of other Herdr calls, since a joined PC can take longer than
-20 s to start the workspace's shell.
+20 s to start the workspace's shell. No one has to run this settlement: the next
+hire at that place on that machine settles such an original itself, with the
+same census (ADR 0331). That hire then answers `not_ready` naming the
+`freshIntent` (`id` and `afterReceiptId`) new work there takes with its own brief.
 
 Legacy receipts without that recorded window, already allocated panes, attempted
 launches, incomplete census, changed connection or revoked authority are refused.

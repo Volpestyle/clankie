@@ -3,7 +3,9 @@
 Status: Accepted, 2026-11-01. The owner chose it after stuck desktop hires
 fenced every place on the Mac. Amends VUH-2243's operator-only settlement;
 extends ADR 0207 and ADR 0319. Amended 2026-11-02 (#251): a hire whose pane
-never appeared settles itself too, once it is five minutes old.
+never appeared settles itself too, once it is five minutes old. Amended
+2026-11-02 (#326): a hire on another machine whose only effect was an
+unanswered workspace create settles itself from that machine's census.
 
 ## Context
 
@@ -35,9 +37,18 @@ inventory hadn't already proved.
   operator's `release-allocation` census, which refuses while anything runs in
   that directory. A receipt or allocation from before start times were
   recorded counts its age from when the service loaded it.
-- A hire still running, a younger one with no recorded pane, a fresh intent, a
-  remote hire, or one under operator recovery is left as it was; the owner's
-  own settlement still covers those.
+- On another fleet machine, before a new hire at a place, Clankie settles each
+  earlier hire there whose launch was committed but whose only effect was an
+  unanswered workspace create, with no pane, session or occupant recorded
+  (#326). No harness command left the service, so it settles as not launched,
+  through the same authenticated host census and sealed journal
+  (`launch-committed-command-unsent`) the operator's `not-launched` takes. A
+  pane in the hire's directory there, as when the create landed late, keeps it
+  fenced. New work at that place then goes as a fresh intent after it (#100),
+  and the refusal names that intent.
+- A hire still running, a younger one with no recorded pane, a fresh intent,
+  any other remote hire, or one under operator recovery is left as it was; the
+  owner's own settlement still covers those.
 - Settling never closes, sends, relaunches or claims the brief arrived. The
   service log notes each one.
 
