@@ -8819,7 +8819,18 @@ ones stay in `work_project_details`:
   the built-in item a verify ask names. `longer` marks an ask its asker said
   takes longer than a ten-second look. `media` is the one thing to look at: the
   ask's evidence, or that item's first clip (else screenshot), as a
-  `clankie://evidence` link with its `mimeType` from the evidence store;
+  `clankie://evidence` link with its `mimeType` from the evidence store.
+  An agent with no lead (one the owner opened by hand, here or on a linked
+  machine) that Herdr marks blocked on a numbered menu becomes a check too
+  (#149): the menu's question, the rows the prompt shows above it, and its
+  options as the agent shows them, in Clankie's own conversation. Answering it
+  presses the keys that pick that option, under the checks `answer_prompt`
+  uses: the pane still blocked, the same menu still on screen, once per screen,
+  and nothing while Clankie only watches. The keys start from where the menu's
+  selection is when you answer. A menu that changed first refuses the answer
+  with `pane_prompt_changed` and retires the check; a menu that left the screen
+  retires it on the next look, within about five seconds. A "Type something"
+  option takes a typed answer, where the terminal accepts text;
 - an **update** is either mailed news (`ownerUpdate`, unread or read; dismiss it
   with `conversations dismiss-update`) or a project status update
   (`projectUpdate`, read-only; `work_project_details` holds the full text and

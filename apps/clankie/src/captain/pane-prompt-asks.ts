@@ -40,13 +40,13 @@ const QUESTION_MAX = 500;
 /** The Watch answers a check itself only within these (clankie-app watchBridge). */
 const WATCH_CONTEXT_MAX = 300;
 
-export interface PanePromptOption {
+interface PanePromptOption {
   readonly label: string;
   /** The option's 1-based number as the agent shows it. */
   readonly number: number;
 }
 
-export interface PanePrompt {
+interface PanePrompt {
   readonly question: string;
   /** Lines the prompt itself shows above its question, such as the command it would run. */
   readonly context: readonly string[];
@@ -64,7 +64,7 @@ const clean = (line: string) => line.replace(BORDER, "").trim();
  * there. Only the prompt's own rows are kept: its question, up to three rows above it
  * back to a rule or a blank gap, and its options. Nothing else on the screen leaves.
  */
-export function readPanePrompt(screen: string): PanePrompt | undefined {
+function readPanePrompt(screen: string): PanePrompt | undefined {
   const lines = screen.split("\n").map(clean);
   // The last option 1 on the screen starts the menu.
   const first = lines.findLastIndex((line) => OPTION.exec(line)?.[1] === "1");
@@ -120,7 +120,7 @@ function signature(paneId: string, prompt: PanePrompt): string {
 }
 
 /** Keys that move the menu's selection from where it is to the chosen option, then confirm. */
-export function stepsTo(prompt: PanePrompt, number: number): PromptAnswerStep[] {
+function stepsTo(prompt: PanePrompt, number: number): PromptAnswerStep[] {
   const distance = number - prompt.selected;
   const key = distance > 0 ? "down" : "up";
   return [...Array.from({ length: Math.abs(distance) }, () => ({ key }) as const), { key: "enter" }];
@@ -135,6 +135,8 @@ interface Binding {
   readonly question: string;
   requestId?: string;
   answering?: boolean;
+  /** Answered: the same menu isn't asked again until the pane is seen leaving it. */
+  settled?: boolean;
 }
 
 export interface PanePromptAskDeps {
@@ -199,7 +201,7 @@ export function createPanePromptAsks(deps: PanePromptAskDeps) {
         binding.requestId = result.question.requestId;
       else bindings.delete(agent.terminalId);
     }
-    for (const binding of [...bindings.values()])
+    for (const binding of bindings.values())
       if (!seen.has(binding.terminalId) && !binding.answering) retire(binding, "pane_prompt_gone");
     const live = new Set([...bindings.values()].map((binding) => binding.requestId));
     for (const question of deps.pending())
@@ -232,6 +234,7 @@ export function createPanePromptAsks(deps: PanePromptAskDeps) {
       if (binding === undefined || binding.answering)
         return refused("That agent's question is no longer open here. Read its screen again.");
       binding.answering = true;
+      let pressed = false;
       try {
         const pane = await deps.bindPane(binding.terminalId);
         if (pane === undefined || pane.pane.paneId !== binding.paneId)
@@ -249,9 +252,14 @@ export function createPanePromptAsks(deps: PanePromptAskDeps) {
         } else if (answer.kind === "text" && prompt.freeform !== undefined) {
           steps = [...stepsTo(prompt, prompt.freeform).slice(0, -1), { text: answer.text }, { key: "enter" }];
         } else return refused("That isn't one of the agent's options.");
-        return await deps.answer({ terminalId: binding.terminalId, expect: binding.question, steps });
+        const result = await deps.answer({ terminalId: binding.terminalId, expect: binding.question, steps });
+        pressed = result.outcome === "answered" || result.outcome === "uncertain";
+        return result;
       } finally {
         binding.answering = false;
+        // A refused answer retires the ask; the next look asks what the screen shows then.
+        if (pressed) binding.settled = true;
+        else bindings.delete(binding.terminalId);
       }
     },
   };
