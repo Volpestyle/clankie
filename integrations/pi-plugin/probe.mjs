@@ -98,6 +98,7 @@ async function probe(packageRoot, root) {
     PI_OFFLINE: "1",
     PI_TELEMETRY: "0",
   });
+  // allow-no-sandbox -- loads Pi's own installed package by path, not Playwright
   const sdk = await import(pathToFileURL(join(packageRoot, "dist/index.js")).href);
 
   step = "serve the local probe model";

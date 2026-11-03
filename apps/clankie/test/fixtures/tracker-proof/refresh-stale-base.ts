@@ -11,6 +11,7 @@ import { promisify } from "node:util";
 const root = process.argv[2]!;
 assert.ok(process.env.HOME?.startsWith(root));
 const source = new URL("../../../../../packages/work-items/src/index.ts", import.meta.url).href;
+// allow-no-sandbox -- loads this checkout's work-items source by URL, not Playwright
 const { createLocalTracker } = await import(source);
 const directory = join(root, "tracker");
 const external = (args: Record<string, unknown>) =>

@@ -11,6 +11,7 @@ import { createContainedCodingTools } from "./lead-coding-tools.mjs";
 import { assertNativeFleet } from "./lead-native-runtime.mjs";
 import { createLeadTransport } from "./lead-provider-transport.mjs";
 import { createLeadModelRuntime } from "./lead-model-runtime.mjs";
+// allow-no-sandbox -- loads Pi's AI package by URL, not Playwright
 const { convertResponsesTools } = await import(
   new URL(
     "../../apps/clankie/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js",

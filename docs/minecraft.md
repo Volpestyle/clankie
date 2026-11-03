@@ -325,7 +325,8 @@ World chat and signs are untrusted observations and grant no machine authority.
 The motor serves prismarine-viewer's browser client on loopback and screenshots
 it with headless Chromium. Chrome is an external dependency, as for browsing;
 no native canvas or GL addon is needed. Set `CLANKIE_MINECRAFT_CHROMIUM` to an
-executable path when Chrome is installed elsewhere. Frames are PNGs at 320×180, bounded to
+executable path when Chrome is installed elsewhere; the viewer never falls back
+to a Playwright-downloaded Chromium, and Chromium's sandbox stays on. Frames are PNGs at 320×180, bounded to
 256 KiB. The service publishes them through the existing brokered Activity
 producer, with session checks and no overlapping capture requests. Disconnect
 closes the producer so the viewer cannot retain a stale live frame.

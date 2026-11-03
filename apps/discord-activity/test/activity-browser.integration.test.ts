@@ -181,6 +181,7 @@ it.skipIf(process.env.ACTIVITY_BROWSER_INTEGRATION !== "1")(
     const browser = await chromium.launch({
       executablePath:
         process.env.ACTIVITY_TEST_CHROMIUM ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      chromiumSandbox: true,
       headless: true,
     });
     const sinks = [client.sink(a), client.sink(b)];
@@ -441,6 +442,7 @@ it.skipIf(process.env.ACTIVITY_BROWSER_INTEGRATION !== "1")(
     const browser = await chromium.launch({
       executablePath:
         process.env.ACTIVITY_TEST_CHROMIUM ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      chromiumSandbox: true,
       headless: true,
     });
     const sink = client.sink(session);

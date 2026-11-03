@@ -120,6 +120,7 @@ export async function runAgentsCommand(
     if (!options.repoRoot) throw new Error("Call receipts need the Clankie installation root.");
     // Load the worker bridge from its shipped location: it reads its plugin
     // manifest beside itself, which bundling it into the console would move.
+    // allow-no-sandbox -- loads the worker plugin's seat-channel module by path, not Playwright
     const { callNativeReceipt } = (await import(
       pathToFileURL(join(options.repoRoot, "integrations/claude-plugin/worker/bin/seat-channel.mjs")).href
     )) as typeof import("../../../../integrations/claude-plugin/worker/bin/seat-channel.mjs");

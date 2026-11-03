@@ -2,6 +2,7 @@
 // A unit test runner's handles would hide a transport shutdown that exits13.
 import { pathToFileURL } from "node:url";
 const [transportPath, helper, mode] = process.argv.slice(2);
+// allow-no-sandbox -- loads the native transport module its caller names, not Playwright
 const { nativeProcessRequest, closeNativeProcessObservers } = await import(pathToFileURL(transportPath).href);
 const reply = await nativeProcessRequest(helper, [
   mode === "exit-without-close" ? "idle-with-keepalive" : "idle-before-close",

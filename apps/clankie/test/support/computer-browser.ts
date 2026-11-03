@@ -24,7 +24,9 @@ export class FixtureComputer implements ComputerAdapter {
         ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
         : process.env.CLANKIE_TEST_CHROMIUM;
     const server = await chromium.launchServer({
-      ...(executablePath === undefined ? {} : { executablePath }),
+      // Installed Chrome, never a Playwright-downloaded Chromium.
+      ...(executablePath === undefined ? { channel: "chrome" } : { executablePath }),
+      chromiumSandbox: true,
       headless: true,
       host: "127.0.0.1",
     });

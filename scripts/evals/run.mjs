@@ -40,6 +40,7 @@ const json = (path, value) => {
 // mounted at the ignored evals/holdout path. Instruction and skill work never
 // sees its cases; reports carry only its hash and IDs.
 const heldoutPath = join(repo, "evals", "holdout", "clankie", "cases.mjs");
+// allow-no-sandbox -- loads the held-out eval cases by path, not Playwright
 const heldoutCases = existsSync(heldoutPath)
   ? (await import(pathToFileURL(realpathSync(heldoutPath)).href))
       .default({ code, social })

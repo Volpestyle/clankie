@@ -264,6 +264,7 @@ const CLANKIE: ManagedService = {
   prepare: async ({ repoRoot }) => {
     const builder = join(repoRoot, "scripts", "build-fleet-proof.mjs");
     if (existsSync(join(repoRoot, "libexec", "node")) || !existsSync(builder)) return;
+    // allow-no-sandbox -- loads this checkout's fleet-proof builder by path, not Playwright
     const { buildFleetProof } = (await import(pathToFileURL(builder).href)) as {
       buildFleetProof: () => Promise<string | undefined>;
     };

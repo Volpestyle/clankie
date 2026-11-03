@@ -249,6 +249,7 @@ async function fixture(options: { actions?: boolean; allowInput?: boolean; recen
   const address = fixtureServer.address();
   if (address === null || typeof address === "string") throw new Error("No fixture port");
   const browserServer = await chromium.launchServer({
+    chromiumSandbox: true,
     headless: true,
     host: "127.0.0.1",
     executablePath:

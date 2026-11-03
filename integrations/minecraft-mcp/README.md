@@ -99,8 +99,11 @@ The service's continuous mind and explicit worker handoff are described in
 ## Viewer feed
 
 Installed Chrome on macOS or Chromium on Linux supplies the browser. Set
-`CLANKIE_MINECRAFT_CHROMIUM` to an executable path when needed. No browser download
-or native canvas/gl package is installed by this integration.
+`CLANKIE_MINECRAFT_CHROMIUM` to an executable path when needed. Without a known
+path it asks Playwright for installed Google Chrome (the `chrome` channel) and
+fails if there is none; it never falls back to a Playwright-downloaded Chromium.
+Chromium's sandbox stays on. No browser download or native canvas/gl package is
+installed by this integration.
 
 Viewer HTTP and Socket.IO bind only to `127.0.0.1` on an ephemeral port. Viewer
 input never drives the motor. Headless Chromium screenshots the browser's

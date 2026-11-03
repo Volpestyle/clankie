@@ -30,6 +30,7 @@ const output = resolve(args[outputIndex + 1]!);
 const spikeIndex = args.indexOf("--spike");
 const spike = resolve(spikeIndex < 0 ? join(homedir(), "dev/minecraft-spike") : args[spikeIndex + 1]!);
 const repoRoot = resolve(import.meta.dirname, "../../..");
+// allow-no-sandbox -- loads the Minecraft spike's rcon helper by path, not Playwright
 const { rcon } = (await import(pathToFileURL(join(spike, "rcon.mjs")).href)) as {
   rcon(command: string): Promise<string>;
 };

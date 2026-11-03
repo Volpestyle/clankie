@@ -39,6 +39,7 @@ it.runIf(Boolean(process.env.EVIDENCE_OFFLINE_MINIO_BINARY && process.env.EVIDEN
     });
     let cleanup: unknown;
     const f = await fleetFixture(root, minio.issueSession);
+    // allow-no-sandbox -- loads the private issuer fixture the environment names, not Playwright
     const privateFixture = await import(
       /* @vite-ignore */ pathToFileURL(process.env.EVIDENCE_OFFLINE_ISSUER_FIXTURE!).href
     );

@@ -95,6 +95,7 @@ async function fixture(seat: Seat = HERDR_PANE) {
     new URL("../../../integrations/claude-plugin/worker/mods/tool-catalog.mjs", import.meta.url),
     "utf8",
   );
+  // allow-no-sandbox -- loads the test's own inline data: module, not Playwright
   const module = (await import(
     /* @vite-ignore */ `data:text/javascript,${encodeURIComponent(`${source}\n// ${directory}`)}`
   )) as { register(on: (name: string, matcher: Event | Hook, hook?: Hook) => void): void };

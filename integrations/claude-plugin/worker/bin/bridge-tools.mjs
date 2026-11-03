@@ -16,6 +16,7 @@ export async function bridgeToolNames(binDirectory) {
   const names = [];
   for (const [file, tools] of SOURCES) {
     try {
+      // allow-no-sandbox -- loads the worker plugin's own bin modules by path, not Playwright
       const module = await import(pathToFileURL(join(binDirectory, file)).href);
       for (const tool of tools(module)) if (typeof tool?.name === "string") names.push(tool.name);
     } catch {

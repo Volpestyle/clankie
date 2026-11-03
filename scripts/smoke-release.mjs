@@ -201,6 +201,7 @@ try {
 
   // Auto selects the bundled default, even inside a different live Herdr session
   // (ADR 0181). The launch terminal must not silently select an execution fleet.
+  // allow-no-sandbox -- loads the extracted release's herdr-runtime module by path, not Playwright
   const runtimeModule = await import(
     pathToFileURL(join(extracted, "apps/clankie/src/herdr-runtime.js")).href
   );

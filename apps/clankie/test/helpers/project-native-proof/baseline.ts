@@ -39,5 +39,6 @@ export async function baselineProof(checkout: string) {
       },
     ],
   });
+  // allow-no-sandbox -- loads the proof bundle this helper just built, not Playwright
   return import(pathToFileURL(outfile).href) as Promise<typeof import("../../../src/local-fleet-proof.ts")>;
 }

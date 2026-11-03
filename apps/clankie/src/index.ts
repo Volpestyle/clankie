@@ -2933,6 +2933,7 @@ async function loadDiscordPresenceRuntime(
   environmentVariable: string,
 ): Promise<DiscordPresenceRuntimePort | undefined> {
   if (modulePath === undefined) return undefined;
+  // allow-no-sandbox -- loads the module the owner configured, by path, not Playwright
   const loaded: unknown = await import(pathToFileURL(resolve(modulePath)).href);
   if (!isRecord(loaded) || typeof loaded[factoryName] !== "function") {
     throw new Error(`${environmentVariable} must export ${factoryName}()`);

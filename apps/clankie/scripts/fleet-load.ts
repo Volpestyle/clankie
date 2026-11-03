@@ -309,6 +309,7 @@ async function gate() {
         .join(" ");
       await herdrRun(["pane", "run", panes[index]!, command]);
     }
+    // allow-no-sandbox -- loads this checkout's herdr-census module by path, not Playwright
     const parse = (await import(
       pathToFileURL(join(sourceRoot, "apps/clankie/src/captain/herdr-census.ts")).href
     )) as typeof import("../src/captain/herdr-census.ts");

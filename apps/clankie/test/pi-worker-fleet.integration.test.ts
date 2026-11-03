@@ -56,9 +56,11 @@ async function fixture(mode = "tui", packaged = false) {
   await writeFile(callsPath, "");
   // Drive the exact installed native SDK, not the captain's patched SDK.
   const capability = await discoverPiNativeCapability({ harness: "pi", cwd: root, brief: "" });
+  // allow-no-sandbox -- loads Pi's own installed package by path, not Playwright
   const native = await import(
     /* @vite-ignore */ pathToFileURL(join(dirname(dirname(dirname(capability.cli))), "dist/index.js")).href
   );
+  // allow-no-sandbox -- loads Pi's own installed package by path, not Playwright
   const validation = await import(
     /* @vite-ignore */ pathToFileURL(
       join(
@@ -74,6 +76,7 @@ async function fixture(mode = "tui", packaged = false) {
     expect(
       Object.keys(bundle.metafile.inputs).some((path) => path.includes("@modelcontextprotocol/sdk")),
     ).toBe(true);
+    // allow-no-sandbox -- loads the release bundle's Pi worker module by path, not Playwright
     factory = (
       await import(
         /* @vite-ignore */ pathToFileURL(join(releaseRoot, "apps/clankie/src/captain/pi-worker-fleet.mjs"))

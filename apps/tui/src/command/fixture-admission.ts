@@ -119,6 +119,7 @@ export async function runFixtureAdmission(
   if (flags.size) throw new Error("Unknown fixture authority flags");
   // Only original-facing operations may resolve the existing native authority descriptor.
   const env = options.env ?? process.env;
+  // allow-no-sandbox -- loads the worker plugin's link module by path, not Playwright
   const linkModule = await import(
     pathToFileURL(join(options.repoRoot, "integrations/claude-plugin/worker/bin/link.mjs")).href
   );

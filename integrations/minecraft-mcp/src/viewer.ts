@@ -56,6 +56,7 @@ export class BrowserViewer {
 
   async start(): Promise<void> {
     const viewerRoot = dirname(require.resolve("prismarine-viewer/package.json"));
+    // allow-no-sandbox -- loads prismarine-viewer's own worldView module, not Playwright
     const { WorldView: WorldViewClass } = require(join(viewerRoot, "viewer/lib/worldView.js")) as {
       WorldView: new (...args: unknown[]) => WorldView;
     };
@@ -128,7 +129,10 @@ export class BrowserViewer {
         "/usr/bin/google-chrome",
       ].find((path) => existsSync(path));
     const browser = await chromium.launch({
-      ...(executablePath ? { executablePath } : {}),
+      // Installed Chrome only, never a Playwright-downloaded Chromium, and always
+      // sandboxed: Playwright turns the sandbox off unless chromiumSandbox is set.
+      ...(executablePath ? { executablePath } : { channel: "chrome" }),
+      chromiumSandbox: true,
       headless: true,
       args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--disable-dev-shm-usage"],
     });
