@@ -27,6 +27,12 @@ const INHERITED_HERDR_IDENTITY = [
   "HERDR_TAB_ID",
 ] as const;
 
+/**
+ * A core started from an agent's shell tool, such as Codex's, carries that tool's
+ * colorless settings, and a hire would draw in plain white, so a hire's terminal clears them.
+ */
+const INHERITED_COLOR_OPT_OUTS = ["NO_COLOR", "FORCE_COLOR"] as const;
+
 interface HerdrCoreSeatStart {
   /** The hire's command, run as the terminal's own program. */
   readonly argv: readonly string[];
@@ -101,7 +107,9 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
         TERM: "xterm-256color",
         COLORTERM: "truecolor",
         TERM_PROGRAM: "herdr",
-        ...Object.fromEntries(INHERITED_HERDR_IDENTITY.map((key) => [key, ""])),
+        ...Object.fromEntries(
+          [...INHERITED_HERDR_IDENTITY, ...INHERITED_COLOR_OPT_OUTS].map((key) => [key, ""]),
+        ),
         ...request.env,
       };
       const started = (await call("terminal.run", {

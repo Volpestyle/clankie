@@ -33,7 +33,8 @@ const hc = (process.env.PATH ?? "")
 const session = `cs-${process.pid}`;
 // Its own session and none of a calling hc terminal's identity, but a Herdr pane's: the
 // owner's core on the Mac was started from a Herdr pane, and every terminal it starts
-// inherits that pane's identity unless the run clears it.
+// inherits that pane's identity unless the run clears it. It also carries a Codex shell
+// tool's colorless settings, as a core started by a Codex worker does.
 const env: NodeJS.ProcessEnv = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(
@@ -46,6 +47,10 @@ const env: NodeJS.ProcessEnv = {
   HC_STITCH_MS: "8000",
   HERDR_PANE_ID: "w9:p9",
   HERDR_SOCKET_PATH: "/nowhere/herdr.sock",
+  NO_COLOR: "1",
+  FORCE_COLOR: "0",
+  COLORTERM: "",
+  TERM: "dumb",
 };
 const workerLink = resolve(import.meta.dirname, "../../../integrations/claude-plugin/worker/bin/link.mjs");
 const stateHome = process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state");
@@ -103,7 +108,7 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
       process.execPath,
       "-e",
       [
-        `const keys = ["HC_TERMINAL_ID", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "CLANKIE_PROBE"];`,
+        `const keys = ["HC_TERMINAL_ID", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "CLANKIE_PROBE", "NO_COLOR", "FORCE_COLOR", "COLORTERM", "TERM"];`,
         `require("node:fs").writeFileSync(${JSON.stringify(report)}, JSON.stringify(Object.fromEntries(keys.map((k) => [k, process.env[k] ?? null]))));`,
         `setInterval(() => {}, 1000);`,
       ].join("\n"),
@@ -120,6 +125,9 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
   expect(seen.CLANKIE_PROBE).toBe("brief-1");
   expect(seen.HERDR_PANE_ID ?? "").toBe("");
   expect(seen.HERDR_SOCKET_PATH ?? "").toBe("");
+  expect(seen).toMatchObject({ COLORTERM: "truecolor", TERM: "xterm-256color" });
+  expect(seen.NO_COLOR ?? "").toBe("");
+  expect(seen.FORCE_COLOR ?? "").toBe("");
 
   const live = await seats.get(address);
   expect(live?.state).toBe("live");
