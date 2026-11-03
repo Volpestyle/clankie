@@ -492,8 +492,38 @@ const SPAWN_SESSION_WAIT_MS = 10_000;
 // the model call. A live hire was torn down at exactly 10 s waiting on it.
 const SPAWN_FIRST_TURN_SESSION_WAIT_MS = 30_000;
 const SPAWN_SESSION_POLL_MS = 250;
+/** A live agent's session can be missing from one snapshot (#338); read again this often before refusing. */
+const SEAT_SESSION_RETRIES = 3;
+const SEAT_SESSION_RETRY_MS = 400;
 /** A terminal id, bare on the local fleet or `<fleet>/term_…` on a remote one (ADR 0184). */
 const TERMINAL_ID = /^(?:[a-z][a-z0-9-]{0,63}\/)?term_[0-9a-f]+$/u;
+
+/** Why a seat's live agent can't have a message attributed to its session, and how to recover (#338). */
+function missingSession(seatId: string, agent: HerdrAgentSnapshot): string {
+  return (
+    `Exact native session attribution is unavailable: Herdr names no native session for the ${agent.agent} ` +
+    `agent in seat ${seatId}, so nothing was sent. Send it again shortly. If it keeps happening, its harness ` +
+    "isn't reporting its session to Herdr: restart it in that pane with its resume command (claude --resume, codex resume)."
+  );
+}
+
+/** Refuse a seat that can't take an attributed message, naming what is missing. */
+function unattributedSeat(
+  seatId: string,
+  agent: HerdrAgentSnapshot | undefined,
+): asserts agent is HerdrAgentSnapshot & { session: HerdrAgentSession } {
+  if (agent === undefined)
+    throw new Error(`No agent holds seat ${seatId} now; list the fleet again for its current seat.`);
+  if (agent.agent === "shell" || agent.agent === "unknown")
+    throw new Error(
+      `Seat ${seatId} holds no coding agent now (Herdr reports ${agent.agent}); nothing was sent.`,
+    );
+  if (agent.terminalId !== seatId)
+    throw new Error(
+      `${seatId} names Herdr pane ${agent.paneId}, not its seat; use its seat id ${agent.terminalId}.`,
+    );
+  if (agent.session === undefined) throw new Error(missingSession(seatId, agent));
+}
 /** How long a delivered message may take to turn an idle seat into a working one. */
 const SEAT_PICKUP_WAIT_MS = 10_000;
 const SPAWN_CHANNEL_DIALOG_WAIT_MS = 30_000;
@@ -2251,6 +2281,31 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.paneHire(paneId);
   }
 
+  /**
+   * A seat's live agent, read again briefly while Herdr names no native session for it: a
+   * worker that can send reports can be messaged too, even when one snapshot misses its
+   * session (#338). A seat with no agent, or no session after the retries, is returned as
+   * read, for the caller's own refusal; nothing is inferred. The retries take up to a second
+   * or so, so callers check again that the service is still open once it returns.
+   */
+  private async seatWithSession(
+    read: () => Promise<HerdrAgentSnapshot | undefined>,
+  ): Promise<HerdrAgentSnapshot | undefined> {
+    let agent = await read();
+    for (
+      let attempt = 0;
+      attempt < SEAT_SESSION_RETRIES &&
+      !this.closed &&
+      isMessageableSeat(agent) &&
+      agent.session === undefined;
+      attempt++
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, SEAT_SESSION_RETRY_MS));
+      agent = await read();
+    }
+    return agent;
+  }
+
   /** The persisted lead of this exact native occupant, for the census; grants nothing. */
   public seatClaim(agent: HerdrAgentSnapshot): { owner: ConversationOwner; hired: boolean } | undefined {
     return agent.session === undefined
@@ -2279,9 +2334,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const authority = captureConversationAuthority(source);
     if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     await assertConversationAuthority(authority);
-    const agent = await this.runner.resolveTerminal(seatId);
-    if (!isMessageableSeat(agent) || agent.session === undefined || agent.terminalId !== seatId)
-      throw new Error("Exact native session attribution is unavailable");
+    const agent = await this.seatWithSession(() => this.runner.resolveTerminal(seatId));
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
+    unattributedSeat(seatId, agent);
     this.nativeOwner(agent);
     // Another lead may message a seat Clankie hired, but does not take it over
     // (VUH-1763). A hire whose lead conversation no longer exists is adopted, so
@@ -2322,15 +2377,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const authority = captureConversationAuthority(source);
     if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
     await assertConversationAuthority(authority);
-    const agent = await this.runner.resolveTerminal(seatId);
-    if (
-      !isMessageableSeat(agent) ||
-      agent.session === undefined ||
-      agent.terminalId !== seatId ||
-      agent.status === "offline" ||
-      agent.status === "unknown"
-    )
-      throw new Error("Exact native session attribution is unavailable");
+    const agent = await this.seatWithSession(() => this.runner.resolveTerminal(seatId));
+    if (this.closed || this.stateUnreadable) throw new Error("Native ownership service is unavailable");
+    unattributedSeat(seatId, agent);
+    if (agent.status === "offline" || agent.status === "unknown")
+      throw new Error(
+        `The agent in seat ${seatId} is ${agent.status}, so its session can't be re-adopted now; read it, and re-adopt once it is running.`,
+      );
     const sessionKey = this.nativeSessionKey(agent);
     if (sessionKey === undefined) throw new Error("Exact native thread identity is unavailable");
     const held = this.hireOwners.sessionOwner(sessionKey);
@@ -6432,13 +6485,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
     // `herdr agent get` takes a pane or agent name, not the terminal id a hire
     // returns as its seatId, so a seatId is resolved from the pane list.
-    const agent = TERMINAL_ID.test(target)
-      ? await this.runner.resolveTerminal(target).then((found) => {
-          if (found === undefined) throw new Error(`Herdr seat ${target} not found`);
-          return found;
-        })
-      : await this.runner.get(target);
-    if (agent.session === undefined) throw new Error("Exact native session attribution is unavailable");
+    const agent = await this.seatWithSession(() =>
+      TERMINAL_ID.test(target)
+        ? this.runner.resolveTerminal(target).then((found) => {
+            if (found === undefined) throw new Error(`Herdr seat ${target} not found`);
+            return found;
+          })
+        : this.runner.get(target),
+    );
+    if (this.closed || this.wake === undefined) throw new Error("Herdr watcher is not running");
+    if (this.stateUnreadable) throw new Error("Herdr watcher state is unreadable");
+    if (agent === undefined) throw new Error(`Herdr seat ${target} not found`);
+    if (agent.session === undefined) throw new Error(missingSession(target, agent));
     const occupantId = occupantIdForHerdrSession(agent.session);
     const hiredOwner = this.hireOwners.owner(agent.paneId, agent.terminalId, occupantId);
     if (this.hireOwners.hasClaim(agent.paneId, agent.terminalId) && hiredOwner === undefined)
