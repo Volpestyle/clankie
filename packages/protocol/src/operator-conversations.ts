@@ -1925,6 +1925,40 @@ export const ConversationQuestionListSchema = z
   .strict();
 export type ConversationQuestionList = z.infer<typeof ConversationQuestionListSchema>;
 
+/**
+ * The notice kinds the service tags today. A newer host may add one; a reader
+ * that doesn't know a kind falls back to `attention` and the notice's text.
+ */
+export const OPERATOR_SERVICE_NOTICE_KINDS = [
+  /** A hired worker has waited two hours for a fresh restart it can't get. */
+  "seat_restart_waiting",
+  /** A hired worker's fresh restart may or may not have happened. */
+  "seat_restart_unconfirmed",
+  /** A hired worker's handoff before a restart may or may not have been saved. */
+  "seat_handoff_unconfirmed",
+  /** A hired worker restarted fresh in its own pane. */
+  "seat_restarted",
+  /** Auto-tidy closed finished hires. */
+  "finished_hires_tidied",
+  /** Unread reports from closed seats were retired. */
+  "worker_reports_retired",
+] as const;
+export type OperatorServiceNoticeKind = (typeof OPERATOR_SERVICE_NOTICE_KINDS)[number];
+
+/**
+ * What a service notice is about, for surfaces that group and word it instead
+ * of showing its text (the text stays the model's context, unchanged). A plain
+ * string kind, so a kind added later never makes an older reader drop the line.
+ */
+export const OperatorServiceNoticeSchema = z.strictObject({
+  kind: z.string().regex(/^[a-z][a-z0-9_]{0,63}$/u),
+  /** `owner`: something the owner may need to act on. `none`: a record, nothing to do. */
+  attention: z.enum(["owner", "none"]),
+  /** The hire it concerns, by its display name; never a seat id. */
+  worker: z.string().trim().min(1).max(120).optional(),
+});
+export type OperatorServiceNotice = z.infer<typeof OperatorServiceNoticeSchema>;
+
 const OperatorConversationEventEnvelopeSchema = z.object({
   schemaVersion: z.literal(1),
   conversationId: OperatorConversationIdSchema,
@@ -1977,6 +2011,12 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
      * Older readers drop the key (ADR 0016) and show the line as text.
      */
     spoken: z.literal(true).optional(),
+    /**
+     * Set only on a service notice the host tagged (an external message), so a
+     * surface can group it or leave it out of the chat. Older readers drop
+     * the key (ADR 0016) and show the text as before.
+     */
+    notice: OperatorServiceNoticeSchema.optional(),
     /** Per-call observation, never reconstructed from today's settings. */
     modelUsage: TurnModelUsageSchema.optional(),
     /** Coordinator message identity, retained for duplicate delivery recovery. */
@@ -2024,6 +2064,8 @@ export const OperatorConversationStreamEventSchema = z.discriminatedUnion("type"
           event.attachments !== undefined)
       )
         ctx.addIssue({ code: "custom", message: "Answer receipts are display-only external messages" });
+      if (event.notice && (event.role !== "external" || event.streaming))
+        ctx.addIssue({ code: "custom", message: "Only a complete external message is a service notice" });
     }),
   OperatorConversationEventEnvelopeSchema.extend({
     type: z.literal("reasoning"),

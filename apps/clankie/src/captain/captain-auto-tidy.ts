@@ -120,6 +120,7 @@ export function createCaptainAutoTidy(ctx: AutoTidyContext) {
       conversations.recordServiceNotice(
         owner.conversationId,
         `Auto-tidy closed ${entries.length === 1 ? "a finished hire" : `${entries.length} finished hires`} whose reports you read and whose work landed, was explicitly handed off or was parked on a local keep/ branch: ${panes}.${adopted.length ? ` It first adopted ${adopted.length === 1 ? "an unconfirmed hire" : `${adopted.length} unconfirmed hires`} from the exact native session each original receipt observed (receipts ${adopted.slice(0, 20).join(", ")}).` : ""} undo_worker_pane reopens one within five minutes; later, resume its saved session. keep_worker_pane keeps a pane open; \`clankie fleet set --auto-tidy off\` stops this.`,
+        { kind: "finished_hires_tidied", attention: "none" },
       );
     },
     checkouts: async () => {

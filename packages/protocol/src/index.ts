@@ -803,6 +803,12 @@ export {
   type SkillQuickAction,
 } from "./operator-conversations.ts";
 
+export {
+  OPERATOR_SERVICE_NOTICE_KINDS,
+  OperatorServiceNoticeSchema,
+  type OperatorServiceNotice,
+  type OperatorServiceNoticeKind,
+} from "./operator-conversations.ts";
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
 export {
   FLEET_RESOURCES_PATH,

@@ -353,7 +353,7 @@ export function createLeadSeats(ctx: LeadSeatsContext) {
       await attribution.resolve();
       return { scope: scope.identity, issue, comment };
     },
-    notice: (owner, text) => conversations.recordServiceNotice(owner.conversationId, text),
+    notice: (owner, text, notice) => conversations.recordServiceNotice(owner.conversationId, text, notice),
     signal: shutdown.signal,
   });
   const stopHiredSeatRestarts = startFleetRounds(

@@ -340,6 +340,12 @@ once it reaches the main conversation, so the two-per-room handoff cap does not
 hold back the owner's later messages
 ([VUH-2874 amendment](adr/0218-native-seats-drive-their-attached-conversation.md#a-busy-head-hears-its-owner-first-vuh-2874-2026-10-26)).
 
+A service notice is an `external` message. The ones the service tags also carry
+a structured `notice` (its kind, whether the owner needs to act, the hire's
+display name), so the app can fold the owner's ones into one line and leave
+record-only ones out of the chat. Its text, the lead model's context, is the
+same either way, and readers that predate the field show the text as before.
+
 A five-minute service inactivity watchdog starts at reservation and includes
 cold preparation, before a Pi session exists. Host-observed preparation progress
 and Pi events renew it. The watchdog is suspended while one or more Pi tools
