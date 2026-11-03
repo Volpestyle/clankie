@@ -305,3 +305,21 @@ test("an uncertain original that later shows up scrubbed is settled, and the nex
   expect(await f.send("and the logs?")).toMatchObject({ outcome: "unconfirmed" });
   expect(f.typed).toEqual(["and the logs?"]);
 });
+
+test("a message that is mostly credential is never confirmed by its scrubbed form", async () => {
+  // Credential-only: it reads back as a bare "[REDACTED]", like any other credential-only turn.
+  const bare = fixture({ absorbs: false });
+  const sent = bare.send("password: hunter2");
+  bare.user("api_key: sk-other-0123456789");
+  bare.user("password: hunter2");
+  expect(await sent).toMatchObject({ outcome: "unconfirmed" });
+  expect(
+    new DeliveryFence(bare.receipts).entries().map(([, receipt]) => receipt.scrubbedFingerprint),
+  ).toEqual([undefined]);
+  // Two messages that differ only in the secret's label read back the same; too little
+  // survives around it to tell them apart, so neither confirms the other.
+  const labelled = fixture({ absorbs: false });
+  const original = labelled.send("password: hunter2 rotated now");
+  labelled.user("api_key: hunter2 rotated now");
+  expect(await original).toMatchObject({ outcome: "unconfirmed" });
+});

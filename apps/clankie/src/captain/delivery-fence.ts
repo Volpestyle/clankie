@@ -676,15 +676,33 @@ export function sentFingerprints(text: string): { fingerprint: string; scrubbedF
   const scrubbed = redactSensitiveText(normalized);
   return {
     fingerprint: deliveryFingerprint(normalized),
-    ...(scrubbed === normalized ? {} : { scrubbedFingerprint: deliveryFingerprint(scrubbed) }),
+    ...(scrubbed !== normalized && distinctiveWhenScrubbed(normalized, scrubbed)
+      ? { scrubbedFingerprint: deliveryFingerprint(scrubbed) }
+      : {}),
   };
+}
+
+/** Text that must survive outside the redacted spans for a scrubbed read-back to identify a message. */
+const SCRUBBED_MATCH_MIN_CHARS = 16;
+
+/**
+ * Two messages that differ only inside redacted spans read back the same, so a
+ * scrubbed match proves only what survives around them. A message that is mostly
+ * credential ("password: x", or a bare key) would match any other such turn, so it
+ * is never confirmed by its scrubbed form: at least 16 characters, and over half of
+ * the message, must remain. Otherwise its delivery stays uncertain (#642 review).
+ */
+function distinctiveWhenScrubbed(sent: string, scrubbed: string): boolean {
+  const surviving = scrubbed.replaceAll("[REDACTED]", "").replace(/\s+/gu, " ").trim().length;
+  return surviving >= SCRUBBED_MATCH_MIN_CHARS && surviving * 2 > sent.length;
 }
 
 /**
  * Whether a transcript entry's text is the sent message: exactly, or exactly the
  * sent text with the reader's scrubbing applied. The second is the same message
  * deterministically scrubbed, so the redacted spans are the only possible difference;
- * any other change to the text fails both.
+ * any other change to the text fails both. It is offered only when enough of the
+ * message survives scrubbing to tell it from another (`distinctiveWhenScrubbed`).
  */
 export function readsBackAs(
   read: string,
