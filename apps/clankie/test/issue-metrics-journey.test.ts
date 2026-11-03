@@ -137,7 +137,9 @@ it("serves the real VUH-1608 golden through the production service, client and C
         title: manifest.worker,
         isDefault: false,
         createdAt: manifest.expected.startedAt,
-        updatedAt: manifest.expected.acceptedAt,
+        // Touched now, so the service's 30-day conversation retention keeps it;
+        // the golden's own history stays dated 2026-10-04 (#562).
+        updatedAt: new Date().toISOString(),
         revision: 0,
         sessionState: "waiting",
         nativeSource: {
