@@ -9,6 +9,11 @@ export interface LiveAgentOccupant {
   readonly key: string;
   /** The agent's own process. */
   readonly pid: number;
+  /**
+   * The agent is the pane's root process, launched as its command with no shell under it, so
+   * nothing else can have had the pane's foreground: there is no shell to suspend it into.
+   */
+  readonly root: boolean;
 }
 
 /**
@@ -42,6 +47,7 @@ export async function liveAgentOccupant(
     occupants.reduce((lowest, process) => (process.pid < lowest.pid ? process : lowest));
   return {
     pid: agent.pid,
+    root: agent.pid === shellPid,
     key: JSON.stringify(
       pane.session === undefined
         ? [pane.agent, "process", agent.pid]

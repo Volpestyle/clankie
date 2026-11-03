@@ -914,9 +914,11 @@ export function createOperatorService(
           }) as const;
         // A desktop-app hire's terminal has run nothing but the harness Clankie started in it
         // (ADR 0319), and a Herdr pane Clankie hired into is a tab he opened for that hire, on
-        // this Mac or a linked PC: all of its history is that agent's own, so a quiet hire still
-        // shows its last screen. Only a hire claim on this exact live occupant counts; an
-        // adopted or hand-started agent, or a different one in the same pane, keeps the cut.
+        // this Mac or a linked PC: when the agent is that pane's root process, with no shell
+        // under it, all of its history is that agent's own, so a quiet hire still shows its last
+        // screen. Only a hire claim on this exact live occupant counts; an adopted or
+        // hand-started agent, a different one in the same pane, or a hire run under a shell
+        // (which can be suspended into it) keeps the cut.
         const hired =
           pane.session !== undefined &&
           ctx.liveSeats.some(
@@ -946,12 +948,14 @@ export function createOperatorService(
         if (TRANSCRIPT_READ_HARNESSES.has(pane.agent)) {
           const transcript =
             pane.session === undefined ? undefined : await ctx.herdrRunner.transcript?.(pane);
-          // A hire's pane holds only its agent's rows, so the menu it waits on is read from its
-          // screen. An agent the owner started never has its screen read, not even under the
-          // screen cut: after a suspend and `fg` an inline TUI repaints only its own rows, so the
-          // owner's shell work can stand on screen above its menu, written after any anchor.
+          // The menu it waits on is read from its screen only when nothing but the agent can
+          // have drawn there: a hire launched as its pane's own command, with no shell under it
+          // to suspend into. Any other agent's screen is never read, not even under the screen
+          // cut: after a suspend and `fg` an inline TUI repaints only its own rows, so shell work
+          // can stand on screen above its menu, and that holds for a hire run under a shell, or
+          // a hired session the owner resumed by hand, as for one the owner started.
           const screen =
-            whole && transcript !== undefined
+            whole && occupant.root && transcript !== undefined
               ? await ctx.herdrRunner.readPane(pane.paneId, "visible", "text")
               : undefined;
           const now = await unchanged();
@@ -969,9 +973,13 @@ export function createOperatorService(
         const history = await ctx.herdrRunner.readPane(pane.paneId, "recent-unwrapped", "text");
         const screen = await ctx.herdrRunner.readPane(pane.paneId, "visible", "text");
         if ((await unchanged()) === undefined) return unavailable(changed);
-        const read = whole
-          ? { text: history, detail: undefined }
-          : scope.bound(request.terminalId, occupant, history, screen);
+        // A hire's whole history is its agent's own only when nothing else can have held the
+        // pane: the agent is the pane's root process. A hire run under a shell can be suspended
+        // into it, so it keeps the cut like an agent the owner started.
+        const read =
+          whole && occupant.root
+            ? { text: history, detail: undefined }
+            : scope.bound(request.terminalId, occupant, history, screen);
         return answer(read.text, await withStopped(read.detail));
       } catch (error) {
         return unavailable(

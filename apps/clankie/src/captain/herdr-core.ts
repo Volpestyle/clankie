@@ -199,6 +199,7 @@ function liveAgentOccupant(terminal: HcTerminal, previous?: number): LiveAgentOc
   const agent = previous === root || previous === frontPid ? previous : rootIsShell ? frontPid : root;
   return {
     pid: agent,
+    root: agent === root,
     key: JSON.stringify([
       terminal.address,
       terminal.created_ms ?? null,

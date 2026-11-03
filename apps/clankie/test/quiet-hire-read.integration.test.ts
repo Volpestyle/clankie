@@ -17,9 +17,9 @@ import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
 
 const exec = promisify(execFile);
 
-// #298: a quiet hire (waiting on CI) must still show its last screen to its lead, on this Mac
-// and over the linked-PC read path, while an agent the owner started by hand keeps ADR 0307's
-// cut. Real Herdr, real local and remote runners and the real operator service; only `grok`
+// #298: a quiet hire (waiting on CI) launched as its pane's own command must still show its last
+// screen to its lead, on this Mac and over the linked-PC read path, while an agent the owner
+// started by hand, or a hire run under a shell (#328), keeps ADR 0307's cut. Real Herdr, real local and remote runners and the real operator service; only `grok`
 // is a stand-in that reports itself to Herdr as Grok does, prints, then goes quiet. Grok is a harness
 // still read from its screen; Claude Code and Codex read their own transcript (#328). The PC's
 // ssh transport is stood in by running the same argv against this Herdr.
@@ -83,11 +83,19 @@ setInterval(() => {}, 1 << 30);
     new Map([["pc", createRemoteHerdrRunner(pc, async (args) => herdr(args), { pollMs: 0 })]]),
   );
 
-  // Clankie's hire: a tab he opens, then the harness launched at its prompt. (hire_agent uses
-  // `herdr agent start`, which waits on a real harness's readiness the stand-in doesn't draw.)
+  // Clankie's hire: a tab he opens, with the harness exec'd in place of its shell, so it is the
+  // pane's root process as a command-tab hire is. By absolute path, so a real `grok` installed
+  // on this machine never starts instead.
   const hirePane = await runner.createTab!({ cwd: join(root, "work"), label: "quiet hire" });
-  // By absolute path, so a real `grok` installed on this machine never starts instead.
-  await runner.runInPane!(hirePane, [join(root, "bin/grok")]);
+  await runner.runInPane!(hirePane, ["exec", join(root, "bin/grok")]);
+  // A hire run at its shell's prompt, as `herdr agent start` runs one: it can be suspended into
+  // that shell, so it keeps the cut.
+  const shellHirePane = await runner.createTab!({ cwd: join(root, "work"), label: "shell hire" });
+  await runner.runInPane!(shellHirePane, [
+    "sh",
+    "-c",
+    `echo TOKEN=shell-hire-secret; ${join(root, "bin/grok")}`,
+  ]);
   // The owner's own agent: shell work, then Grok, in a tab Clankie didn't hire into.
   const ownerPane = await runner.createTab!({ cwd: join(root, "work"), label: "owner" });
   await runner.runInPane!(ownerPane, ["sh", "-c", `echo TOKEN=owner-secret; exec ${join(root, "bin/grok")}`]);
@@ -107,6 +115,7 @@ setInterval(() => {}, 1 << 30);
     return runner.get(paneId);
   };
   const hire = await settled(hirePane);
+  const shellHire = await settled(shellHirePane);
   const owner = await settled(ownerPane);
   const seat = (terminalId: string, session: NonNullable<typeof hire.session>, hired: boolean) =>
     ({
@@ -133,6 +142,8 @@ setInterval(() => {}, 1 << 30);
     liveSeats: [
       seat(hire.terminalId, hire.session!, true),
       seat(`pc/${hire.terminalId}`, hire.session!, true),
+      seat(shellHire.terminalId, shellHire.session!, true),
+      seat(`pc/${shellHire.terminalId}`, shellHire.session!, true),
       // Adopted by messaging, never hired: still the owner's pane.
       seat(owner.terminalId, owner.session!, false),
     ],
@@ -149,8 +160,14 @@ setInterval(() => {}, 1 << 30);
     expect(await read(terminalId)).toMatchObject({ text: expect.stringContaining("PR opened as a draft") });
   }
 
-  // The owner's agent: its first screen, with the shell work above it, stays held back and says so.
-  for (const terminalId of [owner.terminalId, `pc/${owner.terminalId}`]) {
+  // The owner's agent, and a hire run under a shell: the first screen, with the shell work above
+  // it, stays held back and says so.
+  for (const terminalId of [
+    owner.terminalId,
+    `pc/${owner.terminalId}`,
+    shellHire.terminalId,
+    `pc/${shellHire.terminalId}`,
+  ]) {
     const answer = await read(terminalId);
     expect(answer).toMatchObject({
       status: "read",
@@ -158,5 +175,6 @@ setInterval(() => {}, 1 << 30);
       detail: "Earlier screen hidden until this agent prints something new.",
     });
     expect(JSON.stringify(answer)).not.toContain("owner-secret");
+    expect(JSON.stringify(answer)).not.toContain("shell-hire-secret");
   }
 }, 60_000);
