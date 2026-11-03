@@ -5300,14 +5300,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
       await recheckPlan();
       await this.admitProjectLaunch(input, true);
       if (identityAccount && identityHarness && this.workerAccounts) {
-        const current = await this.workerAccounts(remote, identityHarness);
-        const stillSigned = current.accounts.some(
-          (entry) =>
-            entry.accountKey === identityAccount!.accountKey &&
-            entry.label === identityAccount!.label &&
-            (entry.homes ?? [{ home: entry.home }]).some((home) => home.home === identityAccount!.home),
-        );
-        if (!stillSigned)
+        // Only a read that contradicts the choice refuses. A probe that didn't answer, or a
+        // home whose own read timed out, says nothing about its sign-in (#326): look once
+        // more, then launch on the identity verified moments ago.
+        const reread = async () =>
+          startupSignIn(
+            // allow-swallowed-rejection -- a failed re-read is no evidence of a sign-in change.
+            await this.workerAccounts!(remote, identityHarness).catch(() => undefined),
+            identityAccount!,
+          );
+        let verdict = await reread();
+        if (verdict === "unknown") verdict = await reread();
+        if (verdict === "changed")
           throw new Error(
             "The selected home changed sign-in during startup; no agent was started. Select the intended account again.",
           );
@@ -7400,4 +7404,29 @@ function effortFreeDefaults(profile: HireProfile): HireProfile {
 /** A hire receipt this machine's own inventory can settle: Herdr's local panes or the desktop app's. */
 function thisMachineReceiptFleet(fleet: string | undefined): boolean {
   return fleet === "local" || fleet === HERDR_CORE_FLEET;
+}
+
+/**
+ * Whether a startup re-read still holds the identity a hire chose. Only a read with no
+ * evidence is `unknown`: the machine never answered, or the chosen home's own read
+ * timed out (it then stands alone, signed-in unknown). A read that answered without
+ * the chosen home, or shows it signed out, signed in without a readable identity, or
+ * in another identity, is `changed`.
+ */
+function startupSignIn(
+  report: MachineWorkerAccounts | undefined,
+  chosen: import("./harness-accounts.ts").WorkerAccountStatus,
+): "same" | "changed" | "unknown" {
+  if (report === undefined || report.unanswered) return "unknown";
+  const holds = (entry: import("./harness-accounts.ts").WorkerAccountStatus) =>
+    entry.harness === chosen.harness &&
+    (entry.homes ?? [{ home: entry.home }]).some((home) => home.home === chosen.home);
+  if (
+    report.accounts.some(
+      (entry) => entry.accountKey === chosen.accountKey && entry.label === chosen.label && holds(entry),
+    )
+  )
+    return "same";
+  const own = report.accounts.filter(holds);
+  return own.length > 0 && own.every((entry) => entry.signedIn === null) ? "unknown" : "changed";
 }

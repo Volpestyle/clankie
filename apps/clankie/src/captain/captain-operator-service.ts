@@ -1969,11 +1969,17 @@ function startAgentPlaces(settings: ClankieSettings): {
 function startAgentRefusal(reason: string, detail?: string, receiptId?: string): string {
   // A service answer is authoritative, including an explicit refusal that started nothing.
   // Do not infer uncertainty from the broad hire failure reason (ADR 0207).
-  if (detail?.trim()) return detail.length <= 1_200 ? detail : `${detail.slice(0, 1_199)}…`;
+  // An uncertain start always names its receipt, which is what settles it (#326).
   const settle =
-    receiptId !== undefined && (reason === "delivery_unconfirmed" || reason === "start_unconfirmed")
+    receiptId !== undefined &&
+    (reason === "delivery_unconfirmed" || reason === "start_unconfirmed") &&
+    !detail?.includes(receiptId)
       ? ` Inspect original hire receipt ${receiptId} before trying again.`
       : "";
+  if (detail?.trim()) {
+    const room = 1_200 - settle.length;
+    return `${detail.length <= room ? detail : `${detail.slice(0, room - 1)}…`}${settle}`;
+  }
   return `${startAgentRefusalWords(reason)}${settle}`;
 }
 
