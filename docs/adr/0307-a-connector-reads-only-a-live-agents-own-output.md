@@ -174,6 +174,15 @@ agent showed.
   unreadable to its lead. It counts only while the fleet roster carries a hire
   claim (`owner.hired`) for that seat and for the exact native session in the
   pane now; an adopted or hand-started agent, or a different session in the
-  same pane, keeps the cut. The claim names the session, not the process, so a
-  hired session the owner resumes by hand in that pane after shell work there
-  would show that shell work, the same kind of gap as the suspend case above.
+  same pane, keeps the cut. Amended 2026-11-03 (#328): only while the hired
+  agent is the pane's root process, launched as its command with no shell
+  under it. A hire run under a shell (`herdr agent start` needs a shell
+  prompt, so that is the usual Herdr hire), or a hired session the owner
+  resumed by hand in their shell, can be suspended into that shell and
+  brought back with `fg`, so it keeps the cut like an agent the owner
+  started: a quiet one's first read is empty, with the held-back note, until
+  it prints again. A root process that isn't named as a shell is taken for
+  the agent, so a wrapper launched as the pane's command (`nix develop`,
+  `direnv exec`, `script`) that runs the agent under it counts as root too;
+  such a wrapper gives the owner no prompt to type at, but a wrapper that
+  does would be read whole.

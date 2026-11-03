@@ -256,8 +256,10 @@ that session (its screen is never read), and for a hire launched as its pane's
 own command, its screen's visible rows; when that transcript
 can't be read the read is refused (#328). Other harnesses are read from the screen as follows. A pane Clankie hired into (a
 tab he opened for that hire, on this Mac or a linked PC, still held by the
-hired occupant) is read whole, so a quiet hire still shows its last screen. For
-an agent the owner started by hand, what the pane showed at its first read is
+hired occupant) is read whole when the agent is the pane's own command, so a
+quiet hire still shows its last screen; a hire run under a shell keeps the cut
+below, since it can be suspended into that shell. For
+an agent the owner started by hand, or a hire run under a shell, what the pane showed at its first read is
 held back and the read carries a `note` saying so. Only
 against an older service without `terminal_read` does it fall back to the tail
 stream, which reaches this Mac's panes only. `list_agents` asks the catalog to probe each linked machine

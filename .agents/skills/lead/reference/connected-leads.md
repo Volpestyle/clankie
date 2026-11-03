@@ -79,8 +79,10 @@ it; none takes precedence over another.
   `expect` takes text the prompt shows about it (a command's first words, or the
   harness's own question). A Claude Code or
   Codex worker whose session can't be read is refused, not shown from its screen.
-  Other harnesses are read from their screen: a hire's whole, and an agent the
-  owner started by hand comes back empty with a note until it prints again.
+  Other harnesses are read from their screen: a hire launched as its pane's own
+  command whole, and any other agent (one the owner started, or a hire run under
+  a shell, the usual Herdr hire) comes back empty with a note until it prints
+  again.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).
