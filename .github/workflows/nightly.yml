@@ -26,6 +26,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: main
+          # History, as the CI test jobs check out: some tests read golden files from
+          # past commits (#597). Blobs still load on demand.
+          fetch-depth: 0
           filter: blob:none
       - uses: pnpm/action-setup@v4
         with:
