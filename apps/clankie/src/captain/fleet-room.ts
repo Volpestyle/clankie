@@ -206,7 +206,17 @@ export class FleetRoomJournal {
       id: `app_note:${randomUUID()}`,
       at: this.clock().toISOString(),
       kind: "app_note",
-      from: { kind: "app", label: author.trim().slice(0, 120) || "App" },
+      // The name is the app's own OAuth client name: no control or format characters
+      // (a newline could pose as a second line of whatever quotes it).
+      from: {
+        kind: "app",
+        label:
+          author
+            .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+            .replace(/\s+/gu, " ")
+            .trim()
+            .slice(0, 120) || "App",
+      },
       to: null,
       text,
     });
