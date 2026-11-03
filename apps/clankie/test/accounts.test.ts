@@ -19,7 +19,7 @@ import {
   CLANKIE_GITHUB_APP,
   createAccounts,
   GITHUB_OAUTH_APP_PROVIDER_ID,
-  githubConnectionAccount,
+  githubConnection,
   githubConnectionToken,
   oauthAppsFrom,
   type OauthApps,
@@ -866,19 +866,17 @@ describe("GitHub App user tokens (#185)", () => {
     const flowId = (await context.json("/v1/accounts/github/start", {})).body.flowId;
     context.advance(1);
     const polled = await context.json("/v1/accounts/github/poll", { flowId });
-    const token = () =>
-      githubConnectionToken(context.store, {
-        fetch: context.providers.fetch,
-        githubWeb: context.providers.origin,
-        now: context.now,
-      });
+    // Always the fake GitHub and the test clock: a real clock would see the token as expired.
+    const github = { fetch: context.providers.fetch, githubWeb: context.providers.origin, now: context.now };
+    const token = () => githubConnectionToken(context.store, github);
+    const connection = () => githubConnection(context.store, github);
     const refreshes = () =>
       context.providers.seen.filter(
         (entry) =>
           entry.path === "/login/oauth/access_token" &&
           new URLSearchParams(entry.body).get("grant_type") === "refresh_token",
       );
-    return { ...context, polled, token, refreshes };
+    return { ...context, polled, token, connection, refreshes };
   };
 
   it("connects without the repo scope and keeps the rotating pair on the body", async () => {
@@ -914,8 +912,8 @@ describe("GitHub App user tokens (#185)", () => {
   });
 
   it("refreshes before the 8-hour expiry once for concurrent callers, keeping the account binding", async () => {
-    const { store, token, refreshes, advance, providers } = await connectApp();
-    const before = await githubConnectionAccount(store);
+    const { store, token, connection, refreshes, advance, providers } = await connectApp();
+    const before = await connection();
     expect(before?.binding).toMatch(/^github-connection:/u);
     advance(EIGHT_HOURS - 4 * 60_000);
     expect(await Promise.all([token(), token(), token()])).toEqual([
@@ -931,7 +929,7 @@ describe("GitHub App user tokens (#185)", () => {
       refresh_token: "ghr_MARKER_app_refresh_1",
     });
     expect(await store.get("github")).toMatchObject({ refresh: "ghr_MARKER_app_refresh_2" });
-    expect(await githubConnectionAccount(store)).toEqual(before);
+    expect((await connection())?.binding).toBe(before?.binding);
     // The refreshed token works against the API; the rotated-out one does not.
     const user = async (bearer: string) =>
       (await fetch(`${providers.origin}/user`, { headers: { authorization: `Bearer ${bearer}` } })).status;
@@ -968,12 +966,10 @@ describe("GitHub App user tokens (#185)", () => {
     );
 
     const own = await connectApp("Iv23liOwnersApp");
-    expect((await githubConnectionAccount(own.store))?.installUrl).toBeUndefined();
+    expect((await own.connection())?.installUrl).toBeUndefined();
 
-    const { dir, store, providers, token } = await connectApp(oauthAppsFrom({}, {}).github.clientId);
-    expect((await githubConnectionAccount(store))?.installUrl).toBe(
-      "https://github.com/apps/clankie-test/installations/new",
-    );
+    const { dir, providers, connection } = await connectApp(oauthAppsFrom({}, {}).github.clientId);
+    expect((await connection())?.installUrl).toBe("https://github.com/apps/clankie-test/installations/new");
     const repo = join(dir, "uninstalled");
     await writeConvention(repo, {
       schemaVersion: 1,
@@ -985,8 +981,7 @@ describe("GitHub App user tokens (#185)", () => {
     const service = createWorkItemsService({
       stateDirectory: dir,
       workspace: () => repo,
-      githubToken: token,
-      githubAccount: () => githubConnectionAccount(store),
+      githubConnection: connection,
       hosted: true,
       gh: async () => {
         throw new Error("a hosted body never runs gh");

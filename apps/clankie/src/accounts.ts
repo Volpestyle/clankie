@@ -268,21 +268,23 @@ function githubCredentialFrom(
 }
 
 /**
- * The GitHub connection's token for tools on this body, or undefined when
- * GitHub is not connected or must be connected again. An expiring GitHub App
- * user token is refreshed under the store's lock before it lapses; a refresh
- * GitHub cannot answer leaves a still-valid token in use and otherwise throws.
+ * The connected GitHub account as one credential snapshot: its token, what
+ * identifies the account across token refreshes, and the install page to name
+ * when a write is refused. Token and identity always come from the same entry,
+ * so a reconnect can never pair one account's token with another's identity.
+ * A non-expiring token is its own identity, as before; an expiring GitHub App
+ * user token is identified by its connection and refreshed under the store's
+ * lock before it lapses. Undefined when GitHub is not connected or must be
+ * connected again; a refresh GitHub cannot answer leaves a still-valid token
+ * in use and otherwise throws.
  */
-export async function githubConnectionToken(
+export async function githubConnection(
   store: Pick<CredentialStore, "get" | "update">,
   options: GithubConnectionOptions = {},
-): Promise<string | undefined> {
+): Promise<GithubConnection | undefined> {
   const now = options.now ?? Date.now;
-  const stored = await store.get(GITHUB_PROVIDER_ID);
-  if (stored?.type === "api") return stored.key;
-  if (stored?.type !== "oauth") return undefined;
-  let current: ProviderCredential | undefined = stored;
-  if (githubNeedsRefresh(stored, now())) {
+  let current = await store.get(GITHUB_PROVIDER_ID);
+  if (current?.type === "oauth" && githubNeedsRefresh(current, now())) {
     if (store.update === undefined) throw new Error("Credential store cannot refresh the GitHub connection");
     let unavailable = false;
     current = await store.update(GITHUB_PROVIDER_ID, async (latest) => {
@@ -301,29 +303,33 @@ export async function githubConnectionToken(
     if (unavailable && current?.type === "oauth" && current.expires <= now())
       throw new Error("GitHub is unavailable to refresh the connected account's token; try again shortly.");
   }
-  if (current?.type === "api") return current.key;
-  if (current?.type !== "oauth" || (current.expires !== 0 && current.expires <= now())) return undefined;
-  return current.access;
-}
-
-/**
- * What identifies the connected GitHub account across token refreshes, and the
- * install page to point the owner at when a write is refused. A non-expiring
- * token is its own identity, as before; an expiring one is the connection.
- */
-export async function githubConnectionAccount(
-  store: Pick<CredentialStore, "get">,
-): Promise<{ readonly binding?: string; readonly installUrl?: string } | undefined> {
-  const credential = await store.get(GITHUB_PROVIDER_ID);
-  if (credential?.type !== "api" && credential?.type !== "oauth") return undefined;
-  const connectionId = credential.metadata?.connectionId;
-  const installUrl = githubInstallUrl(credential.metadata?.clientId);
+  if (current?.type !== "api" && current?.type !== "oauth") return undefined;
+  if (current.type === "oauth" && current.expires !== 0 && current.expires <= now()) return undefined;
+  const token = current.type === "api" ? current.key : current.access;
+  const connectionId = current.metadata?.connectionId;
+  const installUrl = githubInstallUrl(current.metadata?.clientId);
   return {
-    ...(credential.type === "oauth" && connectionId !== undefined
+    token,
+    ...(current.type === "oauth" && connectionId !== undefined
       ? { binding: `github-connection:${connectionId}` }
       : {}),
     ...(installUrl === undefined ? {} : { installUrl }),
   };
+}
+
+export interface GithubConnection {
+  readonly token: string;
+  /** Stable across refreshes; absent when the token is its own identity. */
+  readonly binding?: string;
+  readonly installUrl?: string;
+}
+
+/** The GitHub connection's token alone, for callers that pin no account. */
+export async function githubConnectionToken(
+  store: Pick<CredentialStore, "get" | "update">,
+  options: GithubConnectionOptions = {},
+): Promise<string | undefined> {
+  return (await githubConnection(store, options))?.token;
 }
 
 /** Clankie's own app has a known install page; an owner's own app is managed where they registered it. */

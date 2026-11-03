@@ -365,11 +365,12 @@ export interface WorkItemsServiceOptions {
    */
   readonly githubToken?: () => Promise<string | undefined>;
   /**
-   * The connected account's identity across token refreshes (else the token
-   * is its own), and the GitHub App install page named when a write is refused.
+   * The connected account as one snapshot: token, identity across refreshes
+   * (else the token is its own) and the GitHub App install page named when a
+   * write is refused. Preferred over `githubToken` when both are given.
    */
-  readonly githubAccount?: () => Promise<
-    { readonly binding?: string; readonly installUrl?: string } | undefined
+  readonly githubConnection?: () => Promise<
+    { readonly token: string; readonly binding?: string; readonly installUrl?: string } | undefined
   >;
   readonly hosted?: boolean;
   /** Test seams; production shells out to git and gh and calls api.github.com. */
@@ -738,6 +739,29 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  // Token and identity from one credential read, so a reconnect between reads cannot mix accounts.
+  const githubSnapshot = async () => {
+    if (options.githubConnection) return options.githubConnection();
+    const token = await options.githubToken?.();
+    return token ? { token } : undefined;
+  };
+  const githubBindingOf = (connection: { readonly token: string; readonly binding?: string }) =>
+    deliveryFingerprint(connection.binding ?? connection.token);
+  // The API writes only while the connection it was built from is still the connected one.
+  const githubWritesAs = (
+    connection: { readonly token: string; readonly binding?: string },
+    api: NonNullable<TrackerDeps["github"]>,
+  ): NonNullable<TrackerDeps["github"]> => ({
+    ...api,
+    async request(method, path, body) {
+      if (method !== "GET") {
+        const current = await githubSnapshot();
+        if (current === undefined || githubBindingOf(current) !== githubBindingOf(connection))
+          throw new Error("Connected GitHub account changed.");
+      }
+      return api.request(method, path, body);
+    },
+  });
   let checkpointConnection:
     | { binding: string; api: NonNullable<TrackerDeps["github"]>; cache: MainCheckpointCache }
     | undefined;
@@ -808,7 +832,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       const own = (await gitRun("git", ["rev-list", "--count", `${base}..${head}`], path)).trim();
       if (own === "0") return undefined;
       if (!/^\d+$/u.test(own)) throw new Error("Worker commit observation unavailable");
-      const access = checkpointAccess(await options.githubToken?.());
+      const access = checkpointAccess((await githubSnapshot())?.token);
       return await mainCheckpoint(access.api, repo, head, { ignoreUnlanded: true, cache: access.cache });
     } catch {
       return checkpointUnknown("Worker repository or GitHub checkpoint unavailable");
@@ -828,7 +852,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
     for (const reference of references) {
       try {
-        const { api, cache } = checkpointAccess(await options.githubToken?.());
+        const { api, cache } = checkpointAccess((await githubSnapshot())?.token);
         let head = reference.value;
         if (reference.kind === "pull") {
           const pull = (await api.request("GET", `repos/${reference.repo}/pulls/${reference.value}`)) as {
@@ -924,8 +948,8 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
   };
 
   const deps = async (path: string, local = true, projectId?: string): Promise<TrackerDeps> => {
-    const token = await options.githubToken?.();
-    const installUrl = token === undefined ? undefined : (await options.githubAccount?.())?.installUrl;
+    const connection = await githubSnapshot();
+    const token = connection?.token;
     const checkpoint = checkpointAccess(token);
     const builtIn = await builtInBinding(path, projectId);
     const localTracker = (await options.mcpHost?.trackerStatus?.())?.backend === "local";
@@ -936,21 +960,24 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       ...(options.hosted === true || (!local && token !== undefined)
         ? {}
         : { gh: options.gh ?? defaultGh(path) }),
-      ...(token === undefined
+      ...(connection === undefined
         ? {}
         : {
             github: cacheGithub(
-              githubRestApi({
-                token,
-                ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
-                ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
-                ...(installUrl === undefined
-                  ? {}
-                  : {
-                      refusedWriteHint: `If the Clankie GitHub App is not installed on this repository, install it: ${installUrl}`,
-                    }),
-              }),
-              createHash("sha256").update(token).digest("hex"),
+              githubWritesAs(
+                connection,
+                githubRestApi({
+                  token: connection.token,
+                  ...(options.githubApiBase === undefined ? {} : { baseUrl: options.githubApiBase }),
+                  ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+                  ...(connection.installUrl === undefined
+                    ? {}
+                    : {
+                        refusedWriteHint: `If the Clankie GitHub App is not installed on this repository, install it: ${connection.installUrl}`,
+                      }),
+                }),
+              ),
+              createHash("sha256").update(connection.token).digest("hex"),
             ),
           }),
       ...(linear === undefined || localTracker ? {} : { linear }),
@@ -1159,9 +1186,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       return (await options.mcpHost.account("linear", "operator")).binding;
     }
     if (kind === "github") {
-      const token = await options.githubToken?.();
+      const connection = await githubSnapshot();
       // Owner writes use the connected account, else the owner's gh login on this machine.
-      if (token) return deliveryFingerprint((await options.githubAccount?.())?.binding ?? token);
+      if (connection) return githubBindingOf(connection);
       const login = options.hosted === true ? undefined : await ghLogin();
       if (login === undefined)
         throw new Error(
@@ -2673,7 +2700,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     if (slugs.size === 0) return [];
     let api: NonNullable<TrackerDeps["github"]>;
     try {
-      const access = checkpointAccess(await options.githubToken?.());
+      const access = checkpointAccess((await githubSnapshot())?.token);
       api = cacheGithub(access.api, access.binding);
     } catch {
       // allow-swallowed-rejection -- no GitHub connection: live seats alone hold issues.
@@ -2848,7 +2875,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
           const saved = JSON.stringify(await readConvention(entry.path));
           const binding =
             (convention.backend === "linear" && !options.mcpHost?.binding && !options.mcpHost?.account) ||
-            (convention.backend === "github" && local && !options.githubToken)
+            (convention.backend === "github" && local && !options.githubToken && !options.githubConnection)
               ? undefined
               : await accountBinding(convention.backend);
           const facts = await (request.action === "project-details" ? readProjectDetails : readProjectWork)(
