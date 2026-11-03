@@ -434,6 +434,19 @@ export class ConversationStore {
         authority: QuestionAuthority,
       ) => Promise<void>)
     | undefined;
+  /**
+   * Asks read from an agent's own pane (#149): the owner's answer presses its keys
+   * before the ask settles, and a menu that changed refuses and retires the ask.
+   */
+  public paneAnswer:
+    | {
+        owns(question: ConversationQuestion): boolean;
+        deliver(
+          question: ConversationQuestion,
+          answer: ConversationQuestionAnswer,
+        ): Promise<{ outcome: "answered" | "refused" | "uncertain" | "unavailable"; message: string }>;
+      }
+    | undefined;
   public projectOnboarding: ReturnType<typeof projectOnboarding> | undefined;
   public nativeMessageHost: NativeMessageHost | undefined;
   private nativeMessages: PendingNativeMessages | undefined;
@@ -3962,6 +3975,24 @@ export class ConversationStore {
     )
       throw new Error("owner_update_source_unavailable");
     return this.ownerUpdates.publish(conversationId, draft, publicationId);
+  }
+
+  /** Pending asks one host source raised, by its origin prefix; copies only. */
+  public pendingAsks(conversationId: string, originPrefix: string): ConversationQuestion[] {
+    const meta = this.metas.get(conversationId);
+    if (!meta) return [];
+    this.validQuestionState(meta);
+    return (meta.questions?.records ?? [])
+      .filter(
+        (record) =>
+          record.question.status === "pending" && record.question.originRunId.startsWith(originPrefix),
+      )
+      .map((record) => structuredClone(record.question));
+  }
+
+  /** The host withdraws an ask it raised, once what it asked about has gone. */
+  public withdrawAsk(conversationId: string, requestId: string, reason: string): void {
+    this.cancelPendingQuestion(conversationId, reason, undefined, requestId);
   }
 
   /** True while a worker's native question from this seat waits on the owner's answer in the ask store. */
