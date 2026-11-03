@@ -29,6 +29,9 @@ import { runSimulatorCommand } from "../../tui/src/command/fleet-resources.ts";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { LocalCodexSeats } from "../src/local-codex-seats.ts";
 
+// Paths come from this file, not the cwd: a package-scoped run starts in apps/clankie (#507).
+const repoRoot = resolve(import.meta.dirname, "../../..");
+
 const execute = promisify(execFile);
 // Codex seats read process births through the kernel helper a source checkout
 // prepares; build it rather than rely on another test file having done so.
@@ -154,7 +157,12 @@ async function fixture(context?: TestContext, detachedCodex = false) {
             await observed("simctl", () =>
               execute(
                 process.execPath,
-                [resolve("packages/fleet-resources/test/fixtures/simctl.mjs"), statePath, log, ...args],
+                [
+                  join(repoRoot, "packages/fleet-resources/test/fixtures/simctl.mjs"),
+                  statePath,
+                  log,
+                  ...args,
+                ],
                 { env, timeout },
               ),
             )
@@ -322,21 +330,25 @@ async function fixture(context?: TestContext, detachedCodex = false) {
       url: host,
     }),
   );
-  child = spawn(process.execPath, [resolve("apps/clankie/test/fixtures/resource-activity-engine.mjs")], {
-    env: {
-      ...env,
-      CLANKIE_STATE: join(root, "state"),
-      ACTIVITY_FIXTURE_ROOT: root,
-      ACTIVITY_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
-      CLAUDE_PLUGIN_ROOT: resolve("integrations/claude-plugin/worker"),
-      ACTIVITY_MOD_PATH: resolve("integrations/claude-plugin/worker/mods/tool-catalog.mjs"),
-      ...(context ? { ACTIVITY_TRACE: "1" } : {}),
-      HERDR_PANE_ID: paneId,
-      HERDR_SOCKET_PATH: join(root, "fixture.sock"),
+  child = spawn(
+    process.execPath,
+    [join(repoRoot, "apps/clankie/test/fixtures/resource-activity-engine.mjs")],
+    {
+      env: {
+        ...env,
+        CLANKIE_STATE: join(root, "state"),
+        ACTIVITY_FIXTURE_ROOT: root,
+        ACTIVITY_PLUGIN_ROOT: join(repoRoot, "integrations/claude-plugin/worker"),
+        CLAUDE_PLUGIN_ROOT: join(repoRoot, "integrations/claude-plugin/worker"),
+        ACTIVITY_MOD_PATH: join(repoRoot, "integrations/claude-plugin/worker/mods/tool-catalog.mjs"),
+        ...(context ? { ACTIVITY_TRACE: "1" } : {}),
+        HERDR_PANE_ID: paneId,
+        HERDR_SOCKET_PATH: join(root, "fixture.sock"),
+      },
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      detached: detachedCodex,
     },
-    stdio: ["ignore", "ignore", "pipe", "ipc"],
-    detached: detachedCodex,
-  });
+  );
   let errors = "";
   child.stderr!.on("data", (data) => {
     errors += data;
@@ -344,7 +356,21 @@ async function fixture(context?: TestContext, detachedCodex = false) {
   });
   cleanups.push(() => stop(child));
   trace("engine-ready:start", { pid: child.pid });
-  expect((await once(child, "message"))[0], errors).toEqual({ ready: true });
+  // An engine that exits before it is ready fails now, with its stderr, instead of at the timeout.
+  const engine = child;
+  const ready = await new Promise<unknown>((resolveReady, reject) => {
+    const onMessage = (message: unknown) => {
+      engine.off("exit", onExit);
+      resolveReady(message);
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      engine.off("message", onMessage);
+      reject(new Error(`Activity engine exited before ready (${String(code ?? signal)}): ${errors}`));
+    };
+    engine.once("message", onMessage);
+    engine.once("exit", onExit);
+  });
+  expect(ready, errors).toEqual({ ready: true });
   trace("engine-ready:end", { pid: child.pid });
   if (detachedCodex) {
     const registration = privateSeats.register(child.pid!, paneId);

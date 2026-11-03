@@ -12,7 +12,8 @@ const execute = promisify(execFile);
 const darwinIt = it.skipIf(process.platform !== "darwin");
 const pressureUrl = pathToFileURL(join(import.meta.dirname, "../src/pressure.ts")).href;
 const governorUrl = pathToFileURL(join(import.meta.dirname, "../src/governor.ts")).href;
-const evidenceDirectory = resolve(".local/fleet-memory-pressure");
+// The repo root's ignored .local, whatever the cwd: a package-scoped run starts in this package (#507).
+const evidenceDirectory = resolve(import.meta.dirname, "../../../.local/fleet-memory-pressure");
 
 async function driver(source: string) {
   const directory = await mkdtemp(join(tmpdir(), "clankie-memory-pressure-"));
