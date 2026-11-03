@@ -288,8 +288,9 @@ test("a session turn that differs outside the scrubbed span is not the message",
   f.user("Sign in again; the password: hunter2 expired, so ask the lead.");
   expect(await first).toMatchObject({ outcome: "unconfirmed" });
   // The original's receipt keeps both fingerprints, and still holds the recipient.
-  const [[, receipt]] = new DeliveryFence(f.receipts).entries();
-  expect(receipt).toMatchObject({ fingerprint: expect.any(String), scrubbedFingerprint: expect.any(String) });
+  expect(new DeliveryFence(f.receipts).entries().map(([, receipt]) => receipt)).toEqual([
+    expect.objectContaining({ fingerprint: expect.any(String), scrubbedFingerprint: expect.any(String) }),
+  ]);
   expect((await f.send("and the logs?")).outcome).not.toBe("delivered");
 });
 
