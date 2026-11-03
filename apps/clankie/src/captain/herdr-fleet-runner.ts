@@ -86,9 +86,13 @@ export function createRemoteHerdrRunner(
    * A pane can be newer than the shared poll (a hire just made it), so a miss
    * reads the list once more before reporting the terminal gone.
    */
-  const terminal = async (terminalId: string): Promise<HerdrAgentSnapshot | undefined> =>
-    (await panes()).find((pane) => pane.terminalId === terminalId || pane.paneId === terminalId) ??
-    (await panes(true)).find((pane) => pane.terminalId === terminalId || pane.paneId === terminalId);
+  const terminal = async (
+    terminalId: string,
+    options?: { readonly fresh?: boolean },
+  ): Promise<HerdrAgentSnapshot | undefined> => {
+    const named = (pane: HerdrAgentSnapshot) => pane.terminalId === terminalId || pane.paneId === terminalId;
+    return (options?.fresh ? undefined : (await panes()).find(named)) ?? (await panes(true)).find(named);
+  };
 
   const until = async (
     target: string,
@@ -195,9 +199,9 @@ export function routeHerdrFleets(
       return (await runner.list()).map((snapshot) => qualify(fleet, snapshot));
     },
     get: (target) => onTarget(target, (runner, id) => runner.get(id)),
-    resolveTerminal: async (terminalId) => {
+    resolveTerminal: async (terminalId, options) => {
       const { runner, id, fleet } = await route(terminalId);
-      const found = await runner.resolveTerminal(id);
+      const found = await runner.resolveTerminal(id, options);
       return found === undefined ? undefined : qualify(fleet, found);
     },
     bindPane: async (terminalId) => {

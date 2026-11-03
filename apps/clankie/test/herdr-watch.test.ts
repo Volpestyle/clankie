@@ -1155,10 +1155,26 @@ describe("harness-native seat transcripts", () => {
           parentUuid: "notification",
           message: { role: "user", content: "<local-command-stdout>status</local-command-stdout>" },
         },
+        // The owner's `! cmd` in bash mode is their shell, not a prompt (#328).
+        {
+          type: "user",
+          uuid: "bash-input",
+          parentUuid: "local-command",
+          message: { role: "user", content: "<bash-input>cat .env</bash-input>" },
+        },
+        {
+          type: "user",
+          uuid: "bash-output",
+          parentUuid: "bash-input",
+          message: {
+            role: "user",
+            content: "<bash-stdout>TOKEN=bash-mode-secret</bash-stdout><bash-stderr></bash-stderr>",
+          },
+        },
         {
           type: "user",
           uuid: "slash-command",
-          parentUuid: "local-command",
+          parentUuid: "bash-output",
           message: {
             role: "user",
             content:

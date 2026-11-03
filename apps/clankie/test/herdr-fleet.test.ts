@@ -30,7 +30,10 @@ import {
   type CreateOperatorServiceContext,
 } from "../src/captain/captain-operator-service.ts";
 import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
-import { TRANSCRIPT_READ_DETAIL, TRANSCRIPT_WAITING_HEADING } from "../src/captain/agent-transcript-read.ts";
+import {
+  TRANSCRIPT_READ_DETAIL,
+  TRANSCRIPT_WAITING_CALL_HEADING,
+} from "../src/captain/agent-transcript-read.ts";
 import type { AgentTranscriptHost } from "@clankie/agent-transcript";
 import { herdrFleetRuntimeArgs } from "../../tui/src/command/herdr.ts";
 import { createHerdrSessionSource } from "@clankie/agent-hosts/sessions";
@@ -642,21 +645,29 @@ describe("fleet routing", () => {
     expect(await read()).toMatchObject({ status: "read", text: "", detail: HIDDEN });
   });
 
-  it("reads a Claude Code agent from its own transcript, adding only a waiting prompt from its screen (#328)", async () => {
+  it("reads a Claude Code agent the owner started from its own transcript, never its screen, even while it waits on input (#328)", async () => {
     // A PC's Claude Code pane the owner started, over the real remote runner and operator service.
-    // Herdr's answers and the PC's transcript host are stood in.
-    // A three-row window over the pane's history.
+    // Herdr's answers and the PC's transcript host are stood in. An eight-row window over the
+    // pane's history, so the owner's own rows are still on screen when the agent's menu appears;
+    // `drawn` is a full-screen redraw.
     let status = "idle";
+    let drawn: string | undefined;
+    let foreground: number[] = [401];
+    let screenReads = 0;
     let history = "$ cat .env\nTOKEN=owner-secret\n$ claude\n Claude Code\n> fix the build";
-    const window = () => history.split("\n").slice(-3).join("\n");
+    const window = () => drawn ?? history.split("\n").slice(-8).join("\n");
     const run: HerdrFleetRun = async (args) => {
       if (args[0] === "pane" && args[1] === "list")
         return JSON.stringify({ result: { panes: [pane("w2:p1J", "term_abc", status)] } });
-      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
-      if (args[0] === "pane" && args[1] === "read") return args[4] === "visible" ? window() : history;
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, foreground);
+      if (args[0] === "pane" && args[1] === "read") {
+        screenReads += 1;
+        return args[4] === "visible" ? window() : history;
+      }
       throw new Error(`unexpected ${args.join(" ")}`);
     };
     const path = "C:\\Users\\volpe\\.claude\\projects\\kh2\\session-term_abc.jsonl";
+    // Its last call, an edit, waits on the owner's permission.
     const jsonl = [
       { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "Fix the build" } },
       {
@@ -664,6 +675,15 @@ describe("fleet routing", () => {
         uuid: "a1",
         parentUuid: "u1",
         message: { role: "assistant", content: [{ type: "text", text: "The build is fixed." }] },
+      },
+      {
+        type: "assistant",
+        uuid: "a2",
+        parentUuid: "a1",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call-edit", name: "Edit", input: { file_path: "build.ts" } }],
+        },
       },
     ]
       .map((line) => JSON.stringify(line))
@@ -693,7 +713,8 @@ describe("fleet routing", () => {
       ),
     } as unknown as CreateOperatorServiceContext);
     const read = () => serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" });
-    const transcript = "› Fix the build\nThe build is fixed.";
+    const transcript = "› Fix the build\nThe build is fixed.\n· Edit";
+    const waitingOnEdit = `${transcript}\n\n${TRANSCRIPT_WAITING_CALL_HEADING}\n· Edit {\n  "file_path": "build.ts"\n}`;
 
     // Its own session, never its screen, even on the first read of an agent the owner started.
     expect(await read()).toEqual({
@@ -704,20 +725,110 @@ describe("fleet routing", () => {
       text: transcript,
       detail: TRANSCRIPT_READ_DETAIL,
     });
-    // Waiting on a menu it drew since: only the visible rows the screen cut lets through are added.
+    // Waiting on a menu it drew since: the call it waits on is added, from its session.
     status = "blocked";
     history += "\nAllow edit to build.ts?\n 1. Yes\n 2. No";
     // The remote runner keeps its pane list for a moment, so the new status shows on a later read.
-    await expect.poll(async () => JSON.stringify(await read())).toContain(TRANSCRIPT_WAITING_HEADING);
-    const waiting = await read();
-    expect(waiting).toMatchObject({
-      status: "read",
-      text: `${transcript}\n\n${TRANSCRIPT_WAITING_HEADING}\nAllow edit to build.ts?\n 1. Yes\n 2. No`,
-    });
-    expect(JSON.stringify(waiting)).not.toContain("owner-secret");
-    // No longer waiting: the screen is gone from the read again.
+    await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(waitingOnEdit);
+    // No longer waiting: only its session again.
     status = "working";
     await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(transcript);
+
+    // Suspended with Ctrl-Z, the shell is in front: the owner's commands there are never read,
+    // not while it is stopped, not after `fg`, and not once it waits on a menu. Once with a read
+    // during the suspension, once with none and a full-screen redraw, and once with none and an
+    // inline repaint of only its own rows, which leaves the shell work on screen above its menu.
+    for (const [round, readWhileStopped, redraws] of [
+      [1, true, true],
+      [2, false, true],
+      [3, false, false],
+    ] as const) {
+      const secret = `FG-SECRET-${round}`;
+      status = "idle";
+      foreground = [];
+      history += `\n^Z\n[1]+  Stopped  claude\n$ echo ${secret}\n${secret}\n$ fg`;
+      if (readWhileStopped) {
+        const stopped = await read();
+        expect(stopped).toMatchObject({ status: "unavailable" });
+        expect(JSON.stringify(stopped)).not.toContain(secret);
+      }
+      foreground = [401];
+      history += `\nclaude\n Claude Code\n> round ${round}`;
+      drawn = redraws ? ` Claude Code\n> round ${round}` : undefined;
+      await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(transcript);
+      status = "blocked";
+      history += `\nAllow edit to round${round}.ts?\n 1. Yes\n 2. No`;
+      if (drawn !== undefined) drawn += `\nAllow edit to round${round}.ts?\n 1. Yes\n 2. No`;
+      await expect.poll(async () => ((await read()) as { text?: string }).text).toBe(waitingOnEdit);
+      const menu = await read();
+      expect(JSON.stringify(menu)).not.toContain(secret);
+      expect(JSON.stringify(menu)).not.toContain("owner-secret");
+    }
+    // Not one read of its screen or scrollback, in any of that.
+    expect(screenReads).toBe(0);
+  });
+
+  it("refuses a transcript read when Herdr's pane list, read again after it, names another session (#328)", async () => {
+    // The remote runner keeps a pane list for half its poll: the check after the read must not
+    // use that copy, or a session that ended during the read is served under the next one.
+    let session = "session-before";
+    let swap: (() => void) | undefined;
+    const run: HerdrFleetRun = async (args) => {
+      if (args[0] === "pane" && args[1] === "list")
+        return JSON.stringify({
+          result: {
+            panes: [
+              pane("w2:p1J", "term_abc", "idle", {
+                agent_session: { source: "herdr:claude", kind: "id", value: session },
+              }),
+            ],
+          },
+        });
+      if (args[0] === "pane" && args[1] === "process-info") return processInfo("w2:p1J", 400, [401]);
+      throw new Error(`unexpected ${args.join(" ")}`);
+    };
+    const jsonl = JSON.stringify({
+      type: "user",
+      uuid: "u1",
+      parentUuid: null,
+      message: { role: "user", content: "Earlier session" },
+    });
+    const transcriptHost: AgentTranscriptHost = {
+      id: "pc",
+      list: async () => [
+        { harness: "claude", path: `C:\\s\\${session}.jsonl`, size: Buffer.byteLength(jsonl), mtimeMs: 1 },
+      ],
+      readBytes: async (_path, from, count) => {
+        swap?.();
+        const bytes = Buffer.from(`${jsonl}\n`);
+        return { bytes: bytes.subarray(from, from + count), size: bytes.length };
+      },
+    };
+    const serve = createOperatorService({
+      deps: {
+        herdrAvailable: () => true,
+        fleets: { list: [pc], run: () => run, remoteWorkspace: async () => false },
+      },
+      shutdown: new AbortController(),
+      personas: { ready: async () => {} },
+      settingsStore: {},
+      terminals: new RuntimeTerminals({ defaultAvailable: () => false }),
+      liveSeats: [],
+      herdrWatches: { stoppedReason: async () => undefined },
+      herdrRunner: routeHerdrFleets(
+        localRunner(),
+        new Map([["pc", createRemoteHerdrRunner(pc, run, { pollMs: 60_000, transcriptHost })]]),
+      ),
+    } as unknown as CreateOperatorServiceContext);
+    swap = () => {
+      session = "session-after";
+    };
+    const swapped = await serve({ op: "terminal_read", schemaVersion: 1, terminalId: "pc/term_abc" });
+    expect(swapped).toMatchObject({
+      status: "unavailable",
+      detail: "The agent in that pane changed while it was read; read it again.",
+    });
+    expect(JSON.stringify(swapped)).not.toContain("Earlier session");
   });
 
   it("lists an agent the owner opened by hand on a PC, once, and reads it there over ssh", async () => {

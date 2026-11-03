@@ -3,7 +3,9 @@
 Status: Accepted, 2026-10-31. Amends
 [ADR 0301](0301-claude-reaches-the-fleet-through-a-narrow-connector.md).
 Amended 2026-11-02 for [#328](https://github.com/Volpestyle/clankie/issues/328):
-Claude Code and Codex are read from their own session transcript.
+Claude Code and Codex are read from their own session transcript. Amended
+2026-11-03: the prompt such an agent waits on comes from its session, not its
+screen, unless Clankie hired it.
 
 ## Context
 
@@ -87,15 +89,21 @@ agent showed.
   internal channel deliveries and image paths are left out. It is found as
   the fleet already finds a seat's transcript (the harness's own session
   files on this Mac, the confined transcript host over ssh on a linked PC),
-  and returned only if the same occupant, session included, holds the pane
-  after the read. The read carries the detail "Read from this agent's own
-  session transcript, not its screen." A menu or question the agent waits
-  on is drawn on its screen only, and `answer_prompt` needs its text, so
-  while Herdr reports the agent `blocked` the read adds, under "Waiting on
-  input, on its screen now:", the visible rows of its screen that the cut
-  above lets through (all of them for a hire read whole), never scrollback.
-  Every transcript read passes the screen through the cut, so its anchor is
-  set before a prompt is drawn. When no transcript can be read (no
+  and returned only if the same occupant (agent, session and process) holds
+  the pane after the read, by Herdr's pane list read again then, never a
+  copy a runner kept. The read carries the detail "Read from this agent's own
+  session transcript, not its screen." While Herdr reports the agent
+  `blocked`, the read says what it waits on. For an agent the owner started,
+  that is the tool calls it started and hasn't finished since its last
+  prompt, from the same transcript, under "Waiting on input, for this call in
+  its session:"; with none open (a menu of the harness's own, such as a model
+  picker) the read says a prompt waits whose text isn't shown. Its screen is
+  never read, not even through the cut above: after a suspend and `fg` an
+  inline TUI repaints only its own rows, so the owner's shell work can stand
+  on screen above its menu, written after any anchor, and no row says who
+  wrote it. For a hire read whole, whose pane holds only its agent's rows,
+  the visible rows of its screen are added instead, under "Waiting on input,
+  on its screen now:". When no transcript can be read (no
   session reported, no file yet, an unreachable host), the read is refused;
   the screen is never shown in its place. Other harnesses keep the screen
   read and its cut, and so do the Herdr desktop app's own terminals
@@ -124,9 +132,15 @@ agent showed.
 - For Claude Code and Codex in a Herdr pane, the transcript read (#328)
   closes the gaps below: the suspend case, a launch inside a longer command or
   multiline block, reprinted or reflowed lines and a hired session resumed by
-  hand, except while the agent waits on input: then the visible rows the
-  cut lets through are added, so shell text left visible below the anchor
-  after a suspend and `fg` can show there until the agent draws over it. A
+  hand, including while the agent waits on input. (As first merged, the
+  waiting rows came from the screen through the cut, and a suspend, shell
+  work and `fg` after an earlier read showed that shell work above the
+  menu; independent review found it, and the rows now come from the
+  session.) The cost: for an agent the owner started, a connected app sees
+  the call a permission prompt is about but not the prompt's own rows, and
+  a menu the harness doesn't record in its session can't be read; it can
+  still answer it, keying an option by its digit, with `expect` set to text
+  from the call (a command's first words) or the harness's own question. A
   Claude Code or Codex agent whose transcript can't be found is now
   unreadable instead of read from its screen, and when it isn't waiting on
   input a read shows only what it wrote to its session, not its live screen.

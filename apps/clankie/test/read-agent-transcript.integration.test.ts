@@ -13,7 +13,11 @@ import {
   type CreateOperatorServiceContext,
 } from "../src/captain/captain-operator-service.ts";
 import { RuntimeTerminals } from "../src/captain/runtime-terminals.ts";
-import { TRANSCRIPT_READ_DETAIL, TRANSCRIPT_READ_REFUSED } from "../src/captain/agent-transcript-read.ts";
+import {
+  TRANSCRIPT_READ_DETAIL,
+  TRANSCRIPT_READ_REFUSED,
+  TRANSCRIPT_WAITING_CALL_HEADING,
+} from "../src/captain/agent-transcript-read.ts";
 
 const exec = promisify(execFile);
 
@@ -67,6 +71,24 @@ process.on("SIGCONT", () => {
   // The same process and session report again, as the harness's next hook would.
   report("idle");
   process.stdout.write("${harness} screen: back\\n");
+});
+// Asked for a permission it then waits on: the call goes in its session and its permission menu
+// is drawn inline below whatever the pane already shows, shaped as the harness draws it, so
+// Herdr's own screen detection reports it blocked.
+process.on("SIGUSR1", () => {
+  if (path)
+    appendFileSync(path, JSON.stringify(${
+      harness === "claude"
+        ? `{ type: "assistant", uuid: "a3", parentUuid: last, message: { role: "assistant",
+          content: [{ type: "tool_use", id: "call-blocked", name: "Edit", input: { file_path: "blocked.ts" } }] } }`
+        : `{ timestamp: new Date().toISOString(), type: "response_item", payload: { type: "function_call",
+          name: "apply_patch", arguments: JSON.stringify({ file_path: "blocked.ts" }), call_id: "call-blocked" } }`
+    }) + "\\n");
+  process.stdout.write(${
+    harness === "claude"
+      ? `"────────────────────────────────\\n Edit file\\n\\n   blocked.ts\\n\\n Do you want to proceed?\\n ❯ 1. Yes\\n   2. No\\n\\n Esc to cancel\\n"`
+      : `"\\n  Would you like to make the following edits?\\n\\n  blocked.ts\\n\\n› 1. Yes, proceed (y)\\n  2. No (esc)\\n\\n  Press enter to confirm or esc to cancel\\n"`
+  });
 });
 setInterval(() => {}, 1 << 30);
 `;
@@ -243,6 +265,33 @@ test("Claude Code and Codex panes read their own transcript, never the owner's s
       expect(answer).toMatchObject({ status: "read", detail: TRANSCRIPT_READ_DETAIL });
       expect(JSON.stringify(answer)).not.toContain(fgSecret);
       expect(JSON.stringify(answer)).not.toContain(secret);
+    }
+
+    // Now it waits on a permission, its menu painted below the shell work still on its screen,
+    // as an inline TUI's is after `fg`. The read names the call it waits on, from its session,
+    // and still none of that shell work.
+    const { shellPid, foreground } = await runner.paneShell!(paneId);
+    process.kill(foreground.find((candidate) => candidate.pid !== shellPid)!.pid, "SIGUSR1");
+    await expect.poll(async () => (await runner.get(paneId)).status, { timeout: 10_000 }).toBe("blocked");
+    const visible = await runner.readPane!(paneId, "visible", "text");
+    expect(visible).toContain(fgSecret);
+    expect(visible).toContain("blocked.ts");
+    for (const id of [terminalId, `pc/${terminalId}`]) {
+      let answer: unknown;
+      await expect
+        .poll(
+          async () => {
+            answer = await read(id);
+            return JSON.stringify(answer);
+          },
+          { timeout: 10_000 },
+        )
+        .toContain("blocked.ts");
+      const text = (answer as { text: string }).text;
+      expect(text).toContain(`\n\n${TRANSCRIPT_WAITING_CALL_HEADING}\n· `);
+      expect(text).not.toContain(fgSecret);
+      expect(text).not.toContain(secret);
+      expect(text).not.toContain("proceed");
     }
   }
 

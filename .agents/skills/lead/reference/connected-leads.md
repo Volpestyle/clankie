@@ -66,10 +66,20 @@ it; none takes precedence over another.
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
-  don't watch another lead's worker. `read_agent` shows a hired worker's whole
-  screen even when it has gone quiet (waiting on CI, say), so read it to tell
-  waiting from stuck or done; only an agent the owner started by hand comes back
-  empty with a note until it prints again.
+  don't watch another lead's worker. `read_agent` reads a Claude Code or Codex
+  worker from its own session transcript (prompts marked `›`, its replies, a `·`
+  line per tool call), never its screen, so it shows what the worker said even
+  once it has gone quiet (waiting on CI, say); read it to tell waiting from stuck
+  or done. While a worker you hired waits on a menu or question, the read adds
+  its screen's rows under "Waiting on input, on its screen now:", and that is
+  the text `answer_prompt`'s `expect` takes. An agent the owner started is never
+  read from its screen: the read adds the tool call it waits on, from its
+  session, under "Waiting on input, for this call in its session:", and
+  `expect` takes text the prompt shows about it (a command's first words, or the
+  harness's own question). A Claude Code or
+  Codex worker whose session can't be read is refused, not shown from its screen.
+  Other harnesses are read from their screen: a hire's whole, and an agent the
+  owner started by hand comes back empty with a note until it prints again.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).
