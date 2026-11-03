@@ -536,9 +536,7 @@ nativeIt(
       }
       await writeFile(f.receipts, adoptedBytes);
       // A finished worker sits idle; the census requires it.
-      await expect
-        .poll(async () => (await f.runner.get(paneId)).status, { timeout: 15_000 })
-        .toBe("idle");
+      await expect.poll(async () => (await f.runner.get(paneId)).status, { timeout: 15_000 }).toBe("idle");
       store = open();
       try {
         const guard = await store.retirementGuard(await f.runner.get(paneId));
