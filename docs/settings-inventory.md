@@ -148,15 +148,16 @@ and render original Clankie. This does not change World/chat lead art.
 
 ### 6. Worker accounts
 
-| Setting                                                                                                         | API                                                      | CLI                       | TUI                        | App                             | Dash | Tier                                           |
-| --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ------------------------- | -------------------------- | ------------------------------- | ---- | ---------------------------------------------- |
-| Accounts per machine (identity, plan, headroom, usable), read                                                   | `GET /v1/worker-accounts?fleet=` (relayed; 669b2946)     | ✓ `accounts workers`      | ✓ `/accounts` → by machine | ✓ Worker accounts, per computer | —    | Common                                         |
-| Hold or release an account, `workerAccountHolds`                                                                | `GET`/`POST /v1/worker-accounts/holds` (revision-fenced) | ✓ `accounts hold/release` | ✓ `/accounts`              | ✓ Set aside / Use again         | —    | Common                                         |
-| Sign a coding agent in (Take Control)                                                                           | `/v1/harness-logins/*`                                   | ✓                         | ✓                          | ✓ Coding agents                 | —    | Common                                         |
-| Usage per account (windows, resets, source, age), read                                                          | `GET /v1/usage` (relayed)                                | ✓ `usage`                 | ✓ `/usage`                 | ✓ Usage                         | —    | Common                                         |
-| Show usage meters in the desktop overlay (`usage.overlay`, default on)                                          | `GET`/`POST /v1/usage/settings` (revision-fenced)        | ✓ `usage overlay`         | ✓ `/usage`                 | ✓ Usage; overlay                | —    | Common                                         |
-| Warn the lead when an account will run out (`usage.runOutWarning`, `usage.runOutWarningHours`; default on, 12h) | `GET`/`POST /v1/usage/settings` (revision-fenced)        | ✓ `usage warning`         | ✓ `/usage`                 | Pending (VUH-1961 views)        | —    | Advanced                                       |
-| Register Claude profiles and Codex homes (`claudeAccounts`, `codexAccounts`)                                    | none                                                     | file                      | file                       | —                               | —    | Single: local filesystem paths on that machine |
+| Setting                                                                                                         | API                                                                         | CLI                       | TUI                        | App                             | Dash | Tier                                           |
+| --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------- | -------------------------- | ------------------------------- | ---- | ---------------------------------------------- |
+| Accounts per machine (identity, plan, headroom, usable), read                                                   | `GET /v1/worker-accounts?fleet=` (relayed; 669b2946)                        | ✓ `accounts workers`      | ✓ `/accounts` → by machine | ✓ Worker accounts, per computer | —    | Common                                         |
+| Hold or release an account, `workerAccountHolds`                                                                | `GET`/`POST /v1/worker-accounts/holds` (revision-fenced)                    | ✓ `accounts hold/release` | ✓ `/accounts`              | ✓ Set aside / Use again         | —    | Common                                         |
+| Usage budget per account, stop hires at N% (`workerAccountBudgets`)                                             | `GET`/`POST /v1/worker-accounts/budgets` (revision-fenced; not relayed yet) | ✓ `accounts budget`       | —                          | Pending (Common, #603)          | —    | Common                                         |
+| Sign a coding agent in (Take Control)                                                                           | `/v1/harness-logins/*`                                                      | ✓                         | ✓                          | ✓ Coding agents                 | —    | Common                                         |
+| Usage per account (windows, resets, source, age), read                                                          | `GET /v1/usage` (relayed)                                                   | ✓ `usage`                 | ✓ `/usage`                 | ✓ Usage                         | —    | Common                                         |
+| Show usage meters in the desktop overlay (`usage.overlay`, default on)                                          | `GET`/`POST /v1/usage/settings` (revision-fenced)                           | ✓ `usage overlay`         | ✓ `/usage`                 | ✓ Usage; overlay                | —    | Common                                         |
+| Warn the lead when an account will run out (`usage.runOutWarning`, `usage.runOutWarningHours`; default on, 12h) | `GET`/`POST /v1/usage/settings` (revision-fenced)                           | ✓ `usage warning`         | ✓ `/usage`                 | Pending (VUH-1961 views)        | —    | Advanced                                       |
+| Register Claude profiles and Codex homes (`claudeAccounts`, `codexAccounts`)                                    | none                                                                        | file                      | file                       | —                               | —    | Single: local filesystem paths on that machine |
 
 ### 7. Connections
 
@@ -235,9 +236,10 @@ Historical follow-ups: Discord ownership and room-skill controls in **clankie-ap
    - No API writes `fleet.hire`; only the local CLI and TUI can.
    - The app's hire page also defaults the harness to `pi` instead of "no
      preference".
-3. **Worker account holds.**
-   - No API holds or releases an account, and `GET /v1/worker-accounts` is not
-     relayed, so the app cannot even read it.
+3. **Worker account holds and budgets.**
+   - Holds have a revision-fenced API, relayed to Take Control devices.
+   - Usage budgets (#603) have an API and CLI; the route is not relayed yet, so
+     the app's Common-tier slider waits on that.
 4. **Host availability core gap resolved.**
    - Revision-fenced host write APIs and device forwarding now exist for
      `host.keepAwake` and `host.autoUpdate`, with shared protocol wording.

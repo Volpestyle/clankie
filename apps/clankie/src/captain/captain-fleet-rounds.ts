@@ -24,7 +24,7 @@ import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { SeatIssueKeeper } from "./seat-issue-status.ts";
 import { createWorkerAccountsReader } from "./harness-accounts.ts";
-import { AccountUsageNotices } from "./account-allocation.ts";
+import { AccountBudgetNotices, AccountUsageNotices, type BudgetNotice } from "./account-allocation.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
 
 import type { RefreshFleet, WakeConversation } from "./captain-context.ts";
@@ -213,6 +213,51 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
       usageNoticeOwners.set(ownerKey, owner);
     }
   };
+  // Each lead hears an account's usage budget once per stage and window (#603).
+  const budgetNotices = new Map<string, AccountBudgetNotices>();
+  const budgetNoticeOwners = new Map<string, ConversationOwner>();
+  const checkBudgets = async (
+    owners: ReadonlyMap<string, ConversationOwner>,
+    seats: readonly OperatorFleetSeat[],
+  ) => {
+    const budgets = (await settings()).workerAccountBudgets ?? [];
+    if (!budgets.length || shutdown.signal.aborted) return;
+    const machines = [...new Set(budgets.map((budget) => budget.machine))];
+    const reports = (
+      await Promise.all(
+        machines.map((machine) =>
+          // allow-swallowed-rejection -- an unreadable machine keeps its last notices; the next round reads it again.
+          readWorkerAccounts(machine === "local" ? undefined : machine, ["claude", "codex"]).catch(
+            () => undefined,
+          ),
+        ),
+      )
+    ).filter((report) => report !== undefined);
+    for (const [ownerKey, owner] of owners) {
+      const notices = budgetNotices.get(ownerKey) ?? new AccountBudgetNotices();
+      budgetNotices.set(ownerKey, notices);
+      const fresh = reports.flatMap((report) => notices.pending(report));
+      if (!fresh.length || !(await validateConversationOwner(owner))) continue;
+      const led = seats.filter((seat) => {
+        const lead = seatLeadOwners.get(seat)?.owner;
+        return lead !== undefined && JSON.stringify(lead) === ownerKey;
+      });
+      const text = fresh.map((notice) => budgetNoticeText(notice, led)).join("\n\n");
+      const accepted = await wakeConversation(
+        owner,
+        text,
+        async () => {
+          if (shutdown.signal.aborted) throw new Error("Usage budget notice stopped");
+        },
+        "machine",
+        false,
+        false,
+      );
+      if (!accepted) continue;
+      notices.delivered(fresh);
+      budgetNoticeOwners.set(ownerKey, owner);
+    }
+  };
   const stopFleetRounds = startFleetRounds(async () => {
     if (shutdown.signal.aborted) return;
     const seats = await refreshFleet();
@@ -248,6 +293,11 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
     if (owners.size)
       await warnRunOuts(owners).catch((error: unknown) => {
         if (!shutdown.signal.aborted) console.warn("Usage warning unavailable", String(error));
+      });
+    const budgetOwners = new Map([...budgetNoticeOwners, ...owners]);
+    if (budgetOwners.size)
+      await checkBudgets(budgetOwners, seats).catch((error: unknown) => {
+        if (!shutdown.signal.aborted) console.warn("Usage budget check unavailable", String(error));
       });
     for (const [ownerKey, owner] of owners) {
       if (pendingFleetRounds.has(ownerKey)) continue;
@@ -322,4 +372,19 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
   }, options.fleetRoundIntervalMs);
 
   return { ledSeats, observeSeatUsageLimit, efficiencyActions, stopFleetRounds };
+}
+
+/** A budget notice with the seats this lead runs on that account, by seat id and title. */
+export function budgetNoticeText(notice: BudgetNotice, led: readonly OperatorFleetSeat[]): string {
+  if (notice.stage !== "reached") return notice.text;
+  const on = led.filter(
+    (seat) =>
+      (seat.fleet ?? "local") === notice.machine &&
+      seat.harness === notice.harness &&
+      seat.account !== undefined &&
+      notice.names.includes(seat.account.label),
+  );
+  return on.length
+    ? `${notice.text}\nYour seats on it: ${on.map((seat) => `${seat.seatId} (${seat.title.slice(0, 80)})`).join("; ")}.`
+    : `${notice.text}\nNone of your seats run on it.`;
 }
