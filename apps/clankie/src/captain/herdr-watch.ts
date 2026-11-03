@@ -2640,6 +2640,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
   }
+  /** The project a seat's current occupant was hired into, from the hire ledger; display only. */
+  public hiredProject(seatId: string, occupantId: string): string | undefined {
+    return this.projectHires.hiredProject(seatId, occupantId);
+  }
   public projectHireMembershipCandidate(fleet: string, pane: string) {
     const address = projectHirePane(fleet, pane);
     if (address === undefined) return { state: "none" as const };

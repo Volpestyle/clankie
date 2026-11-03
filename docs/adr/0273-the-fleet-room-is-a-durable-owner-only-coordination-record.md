@@ -167,3 +167,17 @@ coordination text, so the board is one more kind kept here, not a second store.
   journal beside the room, and `app_notes` reads join them onto each note. A
   room entry is unchanged: `to` stays null, so the owner's app keeps parsing
   pages it already knows.
+
+## Amendment: a worker's project (2026-11-03)
+
+The owner's app filters the room by project, and a worker's persona or live
+seat can't place lines from workers who have since finished. So when the host
+records a line, a worker party also carries `projectId`: the project the
+host's own hire ledger recorded for that exact seat and native occupant. It is
+never read from the text and never guessed for a reused seat. A line from
+before this change, or from a worker Clankie didn't hire, has none. It is for
+display only and grants nothing.
+
+The owner's app parses pages strictly, so the field is opt-in like `app_note`:
+a `fleet_room` read gets `projectId` only when it sends `projects: true`.
+Without that, every page is what it was before.

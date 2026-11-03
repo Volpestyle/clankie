@@ -1448,11 +1448,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         ? undefined
         : personas.all(liveSeats, () => undefined).find((persona) => persona.personaId === seat.personaId)
             ?.name;
+    const projectId = seat === undefined ? undefined : herdrWatches.hiredProject(seatId, seat.occupantId);
     return {
       kind: "worker",
       label: (name ?? seat?.title ?? seatId).trim().slice(0, 120) || seatId,
       seatId,
       ...(seat === undefined ? {} : { personaId: seat.personaId }),
+      ...(projectId === undefined ? {} : { projectId }),
     };
   };
   const recordLeadVisit = (seatId: string, kind: "message" | "close", text?: string) => {

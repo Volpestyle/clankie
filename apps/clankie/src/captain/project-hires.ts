@@ -146,6 +146,12 @@ export class ProjectHires {
           ))
     )?.request.title;
   }
+  /** The project this exact seat and native occupant was hired into, for display only. */
+  public hiredProject(seat: string, occupantId: string): string | undefined {
+    return this.read().allocations.findLast(
+      (entry) => entry.started && entry.seat === seat && entry.occupantId === occupantId,
+    )?.projectId;
+  }
   /**
    * Every roster projection reads this ledger once per seat. Parse a given
    * file version once: writes replace the file by rename, so its identity,

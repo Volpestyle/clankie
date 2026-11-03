@@ -25,6 +25,18 @@ function appNote(entry: FleetRoomEntry): AppNote {
   return { sequence: entry.sequence, at: entry.at, author: entry.from.label, text: entry.text };
 }
 
+/** A page for a reader that didn't ask for projects carries none, as before they existed. */
+function withoutProjects(entry: FleetRoomEntry): FleetRoomEntry {
+  const strip = <T extends FleetRoomEntry["to"]>(party: T): T => {
+    if (party === null || party.projectId === undefined) return party;
+    const { projectId: _projectId, ...rest } = party;
+    return rest as T;
+  };
+  const from = strip(entry.from);
+  const to = strip(entry.to);
+  return from === entry.from && to === entry.to ? entry : { ...entry, from, to };
+}
+
 /** Retention (VUH-2184): the newest 2000 entries, and none older than 14 days. */
 const FLEET_ROOM_RETAINED = 2000;
 const FLEET_ROOM_RETENTION_MS = 14 * 24 * 3_600_000;
@@ -188,13 +200,18 @@ export class FleetRoomJournal {
       const entries = this.visible(include)
         .filter((entry) => entry.sequence > after)
         .slice(0, request.limit);
-      return this.page(entries, after, include);
+      return this.page(entries, after, include, request.projects === true);
     }
     const before = cursor ?? Number.POSITIVE_INFINITY;
     const entries = this.visible(include)
       .filter((entry) => entry.sequence < before)
       .slice(-request.limit);
-    return this.page(entries, entries.at(-1)?.sequence ?? Math.min(before - 1, this.sequence), include);
+    return this.page(
+      entries,
+      entries.at(-1)?.sequence ?? Math.min(before - 1, this.sequence),
+      include,
+      request.projects === true,
+    );
   }
 
   /**
@@ -258,12 +275,13 @@ export class FleetRoomJournal {
     entries: FleetRoomEntry[],
     newerFrom: number,
     include: readonly FleetRoomKind[],
+    projects: boolean,
   ): FleetRoomResult {
     const first = entries[0]?.sequence;
     const hasOlder = first !== undefined && this.visible(include).some((entry) => entry.sequence < first);
     return {
       outcome: "ready",
-      entries,
+      entries: projects ? entries : entries.map(withoutProjects),
       older: hasOlder ? String(first) : null,
       newer: String(Math.max(0, entries.at(-1)?.sequence ?? newerFrom)),
       recordingSince: this.recordingSince,
