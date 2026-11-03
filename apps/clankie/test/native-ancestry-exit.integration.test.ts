@@ -24,13 +24,18 @@ import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 const native = process.platform === "darwin" && process.env.FLEET_PROOF_NATIVE_TEST === "1";
 const check = it.skipIf(!native);
 const exec = promisify(execFile);
-const directory = resolve(".local/vuh-1945/ancestry-exit");
+// Paths come from this file, not the working directory, so the file runs from anywhere.
+const checkout = resolve(import.meta.dirname, "../../..");
+const directory = resolve(checkout, ".local/vuh-1945/ancestry-exit");
 const fixture = resolve(directory, "scheduled-exit");
 const prefix = "Native process proof diagnostic: ";
 type Facts = NonNullable<Awaited<ReturnType<typeof observeSocketProcess>>>;
 
 beforeAll(async () => {
   if (!native) return;
+  // The live-claimant cases read through the checkout's native helper; build it (a no-op
+  // when current) so a fresh or stale checkout cannot read as a failed proof.
+  await exec(process.execPath, [resolve(checkout, "scripts/build-fleet-proof.mjs")], { timeout: 120_000 });
   await mkdir(directory, { recursive: true });
   await writeFile(`${fixture}.target`, "");
   await exec("cc", [
@@ -41,7 +46,7 @@ beforeAll(async () => {
     "-Werror",
     "-mmacosx-version-min=14.0",
     "-lproc",
-    "apps/clankie/test/helpers/native-proof-churn/ancestry-exit.c",
+    resolve(import.meta.dirname, "helpers/native-proof-churn/ancestry-exit.c"),
     "-o",
     fixture,
   ]);
