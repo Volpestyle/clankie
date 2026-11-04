@@ -155,3 +155,14 @@ completion and cancellation, not live latency or perceptual quality.
   nothing to say.
 - Current providers, settings, credentials, readiness, and diagnostics belong in
   the [Discord bridge operating guide](../../apps/discord-bridge/README.md).
+
+## Revisit when
+
+- A realtime provider offers designed or cloned voices natively, removing the
+  reason for a separate mouth.
+- The owner's before/after probe measures continuity or first-audio latency for
+  short V4 openings; the 40-character cutoff is not a measured threshold.
+- A real provider canary shows `eleven_v4_turbo` unavailable on the
+  multi-context WebSocket, or the multi-context reference stops lagging the
+  dialogue guide.
+- A provider documents immediate generation cancellation on `close_context`.

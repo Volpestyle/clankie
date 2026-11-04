@@ -347,3 +347,14 @@ room hears.
 - Current model names, configuration, rates, readiness, live-proof ceremony,
   and receipt fields belong in the
   [Discord bridge operating guide](../../apps/discord-bridge/README.md).
+
+## Revisit when
+
+- James's live call shows the 700 ms talk-over yield misfiring, or speaker echo
+  triggering it; this record calls that threshold untested live.
+- xAI support for `response.cancel` is verified, or Vox gains a TTS duck or
+  pause command.
+- The output backstops (800 tokens for native audio, 200 for text, since the
+  2026-10-04 amendment) or the 45-second PCM cap cut off ordinary turns.
+- Three-human live evidence for ADR 0045's gate contradicts the synthetic
+  multi-speaker checks.

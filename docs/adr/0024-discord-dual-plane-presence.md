@@ -96,3 +96,15 @@ are linked above and in the
 - Current setup and live-proof commands belong in the
   [bot bridge](../../apps/discord-bridge/README.md) and
   [user-session](../../apps/discord-user-session/README.md) operating guides.
+
+## Evidence and limits
+
+This record links no measurement. The split rests on Discord's platform rules at
+ratification: Go Live is exposed only to a normal-user session, and automating
+a normal user account violates Discord's terms.
+
+## Revisit when
+
+- Discord lets bot accounts watch screen shares or publish Go Live video, which
+  removes the lab body's reason to exist.
+- Discord's terms or enforcement for user-account automation change.

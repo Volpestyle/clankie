@@ -239,3 +239,17 @@ occupant. Sessions without an exact identity retain discovery. This is display
 evidence only: sends keep their fresh file/process checks, exact recipient
 fences and authorization. The five-second display deadline and explicit stale
 warnings remain; they are not extended to hide slow observations.
+
+## Evidence and limits
+
+The 2026-10-17 amendment rests on a live 52-seat response that failed the
+48-seat bound, and on recorded projections of 20–24 seconds with about 17
+seconds spent discovering input capabilities. The record links no retained
+capture. The 768-seat bound matches the terminal catalog's scale rather than a
+measured limit.
+
+## Revisit when
+
+- A live roster approaches 768 seats.
+- Projection time stays near the recorded 20–24 seconds after exact-identity
+  reuse, or discovery still dominates it for sessions without exact identity.

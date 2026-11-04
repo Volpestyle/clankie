@@ -147,3 +147,20 @@ not see a service that was alive but answered nothing.
 - **The login agent names a stable Node.** A checkout's agent records a PATH
   link to the running Node instead of the versioned binary an upgrade deletes,
   and `doctor` flags an agent whose Node is missing or pinned.
+
+## Evidence and limits
+
+The amendments rest on observations from the owner's Mac, and the record links
+no archive of them: 264 earlier `Exit status 1` endings in the service log
+before the 2026-10-06 crash, and on 2026-10-17 (VUH-2393) a 2.4 GB
+`clankie.log`, with each service running under a `pnpm → sh → tsx → node` chain
+holding about 460 MB of wrappers.
+
+## Revisit when
+
+- The 30-second detection delay or the three-minute unhealthy window lets an
+  outage run until the owner notices it first.
+- Healthy services are restarted as `unhealthy` under load, or give-ups hit
+  services that would have recovered.
+- A crash report needs more log tail than 64 MiB rotation keeps, or rotated
+  logs still fill the disk.

@@ -73,3 +73,19 @@ bands are still measured redundantly — `layoutBandRows` and `maxTranscriptRows
 between them render the banner, status, typeahead, and editor about eight times
 per frame — but that is 0.28 ms and constant in session length, so it stays as it
 is rather than trading legible layout code for a rounding error.
+
+## Evidence and limits
+
+The table in Context is the retained measurement: `bench/transcript-render.ts`
+at width 120, from 1.99 ms before and 0.01 ms after at 10 blocks to 99.87 ms and
+0.05 ms at 500. The chrome bands' redundant measuring is put at 0.28 ms per
+frame.
+
+## Revisit when
+
+- The bench shows frame cost growing with scrollback length again, for example
+  a block type that rebuilds its array on every call.
+- Chrome-band measuring stops being constant in session length or grows well
+  past 0.28 ms.
+- Block heights become known without rendering, which makes windowing to the
+  visible rows cheap.

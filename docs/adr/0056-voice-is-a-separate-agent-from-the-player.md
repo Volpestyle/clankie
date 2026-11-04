@@ -124,3 +124,19 @@ one that is fenced.
   decides what is worth saying.
 - The volition rate stays reported beside the progress metrics, so this decision
   is falsifiable by the same measurement that produced it.
+
+## Evidence and limits
+
+The benchmark table in Context is the evidence: no speech in 12 or 16 turns
+for each single-call variant, 1 of 16 with prompt discouragement removed, and
+7 of 16 wanted with 2 spoken once Voice was its own agent. Follow-through was
+18% for the baseline and 57% for the split run, one run each, so it is an
+observation rather than a claim. The record links no retained run artifacts.
+[ADR 0049](0049-free-play-agency-and-non-deterministic-evidence.md) records
+the same near-silence across repeated runs.
+
+## Revisit when
+
+- A player model with an optional `speak` field voices wanted remarks at a rate
+  comparable to the split agent on the same benchmark.
+- The volition metrics show Voice skipped or silent on nearly every turn.
