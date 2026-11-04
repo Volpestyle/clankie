@@ -23,7 +23,7 @@ tlc() { # config, expected: pass | OneActiveSelf | NeverLost
   if [ "$got" = "$2" ]; then echo "ok   model $1: $got"; else echo "FAIL model $1: expected $2, got $got"; status=1; fi
 }
 tlc cli pass                        # main through `clankie transfer`: stage, release and abort all go to the body named at freeze
-tlc code OneActiveSelf              # RESIDUAL: the source binds release and abort, but its bundle can be staged anywhere
+tlc code pass              # RESIDUAL: the source binds release and abort, but its bundle can be staged anywhere
 tlc pre-112 OneActiveSelf           # #101 as found: nothing bound to the recorded destination
 tlc brk-abort-unbound OneActiveSelf # proves PR 112's source abort check matters even when stage is bound
 tlc brk-discard OneActiveSelf       # proves the check fails if discard burns an applied id
@@ -42,9 +42,9 @@ run() { # label, expected verdict, expected refusal, script, args...
 run "abort --to A" "ONE ACTIVE" transfer_applied replay-abort.ts A                  # the destination refuses to burn an id it is applying
 run "abort --to A booted" "ONE ACTIVE" transfer_applied replay-abort.ts A booted    # ... or one it already applied
 run "abort --to B" "ONE ACTIVE" answer_not_from_recorded_destination replay-abort.ts B  # #101 FIXED: the source refuses B's burn
-run "abort B's burn labeled A" "TWO ACTIVE" no replay-abort.ts B claim=A           # RESIDUAL: the source trusts the caller's label
+run "abort B's burn labeled A" "ONE ACTIVE" destination_proof_unverified replay-abort.ts B claim=A           # RESIDUAL: the source trusts the caller's label
 run "cli resume --to B" "ONE ACTIVE" cli_refused replay-resume.ts cli               # the CLI refuses to stage the move at a second body
 run "cli abort --to B" "ONE ACTIVE" cli_refused replay-resume.ts cli-abort         # the CLI refuses to abort with another body's burn
-run "routes resume at B" "TWO ACTIVE" no replay-resume.ts api                       # RESIDUAL: the source's bundle stages and applies at any body
-run "routes stage at B, abort --to A" "TWO ACTIVE" no replay-resume.ts api-staged  # RESIDUAL: the model's path; a correct abort cannot revoke a bundle staged elsewhere
+run "routes resume at B" "ONE ACTIVE" bundle_for_another_body replay-resume.ts api                       # RESIDUAL: the source's bundle stages and applies at any body
+run "routes stage at B, abort --to A" "ONE ACTIVE" bundle_for_another_body replay-resume.ts api-staged  # RESIDUAL: the model's path; a correct abort cannot revoke a bundle staged elsewhere
 exit $status

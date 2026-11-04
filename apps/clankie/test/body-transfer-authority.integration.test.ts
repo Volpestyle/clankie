@@ -36,8 +36,16 @@ const ready = async (commit: () => Promise<void>) => {
 it("keeps the source frozen when a body it didn't freeze for answers", async () => {
   const source = await body("s");
   const bystander = await body("b");
+  const destination = await body("a");
   const transferId = randomUUID();
-  await source.freeze({ transferId, destination: "https://a.example" }, ready);
+  await source.freeze(
+    {
+      transferId,
+      destination: "https://a.example",
+      destinationIdentity: destination.authority({ transfers: true }).bodyIdentity,
+    },
+    ready,
+  );
 
   const discarded = await bystander.discard({ transferId });
   expect(discarded.transfers?.[transferId]?.outcome).toBe("burned");
@@ -54,7 +62,6 @@ it("keeps the source frozen when a body it didn't freeze for answers", async () 
   expect(source.authority()).toMatchObject({ state: "frozen", transferId });
 
   // The recorded destination burning the id is still the way back.
-  const destination = await body("a");
   const burned = await destination.discard({ transferId });
   await expect(
     source.abort({ transferId, destination: "https://a.example", discarded: burned }),

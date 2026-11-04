@@ -32,7 +32,14 @@ const ready = async (commit: () => Promise<void>) => (await commit(), "ready" as
 const t = randomUUID();
 
 const S = body(dS, "S");
-await S.freeze({ transferId: t, destination: "A" }, ready);
+await S.freeze(
+  {
+    transferId: t,
+    destination: "A",
+    destinationIdentity: body(dA, "A").authority({ transfers: true }).bodyIdentity,
+  },
+  ready,
+);
 const S2 = body(dS, "S"); // the source restarts dormant
 await S2.boot();
 const A = body(dA, "A");

@@ -80,7 +80,14 @@ const t = randomUUID();
 
 // S freezes for A and restarts dormant.
 await mount("S");
-await live.S.freeze({ transferId: t, destination: url.A }, ready);
+await live.S.freeze(
+  {
+    transferId: t,
+    destination: url.A,
+    destinationIdentity: body("A").authority({ transfers: true }).bodyIdentity,
+  },
+  ready,
+);
 await mount("S");
 // A stages and applies over its routes; its reply is lost to the restart, so it stays frozen/applying.
 await mount("A");

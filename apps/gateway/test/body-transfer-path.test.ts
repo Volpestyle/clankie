@@ -238,7 +238,13 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
 
     const transferId = "5d6c1b0e-6a52-4c6c-9f4e-2b8d1f6c3a10";
     expect(
-      (await macPost("/v1/body-transfer/freeze", { transferId, destination: `hosted:${hostId}` })).status,
+      (
+        await macPost("/v1/body-transfer/freeze", {
+          transferId,
+          destination: `hosted:${hostId}`,
+          destinationIdentity: (await status()).bodyIdentity,
+        })
+      ).status,
     ).toBe(200);
     const bundle: Buffer[] = [];
     let expected: { size: number; sha256: string } | undefined;
@@ -274,7 +280,7 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       sha256: expected!.sha256,
     });
     expect(staged.status, await staged.clone().text()).toBe(200);
-    expect(await staged.json()).toMatchObject({ transferId, outcome: "staged", files: 3 });
+    expect(await staged.json()).toMatchObject({ transferId, outcome: "staged", files: 4 });
     // A supervising device cannot apply it.
     expect((await supervisor.fetch("POST", "/v1/body-transfer/apply", { transferId })).status).toBe(403);
     // The restart the apply starts can cut its reply; the body's status decides, as in the CLI.
@@ -339,6 +345,7 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       .fetch("POST", "/v1/body-transfer/freeze", {
         transferId: backId,
         destination: "local:owner-mac",
+        destinationIdentity: mac.authority({ transfers: true }).bodyIdentity,
         destinationMachineId: "join-owner-mac",
       })
       .then(
@@ -428,7 +435,7 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
     expect((await macDoorPost("/v1/body-transfer/apply", { transferId: backId })).status).toBe(200);
     for (let attempt = 0; attempt < 100 && macBody.dormant(); attempt++)
       await new Promise((resolve) => setTimeout(resolve, 20));
-    const macActive = macBody.authority();
+    const macActive = macBody.authority({ transfers: true });
     expect(macActive).toMatchObject({
       state: "active",
       dormant: false,

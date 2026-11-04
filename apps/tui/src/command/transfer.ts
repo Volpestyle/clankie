@@ -214,6 +214,7 @@ export async function runTransferCommand(
         await post(source, BODY_TRANSFER_FREEZE_PATH, {
           transferId,
           destination: destination.label,
+          destinationIdentity: to.bodyIdentity,
           ...(values["destination-machine"] === undefined
             ? {}
             : { destinationMachineId: values["destination-machine"] }),
