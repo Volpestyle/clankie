@@ -628,13 +628,22 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   );
   app.route(
     "/",
-    createHarnessLoginRoutes(dependencies.harnessLogins, authorizeOwnerSecrets, async (request) => {
-      const operator = await authenticateOperator(request, dependencies);
-      if (operator && operator !== "unavailable") return `operator:${operator.operatorId}`;
-      const device = await authenticateDevice(request);
-      if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return undefined;
-      return `device:${device.deviceId}`;
-    }),
+    createHarnessLoginRoutes(
+      dependencies.harnessLogins,
+      authorizeOwnerSecrets,
+      async (request) => {
+        const operator = await authenticateOperator(request, dependencies);
+        if (operator && operator !== "unavailable") return `operator:${operator.operatorId}`;
+        const device = await authenticateDevice(request);
+        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+          return undefined;
+        return `device:${device.deviceId}`;
+      },
+      {
+        installs: dependencies.harnessInstalls,
+        machineSetup: async () => (await settingsSource.load()).autonomy.fleet.machineSetup,
+      },
+    ),
   );
   const readCaptainReadiness = async () => {
     if (dependencies.captain.operatorSeatReady?.()) return { ready: true } as const;

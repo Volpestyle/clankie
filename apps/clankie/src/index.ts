@@ -275,6 +275,7 @@ import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
+import { HarnessInstalls } from "./harness-installs.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import {
   harnessAccountIdentities,
@@ -1266,6 +1267,8 @@ const harnessLogins = new HarnessSignIns({
       key,
     ),
 });
+// The owner's app installs a missing harness with its vendor's installer (#737).
+const harnessInstalls = new HarnessInstalls({ env: process.env, logins: harnessLogins });
 const scheduledUpdateEnabled = async () => (await settingsStore.load()).host.autoUpdate;
 const scheduledUpdateIdle = bodyIdleCheck({
   activity: bodyActivity,
@@ -2581,6 +2584,7 @@ const clankie = await createClankieApp({
   },
   modelDeviceSetup: { platform: process.platform, hosted: false },
   harnessLogins,
+  harnessInstalls,
   modelKeys,
   captainSeats,
   agentSessions,
@@ -2879,6 +2883,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
   harnessLogins.close();
+  harnessInstalls.close();
   fleetLinks.close();
   const closeFleetLinkConnections = drainHttpServer(fleetLinkServer);
   const bodyRequestsStopped = clankie.stopBodyRequests();

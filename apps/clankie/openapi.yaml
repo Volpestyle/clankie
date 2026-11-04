@@ -1340,6 +1340,133 @@ paths:
         "403": { description: forbidden — terminalControl required }
         "413": { description: malformed — body exceeds 16 KiB }
         "503": { description: unavailable }
+  /v1/harness-logins/install:
+    get:
+      tags: [Operator]
+      operationId: readHarnessInstall
+      summary: Read the latest worker harness install, running or finished
+      description: |
+        Same authority as harness sign-in: the operator, or a device holding Take
+        Control. Progress is the installer's latest plain-text output. No-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: The latest install
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  error:
+                    type: string
+                    enum:
+                      [
+                        busy,
+                        already_installed,
+                        installer_unavailable,
+                        machine_setup_owner_approval_required,
+                        install_not_found,
+                        malformed,
+                        forbidden,
+                        unavailable,
+                      ]
+                  install:
+                    type: object
+                    additionalProperties: false
+                    required: [installId, harness, installer, state, startedAt, progress, ownerApproval]
+                    properties:
+                      installId: { type: string, format: uuid }
+                      harness: { type: string, enum: [claude, codex] }
+                      installer:
+                        { type: string, maxLength: 200, description: The vendor install line this ran }
+                      state: { type: string, enum: [running, succeeded, failed] }
+                      startedAt: { type: string, format: date-time }
+                      finishedAt: { type: string, format: date-time }
+                      progress: { type: array, maxItems: 40, items: { type: string, maxLength: 500 } }
+                      error: { type: string, enum: [installer_failed, not_found_after_install, timed_out] }
+                      exitCode: { type: [integer, "null"] }
+                      ownerApproval: { type: string, enum: [claimed, not_claimed] }
+                      logins:
+                        type: object
+                        description: GET /v1/harness-logins, read again once the installer finished
+        "401": { description: authentication_required }
+        "403": { description: forbidden }
+        "404": { description: install_not_found }
+        "503": { description: unavailable }
+    post:
+      tags: [Operator]
+      operationId: startHarnessInstall
+      summary: Install Claude Code or Codex on this machine with its vendor's own installer
+      description: |
+        Runs `curl -fsSL https://claude.ai/install.sh | bash` for Claude Code, or
+        `brew install --cask codex` (else `npm install -g @openai/codex`) for Codex,
+        as the service's user. One install runs at a time. When it exits, the
+        sign-in list is read again: it succeeds only if the harness is now found.
+        Installing software is machine setup: while the owner keeps it
+        (`machineSetup: owner`), the request must claim their approval.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness]
+              properties:
+                harness: { type: string, enum: [claude, codex] }
+                ownerApproved: { type: boolean }
+      responses:
+        "202":
+          description: Install started; poll GET for progress and the outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [ok]
+                properties:
+                  ok: { type: boolean }
+                  error:
+                    type: string
+                    enum:
+                      [
+                        busy,
+                        already_installed,
+                        installer_unavailable,
+                        machine_setup_owner_approval_required,
+                        install_not_found,
+                        malformed,
+                        forbidden,
+                        unavailable,
+                      ]
+                  install:
+                    type: object
+                    additionalProperties: false
+                    required: [installId, harness, installer, state, startedAt, progress, ownerApproval]
+                    properties:
+                      installId: { type: string, format: uuid }
+                      harness: { type: string, enum: [claude, codex] }
+                      installer:
+                        { type: string, maxLength: 200, description: The vendor install line this ran }
+                      state: { type: string, enum: [running, succeeded, failed] }
+                      startedAt: { type: string, format: date-time }
+                      finishedAt: { type: string, format: date-time }
+                      progress: { type: array, maxItems: 40, items: { type: string, maxLength: 500 } }
+                      error: { type: string, enum: [installer_failed, not_found_after_install, timed_out] }
+                      exitCode: { type: [integer, "null"] }
+                      ownerApproval: { type: string, enum: [claimed, not_claimed] }
+                      logins:
+                        type: object
+                        description: GET /v1/harness-logins, read again once the installer finished
+        "400": { description: malformed }
+        "401": { description: authentication_required }
+        "403": { description: forbidden or machine_setup_owner_approval_required }
+        "409": { description: busy (another install runs), already_installed or installer_unavailable }
+        "503": { description: unavailable }
   /v1/model-keys/set:
     post:
       tags: [Operator]
