@@ -7756,7 +7756,8 @@ refusals and stays elevated for at least one minute. Metrics count every
 refusal; the alert counts only what points at a fleet fault (#324). It leaves
 out `caller_exited` (the caller exited before its own check finished),
 `closed_socket` (the caller's connection ended), every check from a pane that holds no Clankie hire (the owner's own sessions, the
-operator seat, a hand-started seat a lead adopted by messaging), and a hire's
+operator seat, a hand-started seat a lead adopted by messaging, or a legacy
+ownership record with no explicit hire provenance), and a hire's
 `not_member` during the first minute after Clankie first sees it, while its
 admission completes. A hire's later `not_member` and its observation failures
 count, and so does a request that claims no pane. Startup and high machine load

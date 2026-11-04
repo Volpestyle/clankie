@@ -6402,7 +6402,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     fleetProofCaller(pane) {
-      return herdrWatches.paneHire(pane);
+      return herdrWatches.paneHire(pane, true);
     },
 
     async workerCatalogSeat(paneId) {

@@ -2327,8 +2327,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
 
   /** Whether a pane holds a Clankie hire, for fleet-health alert attribution only (#324). */
-  public paneHire(paneId: string): "starting" | "hired" | undefined {
-    return this.hireOwners.paneHire(paneId);
+  public paneHire(paneId: string, requireProvenance = false): "starting" | "hired" | undefined {
+    return this.hireOwners.paneHire(paneId, requireProvenance);
   }
 
   /**

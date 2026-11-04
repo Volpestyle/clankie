@@ -136,12 +136,14 @@ export class HireOwners {
   /**
    * Whether this pane holds a Clankie hire, and whether it is still starting (no
    * bound seat yet). Fleet-health alert attribution only (#324); grants nothing.
-   * A hand-started seat a conversation adopted (`hired: false`) is not a hire.
+   * A hand-started seat (`hired: false`) is not a hire. Alert attribution requires
+   * explicit provenance; other callers retain legacy compatibility.
    */
-  public paneHire(paneId: string): "starting" | "hired" | undefined {
+  public paneHire(paneId: string, requireProvenance = false): "starting" | "hired" | undefined {
     let starting = false;
     for (const entry of this.state.hires) {
-      if (entry.paneId !== paneId || entry.hired === false) continue;
+      if (entry.paneId !== paneId || (requireProvenance ? entry.hired !== true : entry.hired === false))
+        continue;
       if (entry.seatId !== undefined) return "hired";
       starting = true;
     }
