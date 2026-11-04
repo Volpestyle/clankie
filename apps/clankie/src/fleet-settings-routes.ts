@@ -140,6 +140,7 @@ export function createFleetSettingsRoutes(
   });
   app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    // allow-swallowed-rejection -- an unparseable body becomes null, which the schema answers as malformed (400).
     const body: unknown = await context.req.json().catch(() => null);
     const input = UpdateFleetSettingsSchema.safeParse(body);
     if (!input.success) return context.json({ error: "malformed" }, 400);
