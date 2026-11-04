@@ -76,6 +76,7 @@ export async function createQaService(
   return {
     baseUrl,
     operatorToken,
+    deviceSessionKey,
     eventLogPath,
     now: () => now,
     advance: (milliseconds: number) => {

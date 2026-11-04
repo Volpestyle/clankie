@@ -7,6 +7,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
+import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import * as census from "../src/captain/herdr-census.ts";
 
 it("native continuation goes through one hire/adoption path and preserves the existing seat identity", async () => {
@@ -91,6 +92,7 @@ it("native continuation goes through one hire/adoption path and preserves the ex
       expect.any(Function),
       expect.any(Function),
       true,
+      deliveryFingerprint("continue"),
     );
     expect(track).toHaveBeenCalledWith("term_existing");
     for (const bad of [
