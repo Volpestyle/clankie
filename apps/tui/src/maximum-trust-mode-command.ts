@@ -11,6 +11,7 @@ function describeMaximumTrustMode(result: MaximumTrustModeResult): string {
   return [
     `${MAXIMUM_TRUST_MODE_WORDING.title}: ${onOff(result.enabled)}. ${result.description}`,
     ...(result.warning === undefined ? [] : [`Warning: ${result.warning}`]),
+    `Live seat status: this machine only; remote machines are not listed${result.seatsOnOtherMode === undefined ? "; local observation unavailable" : ""}.`,
     ...(seats.length === 0
       ? []
       : [
@@ -28,7 +29,7 @@ export function maximumTrustModeCommand(
   return {
     name: "maximum-trust-mode",
     aliases: [],
-    description: "Launch every harness without its permission prompts and sandbox",
+    description: "Choose native bypass overrides for supported harnesses; owner confirmations remain",
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {

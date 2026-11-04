@@ -1,7 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { runMaximumTrustModeCommand } from "../../tui/src/command/maximum-trust-mode.ts";
+import { maximumTrustModeCommand } from "../../tui/src/maximum-trust-mode-command.ts";
+import { commandHelp } from "../../tui/src/command/registry.ts";
+import type { ClankieFaceShell } from "../../tui/src/shell/shell.ts";
 import { SettingsStore } from "@clankie/settings";
 import { MAXIMUM_TRUST_MODE_PATH, MaximumTrustModeSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
@@ -84,6 +88,7 @@ it("names the live seats still on the other mode after a switch", async () => {
           )
         ).json(),
       );
+    expect((await post(true)).seatsScope).toBe("local");
     expect((await post(true)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_lead"]);
     expect((await post(false)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_kh2"]);
   } finally {
@@ -135,4 +140,81 @@ it("reads a seat's launch mode from the flags Herdr reports for its pane", async
       runCommand: async () => ({ stdout: processInfo(claude).replace("w47:p2D", "w1:p1"), stderr: "" }),
     }),
   ).toBeUndefined();
+});
+
+it("the owner API and CLI name local-only coverage even when observation is unavailable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maximum-trust-status-"));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const app = createMaximumTrustModeRoutes(async () => true, settings);
+    const result = await runMaximumTrustModeCommand(["status"], {
+      ownerFetcher: { fetch: async (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)) },
+    });
+    expect(result).toEqual({
+      ok: true,
+      enabled: false,
+      seatsScope: "local",
+      description:
+        "Off: Clankie adds no bypass override; each coding agent keeps its own permission behavior.",
+    });
+    expect(result.seatsOnOtherMode).toBeUndefined();
+    expect((await settings.load()).maximumTrustMode).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("owner API status, TUI help and CLI help describe supported overrides without promising all prompts disappear", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maximum-trust-help-"));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const app = createMaximumTrustModeRoutes(async () => true, settings);
+    const mode = (args: readonly string[]) =>
+      runMaximumTrustModeCommand(args, {
+        ownerFetcher: {
+          fetch: async (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)),
+        },
+      });
+    const command = maximumTrustModeCommand(mode);
+    expect(command.description).toBe(
+      "Choose native bypass overrides for supported harnesses; owner confirmations remain",
+    );
+    expect(
+      commandHelp()
+        .split("\n")
+        .filter((_line, index, lines) => lines[index - 1]?.includes("maximum-trust-mode [status|on|off]")),
+    ).toEqual([
+      "                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)",
+    ]);
+    const docs = await readFile(new URL("../../../docs/cli.md", import.meta.url), "utf8");
+    const section = docs.split("### `maximum-trust-mode [status|on|off]`")[1]?.split("\n### ")[0];
+    expect(section).toContain("OpenCode is deliberately not mapped to this switch");
+    expect(section).not.toMatch(
+      /guardrails of every harness|every permission prompt|without their permission and\s+command guardrails/u,
+    );
+    const apiDocs = await readFile(new URL("../openapi.yaml", import.meta.url), "utf8");
+    const apiSection = apiDocs.split("  /v1/operator/maximum-trust-mode:")[1]?.split(/\n  \/v1\//u)[0];
+    expect(apiSection).toContain("OpenCode keeps its configured permissions");
+    expect(apiSection).not.toContain("every harness Clankie launches");
+    for (const enabled of [true, false]) {
+      await mode([enabled ? "on" : "off"]);
+      const insertCommandResult = vi.fn();
+      await command.run("status", { insertCommandResult } as unknown as ClankieFaceShell);
+      expect(insertCommandResult).toHaveBeenCalledOnce();
+      const [name, status, tone] = insertCommandResult.mock.calls[0]!;
+      expect(name).toBe("/maximum-trust-mode");
+      expect(tone).toBe("success");
+      expect(status).toContain(
+        "Live seat status: this machine only; remote machines are not listed; local observation unavailable.",
+      );
+      if (enabled) expect(status).toContain("OpenCode keeps its configured permissions");
+      else expect(status).toContain("Off: Clankie adds no bypass override");
+      expect(status).not.toMatch(
+        /every harness|every permission prompt|skip every permission|without its permission prompts and sandbox/u,
+      );
+      expect((await settings.load()).maximumTrustMode).toBe(enabled);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

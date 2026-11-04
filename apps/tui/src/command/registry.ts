@@ -529,7 +529,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["maximum-trust-mode"],
     lines: [
       "  maximum-trust-mode [status|on|off]",
-      "                           Launch every harness without its permission prompts and sandbox (JSON)",
+      "                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)",
     ],
   },
   {

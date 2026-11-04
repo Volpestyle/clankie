@@ -13,11 +13,12 @@ export interface MaximumTrustModeResult {
   readonly enabled: boolean;
   readonly description: string;
   readonly warning?: string;
+  readonly seatsScope: "local";
   /** Live seats on this machine still on the other mode until relaunched. */
   readonly seatsOnOtherMode?: readonly MaximumTrustSeat[];
 }
 
-/** The owner's one switch over every launched harness's guardrails (VUH-2048), over the owner API. */
+/** The owner's switch over supported launched harnesses' guardrails (VUH-2048), over the owner API. */
 export async function runMaximumTrustModeCommand(
   args: readonly string[],
   options: OwnerSettingsApiOptions = {},
@@ -36,6 +37,7 @@ export async function runMaximumTrustModeCommand(
   return {
     ok: true,
     enabled: snapshot.enabled,
+    seatsScope: snapshot.seatsScope ?? "local",
     description: snapshot.enabled ? MAXIMUM_TRUST_MODE_WORDING.on : MAXIMUM_TRUST_MODE_WORDING.off,
     ...(snapshot.enabled ? { warning: MAXIMUM_TRUST_MODE_WORDING.warning } : {}),
     ...(snapshot.seatsOnOtherMode === undefined ? {} : { seatsOnOtherMode: snapshot.seatsOnOtherMode }),

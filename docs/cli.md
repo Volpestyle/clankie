@@ -413,7 +413,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]
                            Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
   maximum-trust-mode [status|on|off]
-                           Launch every harness without its permission prompts and sandbox (JSON)
+                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)
   fleet leads [--json]  Read active Clankie and connected app leads
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
   fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
@@ -5970,39 +5970,61 @@ service; older services refuse the query.
 
 ### `maximum-trust-mode [status|on|off]`
 
-The owner's one switch over the guardrails of every harness Clankie launches
-(VUH-2048). Off, the default, keeps each harness's own auto mode: `clankie claude`
+The owner's switch requests native bypass overrides for supported harnesses
+(VUH-2048). Off, the default, adds no bypass override: `clankie claude`
 and Claude hires start with `--permission-mode auto`, whose classifier stops
 risky commands. Claude refuses auto mode for some models (older ones, some
 providers) and would ask before every command, so a local Claude hire first asks
 the installed Claude, without a prompt, and is refused before launch with
 Claude's reason when auto mode is unavailable; the hire receipt's
-`permissionMode` names the mode the worker runs in. On, the next launches start without their permission and
-command guardrails, through each harness's native flag:
+`permissionMode` names the mode the worker runs in. On, new Claude, Codex and
+Grok launches take the native overrides below; OpenCode keeps its configured
+permissions:
 
 | Harness         | Flag while on                                                                                                      | Applied at launch                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
 | Claude          | `--dangerously-skip-permissions`                                                                                   | `clankie claude`, Claude hires, remote project leads |
 | Codex           | `--dangerously-bypass-approvals-and-sandbox`, as `-c approval_policy="never" -c sandbox_mode="danger-full-access"` | `clankie codex`, Codex hires (local and remote)      |
 | Grok            | `--permission-mode bypassPermissions`                                                                              | `clankie grok`, Grok hires                           |
-| OpenCode        | none: its permissions come only from config                                                                        | —                                                    |
+| OpenCode        | no override: its configured permissions remain in effect                                                           | —                                                    |
 | Pi, Prime Agent | none: they ask no approvals                                                                                        | —                                                    |
 
 Codex seats and hires run a dedicated app-server whose server and view share
 `-c` overrides, so the flag is applied as the two settings it sets; on hires it
 replaces the `on-request` approval policy fleet gates otherwise select.
 
-What it bypasses: every permission prompt and Claude's auto-mode classifier.
-The agent runs any command, edits any file and reaches the network without
-asking, with the accounts and credentials its machine holds. Claude still
+These overrides request each supported harness's native bypass behavior,
+including Claude's auto-mode classifier. They do not remove every native prompt
+or policy. Agents can run commands, edit files and reach the network with the
+accounts and credentials their machine holds, subject to its access ceiling
+and the harness's remaining policies. Claude still
 enforces deny rules in every mode, so managed denies and the tracker denies
 Clankie adds stay, and a managed `disableBypassPermissionsMode: "disable"`
-refuses the mode outright. Native prompts that still appear remain the owner's.
+refuses the mode outright. Native prompts that still appear remain the owner's. A first-use Claude bypass
+confirmation is reported as `trust_required` with `bypass_confirmation_required`
+and an owner-only fix. The owner reviews and accepts it once in the same Claude
+profile (the hire's account / `CLAUDE_CONFIG_DIR`). Clankie never answers that
+confirmation or writes `skipDangerousModePermissionPrompt` for the owner. Inspect
+the original pane before retrying: a failed readiness check does not prove the
+initial brief was never submitted. See [Claude's bypass confirmation](https://code.claude.com/docs/en/permission-modes#skip-all-checks-with-bypasspermissions-mode).
+
+OpenCode is deliberately not mapped to this switch. On versions that expose it
+in `opencode --help`, the nearest native control is `--auto`: it approves requests
+that would ask, while keeping explicit denies. That is not a sandbox bypass.
+Its configurable alternative is V1's `permission` rules or V2's ordered
+`permissions` rules; a blanket allow can replace restrictions the owner chose,
+so Clankie does not inject one. See the [OpenCode permission guide](https://opencode.ai/docs/permissions/)
+and [V2 rules](https://dev.opencode.ai/v2/docs/permissions/). Existing configured
+rules remain authoritative. This switch also never raises a machine's
+[access ceiling](adr/0244-machines-join-clankie-at-an-access-level.md), approved workspace
+grants or a read-only hire's permissions.
 
 It applies to launches after the change. Running seats keep the mode they
 started with until relaunched: the snapshot's `seatsOnOtherMode` lists this
 machine's live seats (`seatId`, `title`, `harness`, `maximumTrust`) whose own
-process flags still show the other mode, read through Herdr. Remote machines
+process flags still show the other mode, read through Herdr. The API and CLI
+label the list `seatsScope: "local"`; a missing list means observation was
+unavailable, not that all seats match. Remote machines
 are not listed; a remote lead's launch receipt records its `maximumTrust`. It is not the autonomy dial: [`autonomy`](#autonomy-dial)
 and [`auto`](#auto-switch) decide what Clankie does without asking, this only
 what a launched harness may run without asking, and neither implies the other.

@@ -6334,6 +6334,17 @@ export class HerdrWatchStore implements HerdrWatchPort {
         reason: "trust_required",
         detail: `${harness} is waiting for hook or folder trust. Review the trust prompt in pane ${paneId}; no trust was accepted. ${detail}`,
       };
+    else if (
+      harness === "claude" &&
+      visible !== undefined &&
+      /Bypass\s+Permissions\s+mode/u.test(stripVTControlCharacters(visible)) &&
+      /Yes,\s+I\s+accept/u.test(stripVTControlCharacters(visible))
+    )
+      failure = {
+        outcome: "failed",
+        reason: "trust_required",
+        detail: `bypass_confirmation_required: Claude is waiting for its one-time bypass confirmation. Fix: only the owner may review and accept it in pane ${paneId}, using the same Claude profile (account / CLAUDE_CONFIG_DIR). Inspect this original hire before retrying; no confirmation was accepted. ${detail}`,
+      };
     else if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
       failure = { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };
     const agent = await this.runner.get(paneId).catch(() => undefined);

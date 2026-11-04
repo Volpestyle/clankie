@@ -258,9 +258,9 @@ export const UpdateAppearanceSettingsSchema = z
 export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapshotSchema>;
 
 /**
- * Maximum trust mode (VUH-2048): one owner switch. While on, every harness
- * Clankie launches next starts without its own permission and command
- * guardrails, through that harness's native flag. Seats already running keep
+ * Maximum trust mode (VUH-2048): one owner switch for the native bypass
+ * overrides mapped below. Other harnesses keep their configured behavior.
+ * Machine ceilings and read-only hires still apply. Seats already running keep
  * the mode they launched with. It is not the autonomy dial: that decides what
  * Clankie does without asking, this only what a launched harness may run
  * without asking.
@@ -268,15 +268,16 @@ export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapsh
 export const MAXIMUM_TRUST_MODE_PATH = "/v1/operator/maximum-trust-mode";
 export const MAXIMUM_TRUST_MODE_WORDING = {
   title: "Maximum trust mode",
-  off: "Off: each coding agent runs in its own auto mode and asks before risky commands.",
-  on: "On: new seats, hires and project leads skip every permission prompt and sandbox. Seats already running keep their mode until relaunched.",
+  off: "Off: Clankie adds no bypass override; each coding agent keeps its own permission behavior.",
+  on: "On: new Claude, Codex and Grok launches use their native bypass mode. OpenCode keeps its configured permissions; Pi and Prime Agent ask no approvals. Existing seats keep their launch mode.",
   warning:
     "Agents run any command, edit any file and reach the network without asking, with your accounts and credentials. Only turn this on for machines and repositories you would let them change unsupervised.",
 } as const;
 /**
  * Each harness's native flag for running without its permission and command
- * guardrails. A harness absent here has none: OpenCode only takes them from
- * its config, Pi and Prime Agent ask no approvals to begin with.
+ * guardrails. OpenCode is deliberately not mapped: its nearest --auto mode
+ * preserves explicit denies and does not bypass a sandbox. Pi and Prime Agent
+ * ask no approvals to begin with.
  */
 export const MAXIMUM_TRUST_HARNESS_ARGS = {
   claude: ["--dangerously-skip-permissions"],
@@ -310,6 +311,8 @@ export const MaximumTrustModeSnapshotSchema = z.object({
    * service could not observe its seats; remote machines are not listed.
    */
   seatsOnOtherMode: z.array(MaximumTrustSeatSchema).max(256).optional(),
+  /** Explicit scope, even when live observation is unavailable. Optional for older hosts. */
+  seatsScope: z.literal("local").optional(),
 });
 export const UpdateMaximumTrustModeSchema = z
   .object({ schemaVersion: z.literal(1), enabled: z.boolean() })

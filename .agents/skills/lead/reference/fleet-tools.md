@@ -68,6 +68,15 @@ service asks that Claude whether it will take auto mode for the hire's model; a
 refusal (`auto_mode_unavailable: ...`, for example an older model) starts
 nothing, because the worker would stall at its first command prompt. Hire a
 model that supports auto mode; turning on maximum trust is the owner's call.
+A `bypass_confirmation_required` hire is waiting for Claude's first-use bypass
+confirmation. Only the owner may review and accept it once in the same account /
+`CLAUDE_CONFIG_DIR`; never answer it or write its acceptance setting for them.
+Inspect the original pane before retrying, since the initial brief may be queued.
+Maximum trust leaves OpenCode's configured permissions intact. Its nearest native
+control, where `opencode --help` exposes it, is `--auto`, which retains explicit
+denies, not a sandbox bypass. Live maximum-trust seat status is local-only;
+remote machines are not listed, and an absent list means observation unavailable.
+Machine access ceilings, workspace grants and read-only hires remain in force.
 
 In the service lane, an autonomous `hire_agent` needs the master switch on,
 saved global Full autonomy, and a resolved project on Auto, and project

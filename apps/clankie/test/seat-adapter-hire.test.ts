@@ -272,12 +272,27 @@ it("an unconfirmed brief keeps its pane for inspection and never retries", async
 
 // Claude's trust prompt before and after 2.1.281's "Quick safety check" wording.
 it.each([
-  false,
-  "Do you trust the files in this folder?",
-  "Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder",
+  { visible: false, maximumTrust: false },
+  { visible: false, maximumTrust: true },
+  { visible: "Do you trust the files in this folder?", maximumTrust: false },
+  {
+    visible:
+      "Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder",
+    maximumTrust: false,
+  },
+  // Claude Code 2.1.318's native dialog strings, without accepting the prompt.
+  {
+    visible:
+      "By proceeding, you accept all responsibility for actions taken while running in Bypass Permissions mode.\n ❯ No, exit\n   Yes, I accept",
+    maximumTrust: true,
+  },
+  {
+    visible: "\u001b[31mBypass Permissions\nmode\u001b[0m\n ❯ No, exit\n   Yes, I accept",
+    maximumTrust: true,
+  },
 ] as const)(
-  "a local Claude hire uses the real channel adapter with a registered remote fleet (trust prompt: %s)",
-  async (blocked) => {
+  "a local Claude hire uses the real channel adapter with a registered remote fleet (trust prompt: $visible, maximum trust: $maximumTrust)",
+  async ({ visible: blocked, maximumTrust: bypass }) => {
     const { root, runner } = await fixture(async () => ({
       outcome: "started",
       control: {} as SeatControl,
@@ -356,6 +371,7 @@ it.each([
         ],
       }),
       seatAdapters: [adapter],
+      maximumTrustMode: async () => bypass,
     });
     const log = vi.spyOn(console, "info").mockImplementation(() => undefined);
     try {
@@ -378,10 +394,23 @@ it.each([
           args: expect.arrayContaining(["--channels", "plugin:clankie-worker@inline", "--model", "haiku"]),
         }),
       );
+      expect(runner.startAgent.mock.calls.at(-1)?.[0].args?.includes("--dangerously-skip-permissions")).toBe(
+        bypass,
+      );
+      const args = runner.startAgent.mock.calls.at(-1)![0].args!;
+      const launchSettings = JSON.parse(await readFile(args[args.indexOf("--settings") + 1]!, "utf8"));
+      expect(launchSettings.skipDangerousModePermissionPrompt).toBeUndefined();
       expect(runner.promptAgent).not.toHaveBeenCalled();
       expect(result.control).toEqual({ mode: "channel" });
       if (blocked) {
         expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
+        if (bypass) {
+          if (result.outcome !== "failed") throw new Error("Expected the original hire to fail");
+          expect(result.detail).toContain("bypass_confirmation_required");
+          expect(result.detail).toContain("same Claude profile");
+          expect(result.detail).toContain("only the owner");
+          expect(result.detail).toContain("no confirmation was accepted");
+        }
         expect(deliver).not.toHaveBeenCalled();
         expect(runner.closePane).not.toHaveBeenCalled();
         expect(OperatorSeatSpawnResultSchema.parse(result).control).toEqual({ mode: "channel" });
