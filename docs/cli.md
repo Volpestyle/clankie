@@ -5508,8 +5508,8 @@ access; Portal, Watch, revocation or stale channel policy refuse them. Policy
 writes recheck that authority under the registry lock.
 
 Windows and WSL resource status is explicitly unavailable (`unsupported-platform`)
-until the later authorized Windows rollout (#325). WSL never creates a separate
-Linux budget alongside Windows. This does not install or restart anything on PCs,
+until the later authorized Windows rollout (#325). The join receiver never creates a separate
+Linux budget for WSL alongside Windows. This does not install or restart anything on PCs,
 or replace project build locks. A saved policy for an offline host remains desired
 policy; set it again once the host is online to apply it.
 No shell or Herdr connection is opened by these resource API/UI paths.

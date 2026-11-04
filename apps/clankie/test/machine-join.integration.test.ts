@@ -16,7 +16,7 @@ import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue, sealGatewayValue } from "../src/gateway-encryption.ts";
 import { machineJoinLeaseAad, machineJoinExchangeAad } from "@clankie/protocol/machine-join";
 import { createResourceGovernor, defaultResourcePolicy } from "@clankie/fleet-resources";
-import { FleetResourcePolicySchema } from "@clankie/protocol";
+import { OPERATOR_CONVERSATION_DISPATCH_PATH, FleetResourcePolicySchema } from "@clankie/protocol";
 import { ResourceStore } from "../../../packages/fleet-resources/src/store.ts";
 import { joinedMachineResourcePorts } from "../../tui/bin/joined-machine-resources.ts";
 import { runHeavyCommand } from "../../tui/src/command/heavy.ts";
@@ -28,6 +28,12 @@ import { createFleetResourceRoutes } from "../src/fleet-resource-routes.ts";
 import { createFleetSettingsRoutes } from "../src/fleet-settings-routes.ts";
 import { createFleetCapacityReader } from "../src/app/fleet-capacity.ts";
 import { UsageHistory } from "../src/app/usage-burn.ts";
+import { createClankieApp } from "../src/app.ts";
+import { createStubCaptain } from "../src/captain/port.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createMachineJoinRoutes } from "../src/machine-join-routes.ts";
 import { machineAccessLevel, requireMachineAccess } from "../src/machine-access.ts";
@@ -1450,4 +1456,79 @@ test.runIf(nativeResourcesSupported)(
       await f.close();
     }
   },
+);
+
+test.runIf(nativeResourcesSupported)(
+  "a join outage invalidates policy before a waiting resource write can commit",
+  async () => {
+    const f = await fixture();
+    const credential = await f.approve();
+    await saveJoinedMachineCredential(f.store, credential);
+    const directory = join(f.root, "outage-resources");
+    const store = new ResourceStore(directory);
+    const governor = createResourceGovernor({ directory });
+    const ports = joinedMachineResourcePorts({ directory, env: {} });
+    const abort = new AbortController();
+    let received = false,
+      disconnected = false,
+      locked = false,
+      finished = false;
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      retryMs: 10,
+      onDisconnected: () => {
+        disconnected = true;
+      },
+      ports: {
+        ...ports,
+        resources: async (...args) => {
+          received = true;
+          try {
+            return await ports.resources!(...args);
+          } finally {
+            finished = true;
+          }
+        },
+      },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locking: Promise<void> | undefined;
+    try {
+      await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, simulatorSlots: 0 });
+      locking = store.transaction(async () => {
+        locked = true;
+        await gate;
+      });
+      await until(() => locked);
+      const configure = joinedFleetResources(f.joins).configure(
+        credential.lease.machineId,
+        FleetResourcePolicySchema.parse({ heavySlots: 7, simulatorSlots: 0 }),
+      );
+      const refused = expect(configure).rejects.toThrow();
+      await until(() => received);
+      f.carrier.rejectPath = "/channel";
+      await until(() => disconnected);
+      release();
+      await locking;
+      // Let the receiver finish the refused operation before renewing the channel policy.
+      await until(() => finished);
+      f.carrier.rejectPath = "";
+      await refused;
+      expect((await governor.snapshot()).policy.heavySlots).toBe(1);
+    } finally {
+      release();
+      abort.abort();
+      await channel;
+      await locking;
+      store.close();
+      await governor.close();
+      await f.close();
+    }
+  },
+  15_000,
 );

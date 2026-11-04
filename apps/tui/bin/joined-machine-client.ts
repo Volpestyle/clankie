@@ -108,7 +108,7 @@ async function executeJoinedMachineRequest(
   approvedDirectories: readonly string[],
   ports: JoinedMachinePorts,
   signal: AbortSignal,
-  screenGuard: () => void,
+  operationGuard: () => void,
   originallyScreen: boolean,
 ): Promise<JoinedMachineResult> {
   const request = JoinedMachineRequestSchema.parse(raw);
@@ -147,9 +147,9 @@ async function executeJoinedMachineRequest(
     if (operation.kind === "resources") {
       if (!ports.resources) return { id: request.id, ok: false, error: "operation_unavailable" };
       const resources = JoinedMachineResourceResultSchema.parse(
-        await ports.resources(operation.request, signal, screenGuard),
+        await ports.resources(operation.request, signal, operationGuard),
       );
-      screenGuard();
+      operationGuard();
       if (Buffer.byteLength(JSON.stringify(resources), "utf8") > MACHINE_JOIN_RESULT_BATCH_BYTES_MAX - 1024)
         throw Error("resource_result_too_large");
       return { id: request.id, ok: true, resources };
@@ -158,7 +158,7 @@ async function executeJoinedMachineRequest(
     if (!handler) return { id: request.id, ok: false, error: "operation_unavailable" };
     const output =
       operation.kind === "screen"
-        ? await ports.screen!(operation.request, signal, screenGuard)
+        ? await ports.screen!(operation.request, signal, operationGuard)
         : operation.kind === "shell"
           ? await ports.shell!(operation.command, directory, signal)
           : await ports.workers!(operation.request, directory, signal);
@@ -369,11 +369,12 @@ export async function runJoinedMachineChannel(
   let currentScreen = false;
   let currentWorkers = false;
   let policyAt = 0;
+  let resourcePolicyAt = 0;
   const ports = options.ports ?? { shell: joinedMachineShell };
   const freshScreen = () => !signal.aborted && currentScreen && performance.now() - policyAt < 2000;
   const staleTimer = setInterval(() => {
     ports.screenPolicy?.(freshScreen());
-    if (performance.now() - policyAt >= 2000)
+    if (performance.now() - resourcePolicyAt >= 2000)
       for (const task of active.values()) if (task.request.operation.kind === "resources") task.abort.abort();
     // Observe a separate "join leave" even during a network timeout or backoff.
     void credentialCurrent().catch(() => localStop.abort());
@@ -402,7 +403,7 @@ export async function runJoinedMachineChannel(
       } catch (error) {
         if (!(error instanceof JoinedMachineRevoked)) {
           if (signal.aborted) throw error;
-          policyAt = 0;
+          resourcePolicyAt = 0;
           // Resent results settle at most once at the home; unknown ones are ignored.
           results = [...outgoing, ...results];
           if (retryMs === 0) options.onDisconnected?.();
@@ -440,6 +441,7 @@ export async function runJoinedMachineChannel(
           : credential.lease.accessLevel,
       };
       policyAt = performance.now();
+      resourcePolicyAt = policyAt;
       currentScreen = policy.accessLevel === "screen";
       currentWorkers = machineAccessAllows(policy.accessLevel, "workers");
       ports.screenPolicy?.(freshScreen());
@@ -476,10 +478,10 @@ export async function runJoinedMachineChannel(
               signal.aborted ||
               abort.signal.aborted ||
               (request.operation.kind === "resources"
-                ? !currentWorkers || performance.now() - policyAt >= 2000
+                ? !currentWorkers || performance.now() - resourcePolicyAt >= 2000
                 : !freshScreen())
             )
-              throw Error("screen_policy_unavailable");
+              throw Error("join_policy_unavailable");
           },
           credential.lease.accessLevel === "screen",
         )
