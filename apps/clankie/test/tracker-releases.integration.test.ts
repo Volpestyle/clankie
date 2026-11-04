@@ -10,7 +10,7 @@ import { runWorkCommand } from "../../tui/src/command/work.ts";
 import { expect, it, onTestFinished } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { createLocalTracker } from "@clankie/work-items";
+import { createLocalTracker, type ReleaseHistory } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
@@ -260,7 +260,13 @@ it("derives each release's items from the commits since the previous published r
       fetchImpl: async (input, init) => app.app.request(new URL(String(input)).pathname, init),
     });
     expect(reply.ok, JSON.stringify(reply.body)).toBe(true);
-    return (reply.body as { result: any }).result;
+    return (
+      reply.body as {
+        result: ReleaseHistory & {
+          delivered: { identifier: string; version: string }[];
+        };
+      }
+    ).result;
   };
 
   for (const title of ["Shipped first", "Shipped second", "Never shipped"])
