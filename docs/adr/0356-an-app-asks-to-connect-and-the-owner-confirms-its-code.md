@@ -93,8 +93,8 @@ enters a correct code for a sign-in that isn't theirs. **Typed approval and matc
 Allow are both open to this, and so is today's CLI.** The destination can't warn the
 owner, because it can be declared truthfully.
 
-Nothing proposed here closes that, and the first version accepts it explicitly
-([decision 7](#decisions-for-james)). Three things bound it:
+Nothing proposed here closes that. Whether the first version ships with it is James's
+call ([decision 7](#decisions-for-james)). Three things bound it:
 
 - **Arming.** The attacker needs the owner to arm the Mac and to act within one short
   window that admits one sign-in.
@@ -102,28 +102,38 @@ Nothing proposed here closes that, and the first version accepts it explicitly
   says what Allow really does.
 - **Detection.** Every approval notifies every owner device, with Revoke.
 
-A real binding needs one of two things, neither available today:
+No real binding is available today, and none is designed here. Two directions look
+tempting, and neither closes this on its own:
 
-- **A passkey on the sign-in page** (option H). It is bound to the real origin, so the
-  owner's authenticator won't sign for a session in someone else's browser or on
-  someone else's page. RFC 10027 recommends this family of flows for proximity.
-- **A client that proves a key at the token endpoint** (option I). A code could then be
-  redeemed only by that client. Clients register as public today.
+- **A passkey on the sign-in page** (option H). It is phishing-resistant authentication
+  of the owner at the genuine origin:
+  [assertion verification](https://www.w3.org/TR/webauthn-3/#sctn-verifying-assertion)
+  checks the challenge and the origin. That doesn't prove the owner started this OAuth
+  request, or stop whoever prepared it from collecting the result. RFC 10027's proximity
+  text concerns CTAP hybrid transport over BLE, not OAuth consent pages in general.
+- **A client that proves a key at the token endpoint** (option I). Possession of a
+  self-registered key doesn't establish the intended recipient or the owner's intent.
+  PKCE already proves a requester-chosen secret, and it didn't solve this.
+
+Our inference, not a cited result: a safe upgrade would need a fresh authenticated
+browser session that creates or rebinds the transaction, invalidates earlier status and
+collection capabilities, and binds the client and grants. That binding has to be
+designed and reviewed separately. Nothing here promises it would be enough.
 
 ## Options considered
 
-| Option                                     | Value                                                                 | Taps             | Verdict                                               |
-| ------------------------------------------ | --------------------------------------------------------------------- | ---------------- | ----------------------------------------------------- |
-| A. Plain Allow on the existing routes      | None: the attack the typed code prevents                              | One              | Rejected                                              |
-| B. Allow plus better wording and timing    | None alone: wording can be matched exactly                            | One              | Rejected alone; truthful wording is kept              |
-| C. **Typed code on the phone or pet**      | Same as today's typed code, with no terminal                          | Type four        | **Recommended**                                       |
-| D. Four choices, tap the one on the page   | Weaker: a blind tap succeeds one time in four                         | One              | Only if James accepts the measured weakening          |
-| E. **Owner arms the Mac first**            | Removes unsolicited prompts; narrows the prepared session             | One more step    | **Recommended with C**                                |
-| F. QR scan, or a link that carries a match | None against a sent link or image                                     | Scan             | Rejected. Links must never pre-answer anything.       |
-| G. Reverse: the phone shows, the page asks | Comparable, but the owner types into whatever page they were shown    | Type             | Rejected: it trains typing a secret into a page       |
-| H. Passkey on the sign-in page             | A real binding, and phishing-resistant                                | One, once set up | The later upgrade; waits on enrollment and origins    |
-| I. Verified client identity                | Metadata documents give an honest name; a proven key binds the client | Same             | Names later; binding only for clients that hold a key |
-| J. Remember an app and skip the prompt     | None: a repeat name and destination are claims too                    | Zero             | Rejected                                              |
+| Option                                     | Value                                                                                            | Taps             | Verdict                                         |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------- | ----------------------------------------------- |
+| A. Plain Allow on the existing routes      | None: the attack the typed code prevents                                                         | One              | Rejected                                        |
+| B. Allow plus better wording and timing    | None alone: wording can be matched exactly                                                       | One              | Rejected alone; truthful wording is kept        |
+| C. **Typed code on the phone or pet**      | Same interaction as today's typed code, with no terminal; a shorter value, with bounded attempts | Type four        | **Recommended**                                 |
+| D. Four choices, tap the one on the page   | Weaker: a blind tap succeeds one time in four                                                    | One              | Only if James accepts the measured weakening    |
+| E. **Owner arms the Mac first**            | Removes unsolicited prompts; narrows the prepared session                                        | One more step    | **Recommended with C**                          |
+| F. QR scan, or a link that carries a match | None against a sent link or image                                                                | Scan             | Rejected. Links must never pre-answer anything. |
+| G. Reverse: the phone shows, the page asks | Comparable, but the owner types into whatever page they were shown                               | Type             | Rejected: it trains typing a secret into a page |
+| H. Passkey on the sign-in page             | Phishing-resistant owner authentication, not a binding by itself                                 | One, once set up | Only as part of a separately designed binding   |
+| I. Verified client identity                | Metadata documents give an honest name; a proven key doesn't show intent                         | Same             | Names later; never as the proof                 |
+| J. Remember an app and skip the prompt     | None: a repeat name and destination are claims too                                               | Zero             | Rejected                                        |
 
 On option I: the
 [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
@@ -169,13 +179,17 @@ arm`). The window lasts five minutes and admits one approval. A decision, its ex
 - The first group of the page's code is the value: four characters, entered on the
   phone or pet. The page says which to enter. `clankie connector approve CODE` stays as
   the fallback.
+- Four characters have less entropy than the eight today's CLI takes (31⁴ against 31⁸).
+  This is the same interaction, not the same assurance. It is acceptable because attempts
+  are bounded: a wrong entry ends the sign-in, and the decision limits below apply.
 - The listing stops returning codes, to every caller. It gains an opaque sign-in id.
   The CLI's typed path then needs a code read from the page, as intended.
 - If James chooses option D, each sign-in holds one stable set of four distinct
   choices, fixed when it is created. Only the display order is shuffled. All four are
   candidate approvals, so the prompt is as sensitive as the sign-in. A wrong tap ends
   that sign-in, but an attacker's next sign-in is a new try: three blind tries succeed
-  57.8% of the time (1 − 0.75³), against effectively never for four typed characters.
+  57.8% of the time (1 − 0.75³), against about one in 920,000 per try for four typed
+  characters.
 
 ### One decision, once
 
@@ -275,9 +289,11 @@ determined flood, and a requester with many addresses is held only by the shared
 
 - **Requester metadata.** The gateway computes the requester's identity from the
   address it verified (through the trusted proxy), hashes it per host, and sets it on
-  the sign-in route only (#776). A caller can't set it through the doorway. The Mac's
-  tunnel passes it to the service over loopback. A sign-in without it counts only toward
-  the shared cap, and a direct caller, who is on a trusted network, can set their own.
+  the sign-in route only (#776). That a caller can't set it through the doorway depends
+  on #776's encrypted-path fix, which is still under review. The Mac's tunnel passes it
+  to the service over loopback. A sign-in without it counts only toward the shared cap.
+  The service doesn't authenticate it, so a direct caller can set their own. That local
+  access is trusted is an assumption here, not something any check establishes.
 - **Shares.** One requester keeps at most four waiting sign-ins, and its next replaces
   its oldest (#776). People behind one address (a NAT, an office, a VPN) share that
   share, and one can displace another's waiting sign-in.
@@ -336,7 +352,8 @@ doctor` shows recent failures. The notice uses fixed text with the name as quote
 
 ## Decisions for James
 
-Each states the security reviewer's position, which this ADR adopts.
+Decisions 1 to 6 state the security reviewer's position, which this ADR adopts. Decision
+7 has no such position: it is James's alone.
 
 1. **Typed code, or one tap?** Typed by default. It removes the terminal but isn't the
    one tap you asked for. Choosing four-choice one tap (option D) is allowed, and is
@@ -351,7 +368,7 @@ Each states the security reviewer's position, which this ADR adopts.
    without an account.
 5. **On by default, or opt-in?** Opt-in. The typed code on the Mac stays the default.
 6. **Wait for ADR 0253's protected signer?** No.
-7. **Accept the prepared-session risk for the first version?** The ADR accepts it, with
-   truthful copy, arming and notices, because no real binding is available today. It
-   exists in today's typed flow too. The alternative is to wait for a passkey on the
-   sign-in page (option H).
+7. **Accept the prepared-session risk for the first version, or defer?** Either accept
+   this residual risk, as described above, for the first version, or defer until a
+   separately designed and reviewed binding closes it. It exists in today's typed flow
+   too. No such binding exists yet, and waiting for a passkey alone wouldn't close it.
