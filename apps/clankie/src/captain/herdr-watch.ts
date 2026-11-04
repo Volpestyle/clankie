@@ -1147,6 +1147,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     | undefined;
   private readonly remoteLaunches = new Set<string>();
   private readonly runner: HerdrWatchRunner;
+  private readonly piNativeEnabled: (() => Promise<boolean>) | undefined;
   private readonly seatAdapters: ReadonlyMap<string, HarnessSeatAdapter>;
   private readonly remoteSeatAdapters:
     | ((fleet: string) => ReadonlyMap<string, HarnessSeatAdapter> | undefined)
@@ -1292,6 +1293,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
        * adapter, with herdr as its view; unsupported briefs fail without terminal input.
        */
       readonly seatAdapters?: readonly HarnessSeatAdapter[];
+      /** Off keeps unbriefed hosted Pi on its terminal path; native briefs still refuse. */
+      readonly piNativeEnabled?: () => Promise<boolean>;
       /**
        * A remote fleet's own adapters (VUH-1527). A briefed hire on that fleet
        * of a listed harness gets the same native channel a local one does;
@@ -1372,6 +1375,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       }) as ProjectHireProcessProof;
     });
     this.resumeInventory = options.resumeInventory;
+    this.piNativeEnabled = options.piNativeEnabled;
     this.seatAdapters = new Map((options.seatAdapters ?? []).map((adapter) => [adapter.harness, adapter]));
     const remoteSeatAdapters = options.remoteSeatAdapters;
     // One adapter set per fleet, made once: an adapter holds its seats' live control.
@@ -5283,7 +5287,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
       };
     }
     const adapters = remote === undefined ? this.seatAdapters : this.remoteSeatAdapters?.(remote);
-    const candidate = adapters?.get(input.harness);
+    const candidate =
+      input.harness === "pi" &&
+      (remote === undefined || remote === HERDR_CORE_FLEET) &&
+      this.piNativeEnabled &&
+      !(await this.piNativeEnabled())
+        ? undefined
+        : adapters?.get(input.harness);
     const adapter =
       (brief !== undefined || resume !== undefined || candidate?.prepare !== undefined) &&
       (candidate?.prepare !== undefined || this.runner.runInPane !== undefined)

@@ -10,13 +10,14 @@ import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { connectPiWorker } from "../../../integrations/pi-plugin/worker-connection.mjs";
 import { createPiWorkerRuntime } from "../../../integrations/pi-plugin/worker-runtime.mjs";
 import { HerdrWatchStore, type HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import { SettingsStore } from "@clankie/settings";
 import { DeliveryFence } from "../src/captain/delivery-fence.ts";
 
 const cleanup: (() => Promise<unknown> | void)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function fixture() {
+async function fixture(enabled?: () => Promise<boolean>) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "pi-seat-")));
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
   const sessionId = randomUUID();
@@ -54,6 +55,7 @@ async function fixture() {
     native,
     discover,
     timeoutMs: 100,
+    ...(enabled ? { enabled } : {}),
   });
   const view: SeatView = {
     paneId: "w1:p1",
@@ -101,16 +103,19 @@ async function fixture() {
     model: "fixture/native",
     effort: "high",
   };
-  const prepare = async (input = launch) => {
-    const prepared = await adapter.prepare!(input);
-    cleanup.push(() => prepared.dispose());
+  const connect = (prepared: Pick<import("@clankie/agent-hosts").PreparedSeatLaunch, "env">) => {
     const connection = connectPiWorker(
       { port: Number(prepared.env?.CLANKIE_PI_WORKER_PORT), token: prepared.env!.CLANKIE_PI_WORKER_TOKEN! },
       (controller) => createPiWorkerRuntime(pi, controller),
     );
     cleanup.push(() => connection.close());
     handlers.get("session_start")?.({ reason: "startup" }, context);
-    return { prepared, connection };
+    return connection;
+  };
+  const prepare = async (input = launch) => {
+    const prepared = await adapter.prepare!(input);
+    cleanup.push(() => prepared.dispose());
+    return { prepared, connection: connect(prepared) };
   };
   const finish = () => {
     entries.push({
@@ -133,6 +138,7 @@ async function fixture() {
     view,
     launch,
     prepare,
+    connect,
     sendMessage,
     context,
     finish,
@@ -375,3 +381,75 @@ test.each(["birth", "pane", "path", "cwd", "cli"])(
     expect(f.sendMessage).toHaveBeenCalledOnce();
   },
 );
+
+// Real watch-store hire → production Pi adapter → controller socket → extension
+// runtime. Only the terminal/process observer and Pi's model runtime are fixtures.
+for (const phase of ["off", "on", "before_prepare", "before_start"] as const) {
+  test(`native Pi hire enforces the saved switch (${phase})`, async () => {
+    let settings: SettingsStore;
+    const f = await fixture(async () => (await settings.load()).piNativeEnabled ?? false);
+    settings = new SettingsStore(join(f.directory, "owner-settings.json"));
+    await settings.update((current) => ({ ...current, piNativeEnabled: phase !== "off" }));
+    const setOff = () => settings.update((current) => ({ ...current, piNativeEnabled: false }));
+    const agent: HerdrAgentSnapshot = {
+      paneId: f.view.paneId,
+      terminalId: "terminal",
+      agent: "pi",
+      title: "Pi",
+      status: "idle",
+      workingDirectory: f.directory,
+      session: f.session,
+    };
+    const runner = {
+      createTab: vi.fn(async (input: { env?: Readonly<Record<string, string>> }) => {
+        f.connect(input);
+        if (phase === "before_start") await setOff();
+        return f.view.paneId;
+      }),
+      startAgent: vi.fn(async () => {
+        throw Error("terminal fallback forbidden for a brief");
+      }),
+      get: async () => structuredClone(agent),
+      list: async () => [structuredClone(agent)],
+      wait: async () => structuredClone(agent),
+      resolveTerminal: async () => structuredClone(agent),
+    };
+    const store = new HerdrWatchStore(join(f.directory, "gated-hire.json"), {
+      runner,
+      seatAdapters: [f.adapter],
+      piNativeEnabled: async () => {
+        const enabled = (await settings.load()).piNativeEnabled!;
+        // Selection admitted native Pi, then its preference changed before prepare.
+        if (phase === "before_prepare") await setOff();
+        return enabled;
+      },
+    });
+    cleanup.push(() => store.close());
+    const result = await store.spawnSeat(
+      {
+        schemaVersion: 1,
+        harness: "pi",
+        title: "gated Pi",
+        workingDirectory: f.directory,
+        model: "fixture/native",
+        effort: "high",
+        effortReason: "Exercise native Pi admission without a paid model call.",
+      },
+      undefined,
+      "native brief",
+    );
+    if (phase === "on") {
+      expect(result).toMatchObject({ outcome: "spawned", control: { mode: "adapter" } });
+      expect(f.native.capture).toHaveBeenCalledOnce();
+      expect(f.sendMessage).toHaveBeenCalledOnce();
+    } else {
+      expect(result).toMatchObject({ outcome: "failed" });
+      expect(f.native.capture).not.toHaveBeenCalled();
+      expect(f.sendMessage).not.toHaveBeenCalled();
+      if (phase === "before_start")
+        expect(result).toMatchObject({ detail: expect.stringMatching(/turned off/u) });
+      else expect(runner.createTab).not.toHaveBeenCalled();
+    }
+    expect(runner.startAgent).not.toHaveBeenCalled();
+  });
+}

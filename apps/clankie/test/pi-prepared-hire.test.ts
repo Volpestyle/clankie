@@ -395,3 +395,37 @@ test("prepared Pi refuses a hosted model that conflicts with the project's requi
   expect(f.runner.runInPane).not.toHaveBeenCalled();
   expect(f.brief).not.toHaveBeenCalled();
 });
+
+test("native Pi off preserves the hosted terminal launch and provider selection", async () => {
+  const f = await fixture();
+  const included: PiSeatModel = {
+    model: "clankie/default",
+    provider: {
+      id: "clankie",
+      config: { baseUrl: "http://127.0.0.1:1/not-called", apiKey: "synthetic-not-a-credential" },
+    },
+  };
+  const store = new HerdrWatchStore(join(f.directory, "default-off.json"), {
+    runner: f.runner,
+    seatAdapters: [f.adapter],
+    piNativeEnabled: async () => false,
+    piSeatModel: async () => included,
+  });
+  cleanups.push(async () => store.close());
+  expect(
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "hosted seat",
+      workingDirectory: f.directory,
+      model: "fixture/native",
+    }),
+  ).toMatchObject({ outcome: "spawned", control: { mode: "terminal", reason: "no_brief" } });
+  expect(f.adapter.prepare).not.toHaveBeenCalled();
+  expect(f.runner.configurePiProvider).toHaveBeenCalledWith("clankie", included.provider!.config);
+  expect(f.runner.configurePiProvider.mock.invocationCallOrder[0]).toBeLessThan(
+    f.runner.startAgent.mock.invocationCallOrder[0]!,
+  );
+  expect(f.runner.startAgent).toHaveBeenCalledOnce();
+  expect(f.runner.runInPane).not.toHaveBeenCalled();
+});

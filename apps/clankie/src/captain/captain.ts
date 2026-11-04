@@ -577,8 +577,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       createHerdrWatchRunner(
         deps.herdrAvailable,
         undefined,
-        (options.openCodeNative ?? options.grokNative ?? options.primeNative ?? options.piNative)
-          ?.createCommandTab,
+        async (input) => {
+          const native =
+            options.openCodeNative ??
+            options.grokNative ??
+            options.primeNative ??
+            ((await piEnabled()) ? options.piNative : undefined);
+          if (!native) throw new Error("Native initial-command pane creation unavailable; Pi is turned off.");
+          return native.createCommandTab(input);
+        },
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
           ...(deps.runtimes ? { localReadBinding: () => deps.runtimes!.configuredBinding("default") } : {}),
@@ -1057,6 +1064,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
+    piNativeEnabled: piEnabled,
     seatAdapters: options.seatAdapters ?? [
       createCodexSeatAdapter({
         fleetGates: localFleetGates,

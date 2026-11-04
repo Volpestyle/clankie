@@ -124,7 +124,8 @@ Each harness's prerequisites, probes and limits are in
 - **Pi** is off by default. The owner or a Take Control device can use
   `clankie accounts pi show|enable|disable` (`/v1/worker-accounts/pi`). The saved
   preference applies to new hires immediately, survives restarts and overrides
-  the legacy environment default. Existing workers keep their sessions.
+  the legacy environment default. Existing workers keep their sessions; native
+  Pi off still permits unbriefed hosted Pi terminal launches, but refuses native briefs.
   Check `clankie accounts workers`: `pi.state` names `not_installed`, `too_old`,
   `not_enabled` or `ready`; missing/old installs include `pi.installCommand`.
   `ready` describes native runtime readiness; `usable` also checks the model and

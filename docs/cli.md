@@ -2585,7 +2585,8 @@ the worker has a configured authenticated model. Use `clankie accounts pi show`,
 `clankie accounts pi enable` or `clankie accounts pi disable`. This saved owner
 preference takes effect for new hires immediately, survives service restarts,
 and overrides the legacy `CLANKIE_PI_NATIVE_ENABLED=1` startup default. Turning
-Pi off leaves existing workers running. The owner or a Take Control device can
+native Pi off leaves existing workers running and preserves unbriefed hosted Pi
+terminal launches. Briefed native Pi hires still refuse while it is off. The owner or a Take Control device can
 read and change it through `GET`/`POST /v1/worker-accounts/pi`; writes require the
 current `expectedRevision` and an `enabled` boolean. No service restart is needed.
 

@@ -4,11 +4,14 @@ import { startFixtureServer } from "./owner-settings-surface-fixture.ts";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { mintOperatorToken } from "@clankie/credential-broker";
 import { MachineWorkerAccountsSchema } from "@clankie/protocol/worker-accounts";
 import { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
+import { createCaptain } from "../src/captain/captain.ts";
+import type { CaptainDeps } from "../src/captain/deps.ts";
+import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorkerAccountHoldsRoutes } from "../src/worker-account-holds-routes.ts";
 import { chooseWorkerHarness, createWorkerAccountsReader } from "../src/captain/harness-accounts.ts";
@@ -390,3 +393,143 @@ it("serves all four Pi states over real HTTP and persists owner/Take Control ena
     await app.close();
   }
 }, 60_000);
+
+it("captain keeps saved Pi false ahead of env=1 for real briefed and hosted hires", async () => {
+  const previousEnabled = process.env.CLANKIE_PI_NATIVE_ENABLED;
+  process.env.CLANKIE_PI_NATIVE_ENABLED = "1";
+  const settings = new SettingsStore(join(root, "captain-settings.json"));
+  await settings.update((current) => ({ ...current, piNativeEnabled: false }));
+  const watchStores: HerdrWatchStore[] = [];
+  const start = vi
+    .spyOn(HerdrWatchStore.prototype, "start")
+    .mockImplementation(function (this: HerdrWatchStore) {
+      watchStores.push(this);
+    });
+  const sessionId = "10000000-0000-4000-8000-000000000001";
+  const sessionFile = join(root, `timestamp_${sessionId}.jsonl`);
+  await writeFile(
+    sessionFile,
+    JSON.stringify({ type: "session", version: 3, id: sessionId, cwd: root }) + "\n",
+  );
+  const agent = {
+    paneId: "w1:p1",
+    terminalId: "terminal",
+    agent: "pi",
+    title: "hosted",
+    status: "idle" as const,
+    session: { source: "herdr:pi", kind: "path" as const, value: sessionFile },
+  };
+  const runner = {
+    createTab: vi.fn(async () => "w1:p1"),
+    startAgent: vi.fn(async () => {}),
+    installPiIntegration: vi.fn(async () => {}),
+    get: async () => agent,
+    list: async () => [agent],
+    wait: async () => agent,
+    resolveTerminal: async () => agent,
+  };
+  const captain = createCaptain({ herdrAvailable: () => false } as CaptainDeps, {
+    repoRoot: root,
+    stateDir: join(root, "captain"),
+    settings,
+    nativeHerdrRunner: runner,
+    piNative: {
+      createCommandTab: async () => "w1:p1",
+      capture: async () => {
+        throw Error("native capture forbidden while off");
+      },
+    },
+  });
+  const watches = watchStores[0];
+  try {
+    expect(watches).toBeDefined();
+    const request = {
+      schemaVersion: 1 as const,
+      harness: "pi" as const,
+      title: "Pi switch",
+      workingDirectory: root,
+      model: "openai/gpt-4o",
+      effort: "high" as const,
+      effortReason: "Verify persisted owner preference wins over the legacy environment.",
+    };
+    expect(await watches!.spawnSeat(request, undefined, "native brief")).toMatchObject({
+      outcome: "failed",
+      reason: "harness_unavailable",
+      detail: expect.stringMatching(/No structured harness adapter/u),
+    });
+    expect(runner.createTab).not.toHaveBeenCalled();
+    expect(await watches!.spawnSeat(request)).toMatchObject({
+      outcome: "spawned",
+      control: { mode: "terminal" },
+    });
+    expect(runner.startAgent).toHaveBeenCalledOnce();
+  } finally {
+    await captain.close();
+    start.mockRestore();
+    if (previousEnabled === undefined) delete process.env.CLANKIE_PI_NATIVE_ENABLED;
+    else process.env.CLANKIE_PI_NATIVE_ENABLED = previousEnabled;
+  }
+});
+
+it("revoking a Take Control device after admission but before the atomic Pi write prevents persistence", async () => {
+  const settings = new SettingsStore(join(root, "revocation-settings.json"));
+  const token = mintOperatorToken();
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  let revokeId: string | undefined;
+  let service: Awaited<ReturnType<typeof createClankieApp>>;
+  service = await createClankieApp({
+    captain: createStubCaptain(),
+    deviceSessionKey: new Uint8Array(32).fill(7),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owner" } : undefined,
+    settings: {
+      load: () => settings.load(),
+      update: (mutate, guard) =>
+        settings.update(mutate, async () => {
+          if (revokeId) {
+            const revoked = await service.app.request(`/v1/devices/${revokeId}/revoke`, {
+              method: "POST",
+              headers,
+            });
+            expect(revoked.status).toBe(200);
+            revokeId = undefined;
+          }
+          await guard?.();
+        }),
+    },
+  });
+  const server = await startFixtureServer(service.app.fetch);
+  const post = async (path: string, body: unknown, auth = headers) =>
+    fetch(`${server.host}${path}`, { method: "POST", headers: auth, body: JSON.stringify(body) });
+  try {
+    const offer = await (await post("/v1/pairing/offer", {})).json();
+    const redeemed = await (
+      await post("/v1/pairing/redeem", {
+        offerSecret: new URL(offer.deepLink).searchParams.get("offer"),
+        device: { name: "Revoked at commit", platform: "ios" },
+      })
+    ).json();
+    const completed = await (
+      await post("/v1/pairing/complete", {
+        completionToken: redeemed.completionToken,
+        acceptedGrants: TAKE_CONTROL_GRANTS,
+      })
+    ).json();
+    const device = { authorization: `Bearer ${completed.deviceToken}`, "content-type": "application/json" };
+    const initialResponse = await fetch(`${server.host}/v1/worker-accounts/pi`, { headers: device });
+    expect(initialResponse.status).toBe(200);
+    const initial = await initialResponse.json();
+    revokeId = redeemed.deviceId;
+    const result = await post(
+      "/v1/worker-accounts/pi",
+      { enabled: true, expectedRevision: initial.revision },
+      device,
+    );
+    expect(result.status).toBe(409);
+    expect((await settings.load()).piNativeEnabled).toBeUndefined();
+    expect((await fetch(`${server.host}/v1/worker-accounts/pi`, { headers: device })).status).toBe(401);
+  } finally {
+    await server.close();
+    await service.close();
+  }
+});

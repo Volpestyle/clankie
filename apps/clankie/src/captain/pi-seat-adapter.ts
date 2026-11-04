@@ -40,6 +40,8 @@ const Session = z.object({
   }),
   runtime: z.object({ executable: z.string(), argv: z.array(z.string()).length(2), node: z.string() }),
 });
+class PiTurnedOff extends Error {}
+
 const Delivery = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("accepted"), messageId: z.string().uuid(), state: z.literal("started") }),
   z.object({ outcome: z.literal("unconfirmed"), messageId: z.string().uuid(), detail: z.string() }),
@@ -178,7 +180,8 @@ export function createPiSeatAdapter(deps: {
           try {
             signal?.throwIfAborted();
             startSignal?.throwIfAborted();
-            if (deps.enabled && !(await deps.enabled())) throw new Error("Pi is turned off for new hires.");
+            if (deps.enabled && !(await deps.enabled()))
+              throw new PiTurnedOff("Pi was turned off before this hire started.");
             await capability.verify();
             await view.guard?.();
             root = await deps.native.capture(view.paneId, capability.executable, cwd);
@@ -354,13 +357,15 @@ export function createPiSeatAdapter(deps: {
             )
               throw new Error("brief_delivery_unverified: native Pi did not confirm its brief");
             return { outcome: "started", control };
-          } catch {
+          } catch (error) {
             await dispose();
             return {
               outcome: "failed",
               reason: "not_ready",
               detail:
-                "Native Pi binding or brief unconfirmed; inspect the original pane before retrying. No duplicate process or terminal fallback was used.",
+                error instanceof PiTurnedOff
+                  ? error.message
+                  : "Native Pi binding or brief unconfirmed; inspect the original pane before retrying. No duplicate process or terminal fallback was used.",
             };
           }
         },
