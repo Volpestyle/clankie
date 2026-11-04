@@ -339,8 +339,10 @@ async function probeHerdrBrowser(exec: ExecFileImpl): Promise<HerdrBrowserReport
     parsed = undefined;
   }
   if (!parsed?.success) return { machine, error: "herdr-browser-update status gave no Chromium report" };
-  const { installed, ...chromium } = parsed.data.chromium;
-  return installed === false ? undefined : { machine, ...chromium };
+  // The status JSON's `chromium` report, which is not Playwright's.
+  const { chromium: status } = parsed.data;
+  const { installed, ...browserStatus } = status;
+  return installed === false ? undefined : { machine, ...browserStatus };
 }
 
 export type ExecFileImpl = (
