@@ -163,6 +163,20 @@ another process, which ADR 0217 accepts ("anything running in a linked session")
 and a descriptor in flight over `SCM_RIGHTS` was already outside the boundary.
 Project proofs, which carry native-session authority, are never reused.
 
+`apps/clankie/test/local-fleet-proof-reuse.integration.test.ts`
+(`FLEET_PROOF_NATIVE_TEST=1`, macOS) changes one fact under a live, reused
+connection and requires a full proof and its refusal:
+
+- the pane it names, or its pane moved to another workspace;
+- its owner exited, leaving an heir holding the connection;
+- its Herdr binding changed or was revoked;
+- a second holder, which is the unseen case above until a failed recheck forces
+  the full proof.
+
+The rechecks back each other up, so deleting any one of them leaves these
+passing. Deleting each case's whole group fails that case: the pane checks, the
+lineage checks, the two binding checks, or discarding a failed recheck's proof.
+
 Reuse only helps when connections persist. Node's `fetch`, which every worker
 bridge uses, keeps an idle connection only as long as the server's `Keep-Alive`
 hint allows, less a margin. At Node's server default of five seconds, even a
