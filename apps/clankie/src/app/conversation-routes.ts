@@ -1,3 +1,4 @@
+import { withPresenceCursor } from "../captain/presence.ts";
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema, type FleetLead } from "@clankie/protocol/fleet-leads";
 import { isDeviceRunExpired } from "../devices.ts";
 import type { LeadWakeSender } from "../lead-wakes.ts";
@@ -162,7 +163,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           const device = await ctx.authenticateDevice(context.req.raw);
           if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
           const record = ctx.devices.get(device.deviceId);
-          return ownerDeviceRecord(record);
+          return ownerDeviceRecord(record, ctx.devices);
         };
         if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
         if (path === FLEET_LEADS_PATH) {
@@ -452,7 +453,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
    * The owner's own app (ADR 0299): an active Take Control device that no hosted account,
    * support grant or automation run minted. Rechecked before every write it authorizes.
    */
-  const ownerAppDevice = (deviceId: string): boolean => ownerAppRecord(ctx.devices.get(deviceId));
+  const ownerAppDevice = (deviceId: string): boolean =>
+    ownerAppRecord(ctx.devices.get(deviceId), ctx.devices);
   /** Host-only ownerApp for a device principal that is the owner's own app; never for the operator bearer. */
   const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
     principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
@@ -524,7 +526,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return (
         record?.status === "active" &&
         record.grants.chat &&
-        leadSwitchDevice(record) &&
+        ownerPairedDeviceRecord(record, ctx.devices) &&
         now.getTime() < sessionExpiresAt &&
         !isDeviceRunExpired(record, now)
       );
@@ -684,7 +686,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const record = ctx.devices.get(owner.principal.id);
         // Local pairing records the configured operator ID, not a fixed name.
         // Hosted visitor pairing uses the distinct "hosted-account" principal.
-        return ownerDeviceRecord(record);
+        return ownerDeviceRecord(record, ctx.devices);
       };
       if (!ownerDevice() || !owner || !(await owner.authorize()))
         return context.json({ error: "owner_device_required" }, 403);
@@ -709,7 +711,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       // Take Control device. Anyone else takes the ordinary presence path, without it.
       const quietReader = () => {
         if (!owner?.current()) return false;
-        return owner.principal.kind === "operator" || leadSwitchDevice(ctx.devices.get(owner.principal.id));
+        return (
+          owner.principal.kind === "operator" ||
+          ownerPairedDeviceRecord(ctx.devices.get(owner.principal.id), ctx.devices)
+        );
       };
       const admitted = quietReader() && owner !== undefined && (await owner.authorize());
       if (!admitted) delete parsed.data.includeQuiet;
@@ -718,8 +723,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const result = await ctx.dependencies.captain.serveOperatorConversation(parsed.data);
         // A parked read can outlast the authority that opened it.
         if (result.op === "presence" && !(quietReader() && (await owner.authorize()))) {
-          const { quiet: _quiet, quietUntil: _until, ...snapshot } = result.snapshot;
-          return context.json({ ...result, snapshot });
+          const { quiet: _quiet, quietUntil: _until, cursor: _cursor, ...snapshot } = result.snapshot;
+          return context.json({ ...result, snapshot: withPresenceCursor(snapshot) });
         }
         return context.json(result);
       }
@@ -730,7 +735,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (!owner?.current()) return false;
         if (owner.principal.kind === "operator") return true;
         const record = ctx.devices.get(owner.principal.id);
-        return ownerDeviceRecord(record);
+        return ownerDeviceRecord(record, ctx.devices);
       };
       if (!ownerReader() || !owner || !(await owner.authorize()))
         return context.json({ error: "owner_required" }, 403);
@@ -747,7 +752,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (owner.principal.kind === "operator") return true;
         const record = ctx.devices.get(owner.principal.id);
         // Never a hosted visitor, whichever route its request took (as lead_chats).
-        return ownerDeviceRecord(record);
+        return ownerDeviceRecord(record, ctx.devices);
       };
       const denied = () => context.json({ error: "owner_required" }, 403);
       if (!ownerReader() || !owner || !(await owner.authorize())) return denied();
@@ -783,7 +788,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       const ownerReader = () => {
         if (!owner?.current()) return false;
         if (owner.principal.kind === "operator") return true;
-        return ownerDeviceRecord(ctx.devices.get(owner.principal.id));
+        return ownerDeviceRecord(ctx.devices.get(owner.principal.id), ctx.devices);
       };
       const reply = (result: AppNotesResult) => context.json({ op: "app_notes", schemaVersion: 1, result });
       if (request.action === "post") {
@@ -983,7 +988,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       } else {
         const ownerSends =
           owner?.current() === true &&
-          (owner.principal.kind === "operator" || ownerDeviceRecord(ctx.devices.get(owner.principal.id)));
+          (owner.principal.kind === "operator" ||
+            ownerDeviceRecord(ctx.devices.get(owner.principal.id), ctx.devices));
         if (!ownerSends || !owner || !(await owner.authorize()))
           return context.json({ error: "owner_required" }, 403);
         from = { kind: "owner" };
@@ -1159,7 +1165,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "lead" &&
       parsed.data.command.action === "set" &&
       owner?.principal.kind === "device" &&
-      !leadSwitchDevice(ctx.devices.get(owner.principal.id))
+      !ownerPairedDeviceRecord(ctx.devices.get(owner.principal.id), ctx.devices)
     )
       return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
@@ -1230,7 +1236,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           if (!owner.current()) return undefined;
           if (owner.principal.kind === "operator") return { source: { kind: "machine" as const } };
           const record = ctx.devices.get(owner.principal.id);
-          return ownerDeviceRecord(record)
+          return ownerDeviceRecord(record, ctx.devices)
             ? {
                 deviceId: record.deviceId,
                 source: { kind: "device" as const, name: record.name, platform: record.platform },
@@ -1803,7 +1809,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     if (!(await authority.authorize()) || !authority.current())
       return context.json({ error: "owner_required" }, 401);
     const owner = authority.principal.kind === "device";
-    if (owner && !ownerAppRecord(ctx.devices.get(authority.principal.id)))
+    if (owner && !ownerAppRecord(ctx.devices.get(authority.principal.id), ctx.devices))
       return context.json({ error: "owner_app_required" }, 403);
     try {
       return context.json(
@@ -1909,28 +1915,57 @@ const CLANKIE_FOR_OWNER: TrackerActor = { ...TRACKER_LEAD, onBehalfOf: [TRACKER_
  * The owner's own app (ADR 0299): an active Take Control device that no hosted account,
  * support grant or automation run minted.
  */
-export function ownerAppRecord(record: DeviceRecord | undefined): boolean {
+export function ownerAppRecord(
+  record: DeviceRecord | undefined,
+  devices?: ReadonlyMap<string, DeviceRecord>,
+): boolean {
   return (
-    ownerDeviceRecord(record) &&
-    // A hosted pairing proves the hosted account, not this owner's hands, until ADR 0253's signer.
-    record.mintedBy !== "hosted-account-operator" &&
+    ownerDeviceRecord(record, devices) &&
+    ownerProvenance(record, devices, true) &&
     record.status === "active" &&
     record.grants.terminalControl &&
     record.run === undefined
   );
 }
 
-export function ownerDeviceRecord(record: DeviceRecord | undefined): record is DeviceRecord {
-  return (
-    record !== undefined &&
-    record.supportGrantId === undefined &&
-    record.mintedBy !== "hosted-account" &&
-    !record.mintedBy.startsWith("support:")
-  );
+/** Pairing ancestry is host-authored provenance, never a claim in a device request. */
+function ownerProvenance(
+  record: DeviceRecord,
+  devices?: ReadonlyMap<string, DeviceRecord>,
+  app = false,
+): boolean {
+  const seen = new Set<string>();
+  let current: DeviceRecord | undefined = record;
+  while (current !== undefined) {
+    if (
+      seen.has(current.deviceId) ||
+      current.supportGrantId !== undefined ||
+      current.mintedBy === "hosted-account" ||
+      current.mintedBy.startsWith("support:") ||
+      (app && (current.mintedBy === "hosted-account-operator" || current.run !== undefined))
+    )
+      return false;
+    seen.add(current.deviceId);
+    if (!current.mintedBy.startsWith("device:")) return true;
+    current = devices?.get(current.mintedBy.slice("device:".length));
+    // A connector is not an owner minter. Missing or cyclic provenance stays unavailable.
+    if (current?.scope === "connector") return false;
+  }
+  return false;
+}
+
+export function ownerDeviceRecord(
+  record: DeviceRecord | undefined,
+  devices?: ReadonlyMap<string, DeviceRecord>,
+): record is DeviceRecord {
+  return record !== undefined && ownerProvenance(record, devices);
 }
 /** The owner's own paired device, never an app signed in to the connector (ADR 0350). */
-function leadSwitchDevice(record: DeviceRecord | undefined): boolean {
-  return ownerDeviceRecord(record) && record.scope !== "connector";
+export function ownerPairedDeviceRecord(
+  record: DeviceRecord | undefined,
+  devices?: ReadonlyMap<string, DeviceRecord>,
+): boolean {
+  return ownerDeviceRecord(record, devices) && record.scope !== "connector";
 }
 
 const CANT_START: Record<"no_model" | "no_credential" | "unavailable", (model?: string) => string> = {

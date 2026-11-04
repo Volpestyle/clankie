@@ -53,6 +53,7 @@ import {
   withDirectPairingRoute,
 } from "../pairing.ts";
 import { authenticateOperator, readJson } from "./http-auth.ts";
+import { ownerPairedDeviceRecord } from "./conversation-routes.ts";
 import { logger } from "./log.ts";
 import {
   hashCompletionToken,
@@ -350,7 +351,11 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const device = await ctx.authenticateDevice(request);
     if (device === "unavailable") return { error: "device_authentication_unavailable", status: 503 } as const;
     if ("denied" in device) return { error: "operator_authentication_required", status: 401 } as const;
-    if (!device.grants.terminalControl) return { error: "forbidden", status: 403 } as const;
+    if (
+      !device.grants.terminalControl ||
+      !ownerPairedDeviceRecord(ctx.devices.get(device.deviceId), ctx.devices)
+    )
+      return { error: "forbidden", status: 403 } as const;
     return { mintedBy: `device:${device.deviceId}`, device: true } as const;
   };
 
@@ -713,6 +718,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
 
   // A device reads its own registration to restore a session on launch.
   ctx.app.get("/v1/devices/self", async (context) => {
+    context.header("cache-control", "private, no-store");
     const identity = await ctx.authenticateDevice(context.req.raw);
     if (identity === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
     if ("denied" in identity) return ctx.deviceDenialResponse(context, identity);
@@ -725,6 +731,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
       name: record.name,
       platform: record.platform,
       grants: identity.grants,
+      ownerDevice: ownerPairedDeviceRecord(record, ctx.devices),
       host: { name: ctx.hostDisplayName },
       ...(record.scope === undefined ? {} : { scope: record.scope }),
       ...(record.supportGrantId === undefined

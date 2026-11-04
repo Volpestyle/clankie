@@ -8019,7 +8019,7 @@ paths:
       security: [{ deviceBearer: [] }]
       responses:
         "200":
-          description: Self row, including optional directRoute with explicitly configured controlPlaneUrl and relayUrl origins
+          description: Self row, including the service-computed ownerDevice classification from recorded pairing ancestry for quiet presence routing and optional directRoute with explicitly configured controlPlaneUrl and relayUrl origins. Quiet reads also require Take Control. Older services may omit ownerDevice; the relay then keeps quiet fields private.
 
   /v1/hosted/pair-offer:
     post:

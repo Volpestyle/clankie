@@ -375,7 +375,11 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     );
     if (operator !== undefined && operator !== "unavailable") return { id: operator.operatorId };
     const device = await ctx.authenticateDevice(context.req.raw);
-    if (device !== "unavailable" && !("denied" in device) && ownerAppRecord(ctx.devices.get(device.deviceId)))
+    if (
+      device !== "unavailable" &&
+      !("denied" in device) &&
+      ownerAppRecord(ctx.devices.get(device.deviceId), ctx.devices)
+    )
       return { id: device.deviceId };
     if (device !== "unavailable" && !("denied" in device)) return context.json({ error: "forbidden" }, 403);
     return context.json({ error: "authentication_required" }, 401);
