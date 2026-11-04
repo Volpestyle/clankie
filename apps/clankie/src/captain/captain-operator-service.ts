@@ -126,9 +126,9 @@ export interface CreateOperatorServiceContext {
   /** Where start receipts outlive a service restart; memory only when absent (#735). */
   readonly connectorStartsPath?: string;
   /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0313). */
-  readonly fleetCapacity?: () => Promise<
-    Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
-  >;
+  readonly fleetCapacity?: (
+    includeMachineResources?: boolean,
+  ) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]>;
   /** One image inside a seated agent's working directory (ADR 0315). */
   readonly seatImage?: (
     seatId: string,
@@ -649,7 +649,7 @@ export function createOperatorService(
       return {
         op: "fleet_capacity",
         schemaVersion: 1,
-        result: await ctx.fleetCapacity(),
+        result: await ctx.fleetCapacity(request.includeMachineResources),
       };
     }
     if (request.op === "seat_image") {

@@ -57,6 +57,7 @@ function fleetSettingsSnapshot(
   includeWorkPolicy = false,
   includeMaximumTrust = false,
   includeWatch = false,
+  joinedIds: readonly string[] = [],
 ): FleetSettingsSnapshot {
   const fleet = {
     ...settings.fleet,
@@ -81,7 +82,7 @@ function fleetSettingsSnapshot(
         }
       : {}),
     fleetGates: true,
-    resourceMachines: ["local", ...settings.machines.map((machine) => machine.id)],
+    resourceMachines: ["local", ...settings.machines.map((machine) => machine.id), ...joinedIds],
     revision: createHash("sha256")
       .update(JSON.stringify(settings.autonomy.watch === true ? { covered, watch: true } : covered))
       .digest("hex"),
@@ -113,6 +114,7 @@ export function createFleetSettingsRoutes(
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
   dependencies: FleetSettingsContextDependencies & {
+    joinedResources?: { readonly ids: readonly string[]; has(id: string): boolean } | undefined;
     configureResources?: ((policy: FleetResourcePolicy, machine?: string) => Promise<unknown>) | undefined;
   } = {},
 ): Hono {
@@ -135,6 +137,7 @@ export function createFleetSettingsRoutes(
         context.req.query("includeWorkPolicy") === "true",
         context.req.query("includeMaximumTrust") === "true",
         context.req.query("includeWatch") === "true",
+        dependencies.joinedResources?.ids,
       ),
     );
   });
@@ -184,7 +187,7 @@ export function createFleetSettingsRoutes(
           } = input.data.changes;
           if (machineResources)
             for (const machine of Object.keys(machineResources)) {
-              if (resourceMachine(current, machine) !== machine)
+              if (resourceMachine(current, machine, dependencies.joinedResources) !== machine)
                 throw new Error("Use the canonical machine ID");
             }
           const defaults = FleetAutonomySchema.parse({});
@@ -258,6 +261,7 @@ export function createFleetSettingsRoutes(
           context.req.query("includeWorkPolicy") === "true",
           context.req.query("includeMaximumTrust") === "true",
           context.req.query("includeWatch") === "true",
+          dependencies.joinedResources?.ids,
         ),
       );
     } catch {

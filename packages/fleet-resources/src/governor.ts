@@ -1032,12 +1032,16 @@ export function createResourceGovernor(
     }
   }
   return {
-    async configure(policy: FleetResourcePolicy) {
+    async configure(policy: FleetResourcePolicy, options) {
       const parsed = FleetResourcePolicySchema.parse(policy);
-      const state = await store.transaction((current) => {
-        current.policy = parsed;
-        return structuredClone(current);
-      });
+      const state = await store.transaction(
+        (current) => {
+          options?.beforeWrite?.();
+          current.policy = parsed;
+          return structuredClone(current);
+        },
+        options?.signal ? { signal: options.signal } : {},
+      );
       return project(state);
     },
     snapshot,

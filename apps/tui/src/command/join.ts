@@ -221,6 +221,7 @@ export async function runJoinCommand(
       throw Error("join_approval_required");
     }
     const hostPorts: JoinedMachinePorts = options.ports ?? {
+      ...(await import("../../bin/joined-machine-resources.ts")).joinedMachineResourcePorts({ env }),
       shell: joinedMachineShell,
       workers: (await import("./joined-worker.ts")).joinedWorkerPorts(credential, {
         env,

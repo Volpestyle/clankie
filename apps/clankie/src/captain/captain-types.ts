@@ -56,6 +56,10 @@ export interface CaptainOptions {
   readonly nativeLaunchPolicy?: NativeLaunchPolicy;
   /** Machine-wide resource admission and cached fleet metadata; never project-local policy. */
   readonly fleetResources?: FleetResourceRuntime;
+  readonly machineResources?: {
+    ids(): Promise<readonly string[]>;
+    status(machine: string): Promise<import("@clankie/protocol").FleetMachineResourceSnapshot>;
+  };
   /**
    * Herdr session detection for the connector (ADR 0312). When it returns true,
    * an operator message that cannot be confirmed is rediscovered once, and a

@@ -206,6 +206,9 @@ export class MachineJoins {
     }
     return { entries: [...merged.values()].slice(-limit) };
   }
+  get ids(): readonly string[] {
+    return [...this.registrations.keys()];
+  }
   get count(): number {
     return this.registrations.size;
   }
@@ -402,6 +405,8 @@ export class MachineJoins {
       if (work?.machineId === record.id && work.claimed) {
         if (result.screenOutput !== undefined && work.request.operation.kind !== "screen")
           throw Error("join_result_refused");
+        if (result.resources !== undefined && work.request.operation.kind !== "resources")
+          throw Error("join_result_refused");
         work.settle(result);
       }
     }
@@ -476,18 +481,27 @@ export class MachineJoins {
       accessEnforcement: "joined-host" as const,
     }));
   }
-  request(id: string, raw: JoinedMachineOperation, timeoutMs = 45_000): Promise<JoinedMachineResult> {
+  request(
+    id: string,
+    raw: JoinedMachineOperation,
+    timeoutMs = 45_000,
+    signal?: AbortSignal,
+  ): Promise<JoinedMachineResult> {
     const operation = JoinedMachineOperationSchema.parse(raw);
     if (!this.has(id)) return Promise.reject(Error("unknown_joined_machine"));
     if (this.work.size >= 128) return Promise.reject(Error("join_capacity"));
+    if (signal?.aborted) return Promise.reject(Error("revoked"));
     const request = { id: randomUUID(), operation };
     return new Promise((resolve) => {
       const timer = setTimeout(() => settle({ id: request.id, ok: false, error: "unconfirmed" }), timeoutMs);
       const settle = (result: JoinedMachineResult) => {
         clearTimeout(timer);
+        signal?.removeEventListener("abort", cancel);
         this.work.delete(request.id);
         resolve(result);
       };
+      const cancel = () => settle({ id: request.id, ok: false, error: "unconfirmed" });
+      signal?.addEventListener("abort", cancel, { once: true });
       this.work.set(request.id, { request, machineId: id, claimed: false, settle });
     });
   }

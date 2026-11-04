@@ -2,6 +2,8 @@ import {
   FLEET_REVIEW_BUDGET,
   FleetCapacitySchema,
   FleetResourceSnapshotSchema,
+  FleetMachineResourceSnapshotSchema,
+  FleetResourceMachineIdSchema,
   type FleetCapacity,
   type FleetCapacityBurn,
 } from "@clankie/protocol";
@@ -336,6 +338,12 @@ export function createFleetCapacityReader(input: {
   readonly seats: () => Promise<readonly FleetCapacitySeatSource[]>;
   readonly leadSeatId: () => string | undefined;
   readonly heavy: () => unknown;
+  readonly machineResources?:
+    | {
+        ids(): Promise<readonly string[]>;
+        status(machine: string): Promise<import("@clankie/protocol").FleetMachineResourceSnapshot>;
+      }
+    | undefined;
   readonly tracker: () => TrackerRequestBudgetReport | undefined;
   /** Clankie's own usage readings; every account read here is recorded too. */
   readonly history?: UsageHistory;
@@ -344,7 +352,7 @@ export function createFleetCapacityReader(input: {
     homes: readonly string[],
     now: number,
   ) => Promise<{ sessions: SessionBurn[]; truncated: boolean }>;
-}): () => Promise<FleetCapacity> {
+}): (includeMachineResources?: boolean) => Promise<FleetCapacity> {
   const now = input.now ?? Date.now;
   const history = input.history ?? new UsageHistory();
   const sessionBurn = input.sessionBurn ?? readClaudeSessionBurn;
@@ -362,7 +370,7 @@ export function createFleetCapacityReader(input: {
       return { machine, unread: true as const };
     }
   };
-  return async () => {
+  return async (includeMachineResources = false) => {
     const settings = await input.settings();
     const remotes = settings.execution.connections.filter(
       (connection) =>
@@ -403,7 +411,7 @@ export function createFleetCapacityReader(input: {
           : [{ seatId: seat.seatId, occupantId: seat.occupantId, title: seat.title }],
       ),
     });
-    return projectFleetCapacity({
+    const result = projectFleetCapacity({
       observedAt,
       machines,
       seats,
@@ -413,5 +421,58 @@ export function createFleetCapacityReader(input: {
       burn: burn.burn,
       burnNotices: [...burnNotices, ...burn.notices],
     });
+    if (!includeMachineResources) return result;
+    const resources = input.machineResources;
+    const ids = resources ? [...new Set(await resources.ids())] : ["local"];
+    const entries = await Promise.all(
+      ids.map(async (machine) => {
+        FleetResourceMachineIdSchema.parse(machine);
+        try {
+          if (!resources) throw Error("resource_reader_unavailable");
+          const reading = FleetMachineResourceSnapshotSchema.parse(await resources.status(machine));
+          if (reading.machine !== machine) throw Error("resource_identity_mismatch");
+          const observedAt = new Date(now()).toISOString();
+          if (reading.status === "unavailable")
+            return [machine, { status: reading.status, reason: reading.reason, observedAt }] as const;
+          const snapshot = reading.snapshot;
+          const lane = (slots: number | undefined, used: number | undefined, queued: number | undefined) =>
+            slots === undefined || used === undefined || queued === undefined
+              ? ("unknown" as const)
+              : { slots, used, queued, remaining: slots - used };
+          return [
+            machine,
+            {
+              status: "available" as const,
+              observedAt,
+              full: lane(
+                snapshot.capacity.heavySlots,
+                snapshot.capacity.used,
+                snapshot.queue.filter((entry) => entry.kind === "heavy").length,
+              ),
+              light: lane(
+                snapshot.capacity.lightSlots,
+                snapshot.capacity.lightUsed,
+                snapshot.lightQueue?.length,
+              ),
+              server: lane(
+                snapshot.capacity.serverSlots,
+                snapshot.capacity.serverUsed,
+                snapshot.serverQueue?.length,
+              ),
+            },
+          ] as const;
+        } catch {
+          return [
+            machine,
+            {
+              status: "unavailable" as const,
+              reason: "probe-unavailable" as const,
+              observedAt: new Date(now()).toISOString(),
+            },
+          ] as const;
+        }
+      }),
+    );
+    return FleetCapacitySchema.parse({ ...result, machineResources: Object.fromEntries(entries) });
   };
 }

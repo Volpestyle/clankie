@@ -1,3 +1,5 @@
+import { joinedFleetResources } from "./joined-fleet-resources.ts";
+import { createMachineFleetResources } from "./machine-fleet-resources.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
 import "./fetch-dispatcher.ts";
 import { createInboundReportMigrationGate } from "./captain/conversations/inbound-report-migration.ts";
@@ -1423,6 +1425,13 @@ const fleetResources = await createServiceFleetResourceRuntime({
   onError: (error) =>
     logger.warn({ error, event: "fleet_resources.refresh_failed" }, "Fleet resource metadata is unavailable"),
 });
+const remoteFleetResources = joinedFleetResources(machineJoins);
+const machineResources = createMachineFleetResources({
+  settings: () => settingsStore.load(),
+  local: fleetResources,
+  remote: remoteFleetResources,
+  joined: machineJoins,
+});
 const fleetHealthMetrics = new FleetHealthMetrics({
   // Created below; until then a lookup throws and the refusal counts as before.
   caller: (pane) => captain.fleetProofCaller?.(pane),
@@ -1689,6 +1698,14 @@ const captain = createCaptain(
   },
   {
     fleetResources,
+    machineResources: {
+      ids: async () => [
+        "local",
+        ...(await settingsStore.load()).machines.map((machine) => machine.id),
+        ...machineJoins.ids,
+      ],
+      status: (machine) => machineResources.status(machine),
+    },
     builtInTracker,
     onHealthAlertDelivery: (result) => logger.info({ event: "native.health_alert.delivery", ...result }),
     projectHireIdentity: projectProcessObserver,
@@ -2411,6 +2428,7 @@ const clankie = await createClankieApp({
     captain,
   }),
   fleetResources,
+  remoteFleetResources,
   ...(foreignHeavyPermits ? { foreignHeavyPermits } : {}),
   views: new ViewStore(join(stateRoot, "views")),
   credentialStoreHealth: () => operatorCredentialStore.health?.() ?? { state: "ready" },

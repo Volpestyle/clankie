@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { MachineAccessLevelSchema } from "./machine-access.ts";
+import {
+  FleetResourceMachineSpecsSchema,
+  FleetResourcePolicySchema,
+  FleetResourceSnapshotSchema,
+} from "./fleet-resources.ts";
 
 /** Public body/client contract; hosted gateway routing is implemented in clankie-ops. */
 export const MACHINE_JOIN_OUTPUT_CHAR_MAX = 8192;
@@ -110,7 +115,23 @@ export const JoinedMachinePolicySchema = z
     directories: z.array(directory).max(32),
   })
   .strict();
+/** Metadata/policy only. Heavy jobs always execute against the joining host's local registry. */
+export const JoinedMachineResourceRequestSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("status") }),
+  z.strictObject({ action: z.literal("configure"), policy: FleetResourcePolicySchema }),
+]);
+export const JoinedMachineResourceResultSchema = z.discriminatedUnion("status", [
+  z.strictObject({
+    status: z.literal("available"),
+    specs: FleetResourceMachineSpecsSchema,
+    snapshot: FleetResourceSnapshotSchema,
+  }),
+  z.strictObject({ status: z.literal("unavailable"), reason: z.literal("unsupported-platform") }),
+]);
+export type JoinedMachineResourceRequest = z.infer<typeof JoinedMachineResourceRequestSchema>;
+export type JoinedMachineResourceResult = z.infer<typeof JoinedMachineResourceResultSchema>;
 export const JoinedMachineOperationSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("resources"), request: JoinedMachineResourceRequestSchema }),
   z
     .object({
       kind: z.literal("workers"),
@@ -138,6 +159,7 @@ export const JoinedMachineResultSchema = z
     ok: z.boolean(),
     output: z.string().max(MACHINE_JOIN_OUTPUT_CHAR_MAX).optional(),
     screenOutput: z.string().max(MACHINE_JOIN_SCREEN_OUTPUT_CHAR_MAX).optional(),
+    resources: JoinedMachineResourceResultSchema.optional(),
     truncated: z.boolean().optional(),
     error: z
       .enum([

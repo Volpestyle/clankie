@@ -2,7 +2,7 @@ import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
 import { createHash, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -15,6 +15,19 @@ import { MachineJoinLeaseSchema, MachineJoinStatusSchema } from "@clankie/protoc
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue, sealGatewayValue } from "../src/gateway-encryption.ts";
 import { machineJoinLeaseAad, machineJoinExchangeAad } from "@clankie/protocol/machine-join";
+import { createResourceGovernor, defaultResourcePolicy } from "@clankie/fleet-resources";
+import { FleetResourcePolicySchema } from "@clankie/protocol";
+import { ResourceStore } from "../../../packages/fleet-resources/src/store.ts";
+import { joinedMachineResourcePorts } from "../../tui/bin/joined-machine-resources.ts";
+import { runHeavyCommand } from "../../tui/src/command/heavy.ts";
+import { runFleetCommand } from "../../tui/src/command/fleet.ts";
+import { runMachineResourceStatusCommand } from "../../tui/src/command/fleet-resources.ts";
+import { createMachineFleetResources } from "../src/machine-fleet-resources.ts";
+import { joinedFleetResources } from "../src/joined-fleet-resources.ts";
+import { createFleetResourceRoutes } from "../src/fleet-resource-routes.ts";
+import { createFleetSettingsRoutes } from "../src/fleet-settings-routes.ts";
+import { createFleetCapacityReader } from "../src/app/fleet-capacity.ts";
+import { UsageHistory } from "../src/app/usage-burn.ts";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createMachineJoinRoutes } from "../src/machine-join-routes.ts";
 import { machineAccessLevel, requireMachineAccess } from "../src/machine-access.ts";
@@ -38,7 +51,7 @@ async function until(predicate: () => boolean | Promise<boolean>) {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
-async function fixture() {
+async function fixture(resourceRoutes = false) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-join-")));
   const directory = join(root, "workspace");
   await mkdir(directory);
@@ -76,6 +89,23 @@ async function fixture() {
       request.headers.get("authorization") === `Bearer ${owner}` ? true : "authentication_required",
     ),
   );
+  if (resourceRoutes) {
+    const resources = createMachineFleetResources({
+      settings: () => settings.load(),
+      remote: joinedFleetResources(joins),
+      joined: joins,
+    });
+    const authorize = async (request: Request) =>
+      request.headers.get("authorization") === `Bearer ${owner}` ? (true as const) : ("forbidden" as const);
+    relay.route("/", createFleetResourceRoutes(authorize, undefined, undefined, resources));
+    relay.route(
+      "/",
+      createFleetSettingsRoutes(authorize, settings, {
+        joinedResources: joins,
+        configureResources: (_policy, machine) => resources.configure(machine ?? "local"),
+      }),
+    );
+  }
   const server = serve({ fetch: relay.fetch, hostname: "127.0.0.1", port: 0 });
   if (!server.listening) await new Promise<void>((resolve) => server.once("listening", resolve));
   const gateway = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -1152,3 +1182,272 @@ test("joined shell is offered only in the owner console lane, never Discord", ()
     false,
   );
 });
+
+const nativeResourcesSupported = process.platform === "darwin" || process.platform === "linux";
+
+test.runIf(nativeResourcesSupported)(
+  "joined resources carry real local CLI holders, queues and owner policy over the encrypted channel",
+  async () => {
+    const f = await fixture(true);
+    const credential = await f.approve("workers", [f.directory], process.platform);
+    await saveJoinedMachineCredential(f.store, credential);
+    const id = credential.lease.machineId;
+    const directory = join(f.root, "resource-registry");
+    const ports = joinedMachineResourcePorts({ directory, env: {} });
+    const abort = new AbortController();
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      ports,
+      intervalMs: 10,
+    });
+    const machines = createMachineFleetResources({
+      settings: () => f.settings.load(),
+      remote: joinedFleetResources(f.joins),
+      joined: f.joins,
+    });
+    const options = {
+      settings: f.settings,
+      host: f.gateway,
+      env: { CLANKIE_OPERATOR_TOKEN: owner, CLANKIE_CONTROL_PLANE_URL: f.gateway },
+      operatorCredentialStore: new FileCredentialStore(join(f.root, "operator.json")),
+    };
+    const runners = [createResourceGovernor({ directory }), createResourceGovernor({ directory })];
+    const release = join(f.root, "release-heavy");
+    const jobs: Promise<number>[] = [];
+    try {
+      await until(async () => (await f.joins.inventory())[0]?.state === "available");
+      await runFleetCommand(
+        ["set", "--machine", id, "--heavy-slots", "1", "--simulator-slots", "0"],
+        options,
+      );
+      expect((await f.settings.load()).fleet.machineResources?.[id]?.heavySlots).toBe(1);
+      expect(await runMachineResourceStatusCommand(id, options)).toMatchObject({
+        machine: id,
+        status: "available",
+        specs: { platform: process.platform },
+        snapshot: { capacity: { heavySlots: 1, simulatorSlots: 0 } },
+      });
+      const held = `const {existsSync}=require('node:fs');const wait=()=>existsSync(${JSON.stringify(release)})?process.exit(0):setTimeout(wait,20);wait();`;
+      jobs.push(
+        runHeavyCommand(["--holder", "private-holder-one", "--", process.execPath, "-e", held], {
+          governor: runners[0]!,
+          env: {},
+          stderr: { write: () => {} },
+        }),
+      );
+      await until(async () => (await runners[0]!.snapshot()).capacity.used === 1);
+      jobs.push(
+        runHeavyCommand(["--holder", "private-holder-two", "--", process.execPath, "-e", ""], {
+          governor: runners[1]!,
+          env: {},
+          stderr: { write: () => {} },
+        }),
+      );
+      await until(async () => (await runners[0]!.snapshot()).queue.length === 1);
+      const status = await runMachineResourceStatusCommand(id, options);
+      expect(status).toMatchObject({
+        status: "available",
+        snapshot: { capacity: { used: 1 }, queue: [{ holderId: "private-holder-two" }] },
+      });
+      const readCapacity = createFleetCapacityReader({
+        settings: () => f.settings.load(),
+        accounts: async () => ({ machine: "local", unread: true }),
+        seats: async () => [],
+        leadSeatId: () => undefined,
+        heavy: () => undefined,
+        tracker: () => undefined,
+        history: new UsageHistory(join(f.root, "usage.json")),
+        machineResources: { ids: async () => ["local", id], status: (machine) => machines.status(machine) },
+      });
+      expect(await readCapacity()).not.toHaveProperty("machineResources");
+      const capacity = await readCapacity(true);
+      expect(capacity.machineResources?.[id]).toMatchObject({
+        status: "available",
+        full: { slots: 1, used: 1, queued: 1, remaining: 0 },
+        light: { used: 0, queued: 0 },
+        server: { used: 0, queued: 0 },
+      });
+      expect(capacity.machineResources?.local).toMatchObject({ status: "unavailable" });
+      expect(JSON.stringify(capacity)).not.toMatch(/private-holder|resource-registry|holderId|executable/u);
+      // Stopping the join observer/home link never stops or strands local heavy work.
+      abort.abort();
+      await channel;
+      await writeFile(release, "");
+      expect(await Promise.all(jobs)).toEqual([0, 0]);
+      const expired = new AbortController();
+      expired.abort();
+      await expect(joinedFleetResources(f.joins).status(id, expired.signal)).rejects.toThrow();
+      await f.joins.remove(id);
+      await expect(machines.status(id)).rejects.toThrow("Unknown resource machine");
+    } finally {
+      abort.abort();
+      await channel;
+      await writeFile(release, "");
+      await Promise.allSettled(jobs);
+      await Promise.all(runners.map((runner) => runner.close()));
+      await f.close();
+    }
+  },
+  20_000,
+);
+
+test.each([
+  { platform: "win32" as const, release: "Windows", env: {} },
+  { platform: "linux" as const, release: "5.15.0-microsoft-standard-WSL2", env: {} },
+  { platform: "linux" as const, release: "Linux", env: { WSL_INTEROP: "/run/WSL/1_interop" } },
+  { platform: "linux" as const, release: "Linux", env: { WSL_DISTRO_NAME: "fixture" } },
+])(
+  "joined resource receiver leaves $platform/$release unavailable without creating a registry",
+  async (host) => {
+    const f = await fixture();
+    const credential = await f.approve("workers", [f.directory], host.platform);
+    await saveJoinedMachineCredential(f.store, credential);
+    const directory = join(f.root, "must-not-exist");
+    const ports = joinedMachineResourcePorts({ ...host, directory });
+    const abort = new AbortController();
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      ports,
+      intervalMs: 10,
+    });
+    try {
+      for (const request of [
+        { action: "status" as const },
+        { action: "configure" as const, policy: FleetResourcePolicySchema.parse({ heavySlots: 1 }) },
+      ]) {
+        expect(
+          await f.joins.request(credential.lease.machineId, { kind: "resources", request }),
+        ).toMatchObject({ ok: true, resources: { status: "unavailable", reason: "unsupported-platform" } });
+      }
+      expect(await readdir(f.root)).not.toContain("must-not-exist");
+      expect(await joinedFleetResources(f.joins).status(credential.lease.machineId)).toMatchObject({
+        unavailable: "unsupported-platform",
+      });
+    } finally {
+      abort.abort();
+      await channel;
+      await f.close();
+    }
+  },
+);
+
+test.runIf(nativeResourcesSupported)(
+  "joined policy cannot write after its live authority changes while waiting for the native lock",
+  async () => {
+    const f = await fixture();
+    const credential = await f.approve();
+    await saveJoinedMachineCredential(f.store, credential);
+    const directory = join(f.root, "locked-resources");
+    const store = new ResourceStore(directory);
+    const governor = createResourceGovernor({ directory });
+    const ports = joinedMachineResourcePorts({ directory, env: {} });
+    const abort = new AbortController();
+    let received = false;
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      ports: {
+        ...ports,
+        resources: async (...args) => {
+          received = true;
+          return ports.resources!(...args);
+        },
+      },
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked = false;
+    let locking: Promise<void> | undefined;
+    try {
+      await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, simulatorSlots: 0 });
+      locking = store.transaction(async () => {
+        locked = true;
+        await gate;
+      });
+      await until(() => locked);
+      const configure = joinedFleetResources(f.joins).configure(
+        credential.lease.machineId,
+        FleetResourcePolicySchema.parse({ heavySlots: 7, simulatorSlots: 0 }),
+      );
+      const refused = expect(configure).rejects.toThrow();
+      await until(() => received);
+      await f.settings.update((current) => ({
+        ...current,
+        machineAccess: { ...current.machineAccess, [credential.lease.machineId]: "portal" },
+      }));
+      await refused;
+      release();
+      await locking;
+      expect((await governor.snapshot()).policy.heavySlots).toBe(1);
+      expect(
+        await f.joins.request(credential.lease.machineId, {
+          kind: "resources",
+          request: { action: "status" },
+        }),
+      ).toMatchObject({ ok: false, error: "machine_access_refused" });
+    } finally {
+      release();
+      abort.abort();
+      await channel;
+      await locking;
+      store.close();
+      await governor.close();
+      await f.close();
+    }
+  },
+  15_000,
+);
+
+test.runIf(nativeResourcesSupported)(
+  "resource policy rechecks its guard inside the shared registry lock before committing",
+  async () => {
+    const f = await fixture();
+    const directory = join(f.root, "guarded-resources");
+    const store = new ResourceStore(directory);
+    const governor = createResourceGovernor({ directory });
+    const ports = joinedMachineResourcePorts({ directory, env: {} });
+    let allowed = true;
+    let checks = 0;
+    let locked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locking: Promise<void> | undefined;
+    try {
+      await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, simulatorSlots: 0 });
+      locking = store.transaction(async () => {
+        locked = true;
+        await gate;
+      });
+      await until(() => locked);
+      const writing = ports.resources!(
+        { action: "configure", policy: FleetResourcePolicySchema.parse({ heavySlots: 7 }) },
+        new AbortController().signal,
+        () => {
+          checks++;
+          if (!allowed) throw Error("stale_join_policy");
+        },
+      );
+      const rejected = expect(writing).rejects.toThrow("stale_join_policy");
+      await until(() => checks === 1);
+      allowed = false;
+      release();
+      await locking;
+      await rejected;
+      expect((await governor.snapshot()).policy.heavySlots).toBe(1);
+    } finally {
+      release();
+      await locking;
+      await ports.closeResources?.();
+      store.close();
+      await governor.close();
+      await f.close();
+    }
+  },
+);

@@ -347,7 +347,10 @@ export type SimulatorAdmission =
       snapshot: ResourceSnapshot;
     };
 export interface FleetResourceGovernor {
-  configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
+  configure(
+    policy: FleetResourcePolicy,
+    options?: { signal?: AbortSignal; beforeWrite?: () => void },
+  ): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
   /** Fresh private registry + native birth/ancestry proof; never invert a positive liveness predicate. */
   restartGuard?(

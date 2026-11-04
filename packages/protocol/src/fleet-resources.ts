@@ -461,7 +461,7 @@ export const FleetMachineResourceSnapshotSchema = z.discriminatedUnion("status",
   z.strictObject({
     ...machineResourceFields,
     status: z.literal("unavailable"),
-    reason: z.enum(["governor-unavailable", "probe-unavailable"]),
+    reason: z.enum(["governor-unavailable", "probe-unavailable", "unsupported-platform"]),
   }),
 ]);
 export type FleetMachineResourceSnapshot = z.infer<typeof FleetMachineResourceSnapshotSchema>;
@@ -470,7 +470,7 @@ export type FleetMachineResourceSnapshot = z.infer<typeof FleetMachineResourceSn
 export function resolveFleetResourcePolicy(
   policy: FleetResourcePolicy,
   specs: FleetResourceMachineSpecs,
-): FleetResourcePolicy {
+): FleetResourcePolicy & { heavySlots: number; simulatorSlots: number } {
   const host = FleetResourceMachineSpecsSchema.parse(specs);
   const gib = host.memoryBytes / 1024 ** 3;
   return {
