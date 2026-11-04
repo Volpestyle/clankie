@@ -4,7 +4,7 @@ import {
   AppMetricsReportSchema,
   AppMetricsSnapshotSchema,
   type AppMetricsReport,
-} from "../src/index.ts";
+} from "@clankie/protocol/app-metrics";
 
 describe("app navigation metrics public contract", () => {
   it("accepts Feed and keeps every previous destination for older clients", () => {
