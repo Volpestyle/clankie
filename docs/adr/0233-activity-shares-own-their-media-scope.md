@@ -100,3 +100,11 @@ Admissions die on expiry, room or participant permission loss, disconnect, insta
 The private bearer-authenticated controller stream is bounded by the original share expiry, separate from public delegated grants (at most five minutes) and the single-use browser connection proof. It follows a confirmed source switch but cannot prolong the share. Hosted body reads independently check live edge authorization; the controller seam does not grant Discord admission by itself. Activity polling and stop have separate finite account request budgets, preserving the existing busy-heartbeat budget and a stop lane.
 
 The self-hosted official-bot OAuth/instance adapter is explicitly outside this batch (lead decision 2026-10-05); local delegated shares remain available. James must select/enable the official Activity application, configure its public URL mapping and verification using existing operator-owned credentials, deploy the reviewed code, and inspect a real Discord launch with two customers, sound, switching, stop and permission revocation. No such account, tunnel, deployment or provider effect was performed for this change. Self-hosted scoped local viewer admission remains an explicitly delegated read grant; managed SDK audience checks are not silently bypassed for it.
+
+## Evidence and limits
+
+This record retains the PCM/frame and bounded media-decoding limits. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when codecs, Activity APIs or available client/server resources change; measure decode memory, cancellation and actual delivered media, preserving source scope and publication consent.

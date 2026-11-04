@@ -49,3 +49,11 @@ field would hire on a number Clankie does not have.
   here. That scan assigns the worker review budget to sessions whose role is
   unknown, which this read refuses to repeat.
 - Wake routing is unchanged.
+
+## Evidence and limits
+
+This record retains the role-specific context budgets and one-minute account-read reuse. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when account windows, model context limits or metering capabilities change; compare fresh source readings, unknown/stale values and actual usage before tuning budgets or cache age.

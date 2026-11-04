@@ -109,3 +109,11 @@ answered here.
   ([ADR 0091](0091-a-mid-turn-message-steers-the-turn.md)) has two runs in
   flight, the draft belongs to whichever is generating, and the last run to
   settle takes it down.
+
+## Evidence and limits
+
+This record retains the old 250 ms polling delay and the 60 ms draft pacing bound. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when streaming APIs, renderer load or observed typing latency change; measure end-to-end delivery and event volume before adjusting pacing.

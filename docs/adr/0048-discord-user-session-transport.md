@@ -74,3 +74,11 @@ from the request body. Each process loads only its own privileged executor.
   owner's explicit choice.
 - Current setup, configuration, and live proof belong in the
   [user-session operating guide](../../apps/discord-user-session/README.md).
+
+## Evidence and limits
+
+This record retains the Discord body capability and account-risk tradeoffs recorded at ratification. These are version-specific observations or bounded design choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Discord changes bot/user media capabilities or account rules; repeat the relevant live body proof and reassess those tradeoffs without merging credentials or activating two mouths.

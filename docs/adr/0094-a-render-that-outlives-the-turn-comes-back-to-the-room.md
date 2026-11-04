@@ -72,3 +72,11 @@ same terms as every other fact the harness hands him.
 - If the room should hear about a finished render without being spoken to
   first, that needs a separately authorized unprompted outbound write. This ADR
   deliberately stops short of it.
+
+## Evidence and limits
+
+This record retains the 90-second render wait and the latency of long video renders. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when provider completion times or pending-result APIs change; compare completion latency, missed deliveries and retry behavior before tuning waits.

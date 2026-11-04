@@ -187,3 +187,11 @@ leaves it out.
 The owner's app parses pages strictly, so both fields are opt-in like `app_note`:
 a `fleet_room` read gets them only when it sends `projects: true`.
 Without that, every page is what it was before.
+
+## Evidence and limits
+
+This record retains the fleet-room text/entry/age limits and compaction thresholds. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when real coordination volume or read/compaction cost makes retention too short or expensive; measure retained usefulness and storage without widening the owner-only audience or copying private answers.

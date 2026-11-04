@@ -138,3 +138,11 @@ held for reorder, so a re-address can still barge in. Other finals wait at most
   each speaker. Silent offers do not manufacture engagement. Increasing the set
   to five may spend more follow-up opportunities than an exclusive holder; it
   still does not spend one on every overheard line.
+
+## Evidence and limits
+
+This record retains the engaged-speaker recency bound and the rejected 12-second follow-up window. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when real conversations show clipped follow-ups, stale engagement or replies to the wrong person; inspect representative turns and address changes before altering the floor heuristic.

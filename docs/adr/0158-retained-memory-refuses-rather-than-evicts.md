@@ -72,3 +72,11 @@ episode records, so no lane reads provenance ids its sibling branch withholds.
   requirement actually arrives, not before.
 - The durable set is bounded by refusal rather than by disk, so memory cannot
   grow without someone choosing it.
+
+## Evidence and limits
+
+This record retains the proposed replacement of a 128-entry ring and its storage/retention bounds. These are version-specific observations or bounded design choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when actual retained-memory growth or recall needs show the proposed bounds are inappropriate; measure storage and useful recall before accepting or changing them, preserving explicit forget semantics.

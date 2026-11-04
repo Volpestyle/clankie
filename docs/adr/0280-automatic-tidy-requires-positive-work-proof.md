@@ -120,3 +120,11 @@ clean). Otherwise it stays in the store, and the result says what was left.
 A batch prune fetches once and admits every tree from one listing. Each tree
 still gets its own fresh pane and process census right before removal, because
 admission alone cannot see a worker that arrived since.
+
+## Evidence and limits
+
+This record retains the roughly 670 worktrees, false live-pane claims and 104 GiB free-disk observation. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when new process/cwd behavior or actual cleanup evidence exposes false busy/free results; rerun real ownership and worktree-use proofs, never replacing positive proof with age or disk pressure.

@@ -200,3 +200,11 @@ been refused and reconnected every second, so it never advanced the cursor
 from Herdr. It now asks once with the edge events and, on refusal, subscribes
 without them. On such a Herdr, prompt edges come only from confirmed native
 peer receipts (above); spawn edges come from the `agent list` parent.
+
+## Evidence and limits
+
+This record retains the proposed 64-edge, five-minute observation window. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when measured event volume or rendering needs show that the proposed window omits useful coordination or retains stale edges; evaluate that evidence before ratification or changing bounds.

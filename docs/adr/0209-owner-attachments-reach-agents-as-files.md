@@ -114,3 +114,11 @@ git-ignored workspace content that the worker or owner may delete.
   file in someone else's worktree.
 - Sending text to a Swarm peer with a note that files were dropped was rejected
   because the owner would not learn that the agent never saw them.
+
+## Evidence and limits
+
+This record retains the relay/gateway request ceilings and 512 KiB attachment chunks. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when ingress limits, mobile memory or ordinary attachment sizes change; measure chunk throughput, retries and memory while preserving ordered, digest-verified, idempotent commit.

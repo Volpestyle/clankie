@@ -97,3 +97,11 @@ configured socket and holds it open; a remote fleet keeps its shared `pane list`
 poll. Local Codex seats hear `pane.closed` from the fleet feed instead of
 polling `herdr pane get` every three seconds, and re-read their pane once
 whenever the feed resubscribes.
+
+## Evidence and limits
+
+This record retains the historical roughly 100 ms per CLI call and native terminal integration constraints. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Herdr's API, rendering or observed call cost changes; benchmark the current supported interface before reviving a fork or inheriting the old latency estimate.

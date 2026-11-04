@@ -64,3 +64,11 @@ voice remained recognizable. Twelve single samples are not a statistical claim
 about personality, nor evidence of audio, image-generation quality or cache hits.
 
 See [the feature guide](../persona-images.md) for limits and operations.
+
+## Evidence and limits
+
+This record retains the image/video input ceilings and ten-frame contact sheet. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when model vision limits, media sizes or evidence of missed poses change; compare inspected source frames and the sampled sheet before changing sampling or memory bounds.

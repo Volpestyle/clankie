@@ -243,3 +243,11 @@ Most of these results come from function-level benchmarks or the authors' own
 evaluations. Long-running repository work by frontier-model fleets is barely
 studied, so Clankie's own delivery outcomes (rework, missed defects, accepted
 results) should revise this when they disagree.
+
+## Evidence and limits
+
+This record retains the native history byte/row bounds used for work observations. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when native schemas or transcript volume change enough to omit relevant work or make reads expensive; measure those reads without turning display names or observations into role authority.

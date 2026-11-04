@@ -87,3 +87,11 @@ flowchart LR
   slot, then pruned.
 - Not yet built: a per-run tracker ticket (the issue's optional "recurring
   ticket"). The run log carries links where a target reports them.
+
+## Evidence and limits
+
+This record retains the 30-second scheduler scan and missed-run policy. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when sleep/wake behavior, scheduler cost or user latency needs change; measure late and overlapping runs while preserving the durable per-slot run fence.

@@ -35,3 +35,11 @@ View-switch lag previously depended on someone noticing and profiling it by
 hand. Gateway diagnostic logs do not expose per-device rolling timings beside
 the service's existing metrics. Fixed schemas and ephemeral caps make this
 always-on path useful without creating content telemetry or unbounded history.
+
+## Evidence and limits
+
+This record retains the 100 ms first-frame warning and bounded app-reported metrics. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when device frame budgets or measured user-visible responsiveness change; compare actual supported observations and distributions rather than treating missing samples as zero or device reports as host attestation.

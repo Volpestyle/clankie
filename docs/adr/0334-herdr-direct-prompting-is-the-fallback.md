@@ -87,3 +87,11 @@ flowchart TD
   atomic, so a draft started inside it is joined, not lost.
 - Reading other harnesses' input lines (OpenCode, Pi, Grok) and plain-text reads
   in the desktop app are follow-ups.
+
+## Evidence and limits
+
+This record retains the 20-second native prompt receipt-match wait and supported Herdr surface. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Herdr changes its native prompt API or receipt visibility, or real sends repeatedly become unconfirmed; verify exact-session delivery before changing the wait, preserving refusal for ambiguous outcomes and the channel-first preference.

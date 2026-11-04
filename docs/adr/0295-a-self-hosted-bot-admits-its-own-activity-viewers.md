@@ -98,3 +98,11 @@ not `confirmed`.
 A `#share` fragment still opens a delegated grant on a self-hosted viewer
 outside Discord. Hosted config never sets `delegated`, so hosted viewers keep
 their official-only behaviour.
+
+## Evidence and limits
+
+This record retains the approximately 15-second viewer-departure bound and producer-abort limit. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Discord membership APIs or producer/cancellation behavior changes; measure departure-to-denial and late delivery, retaining the current-membership check and held queue until owned work settles.

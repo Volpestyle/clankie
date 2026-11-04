@@ -217,3 +217,11 @@ occurring. The rule now holds per handoff: a follow-up from the same actor
 under the same resolved grant steers that actor's running handoff and reports
 `absorbed`; other speakers keep separate threads. See the
 [ADR 0229 amendment](0229-room-handoffs-are-visible-parallel-threads.md#amendment-a-senders-burst-steers-their-own-handoff-2026-10-06).
+
+## Evidence and limits
+
+This record retains the two replies 429 ms apart that motivated serialized durable room turns. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when the harness or delivery lifecycle changes, or live evidence shows duplicate/concurrent replies again; verify serialization and durable history together rather than treating the old incident as a current rate.

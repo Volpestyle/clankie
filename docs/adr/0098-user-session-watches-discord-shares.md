@@ -77,3 +77,11 @@ active. The owner opt-in, allowlists, and active-body switch remain mandatory.
   against user-session receipts: ready, watch_connected with decoder=ready,
   and one decoded still of that user after the watch. Deterministic tests
   cannot mint those receipts.
+
+## Evidence and limits
+
+This record retains the user-session stream capabilities and sampled-still limits, with the live proof commands above. These are version-specific observations or bounded design choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Discord stream APIs, native media ownership or observed frame costs change; repeat the appropriate watch/publish proof separately and preserve body admission and account consent.

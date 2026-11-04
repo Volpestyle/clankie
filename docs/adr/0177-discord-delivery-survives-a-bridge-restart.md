@@ -98,3 +98,11 @@ message-delivery consequences when the host resumes. Gateway diagnostics now
 record allowlisted heartbeat-ACK failures, Discord reconnect requests, close
 codes, invalid sessions, replay counts, and maximum Node event-loop delay at
 reconnect. Raw debug packets, URLs, credentials, and message bodies are excluded.
+
+## Evidence and limits
+
+This record retains the reconnect observations, including 12 of 14 reconnects close to DarkWake, and the retained delivery window. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when OS wake behavior, Discord reconnect/nonce contracts or observed recovery change; compare real acknowledgement and duplicate outcomes before tuning scans, retention or retries.
