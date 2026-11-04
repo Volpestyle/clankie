@@ -7,11 +7,25 @@ import { promisify } from "node:util";
 import { beforeAll, expect, it } from "vitest";
 import { processWorkingDirectories } from "../src/process-working-directories.ts";
 
+const execute = promisify(execFile);
+const fixtures = join(import.meta.dirname, "../../../.local/project-proof/churn/native/cwd-reuse");
+
 beforeAll(async () => {
-  if (process.platform === "darwin")
-    await promisify(execFile)(process.execPath, [
-      join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs"),
+  if (process.platform === "darwin") {
+    await execute(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")]);
+    await mkdir(fixtures, { recursive: true });
+    await execute("cc", [
+      "-std=c11",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-mmacosx-version-min=14.0",
+      join(import.meta.dirname, "helpers/native-proof-churn/cwd-reuse.c"),
+      "-o",
+      join(fixtures, "cwd-reuse"),
     ]);
+  }
 });
 
 it.runIf(process.platform === "darwin")(
@@ -84,4 +98,80 @@ it.runIf(process.platform === "darwin")(
     expect(censuses).toBe(150);
   },
   60_000,
+);
+
+// A busy account (a build, a parallel test run) starts processes faster than one census
+// attempt could finish without one of them being born mid-scan; tidy and cache reclaim then
+// answered "unavailable" on a loaded Mac (#650). A newborn is read in the next listing, and
+// one that outlives the census is in its answer, wherever in the scan it was born.
+it.runIf(process.platform === "darwin")(
+  "settles under sustained account process births and keeps every newborn that outlives it",
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cwd-census-births-")));
+    let spawning = true;
+    const loops = Array.from(
+      { length: 8 },
+      () =>
+        new Promise<void>((resolve) => {
+          const next = () => {
+            if (!spawning) return resolve();
+            spawn("/usr/bin/true", [], { stdio: "ignore" }).on("exit", next);
+          };
+          next();
+        }),
+    );
+    const newborns: ReturnType<typeof spawn>[] = [];
+    try {
+      for (let round = 0; round < 20; round++) {
+        const cwd = join(root, `newborn-${round}`);
+        await mkdir(cwd);
+        const census = processWorkingDirectories();
+        newborns.push(spawn("/bin/sleep", ["30"], { cwd, stdio: "ignore" }));
+        expect(await census).toContain(cwd);
+      }
+    } finally {
+      spawning = false;
+      await Promise.all(loops);
+      await Promise.all(
+        newborns.map(async (child) => {
+          if (child.exitCode !== null || child.signalCode !== null) return;
+          const stopped = once(child, "exit");
+          child.kill();
+          await stopped;
+        }),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);
+
+// A listed PID counts as read only while it names the instance that was read (#708 review).
+// The production helper runs with two real children: A works elsewhere, and from the closing
+// listing on A's PID answers with B's live records, as when A exits and B is born on its PID.
+it.runIf(process.platform === "darwin")(
+  "a PID reused between listings is read again, and an unreadable reuse refuses",
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cwd-census-reuse-")));
+    const first = join(root, "first");
+    const replacement = join(root, "replacement");
+    await mkdir(first);
+    await mkdir(replacement);
+    const census = (mode: "replaced" | "denied") =>
+      execute(join(fixtures, "cwd-reuse"), [mode, first, replacement]).then(
+        ({ stdout }) => ({ code: 0, stdout, stderr: "" }),
+        (error: { code: number; stdout: string; stderr: string }) => error,
+      );
+    try {
+      const replaced = await census("replaced");
+      expect(replaced.code, replaced.stderr).toBe(0);
+      expect(JSON.parse(replaced.stdout).cwds).toEqual(expect.arrayContaining([first, replacement]));
+      const denied = await census("denied");
+      expect(denied.code).not.toBe(0);
+      expect(denied.stdout).toBe("");
+      expect(denied.stderr).toContain('"reason":"process_census_unavailable","errno":1');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
 );

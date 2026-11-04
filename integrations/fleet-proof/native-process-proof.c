@@ -754,78 +754,122 @@ static int left_account(pid_t pid, int error) {
   return (error == EPERM || error == EACCES) && (protected_other_user(pid) || exited(pid));
 }
 
+struct cwd_record { struct identity process; char path[MAXPATHLEN]; };
+
+/* One bracketed cwd read: 0 when read (record->process set) or when the process
+ * proved gone or is a readable-only other user's (left unset), 2 when the census
+ * changed under it, anything else a refusal. */
+static int read_cwd(pid_t pid, int required, struct cwd_record *record) {
+  if (!within_budget()) return refuse();
+  struct identity first, second;
+  int observed = observe(pid, &first);
+  if (observed == 0) return 0;
+  if (observed != 1) {
+    int error = errno;
+    if (!required && protected_other_user(pid)) return 0;
+    if (left_account(pid, error)) {
+      diagnostic("census", "process_census_changed", error, 1);
+      return 2;
+    }
+    int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
+    diagnostic("census", "process_census_unavailable", error, retry);
+    return retry ? 2 : refuse();
+  }
+  required = required || first.uid == getuid();
+  int result = cwd_path(pid, record->path, sizeof(record->path));
+  if (result != 0) {
+    int error = errno;
+    if (exited(pid) || (!required && (error == EPERM || error == EACCES))) return 0;
+    if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN ||
+        left_account(pid, error)) {
+      diagnostic("census", "process_census_changed", error, 1);
+      return 2;
+    }
+    return result;
+  }
+  observed = observe(pid, &second);
+  if (observed == 0) return 0;
+  if (observed != 1 || !same_lifetime(&first, &second)) {
+    diagnostic("census", "process_census_changed", 0, 1);
+    return 2;
+  }
+  record->process = second;
+  return 0;
+}
+
 /* Cleanup needs a complete fresh account census before each removal. Reading
  * vnode paths directly avoids lsof's repeated machine-wide filesystem setup.
  * Keep readable other-user paths too; an inaccessible live account PID refuses
- * the entire observation, never authorizes deletion. */
+ * the entire observation, never authorizes deletion.
+ *
+ * The census settles on the first account listing in which every live process
+ * instance (PID, birth and user) has been read. An account process born during
+ * the scan, or a PID reused since its read, is read in the next listing rather
+ * than discarding every completed read: a busy account (a build, a parallel
+ * test run) starts processes faster than one 600 ms attempt could otherwise
+ * finish (#650, as ADR 0348 does for the Linux socket census). */
 static int prove_cwds(int argc) {
   if (argc != 2) return refuse_at("arguments", "invalid_arguments", 0);
   pid_t all[MAX_PIDS], account[MAX_PIDS], after[MAX_PIDS];
-  int count, account_count, after_count;
+  int count, account_count, after_count, born_count = 0;
   if (!list_pids(PROC_ALL_PIDS, all, &count) ||
       !list_pids(PROC_UID_ONLY, account, &account_count) ||
       !merge_pids(all, &count, account, account_count))
     return refuse_at("census", "process_census_unavailable", errno);
-  struct cwd_record { struct identity process; char path[MAXPATHLEN]; };
   struct cwd_record *records = calloc((size_t)count, sizeof(*records));
   if (records == NULL) return refuse_at("census", "allocation_failed", errno);
+  struct cwd_record *born = calloc(MAX_PIDS, sizeof(*born));
+  if (born == NULL) {
+    free(records);
+    return refuse_at("census", "allocation_failed", errno);
+  }
   int result = 0;
-  for (int i = 0; i < count; ++i) {
-    pid_t pid = all[i];
-    if (pid <= 1) continue;
-    if (!within_budget()) { result = refuse(); break; }
-    struct identity first, second;
-    int observed = observe(pid, &first);
-    if (observed == 0) continue;
-    int required = contains(account, account_count, pid);
-    if (observed != 1) {
-      int error = errno;
-      if (!required && protected_other_user(pid)) continue;
-      if (left_account(pid, error)) {
-        diagnostic("census", "process_census_changed", error, 1);
-        result = 2;
+  for (int i = 0; result == 0 && i < count; ++i) {
+    if (all[i] <= 1) continue;
+    result = read_cwd(all[i], contains(account, account_count, all[i]), &records[i]);
+  }
+  for (int unread = 1; result == 0 && unread;) {
+    if (!list_pids(PROC_UID_ONLY, after, &after_count)) {
+      result = refuse_at("census", "process_census_unavailable", errno);
+      break;
+    }
+    unread = 0;
+    for (int i = 0; result == 0 && i < after_count; ++i) {
+      pid_t pid = after[i];
+      if (pid <= 1) continue;
+      /* A listed PID counts as read only when its live instance is one already
+       * read: same PID, birth and user. A PID reused since its read is another
+       * instance, and one whose identity cannot be observed refuses. */
+      struct identity now;
+      int observed = observe(pid, &now);
+      if (observed == 0) continue;
+      if (observed != 1) {
+        int error = errno;
+        if (left_account(pid, error)) {
+          diagnostic("census", "process_census_changed", error, 1);
+          result = 2;
+        } else {
+          int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
+          diagnostic("census", "process_census_unavailable", error, retry);
+          result = retry ? 2 : refuse();
+        }
         break;
       }
-      int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
-      diagnostic("census", "process_census_unavailable", error, retry);
-      result = retry ? 2 : refuse();
-      break;
-    }
-    required = required || first.uid == getuid();
-    result = cwd_path(pid, records[i].path, sizeof(records[i].path));
-    if (result != 0) {
-      int error = errno;
-      if (exited(pid) || (!required && (error == EPERM || error == EACCES))) {
-        result = 0;
-        continue;
+      const pid_t *found = bsearch(&pid, all, (size_t)count, sizeof(pid), compare_pid);
+      int read = found != NULL && same_lifetime(&records[found - all].process, &now) &&
+                 now.uid == getuid();
+      for (int j = 0; !read && j < born_count; ++j) read = same_lifetime(&born[j].process, &now);
+      if (read) continue;
+      if (born_count >= MAX_PIDS) {
+        result = refuse_at("census", "process_census_unavailable", EOVERFLOW);
+        break;
       }
-      if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN ||
-          left_account(pid, error)) {
-        diagnostic("census", "process_census_changed", error, 1);
-        result = 2;
+      result = read_cwd(pid, 1, &born[born_count]);
+      if (result == 0 && born[born_count].process.pid == pid) {
+        ++born_count;
+        unread = 1;
       }
-      break;
     }
-    observed = observe(pid, &second);
-    if (observed == 0) continue;
-    if (observed != 1 || !same_lifetime(&first, &second)) {
-      diagnostic("census", "process_census_changed", 0, 1);
-      result = 2;
-      break;
-    }
-    records[i].process = second;
-  }
-  if (result == 0 && !list_pids(PROC_UID_ONLY, after, &after_count))
-    result = refuse_at("census", "process_census_unavailable", errno);
-  for (int i = 0; result == 0 && i < after_count; ++i) {
-    pid_t pid = after[i];
-    if (pid <= 1) continue;
-    const pid_t *found = bsearch(&pid, all, (size_t)count, sizeof(pid), compare_pid);
-    if (found != NULL && records[found - all].process.pid == pid &&
-        records[found - all].process.uid == getuid()) continue;
-    if (exited(pid)) continue;
-    diagnostic("census", "process_census_changed", 0, 1);
-    result = 2;
   }
   if (result == 0 && !within_budget()) result = refuse();
   if (result == 0) {
@@ -836,10 +880,17 @@ static int prove_cwds(int argc) {
       if (emitted++) fputc(',', proof_output);
       print_string(proof_output, records[i].path);
     }
+    for (int i = 0; i < born_count; ++i) {
+      if (emitted++) fputc(',', proof_output);
+      print_string(proof_output, born[i].path);
+    }
     fputs("]}\n", proof_output);
   }
   erase_buffer(records, (size_t)count * sizeof(*records));
+  /* Slots past the one in progress were never written. */
+  erase_buffer(born, (size_t)(born_count < MAX_PIDS ? born_count + 1 : MAX_PIDS) * sizeof(*born));
   free(records);
+  free(born);
   return result;
 }
 
