@@ -234,10 +234,7 @@ async function syncQuietly(): Promise<number> {
       0,
       Math.floor((startup ? PROMPT_RETRY_BUDGET_MS : SYNC_BUDGET_MS) - performance.now()),
     );
-    const signal = AbortSignal.any([
-      closing.signal,
-      AbortSignal.timeout(remaining),
-    ]);
+    const signal = AbortSignal.any([closing.signal, AbortSignal.timeout(remaining)]);
     await runSeatSyncCommand([], {
       env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },
       host: "http://127.0.0.1",
