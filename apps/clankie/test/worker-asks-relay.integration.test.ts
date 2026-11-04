@@ -193,6 +193,9 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
   expect(await revoked.json()).toMatchObject({ outcome: "refused", reason: "unauthorized" });
   expect(reads).toBe(2);
   expect(asks.list({ state: "open" }).map((entry) => entry.askId)).toEqual([raised[2]!.askId]);
+  // The refused withdraw released its hold on the ask: an answer to it still goes through.
+  expect(await asks.answer(raised[2]!.askId, { value: "merge" })).toMatchObject({ outcome: "answered" });
+  expect(deliver).toHaveBeenCalledTimes(2);
 
   // The public gateway and the hosted operator carry exactly these routes to the relay.
   const id = raised[1]!.askId;
