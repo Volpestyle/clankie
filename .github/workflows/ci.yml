@@ -56,10 +56,13 @@ jobs:
           node scripts/check-retired-claims.mjs
           node scripts/check-chromium-sandbox.mjs
           node scripts/check-swallowed-rejections.mjs ${BASE:+"$BASE"}
-      # No new proof folders, no search-flooding lines, a lean AGENTS.md.
+      # No new proof folders, no search-flooding lines, a lean AGENTS.md, and
+      # docs/cli.md's command reference matching the command registry (#334).
       - name: Docs hygiene
         if: github.event_name != 'workflow_dispatch'
-        run: node scripts/check-docs-hygiene.mjs
+        run: |
+          node scripts/check-docs-hygiene.mjs
+          node scripts/cli-doc.mjs
       - name: Strict native MCP catalog contracts
         if: github.event_name != 'workflow_dispatch'
         run: pnpm mcp:check

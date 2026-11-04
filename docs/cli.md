@@ -179,6 +179,339 @@ fallback after an owner API error. See [ADR 0248](adr/0248-owner-settings-use-on
 | [Use native seats and delegated tools](#seat-commands) | `claude`, `codex`, `mcp`, `access`                          |
 | [Evaluate agent work](#evaluation-commands)            | `evaluator`                                                 |
 
+## Command reference
+
+Every command and its flags, exactly as `clankie help` prints them. The block is
+generated from the launcher's command registry, so it can't fall behind it; the
+sections under [Commands](#commands) explain each one.
+
+<!-- command-reference:start -->
+<!-- Generated from apps/tui/src/command/registry.ts by `pnpm docs:cli`; edit the registry, not this block. -->
+
+```text
+Usage: clankie [--version|-V] [--chat <conversationId>] [<command> ...]
+
+With no command, clankie opens the fullscreen operator console and requires a TTY.
+
+Headless commands (no TTY). One JSON document on stdout unless noted; progress
+on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
+
+  seat show | set app|claude|codex --revision REV | start --revision REV --request UUID | status UUID  Choose and explicitly open Clankie on this Mac
+  http show | allow-origins [ORIGIN ...]  Read or replace the exact browser origin allowlist (owner API; empty clears)
+  fixture-admission request|status|revoke FLAGS | read|read-status --fixture PRIVATE_FILE FLAGS  Single-use host-seat fixture get_user admission; native account unverified
+  skin draft create SENTENCE [--request UUID] | list | get ID [--version N] | pose COMMAND.json | revise ID REV SENTENCE | approve|decline|cancel ID REV  Owner key-pose drafts; no generation or live-look change
+  skin compile SOURCE --out NEW_DIRECTORY | sample IMAGE OPTIONS.json --out NEW_DIRECTORY | check DIRECTORY  Compile, sample or mechanically check lead-skin data; never generates or publishes art
+  heavy [--server] [--seat LABEL] [--holder ID] -- COMMAND [ARGS...]  Run a governed build/check or long-lived server
+  fleet resources           Inspect heavy slots, permit holders and queue (JSON)
+  fleet processes [retire]  List local harnesses; retire only verified own closed hires
+  simulator status | plan JSON | acquire JSON [--wait SECONDS] | verify JSON | touch JSON | release JSON | cancel JSON  Lease a simulator to a verified local seat
+  checkouts status | sync [--repository OWNER_CHECKOUT] | prune --repository OWNER_CHECKOUT --path WORKTREE  Inspect, safely fast-forward, or tidy local repositories (JSON)
+  checkouts decide --repository OWNER_CHECKOUT --path WORKTREE --decision worth_landing|safe_to_drop --reason TEXT  Record a judgment of a worktree's unlanded work (JSON)
+  share [list | request JSON]  Control Activity shares on the current connection (owner/device, JSON)
+  harness install [--refresh-linked | --codex-source-setup SCRIPT] [--project PROJECT] [--approve]  Install or refresh Codex's native plugin and remove older Claude copies under current fleet policy
+  harness refresh-tools [--pane PANE]  Refresh an original native catalog
+  harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)
+  harness opencode [status|install]  Whether OpenCode 2 sessions you open yourself can take messages; install adds Herdr's OpenCode plugin to your OpenCode settings (JSON)
+  project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings
+  project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding
+  project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides
+  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)
+  project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root
+  project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment
+  update [--ref REF] | status [--json]  Explain the live runtime, target and deploy holds; JSON when piped
+  update now | cancel  Apply a batched checkout update at once, or drop it (updates that follow main batch while the body is busy)
+  update --override-holds --reason TEXT  Owner-only update with one audited override per hold
+  update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)
+  computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)
+  body status | request JSON  Inspect or explicitly request conversation body leases (JSON)
+  login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]
+                           Sign this Mac in by email code for remote access (same as remote-access on)
+  logout | disconnect      Say how to take this Mac off remote access; whoami is also in `status`
+  keys [status|set PROVIDER --key-stdin|remove PROVIDER|validate PROVIDER MODEL]
+                           Model-provider API keys on this Mac; the key only on stdin
+  connect                  Retired: Clankie runs on your own machine, so use login
+  connections              Inspect runtime and connected-account inventory (JSON)
+  runtime [list|status] | connect ID (--session NAME | --socket PATH) | disconnect ID
+          workspaces ID (--repo /checkout | --dir /directory)... | workspaces ID --clear
+          capacity ID N|--clear (default 16; clear = unlimited)
+          prepare ID [--claude-path-shim install|remove (local)] [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]
+                           Manage named execution connections (JSON)
+  seat-sync                Project the launched native seat transcript (hook stdin)
+  seat-hook                Report a hired seat's settled turn (worker plugin hook stdin)
+  access list | issue REQUEST.json --out GRANT.json | revoke ID | linear [verify]
+  access project NAME SERVER [--tool NAME]...
+                           Delegate connected MCP tools to a worker (JSON)
+  agents contacts          Known agent identities and availability (JSON)
+  agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split --mcp-servers NAME,...|inherit]
+  agents role NAME|ID ROLE|none [--project PROJECT] | roles | rename NAME|ID NEW_NAME
+                           Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)
+  sessions                 Alias for agents session commands
+  agents [list] [--host ID] [--limit N] | read HOST:SESSION [--tail N | --after CURSOR]
+  agents resume HOST:SESSION [--fleet ID] [--brief TEXT]
+  agents call-receipt inspect ORIGINAL_UUID [--abandonment-id UUID]
+  agents call-receipt abandon-read ORIGINAL_UUID --reason TEXT
+                           Native seat receipts; inspect both IDs after uncertain abandonment
+  agents hosts | hosts add ID --ssh TARGET [--shell posix|powershell] | hosts remove ID
+                           Read any Claude/Codex/Grok/Pi session, here or over SSH (JSON)
+  evaluator [status|enable [--harness codex|claude]|disable|open|retry ID]
+                           Developer diagnostic: independent assessments in Herdr (JSON)
+  routines [list] | history [ID] [--limit N] | pause|resume|run-now|remove ID
+  routines add NAME --when WHEN (--turn PROMPT | --hire JSON --brief TEXT | --check --cwd DIR -- CMD...)
+  routines edit ID [--name N] [--when WHEN] [--tz ZONE] [--missed catch_up|skip]
+                           Recurring scheduled jobs: lead turns, hires, checks (text; --json)
+  conversations list | show ID [--cursor CURSOR] [--limit N] | tail ID [--cursor CURSOR]
+                           Inspect every conversation, including Discord tools (JSON)
+  conversations channels | rooms | channel [ID] [--title T] [--member PERSONA_ID]...
+  conversations questions [ID] [--request UUID] [--status pending|submitted|cancelled]
+  conversations answer|cancel-question ID REQUEST --incarnation UUID --revision N [--option UUID | --text TEXT | --stdin | --worker-stdin]
+                [--discord provision [--room ROOM_ID] | --discord off | --webhook-stdin] | --json-stdin
+                           Agent channels and their managed-server Discord rooms (JSON)
+  feed [--project ID] [--cursor CURSOR] [--limit N] [--json]
+                           Owner checks, finished work to check, updates and drops, newest first; owner only
+  feed drop --project ID [--title TEXT] [--body TEXT | --stdin] [--file PATH]... [--key KEY] [--json]
+                           File a drop as a private issue file and wake the project's lead; owner only
+  feed check [--project ID | --conversation ID] [--longer] [--evidence LINK] [--waiting-on TEXT] [--key KEY] [--json] LINE
+                           Ask the owner to check one thing: one line of at most 140 characters, a ten-second look
+  reset --conversation ID  Archive the old session and reset model context (JSON)
+  send --conversation ID [--delivery steer|queue] [--attach PATH]... (MESSAGE | --stdin)
+                           Steer the active turn or queue a follow-up (JSON receipt);
+                           --attach uploads images or video with the message
+  file publish --conversation ID PATH [--name FILE] [--type MEDIA_TYPE]
+                           Publish one finished local file into the conversation (JSON)
+  health | status          Probe every launcher-owned service (JSON)
+  extensions [status]      Each extension's state: running, degraded with a reason, off (JSON)
+  extensions on|off ID     Switch one extension on or off; applies at the next restart
+  extensions add FOLDER|GIT_URL [--commit SHA] [--path DIR] [--grant all|P,...] [KEY=VALUE...]
+                           Install an outside extension from a folder or a pinned commit (ADR 0338)
+  extensions grant|refuse ID all|PERMISSION...  Change what an outside extension may use
+  extensions remove ID     Uninstall an outside extension
+  runtime-health [status|on|off]    Runtime CPU and slow-health alarm settings (JSON)
+  runtime-health set --cpu-percent N --health-ms N --sustained-seconds N
+                     [--sample-seconds N] [--cooldown-seconds N]
+  doctor [--machine ID] [--json]    One-line diagnosis; --json shows the full install and fleet card
+                           (exit 0 when produced; JSON ok means the card was produced)
+  restart [service] [--keep relay,activity,awake]  Restart in dependency order, leaving named dependents up (JSON; progress on stderr)
+  start [service]          Start what is not running, in dependency order (JSON; progress on stderr)
+  stop [service]           Stop in reverse order (JSON; progress on stderr)
+  recover [--autostart]    Restart launcher-owned services that crashed or stopped answering, with backoff (JSON)
+  autostart enable|disable|status
+                           Start clankie at login and restart crashed services every 30s (JSON)
+  awake [status|on|off]    Keep this Mac awake while plugged in (launcher-supervised caffeinate; JSON)
+  usage [--refresh] [--json]   Claude/Codex accounts on this Mac: plan, % used per limit, local resets (--json for raw)
+  usage overlay [on|off]   Show or hide the desktop overlay's usage meters
+  usage warning [on|off|HOURS]  Tell the lead when an account will run out HOURS+ before its weekly reset (default on, 12)
+  asks [list] [--all]   Workers' open structured asks to their leads (--all includes settled ones)
+  asks answer ASK_ID (--value VALUE | --text TEXT)   Answer one; the worker hears it tied to the ask
+  asks withdraw ASK_ID   Drop an ask that will not be answered
+  huddle [list | ID] [--json]   Recent huddles, or one huddle's board: seats, blockers, landing order
+  huddle start [--project ID] [--window MINUTES]   Ask every seat what it's on, what blocks it, what it lands when
+  huddle close ID   Stop collecting and tell the lead what arrived
+  pair [--json] [--timeout SEC] [--run ID --purpose PURPOSE --ttl SEC] [-- COMMAND ARGS]
+                           One-time device pairing QR + code (human default; --json for agents)
+  devices [--grouped] [--json]         List paired devices
+  connector [status] [--json]   The URL to add in Claude and sign-ins waiting
+  connector approve CODE | deny CODE [--json]   Let a Claude sign-in in, or turn it away
+  connector prompts [on|off APP] [--json]   Which connected apps may answer prompts and press keys in agents' panes
+  connector detect [on|off herdr] [--json]   Whether Herdr sessions are discovered, including ones just cleared
+  connector serve [on|off APP] [--json]   Which connected apps the connector serves
+  connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps
+  connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]
+                           A connected lead's wake webhook (address and key on stdin), and a job for it
+  connector notes [SINCE] [--json]   The apps' note board, with each addressed lead and how it was woken
+  support [list | create read-state|shell --hours 1..72 --ref REFERENCE]
+  support revoke ID | offer ID   Owner-issued support access (JSON)
+  remote-access [status]   Remote access for this Mac (self-host only; gateway alias)
+  remote-access on [--email EMAIL] [--code-stdin]
+                           Sign this Mac in (or back in) with an email code
+  remote-access off | rotate-key | direct --control-plane-url URL --relay-url URL
+  gateway set --url URL --host-id ID | disable
+  devices end-run <run-id> [--json] | devices revoke <id> [--json]
+                           Revoke a device
+  operator-credential rotate [--json]
+                           Rotate the local operator credential
+  operator-credential protect [--json]
+                           Move it to the protected keychain hired workers can't read
+  play status              Live embodiment session (JSON)
+  play guide TEXT --conversation ID  Suggest a Pokémon objective or approach
+  play stop                Stop the live playthrough at the next turn boundary
+  model [status]           Captain model and local providers (JSON)
+  model refresh            Refresh the available model catalog
+  model subscriptions list|methods|start|status|cancel   Service-owned subscription sign-in
+  model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]
+                           Declare an OpenAI-compatible local runtime (ds4, Ollama, LM Studio)
+  model local [list]       List Ollama, LM Studio and vLLM answering on this Mac
+  model local use RUNTIME MODEL
+                           Prove a local model answers, add its endpoint and select it
+  model set provider/model Select the captain model
+  effort [status]          Read reasoning effort for the captain model
+  effort set LEVEL [--model provider/model] | clear [--model provider/model]
+  voice [status] | brain set openai|xai|anthropic [MODEL_ID] | brain model clear
+  voice model set MODEL_ID | model clear (ElevenLabs)
+  image-model [status] | set provider/model | clear
+  video-model [status] | set provider/model | clear
+  persona [status]         Read owner-authored character configuration
+  persona set --display-name NAME [--aliases name,name] [--character-notes TEXT] …
+  linear [status] | follow on|off | target [show|set ID]  Linear webhook wakes
+  linear budget            Read account request usage and background throttling
+  linear read TOOL --json-stdin [--background]   Read Linear; automated polls yield to interactive work
+  linear wake [show|set --actors owner,human,self,users --owner-user-ids IDS --owner-user-emails EMAILS --user-ids IDS --types TYPES --exclude-types TYPES]
+  linear post comment|issue --json-stdin   Publish as an existing worker persona through the connected app
+  linear graphql --json-stdin   Run any Linear GraphQL operation as the connected Clankie app
+  accounts [list] | connect github|linear | complete linear --json-stdin | disconnect github|linear   Body account connections (JSON)
+  accounts start github | poll github --flow-id ID   Start and check GitHub device authorization separately
+  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app
+  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom
+  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles
+  accounts pi [show|enable|disable]   Turn Pi coding workers on or off (owner / Take Control)
+  accounts workers [--machine ID]   Worker Claude/Codex accounts on this or a linked machine: sign-in, plan, usage (JSON)
+  accounts hold|release claude|codex|pi LABEL [--machine ID] [--reason TEXT]   Keep an account out of automatic choice
+  accounts budget [claude|codex LABEL PERCENT|off [--machine ID]]   Stop new hires at PERCENT of the account's plan; leads hear when to pause its work
+  accounts apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL]
+  accounts apps github-secret --client-id ID --secret-stdin   Body-only developer revocation secret
+  work [status] | repos | init [--backend B ...] | list [--status S] [--owner O] [--label L] | show ID
+  work create TITLE [--criterion C]... | update ID [--status S] [--check N]... | close ID
+  work attach ID --url URL --caption TEXT [--kind K]   [--repo PATH on any command]
+  work bundle set ITEM --json BUNDLE | bundle show ITEM [--run ID] | bundle check ID [--body TEXT]
+  work gate ask ITEM --run ID --kind GATE --body TEXT | ask ITEM --body TEXT
+  work run steer|pause|resume|stop ID [--body TEXT]   Built-in tracker run controls
+                           Track work in the repo's own convention, with evidence (JSON)
+  evidence push [PATH] [--issue KEY] [--caption TEXT] | fetch [PATH]   Move evidence-root files to the evidence store
+  evidence list --issue KEY | --commit SHA | receipt RECEIPT_ID   Read evidence records and upload receipts (JSON)
+  review list [--project ID] | show ID [--patch]   Landing candidates and verdicts of the standing review gate (JSON)
+  review status [--directory DIR] [--base REF]   Whether this checkout's exact patch may land (exit 1 while held)
+  review waive --reason TEXT [--directory DIR] [--base REF]   Owner: land this exact patch without review, on the record
+  review submit --checkout DIR --summary TEXT [--issue KEY] [--evidence URL]...   Author, from its own pane: submit_for_review without the tool
+  skills                   Skills shipped with this body (JSON)
+  desktop [status] | quiet-hours START END TIME_ZONE | quiet-hours off
+                           Desktop quiet hours (HH:mm, IANA time zone); applies immediately
+  games status|set on|off  Read or set PokeAgent gameplay availability
+  games budget max-tokens|max-cost-usd|max-turns|max-duration-ms <value|default>
+  games extensions [add MODULE [KEY=VALUE...] | remove MODULE]
+                           Registered games, or install an external game extension (restart)
+  browser [status] | record on|off  Save each burst of his browsing as a WebM (JSON)
+  browser harnesses | delegate on|off
+                           Computer-use harnesses he can hire, and whether he is offered them (JSON)
+  browser tools | call TOOL JSON  Inspect or call Browser Use Pi tools
+  minecraft configure [PROFILE HOST --version VERSION --port PORT]
+  minecraft configure play [--enabled on|off] [--model PROVIDER/MODEL]
+      [--max-tokens N] [--max-cost-usd N] [--turn-interval-ms N]
+      [--idle-backoff-ms N] [--idle-stop-ms N]
+  minecraft driver [mind|owner|worker fleet:FLEET:pane:SEAT]
+  minecraft status|profiles|join PROFILE|leave|cancel [ACTION]|pause|resume
+  minecraft observe|chat TEXT|follow PLAYER|goto X Y Z|dig X Y Z|place X Y Z ITEM
+                           Play in an approved offline Java server (JSON)
+  auto [status|on|off]     Master switch for unprompted work: projects on Auto and self-wakes (JSON)
+  auto rounds [--project ID] [--limit N] | auto rounds --replay --project ID --since ISO --until ISO
+                           Each Auto round's measured velocity per project and its delivery (JSON)
+  autonomy [status|watch|off|low|high|full]
+                           Read or set how many decisions Clankie takes on his own; watch changes nothing (JSON)
+  navigation [status|set work,messages,world]
+                           Choose primary app destinations; first is the landing view (JSON)
+  setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]
+                           Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
+  maximum-trust-mode [status|on|off]
+                           Launch every harness without its permission prompts and sandbox (JSON)
+  fleet leads [--json]  Read active Clankie and connected app leads
+  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
+  fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
+                           Owner-only: let one other local account (a CI runner) queue for heavy slots
+  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear
+          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]
+                           Read or set fleet routing, budget, autonomy and connected tools
+  companion trust APP_PATH [--label TEXT] | list | remove ID
+                           Choose which signed apps on this Mac may take the same-Mac handoff
+  transfer --to URL|local [--from URL|local] | status | abort | reclaim --force | rebind
+                           Move Clankie to another body and back; one body holds him at a time
+  join --gateway URL --host HOST_ID [--directory PATH] | approve CODE --access LEVEL | resume|status|leave
+                           Approve an outbound machine connection without SSH
+  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | shell-audit | sessions NAME
+                           Machines where agents run; connections apply live
+  herdr [status|open|create|disable] | use NAME
+                           Open his workspace or choose your Herdr session
+  herdr [--connection ID] <herdr command>    Run against a selected runtime
+  herdr prepare NAME [--claude-path-shim install|remove (local)] [--codex-source-setup SCRIPT] [--project PROJECT] [--approve]
+  workdir [status] | set PATH | clear
+                           The captain's working directory (default: the home directory)
+  work-on TITLE [--repo REPO_ID --issue ISSUE_ID] | clear
+                           For agents: state your current assignment and optional issue link.
+                           Persists for this native session; HERDR_PANE_ID identifies your seat.
+  hire-receipt settle RECEIPT_OR_FRESH_INTENT_ID [not-launched|delivered|abandoned|abandoned-unknown|release-allocation|adopt]
+                           Recover an authenticated original; retain its identity and evidence.
+  hire-receipt fresh --json-stdin
+                           Explicit new remote work after settlement; retain freshIntent UUIDs.
+  seat-delivery list         Unresolved head seat deliveries and their age.
+  seat-delivery settle RECEIPT_ID abandoned-unknown [--conversation ID]
+                           Owner settlement: never claims receipt, never resends the original.
+  stance <working|thinking|stuck|hauling|resting> [--note TEXT] [--for SECONDS]
+                           For agents: say what you are doing with your own figure
+                           in the World. Your seat comes from HERDR_PANE_ID.
+  prompt [--lane LANE] [--sections identity,persona,reach,fleet,address,model,conversation] [--harness claude]
+                           The system prompt that lane's session starts from (plain text)
+  memory-card [--lane LANE] [--hook]
+                           The memory card that lane's next run injects (plain text)
+  memory [status] | search <terms...>
+  memory retain|release|forget <episodeId>
+  memory correct <episodeId> --summary TEXT
+                           Inspect and curate remembered episodes (JSON)
+  view list | create SPEC_JSON|--stdin [--ttl HOURS|Nd] [--pin] | show ID [--text] [--watch]
+  view pin ID | unpin ID [--ttl HOURS|Nd] | expire ID
+                           Private live boards from fleet resources and tracker issues (JSON)
+  metrics [--run ID] [--limit N]
+  metrics --app            App view-switch rolling p50/p95 and slow-switch counts (JSON)
+  metrics --fleet          Fleet proof/report failure counts and 5/60-minute rates (JSON)
+                           Recent settled captain turns: execution identity, tool shape,
+                           reported usage (JSON; newest first, limit 1-100, default 20)
+  telemetry ship --spool DIR --cursor FILE --log-group NAME [--once] [--interval S]
+                           Self-hosted Linux on EC2 only: ship a body's metadata telemetry to CloudWatch Logs
+  claude[N]               Open Clankie in claude or a numbered shell account command (e.g. claude2)
+  codex[N]                Open Codex; a numbered command selects its exact registered account label
+  opencode                Open Clankie in OpenCode (TTY)
+  grok                    Open Clankie in Grok Build (TTY; macOS, 1.0.46 or newer)
+  prime-agent | prime     Open Clankie in a resident Prime Agent session (TTY; 0.10.x)
+    [--resume] [--conversation ID | --new] [--plugin-dir PATH] [--dry-run]
+                           Without a selection: the global chat while no live seat holds it, else a new chat; --new forces one
+                           Grok accepts --resume, --conversation, --new and --dry-run; no --plugin-dir
+                           Prime also takes --model PROVIDER/MODEL; closing its TUI detaches, --resume reattaches
+                           --dry-run prints a plan without creating a chat
+  mcp [--lane operator] [--conversation ID] Serve Clankie's lane tool bank over stdio for a seated harness
+  mcp --seat               Serve a fleet pane's message channel over stdio (no tools)
+  mcp --fleet              Serve owner-granted fleet tools through the process-authenticated local or SSH link
+  mcp --grant FILE         Serve only a worker's granted connected tools over stdio
+  discord [status]         Read non-secret Discord identifiers and body selection
+  discord set --field value […] | clear --field […]
+  discord setup [choices home|talk|computer|team]  Read sentences or set their named choices
+  discord directory [servers|channels|roles|people] [--server ID] [--limit N] [--after ID]
+  discord definition       Read the shared Discord sentences, pickers and Advanced fields
+  discord transcripts [--cursor CURSOR] [--limit N]  Read private retained voice text
+  help | --help | -h       This text
+
+Services for start/stop/restart: all (default), clankie, relay, discord, user-session, activity, tunnel
+Aliases: captain, eve, cp, control-plane, bridge, lab, watch, viewer, cloudflared, app-relay, phone
+
+Model notes:
+  A bare origin (--base-url http://127.0.0.1:8000) is rewritten to /v1.
+  Probe is GET {baseURL}/models (3s), unauthenticated — an endpoint that checks a
+  bearer answers 401, so pass --models id,id for those.
+  An endpoint that wants a key reads it from the credential store under the provider
+  id; put it there with /auth <providerId> in the console.
+  --set selects the first listed model as captain.
+  Config writes need `clankie restart`, except Linear follow (live).
+
+pair / devices / operator-credential rotate|protect default to human text; pass --json.
+play stop prints 'Nothing is playing.' (not JSON) when idle.
+prompt / memory-card print plain text, and only for the bearer's own lane:
+  operator, discord_voice, discord_presence, gameplay (default: operator).
+claude / codex / opencode / grok / prime need a TTY and that harness on PATH; mcp speaks JSON-RPC and is
+  for a harness's MCP config, not for people.
+Secret entry uses /auth, /discord, /connect, or /voice. The
+credential store is shared — what /auth writes is what this CLI's services read.
+Local LLM servers are not launcher-owned; start them yourself.
+
+Each command's usage: clankie <command> --help.
+```
+
+<!-- command-reference:end -->
+
 ## Commands
 
 <a id="diagnostics"></a>

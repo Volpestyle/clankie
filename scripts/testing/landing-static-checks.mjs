@@ -18,4 +18,6 @@ export const landingNodeChecks = [
   ["swallowed-rejections", "scripts/check-swallowed-rejections.mjs", "base"],
   ["extension-boundary", "scripts/check-extension-boundary.mjs"],
   ["docs-hygiene", "scripts/check-docs-hygiene.mjs", "base"],
+  // docs/cli.md's command reference against the command registry (#334).
+  ["cli-doc", "scripts/cli-doc.mjs"],
 ];
