@@ -25,9 +25,11 @@ const script = async (path: string, body: string, mode = 0o755) => {
 
 it("takes the first absolute PATH entry whose name resolves to an executable", async () => {
   const root = await scratch();
-  const [plain, broken, linked, real, later] = ["plain", "broken", "linked", "real", "later"].map((name) =>
-    join(root, name),
-  );
+  const plain = join(root, "plain");
+  const broken = join(root, "broken");
+  const linked = join(root, "linked");
+  const real = join(root, "real");
+  const later = join(root, "later");
   for (const directory of [plain, broken, linked, real, later]) await mkdir(directory);
   await script(join(plain, "tool"), "exit 0", 0o644); // present but not executable
   await symlink(join(root, "missing"), join(broken, "tool")); // dangling symlink
