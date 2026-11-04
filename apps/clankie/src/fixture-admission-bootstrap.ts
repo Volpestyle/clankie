@@ -29,18 +29,36 @@ export function saveFixtureState(path: string, value: unknown): void {
     closeSync(parent);
   }
 }
-async function trustedFile(path: string): Promise<Buffer> {
+/**
+ * pnpm's virtual store, where Linux installs hardlink each dependency file to its
+ * content-addressable store copy (#304). macOS clones instead, so links stay single.
+ */
+const pnpmVirtualStore = "node_modules/.pnpm/";
+/**
+ * Owned, not group- or other-writable, regular and canonical. Executed and pinning bytes
+ * must also have no other name. A pinned dependency input in pnpm's virtual store may: its
+ * other link is the store copy of the same owned inode, so it adds no writer, and it is
+ * only hashed against its pinned digest, never executed.
+ */
+async function trustedFile(path: string, sharedLinks = false): Promise<Buffer> {
   if ((await realpath(path)) !== path) throw new Error("Fixture artifact alias refused");
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = await file.stat();
-    if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid!() || (stat.mode & 0o022) !== 0)
+    if (
+      !stat.isFile() ||
+      (stat.nlink !== 1 && !sharedLinks) ||
+      stat.uid !== process.getuid!() ||
+      (stat.mode & 0o022) !== 0
+    )
       throw new Error("Fixture artifact must be a trusted regular file");
     return await file.readFile();
   } finally {
     await file.close();
   }
 }
+const trustedInput = (repoRoot: string, path: string) =>
+  trustedFile(join(repoRoot, path), path.startsWith(pnpmVirtualStore));
 /** Bootstrap failed and its launched child/root could not be proven gone; the root is preserved. */
 export class FixtureCleanupUnresolvedError extends AggregateError {
   constructor(failure: unknown, cleanup: unknown) {
@@ -72,7 +90,7 @@ export async function createFixtureBootstrap(repoRoot: string, scratchParent: st
       if (
         input.path.startsWith("/") ||
         input.path.split("/").includes("..") ||
-        digest(await trustedFile(join(repoRoot, input.path))) !== input.sha256
+        digest(await trustedInput(repoRoot, input.path)) !== input.sha256
       )
         throw new Error("Trusted fixture input changed");
     }
@@ -91,7 +109,7 @@ export async function createFixtureBootstrap(repoRoot: string, scratchParent: st
     )
       throw new Error("Pinned fixture artifact changed after host startup");
     for (const input of metadata.inputs)
-      if (digest(await trustedFile(join(repoRoot, input.path))) !== input.sha256)
+      if (digest(await trustedInput(repoRoot, input.path)) !== input.sha256)
         throw new Error("Pinned fixture source changed after host startup");
     // The caller controls none of the executable bytes, bootstrap secret, root or PID.
     await mkdir(scratchParent, { recursive: true, mode: 0o700 });

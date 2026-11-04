@@ -2,7 +2,19 @@ import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { promisify } from "node:util";
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile, realpath } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { serve } from "@hono/node-server";
@@ -20,21 +32,36 @@ beforeAll(async () => {
     await promisify(execFile)(process.execPath, [join(repoRoot, "scripts", script)], { timeout: 120_000 });
 }, 130_000);
 // A private copy of the pinned inputs, so changing them never races other tests' shared artifact.
+// Laid out as a Linux pnpm install leaves it on every platform (#304): each virtual-store
+// dependency input is a hardlink to its own store copy, so it has two links.
+const pnpmStoreInput = (path: string) => path.startsWith("node_modules/.pnpm/");
 const privateRepoCopy = async (root: string) => {
-  const copy = join(root, "repo");
+  const copy = join(root, "repo"),
+    store = join(root, "pnpm-store");
   const pinned = JSON.parse(await readFile(join(repoRoot, ".local/fixture-read/manifest.json"), "utf8")) as {
     inputs: { path: string }[];
   };
+  const inputs = pinned.inputs.map((input) => input.path);
   for (const path of [
     ".local/fixture-read/manifest.json",
     ".local/fixture-read/worker.mjs",
     relative(repoRoot, fleetProcessHelper(repoRoot)),
-    ...pinned.inputs.map((input) => input.path),
+    ...inputs,
   ]) {
     await mkdir(dirname(join(copy, path)), { recursive: true });
-    await copyFile(join(repoRoot, path), join(copy, path));
+    if (!pnpmStoreInput(path)) {
+      await copyFile(join(repoRoot, path), join(copy, path));
+      continue;
+    }
+    const stored = join(store, path);
+    await mkdir(dirname(stored), { recursive: true });
+    await copyFile(join(repoRoot, path), stored);
+    await link(stored, join(copy, path));
   }
-  return copy;
+  const linked = inputs.filter(pnpmStoreInput);
+  expect(linked.length).toBeGreaterThan(0);
+  for (const path of linked) expect((await stat(join(copy, path))).nlink).toBe(2);
+  return { copy, store, inputs };
 };
 const address = async (server: ReturnType<typeof serve>) => {
   if (!server.listening) await once(server, "listening");
@@ -142,9 +169,8 @@ it.skipIf(!["darwin", "linux"].includes(process.platform))(
   "owned artifact bootstrap pins actual child lifetime; denied verification never reads domain data",
   async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "fixture-owned-bootstrap-")));
-    // pnpm hardlinks dependency inputs on Linux; bootstrap intentionally refuses
-    // multiply-linked files. Supply private, single-link build inputs on both platforms.
-    const copy = await privateRepoCopy(root);
+    // Its pnpm dependency inputs are hardlinked to a store copy, as a Linux install leaves them.
+    const { copy } = await privateRepoCopy(root);
     let callbacks = 0,
       callbackPid: number | undefined;
     const callback = serve({
@@ -260,7 +286,7 @@ it.skipIf(!["darwin", "linux"].includes(process.platform))(
 
 it("changing both artifact and manifest after host construction cannot select new trusted bytes", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "fixture-artifact-pin-")));
-  const copy = await privateRepoCopy(root),
+  const { copy } = await privateRepoCopy(root),
     scratch = join(root, "scratch");
   const manifestPath = join(copy, ".local/fixture-read/manifest.json");
   const artifactPath = join(copy, ".local/fixture-read/worker.mjs");
@@ -275,7 +301,59 @@ it("changing both artifact and manifest after host construction cannot select ne
     await expect(bootstrap("http://127.0.0.1:19999", Date.now() + 60_000)).rejects.toThrow(
       "Pinned fixture artifact changed",
     );
-    expect(await readdir(root)).toEqual(["repo"]);
+    expect((await readdir(root)).sort()).toEqual(["pnpm-store", "repo"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("only a pnpm store link may give a pinned file a second name; every other trust check still refuses", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "fixture-input-links-")));
+  // A shared scratch parent fails the first step after the pins are rechecked, so a case
+  // that reaches it passed every pin without launching a fixture.
+  const pinsHeld = "Private owned fixture parent required",
+    unavailable = "Trusted fixture artifact unavailable at host startup";
+  const attempt = async (
+    name: string,
+    change?: (copy: string, store: string, inputs: string[]) => Promise<unknown>,
+  ) => {
+    const { copy, store, inputs } = await privateRepoCopy(join(root, name));
+    await change?.(copy, store, inputs);
+    const scratch = join(root, name, "scratch");
+    await mkdir(scratch);
+    await chmod(scratch, 0o770);
+    const bootstrap = await createFixtureBootstrap(copy, scratch);
+    const run = () => bootstrap("http://127.0.0.1:19999", Date.now() + 60_000);
+    return { copy, store, inputs, run };
+  };
+  const firstParty = (inputs: string[]) => inputs.find((path) => path.startsWith("apps/clankie/src/"))!;
+  const dependency = (inputs: string[]) => inputs.find(pnpmStoreInput)!;
+  try {
+    await expect((await attempt("store-links")).run()).rejects.toThrow(pinsHeld);
+    // A second name anywhere else is still refused: first-party source, the artifact, its
+    // manifest and the helper the host executes.
+    for (const [name, target] of [
+      ["source", (_: string, inputs: string[]) => firstParty(inputs)],
+      ["artifact", () => ".local/fixture-read/worker.mjs"],
+      ["manifest", () => ".local/fixture-read/manifest.json"],
+      ["helper", (copy: string) => relative(copy, fleetProcessHelper(copy))],
+    ] as const) {
+      const linked = await attempt(name, (copy, store, inputs) =>
+        link(join(copy, target(copy, inputs)), join(store, `${name}-alias`)),
+      );
+      await expect(linked.run(), name).rejects.toThrow(unavailable);
+    }
+    // A store link is no exemption from ownership and writability.
+    const writable = await attempt("writable", (copy, _, inputs) =>
+      chmod(join(copy, dependency(inputs)), 0o664),
+    );
+    await expect(writable.run()).rejects.toThrow(unavailable);
+    // Writing the store copy changes the linked input, and the pin sees it after startup.
+    const rewritten = await attempt("rewritten");
+    const stored = join(rewritten.store, dependency(rewritten.inputs));
+    await chmod(stored, 0o644);
+    await writeFile(stored, "export const changed = true;\n");
+    await expect(rewritten.run()).rejects.toThrow("Pinned fixture source changed after host startup");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
