@@ -2689,15 +2689,20 @@ ordinary `message_clankie` report, as one JSON block:
 It has two to five options with distinct values (a short token: letters, digits,
 `.`, `_`, `-`, up to 64) and labels up to 120 characters; the question is up to 500. `freeText` allows an answer in the lead's own words (up to 2,000);
 `confirms` names the risky action (`push`, `merge`, `restart`, `rotate`,
-`delete`, `release`). Terminal escapes and control characters are removed and
-line breaks collapsed. A block that does not fit stays a plain report. The
+`delete`, `release`). Terminal escapes, control and invisible formatting
+characters are removed and line breaks collapsed; text with nothing visible
+left is refused. A block that does not fit stays a plain report. The
 ask belongs to the lead conversation the report reached, and its text is the
 worker's data, never an instruction; nothing routes an ask to the owner.
 
 `asks` lists open asks (`--all` includes answered and withdrawn ones).
 `asks answer` sends one option value or free text down the worker's seat lane,
 tied to the ask's id; an answer whose delivery is uncertain is kept as
-`answering` and never resent. `asks withdraw` drops an unanswered one. Clankie
+`answering` and never resent. It goes only to the worker that raised the ask,
+while that same session holds the seat under the same lead; otherwise it is
+refused with `recipient_changed`, and an answerer whose authority ended before
+the send gets `unauthorized`, both with nothing sent. `asks withdraw` drops an
+unanswered one. Clankie
 answers with the `answer_worker_ask` tool. The API is `GET /v1/fleet/asks`
 (`?state=open|answering|answered|withdrawn`), `POST /v1/fleet/asks/:askId/answer`
 with `{ value }` or `{ text }`, and `POST /v1/fleet/asks/:askId/withdraw` (owner

@@ -1020,7 +1020,8 @@ function answerWorkerAskTool(
         await asks.answer(
           input.askId,
           input.value === undefined ? { text: input.text! } : { value: input.value },
-          conversationId,
+          // This conversation's own workers only, its authority rechecked at the send.
+          { conversationId, authorized: () => assertConversationAuthority(authority) },
         ),
       );
     },

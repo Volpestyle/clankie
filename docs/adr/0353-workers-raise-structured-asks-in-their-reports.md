@@ -52,6 +52,18 @@ the ask confirms one.
   `clankie asks`. An answer must be one of the option values, or free text when
   the ask allows it. Worker questions go to their lead; nothing routes one to
   the owner.
+- **The worker's words are data.** Terminal escapes, line breaks and every
+  character that renders as nothing or reorders text (format characters,
+  default-ignorable code points, private use) are removed before the length and
+  emptiness checks, and text with nothing visible left is refused, so the block
+  stays a plain report.
+- **Only the worker that raised it hears the answer.** The ask keeps the
+  host-observed binding of the reporting session and its native lead at that
+  moment, never shown. An answer goes only while the seat still holds that exact
+  occupant under that lead, checked before sending and fenced again at dispatch
+  together with the answering lead's authority. A replacement occupant, a changed
+  lead, or authority that ended mid-send refuses it with `recipient_changed` or
+  `unauthorized`, and nothing is sent.
 - **The answer reaches the worker tied to the ask.** It goes down the same seat
   lane a lead's message takes: "Your lead answered your ask ID ("question"):
   value (label)". The answer is saved before it is sent. Once it is delivered

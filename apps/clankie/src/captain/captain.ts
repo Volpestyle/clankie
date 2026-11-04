@@ -4259,6 +4259,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     noteFleetRoom,
     workerParty,
     leadParty,
+    inboundBinding,
   });
 
   return {
@@ -6834,6 +6835,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   paneId: agent.paneId,
                   conversationId: target.conversationId,
                   ask,
+                  // The occupant and lead this report was proven from; answers go nowhere else.
+                  recipient: { binding: delivery.binding, owner: JSON.stringify(currentOwner ?? null) },
                 });
               } catch (error) {
                 // The report itself is accepted; the lead still reads the ask in it.

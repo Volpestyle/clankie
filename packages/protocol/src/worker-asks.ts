@@ -9,25 +9,45 @@ import { z } from "zod";
  * questions go to their lead; nothing here routes one to the owner.
  */
 
+/** Terminal escape sequences: CSI, OSC (BEL or ST terminated) and two-byte escapes. */
+// eslint-disable-next-line no-control-regex -- removing these is the point.
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b[@-_]?/gu;
+/** Line-breaking controls become a space. */
+const BREAKS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
 /**
- * A worker's words as one plain line: ANSI escapes and control characters
- * removed and whitespace collapsed, so a card or a terminal shows exactly the
- * text and nothing the worker wrote can restyle or rewrite what is around it.
+ * Everything that renders as nothing or reorders what is around it is removed:
+ * every format character (bidi embeddings, overrides and isolates, the Arabic
+ * letter mark, zero-width joiners and spaces, word joiner, BOM, soft hyphen),
+ * every default-ignorable code point (variation selectors, Hangul fillers, tag
+ * characters), private-use and lone surrogates, and blank glyphs that
+ * Unicode does not class as ignorable.
+ */
+const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}\p{Co}\p{Cs}\u2800\u115f\u1160\u3164\uffa0]/gu;
+/** What a reader can see: a letter, digit, punctuation or symbol. */
+const VISIBLE = /[\p{L}\p{N}\p{P}\p{S}]/u;
+
+/** A worker's words as one plain line, before any emptiness or length check. */
+function plainWorkerText(value: string): string {
+  return value.replace(ANSI, "").replace(BREAKS, " ").replace(INVISIBLE, "").replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * A worker's words as one plain line that a card or terminal shows exactly:
+ * nothing in it can restyle, reorder or forge what is around it, and a line
+ * that would show blank is refused.
  */
 const plainLine = (max: number) =>
   z
     .string()
     .max(max * 4)
-    .transform((value) =>
-      value
-        // eslint-disable-next-line no-control-regex -- removing these is the point.
-        .replace(/\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-_]/gu, "")
-        // eslint-disable-next-line no-control-regex -- C0, DEL and C1 controls.
-        .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u200b-\u200f\u202a-\u202e\u2066-\u2069]/gu, " ")
-        .replace(/\s+/gu, " ")
-        .trim(),
-    )
-    .pipe(z.string().min(1).max(max));
+    .transform(plainWorkerText)
+    .pipe(
+      z
+        .string()
+        .min(1)
+        .max(max)
+        .refine((value) => VISIBLE.test(value), { message: "Must contain visible text" }),
+    );
 
 export const WORKER_ASK_OPTIONS_MIN = 2;
 export const WORKER_ASK_OPTIONS_MAX = 5;
@@ -112,7 +132,17 @@ export const WorkerAskResultSchema = z.discriminatedUnion("outcome", [
   z
     .object({
       outcome: z.literal("refused"),
-      reason: z.enum(["unknown_ask", "settled", "invalid_answer", "not_your_worker", "undelivered"]),
+      reason: z.enum([
+        "unknown_ask",
+        "settled",
+        "invalid_answer",
+        "not_your_worker",
+        /** The worker that raised the ask left its seat, or its lead changed; nothing was sent. */
+        "recipient_changed",
+        /** The answering lead's authority ended before the send; nothing was sent. */
+        "unauthorized",
+        "undelivered",
+      ]),
       detail: z.string(),
     })
     .strict(),

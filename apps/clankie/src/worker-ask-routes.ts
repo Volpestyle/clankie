@@ -47,7 +47,14 @@ export function createWorkerAskRoutes(
     const askId = WorkerAskIdSchema.safeParse(context.req.param("askId"));
     const answer = WorkerAskAnswerSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!askId.success || !answer.success) return context.json({ error: "invalid_request" }, 400);
-    const result = await asks!.answer(askId.data, answer.data);
+    // The caller's authority is read again at the send, not only at the door.
+    const request = context.req.raw;
+    const result = await asks!.answer(askId.data, answer.data, {
+      authorized: async () => {
+        const authority = await authorize(request);
+        if (authority !== true) throw new Error(authority);
+      },
+    });
     return context.json(result);
   });
   app.post(WORKER_ASK_WITHDRAW_PATH, async (context) => {
