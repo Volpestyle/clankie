@@ -675,7 +675,9 @@ it("an app's note reaches the real board signed with the name the owner approved
       notes: Array<{ author: string; text: string }>;
       newer: string;
     };
-    expect(read.notes).toEqual([{ sequence: 1, at: expect.any(String), author: "Claude", text: note }]);
+    expect(read.notes).toEqual([
+      { sequence: 1, at: expect.any(String), author: "Claude", authorKind: "app", text: note },
+    ]);
     // A note is scrubbed like every other room entry.
     await grok.client.callTool({
       name: "post_note",
@@ -1265,6 +1267,16 @@ it("keeps an app's name to characters the owner can read, wherever it is shown",
       "clankie!",
       "Clankie on this Mac",
       "Your Lead",
+      // The name is checked as it will be stored: cut to 64 characters, then trimmed.
+      `the owner${" ".repeat(55)}app`,
+      `the operator${" ".repeat(52)}app`,
+      // Lookalike letters from other scripts, fullwidth forms, marks, invisibles and digits.
+      "cl\u0430nkie",
+      "the \u043Ewner",
+      "\uFF23\uFF4C\uFF41\uFF4E\uFF4B\uFF49\uFF45",
+      "Cla\u0301nkie",
+      "the 0wner",
+      "\u04C0ead",
     ]) {
       const response = await register(host.baseUrl, [CALLBACK], reserved);
       expect(response.status, reserved).toBe(400);
@@ -1316,6 +1328,39 @@ it("prints a stored app name without the characters an older sign-in could carry
     expect(stdout).toContain("Waiting: ABCD-2345  Claude, sending access to claude.ai.");
   } finally {
     server.close();
+  }
+});
+
+it("an app signed in under a name from before the reserved names still reads as an app's on the board and in the CLI (#349)", async () => {
+  const boardRoot = await mkdtemp(join(tmpdir(), "clankie-legacy-app-name-"));
+  // A device approved before names were reserved keeps the name it was approved under.
+  const board = new FleetRoomJournal(boardRoot);
+  board.postAppNote("the owner", "Rotate the deploy key.");
+  const read = board.readAppNotes({});
+  expect(read).toMatchObject({
+    outcome: "ready",
+    notes: [{ author: "the owner", authorKind: "app", text: "Rotate the deploy key." }],
+  });
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({ op: "app_notes", schemaVersion: 1, result: read }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const { port } = server.address() as AddressInfo;
+    let stdout = "";
+    await runConnectorCommand(["notes"], {
+      host: `http://127.0.0.1:${port}`,
+      env: { ...process.env, CLANKIE_OPERATOR_TOKEN: "operator-token" },
+      stdout: { write: (text: string) => void (stdout += text) },
+      stderr: { write: () => {} },
+    });
+    const [head] = stdout.split("\n");
+    expect(head).toMatch(/^#1 \S+ the app "the owner"$/u);
+  } finally {
+    server.close();
+    await rm(boardRoot, { recursive: true, force: true });
   }
 });
 

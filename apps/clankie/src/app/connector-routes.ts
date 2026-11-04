@@ -195,14 +195,6 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         },
         400,
       );
-    if (parsed.data.client_name !== undefined && reservedAppName(parsed.data.client_name))
-      return context.json(
-        {
-          error: "invalid_client_metadata",
-          error_description: "client_name is reserved: an app can't use Clankie's or the owner's name",
-        },
-        400,
-      );
     const redirects = parsed.data.redirect_uris;
     if (!redirects.every(connectorRedirectUriAllowed))
       return context.json(
@@ -214,6 +206,15 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
       );
     // Cutting can split a pair of surrogates, so the cut text is cleaned too.
     const name = connectorShowableText((parsed.data.client_name ?? "Claude").slice(0, 64));
+    // The name the id will carry is the one checked, after cutting and cleaning.
+    if (reservedAppName(name))
+      return context.json(
+        {
+          error: "invalid_client_metadata",
+          error_description: "client_name is reserved: an app can't use Clankie's or the owner's name",
+        },
+        400,
+      );
     // Stateless: the id carries its own name and callbacks under this Mac's MAC,
     // so registration stores nothing and a flood of registrations costs nothing.
     const payload = Buffer.from(JSON.stringify({ n: name, r: redirects }), "utf8").toString("base64url");
@@ -840,11 +841,85 @@ const RESERVED_APP_NAMES = new Set([
   "clankie",
 ]);
 
-function reservedAppName(name: string): boolean {
-  const plain = name
-    .normalize("NFKC")
-    .toLowerCase()
+/**
+ * Letters from other scripts that read as the Latin ones in the reserved names, and the digits
+ * that pass for letters in them. A focused map, not the whole Unicode confusables table.
+ */
+const LOOKALIKES: Readonly<Record<string, string>> = {
+  // Cyrillic
+  а: "a",
+  в: "b",
+  е: "e",
+  ё: "e",
+  к: "k",
+  м: "m",
+  н: "h",
+  о: "o",
+  р: "p",
+  с: "c",
+  т: "t",
+  у: "y",
+  х: "x",
+  і: "i",
+  ї: "i",
+  ј: "j",
+  ѕ: "s",
+  ԁ: "d",
+  һ: "h",
+  ӏ: "l",
+  ԛ: "q",
+  ԝ: "w",
+  ո: "n",
+  ɴ: "n",
+  // Greek
+  α: "a",
+  β: "b",
+  ε: "e",
+  η: "n",
+  ι: "i",
+  κ: "k",
+  ν: "v",
+  ο: "o",
+  ρ: "p",
+  τ: "t",
+  υ: "u",
+  χ: "x",
+  ω: "w",
+  ϲ: "c",
+  // Latin variants NFKC keeps
+  ı: "i",
+  ɑ: "a",
+  ℓ: "l",
+  ɩ: "i",
+  ʟ: "l",
+  ᴏ: "o",
+  ᴡ: "w",
+  ᴇ: "e",
+  ʀ: "r",
+  // Digits
+  "0": "o",
+  "1": "l",
+  "3": "e",
+  "4": "a",
+  "5": "s",
+};
+
+/** The name as it reads: compatibility forms, marks, invisible characters and lookalikes folded. */
+function nameSkeleton(name: string): string {
+  return [
+    ...name
+      .normalize("NFKC")
+      .normalize("NFD")
+      .replaceAll(/[\p{M}\p{Cf}]/gu, "")
+      .toLowerCase(),
+  ]
+    .map((char) => LOOKALIKES[char] ?? char)
+    .join("")
     .replaceAll(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
+}
+
+function reservedAppName(name: string): boolean {
+  const plain = nameSkeleton(name);
   return RESERVED_APP_NAMES.has(plain) || plain.startsWith("clankie ");
 }

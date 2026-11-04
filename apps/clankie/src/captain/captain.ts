@@ -5545,7 +5545,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             value: leftover.session,
           }),
         );
-        if (asked?.kind === "app") return deviceName?.(asked.deviceId) ?? "A connected app";
+        if (asked?.kind === "app") {
+          const name = deviceName?.(asked.deviceId);
+          return name === undefined ? "a connected app" : `the app ${JSON.stringify(name)}`;
+        }
         return asked?.kind === "owner" ? "the owner" : "Clankie";
       },
       observeConnectorLead: (input) => fleetLeadActivity.record(input),

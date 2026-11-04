@@ -847,7 +847,7 @@ it("an addressed board note wakes each named lead once, falling through to Clank
     const cli = await owner(["notes"]);
     expect(cli.code).toBe(0);
     expect(cli.stdout).toContain(`#${note.sequence}`);
-    expect(cli.stdout).toContain(`${author} → grok`);
+    expect(cli.stdout).toContain(`the app ${JSON.stringify(author)} → grok`);
     expect(cli.stdout).toContain("woke grok: webhook [webhook delivered]");
     expect(cli.stdout).toContain("woke grok: clankie (held for the apps) [webhook refused, clankie held]");
     const json = JSON.parse((await owner(["notes", "--json"])).stdout);

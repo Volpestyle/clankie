@@ -52,7 +52,12 @@ function workedOnWords(entries: NonNullable<OperatorFleetSeat["workedOn"]>): str
 }
 
 function starterWords(starter: NonNullable<OperatorFleetSeat["startedBy"]>): string {
-  return starter.kind === "owner" ? "the owner" : starter.kind === "clankie" ? "Clankie" : starter.name;
+  // An app is named as an app, so no app name reads as the owner or Clankie (#349).
+  return starter.kind === "owner"
+    ? "the owner"
+    : starter.kind === "clankie"
+      ? "Clankie"
+      : `the app ${JSON.stringify(starter.name)}`;
 }
 
 export function createHerdrSessionSource(
