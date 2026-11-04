@@ -85,6 +85,10 @@ const AllocationSchema = z
       .optional(),
     confirmed: z.boolean().default(false),
     gone: z.boolean().default(false),
+    /** This attempt's work landed on main first (#602); its harness and model won. */
+    attemptWon: z.string().datetime().optional(),
+    /** The winning attempt's allocation, once another attempt at this deliverable landed. */
+    supersededBy: z.string().optional(),
     operatorRelease: z
       .object({ at: z.string().datetime(), censusSha256: z.string().regex(/^[a-f0-9]{64}$/u) })
       .strict()
@@ -278,6 +282,80 @@ export class ProjectHires {
       return { ...structuredClone(allocation), reused: false };
     });
   }
+  /** A live hire's attempt state (#602); undefined for an ordinary claim. */
+  public attempt(
+    fleet: string,
+    pane: string | undefined,
+  ):
+    | {
+        readonly allocation: string;
+        readonly occupantId: string | undefined;
+        readonly deliverable: string;
+        readonly superseded: boolean;
+      }
+    | undefined {
+    const entry = this.read().allocations.find(
+      (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane === pane && a.request.attempt,
+    );
+    return entry?.request.deliverable === undefined
+      ? undefined
+      : {
+          allocation: entry.id,
+          occupantId: entry.occupantId,
+          deliverable: entry.request.deliverable,
+          superseded: entry.supersededBy !== undefined,
+        };
+  }
+  /**
+   * Every attempt at the deliverable of the attempt captured before its close (#602),
+   * gone or live, while none has won and the captured record still matches its
+   * allocation. `revision` fingerprints the set and each one's provenance; settleAttempt
+   * refuses if it changed while the settlement read GitHub.
+   */
+  public attemptCandidates(
+    allocation: string,
+    occupantId: string,
+  ):
+    | { readonly deliverable: string; readonly candidates: AttemptCandidate[]; readonly revision: string }
+    | undefined {
+    const allocations = this.read().allocations;
+    const attempts = attemptSet(allocations, allocation, occupantId);
+    if (attempts === undefined) return undefined;
+    return {
+      deliverable: attempts.deliverable,
+      revision: attemptRevision(attempts.all),
+      candidates: attempts.all.map((a) => ({
+        allocation: a.id,
+        occupantId: a.occupantId,
+        pane: a.pane,
+        harness: a.request.harness,
+        model: a.selection?.model ?? a.request.model,
+      })),
+    };
+  }
+  /**
+   * Record one attempt as the winner its merged hire branch proved (#602), even after
+   * its close released it, and mark every other live attempt at the same deliverable
+   * superseded. Under the ledger lock, the captured attempt's set must still have the
+   * `revision` the settlement read; any change, or an attempt that already won, refuses.
+   * Advisory: the lead closes the superseded ones. Returns their panes, or undefined.
+   */
+  public settleAttempt(
+    captured: { readonly allocation: string; readonly occupantId: string },
+    revision: string,
+    winner: string,
+  ): string[] | undefined {
+    return this.change((state) => {
+      const attempts = attemptSet(state.allocations, captured.allocation, captured.occupantId);
+      if (attempts === undefined || attemptRevision(attempts.all) !== revision) return undefined;
+      const won = attempts.all.find((a) => a.id === winner);
+      if (won === undefined || won.supersededBy !== undefined) return undefined;
+      won.attemptWon = new Date().toISOString();
+      const siblings = attempts.all.filter((a) => a.id !== won.id && !a.gone);
+      for (const sibling of siblings) sibling.supersededBy = won.id;
+      return siblings.map((sibling) => sibling.pane ?? sibling.id);
+    });
+  }
   /** Read-only identity and age for a refused retry; never settles the original hire. */
   public describe(id: string): string {
     const entry = this.read().allocations.find((allocation) => allocation.id === id);
@@ -337,6 +415,13 @@ export class ProjectHires {
     delete request.effort;
     return { ...allocation, request, reused: false };
   }
+  /**
+   * One live hire holds a deliverable in a project (#602), so an accidental second
+   * claim is refused under the state lock that also records the first. Deliberate
+   * attempts (`attempt: true`) coexist with each other, each with its own harness or
+   * model and its own working directory. A holder's claim ends when its allocation
+   * is released: the pane closed, or a complete census found it gone.
+   */
   private checkDeliverable(
     allocations: Allocation[],
     projectId: string,
@@ -347,20 +432,44 @@ export class ProjectHires {
       throw new Error(
         "Native-first hiring requires a stable deliverable key (for example the issue ID). Its slices belong to the worker's native subagents.",
       );
-    if (
-      request.deliverable &&
-      allocations.some(
-        (a) =>
-          !a.gone &&
-          a.id !== excluding &&
-          a.projectId === projectId &&
-          a.request.deliverable === request.deliverable &&
-          (a.request.delegation === "native-first" || request.delegation === "native-first"),
+    if (request.attempt && !request.deliverable)
+      throw new Error("An attempt needs the deliverable key it attempts.");
+    if (!request.deliverable) return;
+    const holders = allocations.filter(
+      (a) =>
+        !a.gone &&
+        a.id !== excluding &&
+        a.projectId === projectId &&
+        a.request.deliverable === request.deliverable,
+    );
+    for (const holder of holders) {
+      if (holder.request.delegation === "native-first" || request.delegation === "native-first")
+        throw new Error(
+          `Deliverable ${request.deliverable} already has a pane under native-first delegation. Message the existing worker; use its native subagents for slices instead of another hire.`,
+        );
+      const tries = (a: SpawnOperatorSeat) => JSON.stringify([a.harness ?? null, a.model ?? null]);
+      if (!request.attempt || !holder.request.attempt)
+        throw new Error(
+          `Deliverable ${request.deliverable} is already claimed by ${this.holderDetail(holder)}. Message that worker, or close its pane with close_worker_pane to reassign the work. To race another harness or model on purpose, hire each one with attempt: true.`,
+        );
+      if (tries(holder.request) === tries(request))
+        throw new Error(
+          `${this.holderDetail(holder)} already attempts ${request.deliverable} with the same harness and model. Each attempt tries a different one.`,
+        );
+      if (
+        (holder.request.fleet ?? "default") === (request.fleet ?? "default") &&
+        holder.request.workingDirectory === request.workingDirectory
       )
-    )
-      throw new Error(
-        `Deliverable ${request.deliverable} already has a pane under native-first delegation. Message the existing worker; use its native subagents for slices instead of another hire.`,
-      );
+        throw new Error(
+          `${this.holderDetail(holder)} already attempts ${request.deliverable} in ${request.workingDirectory}. Give each attempt its own worktree.`,
+        );
+    }
+  }
+  private holderDetail(holder: Allocation): string {
+    const harness = [holder.request.harness, holder.selection?.model ?? holder.request.model]
+      .filter(Boolean)
+      .join(" ");
+    return `${holder.request.attempt ? "an attempt by " : ""}${harness || "a hire"}${holder.seat === undefined ? "" : ` (seat ${holder.seat})`}, ${this.describe(holder.id)}`;
   }
   private checkCaps(
     allocations: Allocation[],
@@ -755,4 +864,139 @@ function deepFreeze<T>(value: T): T {
     for (const child of Object.values(value)) deepFreeze(child);
   }
   return value;
+}
+
+/** The attempts sharing the captured attempt's deliverable, while none has won. */
+function attemptSet(
+  allocations: readonly Allocation[],
+  allocation: string,
+  occupantId: string,
+): { readonly deliverable: string; readonly all: Allocation[] } | undefined {
+  const captured = allocations.find(
+    (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
+  );
+  const deliverable = captured?.request.deliverable;
+  if (captured === undefined || deliverable === undefined || captured.supersededBy !== undefined)
+    return undefined;
+  const all = allocations.filter(
+    (a) => a.request.attempt && a.projectId === captured.projectId && a.request.deliverable === deliverable,
+  );
+  return all.some((a) => a.attemptWon !== undefined) ? undefined : { deliverable, all };
+}
+/** Fingerprint of an attempt set and each member's provenance. */
+function attemptRevision(attempts: readonly Allocation[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        attempts
+          .map((a) => [
+            a.id,
+            a.occupantId ?? null,
+            a.seat ?? null,
+            a.pane ?? null,
+            a.gone,
+            a.supersededBy ?? null,
+            a.request,
+          ])
+          .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+      ),
+    )
+    .digest("hex");
+}
+/** One attempt at a deliverable, as the hire ledger recorded it (#602). */
+export type AttemptCandidate = {
+  readonly allocation: string;
+  readonly occupantId: string | undefined;
+  readonly pane: string | undefined;
+  readonly harness: string | undefined;
+  readonly model: string | undefined;
+};
+/** The pull request that merged an attempt's hire branch, as GitHub records it. */
+export type AttemptMerge = { readonly number: number; readonly url: string; readonly mergedAt: string };
+/** What the hire recorded before its native harness launched: never the worktree's later say. */
+export type AttemptLaunch = { readonly branch: string; readonly startHead: string; readonly hiredAt: string };
+/** A hire's prelaunch commit baseline as an attempt's launch record. */
+export function attemptLaunch(
+  baseline: { readonly branchRef: string; readonly head: string; readonly capturedAt: string } | undefined,
+): AttemptLaunch | undefined {
+  return (
+    baseline && {
+      branch: baseline.branchRef.slice("refs/heads/".length),
+      startHead: baseline.head,
+      hiredAt: baseline.capturedAt,
+    }
+  );
+}
+export type AttemptSettlement =
+  | {
+      readonly outcome: "won";
+      readonly allocation: string;
+      readonly superseded: string[];
+      readonly detail: string;
+    }
+  | { readonly outcome: "unsettled"; readonly detail: string };
+
+/**
+ * Settle a closed attempt's deliverable from evidence the host keeps (#602): what each
+ * attempt's hire recorded before launch (its branch, start commit and time), and the
+ * pull request GitHub merged from that branch into the default branch after the hire,
+ * with a head descended from that start. Nothing the worktree writes counts. Once every
+ * attempt has such a merge, the first one wins and its live siblings are superseded;
+ * otherwise, or if the attempts changed meanwhile, nothing is set and the lead gets the
+ * candidates.
+ */
+export async function settleAttemptByMerge(
+  hires: Pick<ProjectHires, "attemptCandidates" | "settleAttempt">,
+  record: { readonly allocation: string; readonly occupantId: string },
+  launchOf: (candidate: AttemptCandidate) => AttemptLaunch | undefined,
+  mergedPull: (repository: string, launch: AttemptLaunch) => Promise<AttemptMerge | undefined>,
+): Promise<AttemptSettlement | undefined> {
+  const found = hires.attemptCandidates(record.allocation, record.occupantId);
+  if (found === undefined) return undefined;
+  const { deliverable, candidates, revision } = found;
+  const launches = candidates.map(launchOf);
+  const name = (candidate: AttemptCandidate, index: number) =>
+    `${[candidate.harness, candidate.model].filter(Boolean).join(" ") || "an attempt"} (${
+      candidate.pane === undefined ? `allocation ${candidate.allocation}` : `pane ${candidate.pane}`
+    }${launches[index] === undefined ? "" : `, branch ${launches[index]!.branch}`})`;
+  const unsettled = (reason: string) => ({
+    outcome: "unsettled" as const,
+    detail: `No automatic winner for ${deliverable}: ${reason}. Candidates: ${candidates
+      .map(name)
+      .join("; ")}. Decide which attempt's work to keep and close the others.`,
+  });
+  const repository = /^([\w.-]+\/[\w.-]+)#\d+$/u.exec(deliverable)?.[1];
+  if (repository === undefined) return unsettled("the deliverable names no GitHub issue");
+  const missing = launches.findIndex((launch) => launch === undefined);
+  if (missing !== -1)
+    return unsettled(`no launch record holds the hire branch of ${name(candidates[missing]!, missing)}`);
+  if (new Set(launches.map((launch) => launch!.branch)).size !== launches.length)
+    return unsettled("two attempts share a hire branch");
+  let merges: (AttemptMerge | undefined)[];
+  try {
+    merges = await Promise.all(launches.map((launch) => mergedPull(repository, launch!)));
+  } catch (error) {
+    return unsettled(`GitHub could not be read (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const unmerged = merges.findIndex((merge) => merge === undefined);
+  if (unmerged !== -1)
+    return unsettled(
+      `${name(candidates[unmerged]!, unmerged)} has no pull request merged from its hire branch since its hire`,
+    );
+  const ranked = candidates
+    .map((candidate, index) => ({ candidate, index, merge: merges[index]! }))
+    .sort((a, b) => Date.parse(a.merge.mergedAt) - Date.parse(b.merge.mergedAt));
+  const first = ranked[0]!;
+  if (ranked[1] !== undefined && Date.parse(ranked[1].merge.mergedAt) === Date.parse(first.merge.mergedAt))
+    return unsettled("two attempts' pull requests merged at the same instant");
+  const superseded = hires.settleAttempt(record, revision, first.candidate.allocation);
+  if (superseded === undefined) return unsettled("the attempts changed while GitHub was read");
+  return {
+    outcome: "won",
+    allocation: first.candidate.allocation,
+    superseded,
+    detail: `${name(first.candidate, first.index)} won ${deliverable}: its hire branch merged first as ${first.merge.url}.${
+      superseded.length ? ` Superseded: ${superseded.join(", ")}; close them when their reports are in.` : ""
+    }`,
+  };
 }

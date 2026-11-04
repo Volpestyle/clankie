@@ -833,7 +833,13 @@ function hireAgentTool(
           minLength: 1,
           maxLength: 512,
           description:
-            "Stable work item/deliverable key, e.g. VUH-1596. Required for native-first; all slices keep this same key.",
+            "Stable work item/deliverable key, e.g. VUH-1596 or owner/repo#42. It claims that work for this hire: a second live hire for the same key in the project is refused, naming the holder, until the holder's pane closes. Required for native-first; all slices keep this same key.",
+        }),
+      ),
+      attempt: Type.Optional(
+        Type.Literal(true, {
+          description:
+            "Hire a deliberate attempt at the deliverable, to race different harnesses or models on it. Attempts coexist only with other attempts; each names a different harness or model and works in its own worktree.",
         }),
       ),
       chrome: Type.Optional(

@@ -79,6 +79,8 @@ async function fixture(
     remote?: boolean;
     socket?: boolean;
     projectHire?: boolean;
+    /** The project hire is a deliberate attempt at a deliverable, beside a sibling attempt (#602). */
+    attempt?: boolean;
     missingLaunchProof?: boolean;
     missingHireReceipt?: boolean;
     ordinaryHire?: boolean;
@@ -297,6 +299,7 @@ async function fixture(
       harness,
       title: "Pip",
       workingDirectory: options.cwd ?? root,
+      ...(options.attempt ? { deliverable: "Volpestyle/clankie#602", attempt: true } : {}),
     });
     const allocation = ledger.reserve(settings, "fixture", request);
     ledger.launch(allocation.id, settings);
@@ -529,6 +532,16 @@ async function fixture(
     },
     setHire: (next: () => Promise<OperatorSeatSpawnResult>) => {
       hireResult = next;
+    },
+    /** Another live worker's pane, with its own session, that the census keeps seeing. */
+    rivalPane: () => {
+      others.push({
+        ...pane,
+        pane_id: "w1:p8",
+        terminal_id: "term_888",
+        title: "Rival",
+        agent_session: { ...native, value: "rival-session" },
+      });
     },
     /** Another Herdr pane already running this native session. */
     reopenElsewhere: (unlabelled = false) => {
@@ -945,6 +958,95 @@ it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s
   expect(await f.ports.runner.resolveTerminal(seat)).toBeUndefined();
   expect(f.tidy.leadHistory()[0]).toMatchObject({ paneId: pane });
   f.watch.close();
+});
+it("a closed attempt whose hire branch merged first settles its own retained allocation as the winner after the real close (#602)", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true, attempt: true });
+  try {
+    const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
+    // A sibling attempt at the same deliverable, on another harness in its own worktree.
+    const sibling = f.ledger.reserve(
+      settings,
+      "fixture",
+      SpawnOperatorSeatSchema.parse({
+        schemaVersion: 1,
+        fleet: "pc",
+        harness: "claude",
+        title: "Rival",
+        workingDirectory: join(f.root, "rival"),
+        deliverable: "Volpestyle/clankie#602",
+        attempt: true,
+      }),
+    );
+    f.ledger.launch(sibling.id, settings);
+    f.rivalPane();
+    f.ledger.pane(sibling.id, "pc/w1:p8");
+    const winner = f.ledger.retirementCandidate("pc", "pc/w1:p1")!;
+    expect(winner.request.attempt).toBe(true);
+    // The real store captures the record and settles it. Only each hire's launch record
+    // and what GitHub merged are given: both hire branches merged, the winner's first.
+    const captured: unknown[] = [];
+    const hiredAt = new Date(Date.now() - 60_000).toISOString();
+    const launches = new Map([
+      [winner.id, { branch: "clankie/winner", startHead: "a".repeat(40), hiredAt }],
+      [sibling.id, { branch: "clankie/rival", startHead: "a".repeat(40), hiredAt }],
+    ]);
+    const tidy = new PaneTidy(f.path, {
+      ...f.ports,
+      attemptRecord: (agent) => {
+        const record = f.watch.hireAttemptRecord(agent);
+        captured.push(record);
+        return record;
+      },
+      settleAttempt: (record) =>
+        f.watch.settleHireAttempt(
+          record,
+          (candidate) => launches.get(candidate.allocation),
+          async (repository, launch) =>
+            repository !== "Volpestyle/clankie"
+              ? undefined
+              : launch.branch === "clankie/winner"
+                ? {
+                    number: 7,
+                    url: "https://github.com/Volpestyle/clankie/pull/7",
+                    mergedAt: "2026-11-03T10:00:00Z",
+                  }
+                : {
+                    number: 8,
+                    url: "https://github.com/Volpestyle/clankie/pull/8",
+                    mergedAt: "2026-11-03T10:05:00Z",
+                  },
+        ),
+    });
+    const close = () =>
+      tidy.close(
+        {
+          pane: "pc/w1:p1",
+          reason: "Landed",
+          reportPath: f.reportPath,
+          unlandedReason: "Fixture worktree work is evidenced elsewhere",
+        },
+        authority,
+      );
+    // A refused close settles nothing: the attempt is still running.
+    f.setAnsi(await golden("codex", "draft"));
+    expect(await close()).toMatchObject({ outcome: "refused", reason: "unsent_draft" });
+    expect(f.ledger.allocation(winner.id)?.attemptWon).toBeUndefined();
+    f.setAnsi(await golden("codex", "empty"));
+    const closed = await close();
+    expect(closed, JSON.stringify(closed)).toMatchObject({ outcome: "closed" });
+    expect(captured.at(-1)).toEqual({ allocation: winner.id, occupantId: winner.occupantId });
+    // The lead's close result says who won and what it superseded.
+    expect(closed).toMatchObject({ entry: { attempt: { outcome: "won" } } });
+    const detail = (closed as { entry: { attempt: { detail: string } } }).entry.attempt.detail;
+    expect(detail).toContain("pull/7");
+    expect(detail).toContain("Superseded: pc/w1:p8");
+    // The close released the winner's allocation, and it still records the win.
+    expect(f.ledger.retirementCandidate("pc", "pc/w1:p1")).toBeUndefined();
+    expect(f.ledger.allocation(winner.id)).toMatchObject({ gone: true, attemptWon: expect.any(String) });
+    expect(f.ledger.allocation(sibling.id)).toMatchObject({ gone: false, supersededBy: winner.id });
+  } finally {
+    f.watch.close();
+  }
 });
 it.each([false, true])(
   "re-adoption cannot turn a hand-started pane into a hire (remote=%s)",

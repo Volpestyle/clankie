@@ -634,6 +634,14 @@ export function createFleetProjection(ctx: FleetProjectionContext) {
       )
         efficiency.flags.push("overlap");
     }
+    // #602: a deliberate attempt says so, and says when another attempt's work landed first.
+    for (const seat of projected) {
+      const observed = seatLeadOwners.get(seat)?.observed;
+      const attempt = seat.efficiency && observed && herdrWatches.hireAttempt(observed);
+      if (!attempt) continue;
+      seat.efficiency!.flags.push("attempt");
+      if (attempt.superseded) seat.efficiency!.flags.push("superseded");
+    }
     const nextActivities = JSON.stringify(projected.map((seat) => [seat.occupantId, seat.activity ?? null]));
     if (nextActivities !== seatActivities) {
       seatActivities = nextActivities;

@@ -25,6 +25,8 @@ const RecordSchema = z
     model: z.string().min(1).max(256).optional(),
     effort: z.string().min(1).max(64).optional(),
     commitBaseline: SeatCommitBaselineSchema.optional(),
+    /** The baseline was captured before this hire launched, not at a later first observation. */
+    launchBaseline: z.literal(true).optional(),
     offScope: z.boolean().optional(),
     assignmentStatus: z.enum(["active", "paused", "canceled", "done"]).optional(),
     evidence: z.string().min(1).max(4000).optional(),
@@ -168,7 +170,9 @@ export class SeatEfficiencyStore {
       ...(assignment.objective === undefined ? {} : { objective: assignment.objective }),
       ...(assignment.model === undefined ? {} : { model: assignment.model }),
       ...(assignment.effort === undefined ? {} : { effort: assignment.effort }),
-      ...(assignment.commitBaseline === undefined ? {} : { commitBaseline: assignment.commitBaseline }),
+      ...(assignment.commitBaseline === undefined
+        ? {}
+        : { commitBaseline: assignment.commitBaseline, launchBaseline: true as const }),
     });
     delete this.records[occupantId]!.inactiveSince;
     this.save();
@@ -186,6 +190,15 @@ export class SeatEfficiencyStore {
     return record && sameOwner(record.owner, owner) && record.commitBaseline
       ? SeatCommitBaselineSchema.parse(record.commitBaseline)
       : undefined;
+  }
+
+  /**
+   * The baseline the hire captured before its native harness launched (#602): its
+   * branch, start commit and capture time. A first-observation fallback is not one.
+   */
+  public readLaunchBaseline(occupantId: string, owner: ConversationOwner): SeatCommitBaseline | undefined {
+    const record = Object.hasOwn(this.records, occupantId) ? this.records[occupantId] : undefined;
+    return record?.launchBaseline === true ? this.readCommitBaseline(occupantId, owner) : undefined;
   }
 
   /** Establish a legacy occupant's first-observed baseline without retro-credit. */

@@ -44,6 +44,7 @@ import { resolveFleetSettingsContext } from "../fleet-settings-context.ts";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { prepareStoppedTurnSettlement } from "./stopped-turn.ts";
 import { fleetInstructions } from "./captain-prompts.ts";
+import { attemptLaunch } from "./project-hires.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
 import { PersonaWorkHistory } from "./persona-work-history.ts";
 import { prepareSeatTelemetry, readSeatCommitBaseline, type SeatCommitBaseline } from "./seat-telemetry.ts";
@@ -1379,6 +1380,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const stances = createStanceStore();
   const agentWork = createAgentWorkStore(options.stateDir);
   const seatEfficiency = new SeatEfficiencyStore(join(options.stateDir, "seat-efficiency.json"));
+  /** The lead that owned each attempt captured before its close; reads its siblings' hire branches (#602). */
+  const attemptOwners = new WeakMap<object, ConversationOwner>();
   const workHistory = new PersonaWorkHistory(join(options.stateDir, "persona-work-history.json"));
   const seatLeadOwners = new WeakMap<
     OperatorFleetSeat,
@@ -2898,6 +2901,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           await original();
         },
         original.restoredHire ? { restoredHire: original.restoredHire } : {},
+      );
+    },
+    // #602: closing an attempt settles its deliverable from what each attempt's hire recorded
+    // before launch (branch, start, time) and the pull request GitHub merged from that branch;
+    // nothing the worktree writes counts. Only a local hire records its branch, so a remote
+    // attempt leaves the deliverable to the lead.
+    attemptRecord: (agent) => {
+      const record = herdrWatches.hireAttemptRecord(agent);
+      const owner = herdrWatches.tidyProvenance(agent);
+      if (record === undefined || typeof owner !== "object") return undefined;
+      attemptOwners.set(record, owner);
+      return record;
+    },
+    settleAttempt: async (record) => {
+      const owner = attemptOwners.get(record);
+      const mergedPull = deps.workItems?.mergedPull;
+      if (owner === undefined) return undefined;
+      return herdrWatches.settleHireAttempt(
+        record,
+        // Only the baseline the hire captured before launch; never a first-observation fallback.
+        (candidate) =>
+          candidate.occupantId === undefined
+            ? undefined
+            : attemptLaunch(seatEfficiency.readLaunchBaseline(candidate.occupantId, owner)),
+        mergedPull ??
+          (async () => {
+            throw new Error("GitHub reader unavailable");
+          }),
       );
     },
     mainCheckpoint: async (agent) => {

@@ -22,6 +22,11 @@ import {
   ProjectHires,
   ProjectHireProcessProofSchema,
   projectHireProfile,
+  settleAttemptByMerge,
+  type AttemptCandidate,
+  type AttemptLaunch,
+  type AttemptMerge,
+  type AttemptSettlement,
   type ProjectHireProcessProof,
 } from "./project-hires.ts";
 import type { RetirementGuard } from "./retirement-guard.ts";
@@ -2653,6 +2658,35 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public hireTitle(seat: { readonly paneId: string; readonly occupantId: string }): string | undefined {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.hireTitle(fleet, projectHirePane(fleet, seat.paneId), seat.occupantId);
+  }
+  /** Whether this seat is a deliberate attempt at its deliverable, and whether it was superseded (#602). */
+  public hireAttempt(seat: { readonly paneId: string }) {
+    const fleet = nativeProofLocation(seat.paneId).fleet;
+    return this.projectHires.attempt(fleet, projectHirePane(fleet, seat.paneId));
+  }
+  /**
+   * The exact attempt allocation this pane's current occupant holds, captured before a
+   * close releases it (#602). Undefined unless the ledger's occupant is this session.
+   */
+  public hireAttemptRecord(
+    agent: HerdrAgentSnapshot,
+  ): { readonly allocation: string; readonly occupantId: string } | undefined {
+    const attempt = this.hireAttempt(agent);
+    if (attempt?.occupantId === undefined || !agent.session) return undefined;
+    return occupantIdForHerdrSession(agent.session) === attempt.occupantId
+      ? { allocation: attempt.allocation, occupantId: attempt.occupantId }
+      : undefined;
+  }
+  /**
+   * Settle the captured attempt's deliverable from each attempt's launch record and the
+   * pull request GitHub merged from its hire branch (#602); see settleAttemptByMerge.
+   */
+  public settleHireAttempt(
+    record: { readonly allocation: string; readonly occupantId: string },
+    launchOf: (candidate: AttemptCandidate) => AttemptLaunch | undefined,
+    mergedPull: (repository: string, launch: AttemptLaunch) => Promise<AttemptMerge | undefined>,
+  ): Promise<AttemptSettlement | undefined> {
+    return settleAttemptByMerge(this.projectHires, record, launchOf, mergedPull);
   }
   /**
    * The project a seat's current occupant was hired into, and the GitHub repository of the

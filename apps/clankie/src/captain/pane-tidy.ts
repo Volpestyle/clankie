@@ -72,6 +72,11 @@ const EntrySchema = ClosedWorkerPaneSchema.extend({
     .object({ text: z.string().max(16384), typed: z.boolean() })
     .strict()
     .optional(),
+  /** How closing this attempt settled its deliverable (#602): the winner, or why none was set. */
+  attempt: z
+    .object({ outcome: z.string().max(32), detail: z.string().max(2048) })
+    .strict()
+    .optional(),
   /** Why the last Undo could not reopen the session, exactly as the resume path reported it. */
   undoFailure: z
     .object({
@@ -87,6 +92,8 @@ export const PaneTidyStateSchema = z
   .object({ version: z.literal(1), entries: z.array(EntrySchema), reports: z.array(ReportSchema) })
   .strict();
 type Entry = z.infer<typeof EntrySchema>;
+/** An attempt allocation and the occupant that held it when its pane closed (#602). */
+export type AttemptRecord = { readonly allocation: string; readonly occupantId: string };
 export type TidyFailure =
   | ({ outcome: "refused" } & MainCheckpointHold)
   | { outcome: "refused"; reason: "owner_interactive" | "results_not_kept" | "pane_kept" }
@@ -157,13 +164,14 @@ function publicEntry(entry: Entry): ClosedWorkerPane {
     undoFailure: _undo,
     handoffs: _handoffs,
     restoredHire: _restored,
+    attempt: _attempt,
     ...visible
   } = entry;
   return ClosedWorkerPaneSchema.parse(visible);
 }
 /** The lead's view: the public record plus what was in the input line and why Undo failed. */
 export type ClosedWorkerPaneHistory = ClosedWorkerPane &
-  Pick<Entry, "input" | "undoFailure" | "handoffs" | "restoredHire">;
+  Pick<Entry, "input" | "undoFailure" | "handoffs" | "restoredHire" | "attempt">;
 function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
   return {
     ...publicEntry(entry),
@@ -171,6 +179,7 @@ function leadEntry(entry: Entry): ClosedWorkerPaneHistory {
     ...(entry.undoFailure ? { undoFailure: entry.undoFailure } : {}),
     ...(entry.handoffs ? { handoffs: entry.handoffs } : {}),
     ...(entry.restoredHire ? { restoredHire: entry.restoredHire } : {}),
+    ...(entry.attempt ? { attempt: entry.attempt } : {}),
   };
 }
 
@@ -216,6 +225,18 @@ export class PaneTidy {
     mainCheckpoint?(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined>;
     /** Overrides how long a close waits on mainCheckpoint; tests shorten it. */
     checkpointMs?: number;
+    /**
+     * The exact attempt allocation and occupant in this pane (#602), captured before the
+     * close releases the allocation; read from the hire ledger only, never the worktree.
+     */
+    attemptRecord?(agent: HerdrAgentSnapshot): AttemptRecord | undefined;
+    /**
+     * After the verified close, settles that captured attempt's deliverable from evidence
+     * the host keeps; the result tells the lead the winner or the candidates.
+     */
+    settleAttempt?(
+      record: AttemptRecord,
+    ): Promise<{ readonly outcome: string; readonly detail: string } | undefined>;
     worktreeHold?(
       agent: HerdrAgentSnapshot,
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
@@ -963,6 +984,8 @@ export class PaneTidy {
           return refuse("pane_kept");
       };
       await guard();
+      // Captured before the close releases the attempt's allocation.
+      const attempt = input.nativeOnly ? undefined : this.ports.attemptRecord?.(agent);
       const closeWorktree = input.nativeOnly ? undefined : await this.worktreeForClose(agent);
       const closedAt = this.now();
       entry = EntrySchema.parse({
@@ -1037,6 +1060,26 @@ export class PaneTidy {
         /* The close record already keeps the reason and refs; the per-worktree index is secondary. */
       }
       if (!closed) return fail("close_unconfirmed");
+      if (attempt && this.ports.settleAttempt) {
+        // The pane is closed; a failed settlement leaves the attempt unsettled and says why.
+        entry.attempt = await this.ports.settleAttempt(attempt).then(
+          (settled) => settled && { outcome: settled.outcome, detail: settled.detail.slice(0, 2048) },
+          (error: unknown) => ({
+            outcome: "unsettled",
+            detail:
+              `Attempt settlement failed: ${error instanceof Error ? error.message : String(error)}`.slice(
+                0,
+                2048,
+              ),
+          }),
+        );
+        if (entry.attempt === undefined) delete entry.attempt;
+        try {
+          this.save();
+        } catch {
+          /* The pane is closed; the lead still gets the settlement in this result. */
+        }
+      }
       this.ports.untrack(agent.terminalId);
       if (closeWorktree) {
         entry.worktree = await this.pruneClosedWorktree(

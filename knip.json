@@ -102,6 +102,7 @@
         "scripts/prove-joined-hire.ts",
         "scripts/verify-worker-sandbox.ts",
         "test/fixtures/worker-credential-probe.ts",
+        "test/fixtures/claim-racer.ts",
         "test/fixtures/resource-activity-engine.mjs",
         "scripts/tracker-sync-roundtrip.ts",
         "scripts/linear-mirror-roundtrip.ts",

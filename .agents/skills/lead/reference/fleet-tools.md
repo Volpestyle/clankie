@@ -85,6 +85,26 @@ subagents; another pane for that key is refused, so message the existing
 worker. Messages to a hire arrive numbered per lead; set `replaces` when one
 overrides earlier guidance.
 
+A `deliverable` claims that work for the hire within its project (#602). A
+second live hire for the same key is refused, and the refusal names the holder.
+Message the holder, or close its pane with `close_worker_pane` to reassign the
+work; the claim is also released when a census finds the pane gone. To race
+different harnesses or models on purpose, hire each one with `attempt: true`:
+attempts coexist only with other attempts, and each needs its own harness or
+model and its own worktree. When an attempt's pane closes, the winner comes
+only from what the host recorded: each hire's branch, start commit and time,
+captured before its harness launched, and the pull request GitHub merged from
+that branch into the default branch after the hire, with a head descended from
+that start. Once every attempt has such a merge, the first one wins, with its
+harness and model, whichever pane is closing. Its live siblings show the
+`superseded` flag in `fleet_efficiency`; close them, since only one attempt
+should merge. Commits, reflogs or a cherry-picked copy in a worktree never
+count. Until every attempt has that evidence (a pull request not merged yet, a
+deliverable that is not `owner/repo#N`, a hire with no launch record such as a
+remote one), or if the attempts changed while GitHub was read, nothing is set:
+the close result's `entry.attempt` names the candidates for you to decide.
+Every attempt shows the `attempt` flag.
+
 Never rearrange existing panes or substitute the lead's or focused pane.
 Sub-leads without `hire_agent` use the exact
 [worker grid commands](../../clankie/reference/worker-layout.md).
