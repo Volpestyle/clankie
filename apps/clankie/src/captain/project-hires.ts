@@ -309,26 +309,22 @@ export class ProjectHires {
   /**
    * Every attempt at the deliverable of the attempt captured before its close (#602),
    * gone or live, while none has won and the captured record still matches its
-   * allocation. The settlement reads each one's hire branch.
+   * allocation. `revision` fingerprints the set and each one's provenance; settleAttempt
+   * refuses if it changed while the settlement read GitHub.
    */
   public attemptCandidates(
     allocation: string,
     occupantId: string,
-  ): { readonly deliverable: string; readonly candidates: AttemptCandidate[] } | undefined {
+  ):
+    | { readonly deliverable: string; readonly candidates: AttemptCandidate[]; readonly revision: string }
+    | undefined {
     const allocations = this.read().allocations;
-    const captured = allocations.find(
-      (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
-    );
-    const deliverable = captured?.request.deliverable;
-    if (captured === undefined || deliverable === undefined || captured.supersededBy !== undefined)
-      return undefined;
-    const attempts = allocations.filter(
-      (a) => a.request.attempt && a.projectId === captured.projectId && a.request.deliverable === deliverable,
-    );
-    if (attempts.some((a) => a.attemptWon !== undefined)) return undefined;
+    const attempts = attemptSet(allocations, allocation, occupantId);
+    if (attempts === undefined) return undefined;
     return {
-      deliverable,
-      candidates: attempts.map((a) => ({
+      deliverable: attempts.deliverable,
+      revision: attemptRevision(attempts.all),
+      candidates: attempts.all.map((a) => ({
         allocation: a.id,
         occupantId: a.occupantId,
         pane: a.pane,
@@ -340,26 +336,23 @@ export class ProjectHires {
   /**
    * Record one attempt as the winner its merged hire branch proved (#602), even after
    * its close released it, and mark every other live attempt at the same deliverable
-   * superseded. Advisory: the lead closes the superseded ones. Returns their panes;
-   * undefined when the record no longer matches or an attempt already won.
+   * superseded. Under the ledger lock, the captured attempt's set must still have the
+   * `revision` the settlement read; any change, or an attempt that already won, refuses.
+   * Advisory: the lead closes the superseded ones. Returns their panes, or undefined.
    */
-  public settleAttempt(allocation: string, occupantId: string): string[] | undefined {
+  public settleAttempt(
+    captured: { readonly allocation: string; readonly occupantId: string },
+    revision: string,
+    winner: string,
+  ): string[] | undefined {
     return this.change((state) => {
-      const winner = state.allocations.find(
-        (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
-      );
-      if (winner === undefined || winner.supersededBy !== undefined) return undefined;
-      const attempts = state.allocations.filter(
-        (a) =>
-          a.id !== winner.id &&
-          a.request.attempt &&
-          a.projectId === winner.projectId &&
-          a.request.deliverable === winner.request.deliverable,
-      );
-      if (winner.attemptWon || attempts.some((a) => a.attemptWon)) return undefined;
-      winner.attemptWon = new Date().toISOString();
-      const siblings = attempts.filter((a) => !a.gone);
-      for (const sibling of siblings) sibling.supersededBy = winner.id;
+      const attempts = attemptSet(state.allocations, captured.allocation, captured.occupantId);
+      if (attempts === undefined || attemptRevision(attempts.all) !== revision) return undefined;
+      const won = attempts.all.find((a) => a.id === winner);
+      if (won === undefined || won.supersededBy !== undefined) return undefined;
+      won.attemptWon = new Date().toISOString();
+      const siblings = attempts.all.filter((a) => a.id !== won.id && !a.gone);
+      for (const sibling of siblings) sibling.supersededBy = won.id;
       return siblings.map((sibling) => sibling.pane ?? sibling.id);
     });
   }
@@ -873,6 +866,43 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** The attempts sharing the captured attempt's deliverable, while none has won. */
+function attemptSet(
+  allocations: readonly Allocation[],
+  allocation: string,
+  occupantId: string,
+): { readonly deliverable: string; readonly all: Allocation[] } | undefined {
+  const captured = allocations.find(
+    (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
+  );
+  const deliverable = captured?.request.deliverable;
+  if (captured === undefined || deliverable === undefined || captured.supersededBy !== undefined)
+    return undefined;
+  const all = allocations.filter(
+    (a) => a.request.attempt && a.projectId === captured.projectId && a.request.deliverable === deliverable,
+  );
+  return all.some((a) => a.attemptWon !== undefined) ? undefined : { deliverable, all };
+}
+/** Fingerprint of an attempt set and each member's provenance. */
+function attemptRevision(attempts: readonly Allocation[]): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        attempts
+          .map((a) => [
+            a.id,
+            a.occupantId ?? null,
+            a.seat ?? null,
+            a.pane ?? null,
+            a.gone,
+            a.supersededBy ?? null,
+            a.request,
+          ])
+          .sort((x, y) => String(x[0]).localeCompare(String(y[0]))),
+      ),
+    )
+    .digest("hex");
+}
 /** One attempt at a deliverable, as the hire ledger recorded it (#602). */
 export type AttemptCandidate = {
   readonly allocation: string;
@@ -883,6 +913,20 @@ export type AttemptCandidate = {
 };
 /** The pull request that merged an attempt's hire branch, as GitHub records it. */
 export type AttemptMerge = { readonly number: number; readonly url: string; readonly mergedAt: string };
+/** What the hire recorded before its native harness launched: never the worktree's later say. */
+export type AttemptLaunch = { readonly branch: string; readonly startHead: string; readonly hiredAt: string };
+/** A hire's prelaunch commit baseline as an attempt's launch record. */
+export function attemptLaunch(
+  baseline: { readonly branchRef: string; readonly head: string; readonly capturedAt: string } | undefined,
+): AttemptLaunch | undefined {
+  return (
+    baseline && {
+      branch: baseline.branchRef.slice("refs/heads/".length),
+      startHead: baseline.head,
+      hiredAt: baseline.capturedAt,
+    }
+  );
+}
 export type AttemptSettlement =
   | {
       readonly outcome: "won";
@@ -893,65 +937,65 @@ export type AttemptSettlement =
   | { readonly outcome: "unsettled"; readonly detail: string };
 
 /**
- * Settle a closed attempt's deliverable from evidence the host keeps (#602): the branch
- * recorded for each attempt at its hire, and the pull request GitHub merged from that
- * branch into the repository's default branch. Nothing the worktree writes (commits,
- * reflog, remotes) counts. The attempt whose branch merged first wins and its live
- * siblings are superseded; without that evidence for every attempt, no winner is set and
- * the lead gets the candidates.
+ * Settle a closed attempt's deliverable from evidence the host keeps (#602): what each
+ * attempt's hire recorded before launch (its branch, start commit and time), and the
+ * pull request GitHub merged from that branch into the default branch after the hire,
+ * with a head descended from that start. Nothing the worktree writes counts. Once every
+ * attempt has such a merge, the first one wins and its live siblings are superseded;
+ * otherwise, or if the attempts changed meanwhile, nothing is set and the lead gets the
+ * candidates.
  */
 export async function settleAttemptByMerge(
   hires: Pick<ProjectHires, "attemptCandidates" | "settleAttempt">,
   record: { readonly allocation: string; readonly occupantId: string },
-  branchOf: (candidate: AttemptCandidate) => string | undefined,
-  mergedPull: (repository: string, branch: string) => Promise<AttemptMerge | undefined>,
+  launchOf: (candidate: AttemptCandidate) => AttemptLaunch | undefined,
+  mergedPull: (repository: string, launch: AttemptLaunch) => Promise<AttemptMerge | undefined>,
 ): Promise<AttemptSettlement | undefined> {
   const found = hires.attemptCandidates(record.allocation, record.occupantId);
   if (found === undefined) return undefined;
-  const { deliverable, candidates } = found;
-  const name = (candidate: AttemptCandidate, branch?: string) =>
+  const { deliverable, candidates, revision } = found;
+  const launches = candidates.map(launchOf);
+  const name = (candidate: AttemptCandidate, index: number) =>
     `${[candidate.harness, candidate.model].filter(Boolean).join(" ") || "an attempt"} (${
       candidate.pane === undefined ? `allocation ${candidate.allocation}` : `pane ${candidate.pane}`
-    }${branch === undefined ? "" : `, branch ${branch}`})`;
-  const unsettled = (reason: string, branches: readonly (string | undefined)[] = []) => ({
+    }${launches[index] === undefined ? "" : `, branch ${launches[index]!.branch}`})`;
+  const unsettled = (reason: string) => ({
     outcome: "unsettled" as const,
     detail: `No automatic winner for ${deliverable}: ${reason}. Candidates: ${candidates
-      .map((candidate, index) => name(candidate, branches[index]))
+      .map(name)
       .join("; ")}. Decide which attempt's work to keep and close the others.`,
   });
   const repository = /^([\w.-]+\/[\w.-]+)#\d+$/u.exec(deliverable)?.[1];
   if (repository === undefined) return unsettled("the deliverable names no GitHub issue");
-  const branches = candidates.map(branchOf);
-  const missing = candidates.find((_, index) => branches[index] === undefined);
-  if (missing !== undefined) return unsettled(`no hire branch is recorded for ${name(missing)}`, branches);
-  if (new Set(branches).size !== branches.length)
-    return unsettled("two attempts share a hire branch", branches);
+  const missing = launches.findIndex((launch) => launch === undefined);
+  if (missing !== -1)
+    return unsettled(`no launch record holds the hire branch of ${name(candidates[missing]!, missing)}`);
+  if (new Set(launches.map((launch) => launch!.branch)).size !== launches.length)
+    return unsettled("two attempts share a hire branch");
   let merges: (AttemptMerge | undefined)[];
   try {
-    merges = await Promise.all(branches.map((branch) => mergedPull(repository, branch!)));
+    merges = await Promise.all(launches.map((launch) => mergedPull(repository, launch!)));
   } catch (error) {
-    return unsettled(
-      `GitHub could not be read (${error instanceof Error ? error.message : String(error)})`,
-      branches,
-    );
+    return unsettled(`GitHub could not be read (${error instanceof Error ? error.message : String(error)})`);
   }
-  const merged = candidates
-    .map((candidate, index) => ({ candidate, merge: merges[index], branch: branches[index]! }))
-    .filter((entry): entry is typeof entry & { merge: AttemptMerge } => entry.merge !== undefined)
+  const unmerged = merges.findIndex((merge) => merge === undefined);
+  if (unmerged !== -1)
+    return unsettled(
+      `${name(candidates[unmerged]!, unmerged)} has no pull request merged from its hire branch since its hire`,
+    );
+  const ranked = candidates
+    .map((candidate, index) => ({ candidate, index, merge: merges[index]! }))
     .sort((a, b) => Date.parse(a.merge.mergedAt) - Date.parse(b.merge.mergedAt));
-  const first = merged[0];
-  if (first === undefined) return unsettled("no attempt's hire branch has a merged pull request", branches);
-  if (merged[1] !== undefined && merged[1].merge.mergedAt === first.merge.mergedAt)
-    return unsettled("two attempts' pull requests merged at the same instant", branches);
-  if (first.candidate.occupantId === undefined)
-    return unsettled("the first merge's attempt has no recorded occupant", branches);
-  const superseded = hires.settleAttempt(first.candidate.allocation, first.candidate.occupantId);
-  if (superseded === undefined) return undefined;
+  const first = ranked[0]!;
+  if (ranked[1] !== undefined && Date.parse(ranked[1].merge.mergedAt) === Date.parse(first.merge.mergedAt))
+    return unsettled("two attempts' pull requests merged at the same instant");
+  const superseded = hires.settleAttempt(record, revision, first.candidate.allocation);
+  if (superseded === undefined) return unsettled("the attempts changed while GitHub was read");
   return {
     outcome: "won",
     allocation: first.candidate.allocation,
     superseded,
-    detail: `${name(first.candidate, first.branch)} won ${deliverable}: its hire branch merged first as ${first.merge.url}.${
+    detail: `${name(first.candidate, first.index)} won ${deliverable}: its hire branch merged first as ${first.merge.url}.${
       superseded.length ? ` Superseded: ${superseded.join(", ")}; close them when their reports are in.` : ""
     }`,
   };

@@ -884,37 +884,52 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     }
   };
   /**
-   * The first pull request GitHub merged from `branch` of `repository` into its default
-   * branch (#602), or undefined when none has. Throws when GitHub cannot be read.
+   * The first pull request GitHub merged from an attempt's hire branch of `repository`
+   * into its default branch after the hire (#602), with a head that descends from the
+   * hire's start commit, so an older pull request on a reused branch name never counts.
+   * Undefined when none has; throws when GitHub cannot be read.
    */
   const mergedPull = async (
     repository: string,
-    branch: string,
+    launch: { readonly branch: string; readonly startHead: string; readonly hiredAt: string },
   ): Promise<{ number: number; url: string; mergedAt: string } | undefined> => {
     const { api } = checkpointAccess((await githubSnapshot())?.token);
     const repo = (await api.request("GET", `repos/${repository}`)) as { default_branch?: string };
     const owner = repository.split("/")[0]!;
+    const hiredAt = Date.parse(launch.hiredAt);
+    if (!Number.isFinite(hiredAt)) throw new Error("Attempt hire time unreadable");
     const pulls = (await api.list(
-      `repos/${repository}/pulls?state=closed&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
+      `repos/${repository}/pulls?state=closed&head=${encodeURIComponent(`${owner}:${launch.branch}`)}&per_page=100`,
     )) as {
       number?: number;
       html_url?: string;
       merged_at?: string | null;
-      head?: { ref?: string; repo?: { full_name?: string } | null };
+      head?: { ref?: string; sha?: string; repo?: { full_name?: string } | null };
       base?: { ref?: string };
     }[];
-    return pulls
+    const after = pulls
       .filter(
         (pull) =>
           typeof pull.merged_at === "string" &&
+          Date.parse(pull.merged_at) > hiredAt &&
           typeof pull.number === "number" &&
           typeof pull.html_url === "string" &&
-          pull.head?.ref === branch &&
+          typeof pull.head?.sha === "string" &&
+          pull.head.ref === launch.branch &&
           pull.head.repo?.full_name?.toLowerCase() === repository.toLowerCase() &&
           pull.base?.ref === repo.default_branch,
       )
-      .map((pull) => ({ number: pull.number!, url: pull.html_url!, mergedAt: pull.merged_at! }))
-      .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt))[0];
+      .sort((a, b) => Date.parse(a.merged_at!) - Date.parse(b.merged_at!));
+    for (const pull of after) {
+      // GitHub's own comparison: the merged head must contain the hire's start commit.
+      const compare = (await api.request(
+        "GET",
+        `repos/${repository}/compare/${launch.startHead}...${pull.head!.sha!}`,
+      )) as { status?: string };
+      if (compare.status === "ahead" || compare.status === "identical")
+        return { number: pull.number!, url: pull.html_url!, mergedAt: pull.merged_at! };
+    }
+    return undefined;
   };
   const checkIssueCheckpoint = async (issue: Readonly<Record<string, unknown>>) => {
     const links = issue.links as { url: string }[] | undefined;

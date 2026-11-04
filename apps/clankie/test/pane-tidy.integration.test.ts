@@ -982,12 +982,13 @@ it("a closed attempt whose hire branch merged first settles its own retained all
     f.ledger.pane(sibling.id, "pc/w1:p8");
     const winner = f.ledger.retirementCandidate("pc", "pc/w1:p1")!;
     expect(winner.request.attempt).toBe(true);
-    // The real store captures the record and settles it. Only the hire branches and what
-    // GitHub merged are given: the winner's branch merged as a pull request, the rival's didn't.
+    // The real store captures the record and settles it. Only each hire's launch record
+    // and what GitHub merged are given: both hire branches merged, the winner's first.
     const captured: unknown[] = [];
-    const branches = new Map([
-      [winner.occupantId, "clankie/winner"],
-      [sibling.id, "clankie/rival"],
+    const hiredAt = new Date(Date.now() - 60_000).toISOString();
+    const launches = new Map([
+      [winner.id, { branch: "clankie/winner", startHead: "a".repeat(40), hiredAt }],
+      [sibling.id, { branch: "clankie/rival", startHead: "a".repeat(40), hiredAt }],
     ]);
     const tidy = new PaneTidy(f.path, {
       ...f.ports,
@@ -999,15 +1000,21 @@ it("a closed attempt whose hire branch merged first settles its own retained all
       settleAttempt: (record) =>
         f.watch.settleHireAttempt(
           record,
-          (candidate) => branches.get(candidate.occupantId ?? candidate.allocation),
-          async (repository, branch) =>
-            repository === "Volpestyle/clankie" && branch === "clankie/winner"
-              ? {
-                  number: 7,
-                  url: "https://github.com/Volpestyle/clankie/pull/7",
-                  mergedAt: "2026-11-03T10:00:00Z",
-                }
-              : undefined,
+          (candidate) => launches.get(candidate.allocation),
+          async (repository, launch) =>
+            repository !== "Volpestyle/clankie"
+              ? undefined
+              : launch.branch === "clankie/winner"
+                ? {
+                    number: 7,
+                    url: "https://github.com/Volpestyle/clankie/pull/7",
+                    mergedAt: "2026-11-03T10:00:00Z",
+                  }
+                : {
+                    number: 8,
+                    url: "https://github.com/Volpestyle/clankie/pull/8",
+                    mergedAt: "2026-11-03T10:05:00Z",
+                  },
         ),
     });
     const close = () =>

@@ -24,6 +24,7 @@ import {
   projectHireProfile,
   settleAttemptByMerge,
   type AttemptCandidate,
+  type AttemptLaunch,
   type AttemptMerge,
   type AttemptSettlement,
   type ProjectHireProcessProof,
@@ -2675,15 +2676,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       : undefined;
   }
   /**
-   * Settle the captured attempt's deliverable from each attempt's hire branch and the
-   * pull request GitHub merged from it (#602); see settleAttemptByMerge.
+   * Settle the captured attempt's deliverable from each attempt's launch record and the
+   * pull request GitHub merged from its hire branch (#602); see settleAttemptByMerge.
    */
   public settleHireAttempt(
     record: { readonly allocation: string; readonly occupantId: string },
-    branchOf: (candidate: AttemptCandidate) => string | undefined,
-    mergedPull: (repository: string, branch: string) => Promise<AttemptMerge | undefined>,
+    launchOf: (candidate: AttemptCandidate) => AttemptLaunch | undefined,
+    mergedPull: (repository: string, launch: AttemptLaunch) => Promise<AttemptMerge | undefined>,
   ): Promise<AttemptSettlement | undefined> {
-    return settleAttemptByMerge(this.projectHires, record, branchOf, mergedPull);
+    return settleAttemptByMerge(this.projectHires, record, launchOf, mergedPull);
   }
   /**
    * The project a seat's current occupant was hired into, and the GitHub repository of the

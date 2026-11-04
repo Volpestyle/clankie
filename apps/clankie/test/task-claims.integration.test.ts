@@ -13,7 +13,9 @@ import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import type { SpawnOperatorSeat } from "@clankie/protocol";
-import { ProjectHires, settleAttemptByMerge } from "../src/captain/project-hires.ts";
+import { attemptLaunch, ProjectHires, settleAttemptByMerge } from "../src/captain/project-hires.ts";
+import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
+import { readSeatCommitBaseline } from "../src/captain/seat-telemetry.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 const exec = promisify(execFile);
@@ -147,14 +149,18 @@ it("lets deliberate attempts race different harnesses in their own worktrees, an
   expect(ledger.attempt("default", "w9:p9")).toBeUndefined();
 
   // A record whose occupant no longer matches settles nothing.
-  expect(ledger.settleAttempt(codex.id, "occupant-replaced")).toBeUndefined();
+  const replaced = { allocation: codex.id, occupantId: "occupant-replaced" };
+  expect(ledger.attemptCandidates(replaced.allocation, replaced.occupantId)).toBeUndefined();
   // Codex's work lands first and its close released its allocation: the retained record
   // still wins, Claude's attempt is superseded, and a second settlement changes nothing.
   ledger.reconcile("default", new Set(["w1:p1"]), new Set(), ledger.inventoryCandidates("default"));
   expect(ledger.allocation(codex.id)?.gone).toBe(true);
-  expect(ledger.settleAttempt(codex.id, "occupant-w1:p2")).toEqual(["w1:p1"]);
-  expect(ledger.settleAttempt(codex.id, "occupant-w1:p2")).toBeUndefined();
-  expect(ledger.settleAttempt(claude.id, "occupant-w1:p1")).toBeUndefined();
+  const record = { allocation: codex.id, occupantId: "occupant-w1:p2" };
+  const { revision } = ledger.attemptCandidates(record.allocation, record.occupantId)!;
+  expect(ledger.settleAttempt(replaced, revision, codex.id)).toBeUndefined();
+  expect(ledger.settleAttempt(record, revision, codex.id)).toEqual(["w1:p1"]);
+  expect(ledger.settleAttempt(record, revision, codex.id)).toBeUndefined();
+  expect(ledger.attemptCandidates(record.allocation, record.occupantId)).toBeUndefined();
   expect(ledger.attempt("default", "w1:p1")).toMatchObject({ superseded: true });
   expect(ledger.allocation(codex.id)).toMatchObject({
     attemptWon: expect.any(String),
@@ -164,43 +170,57 @@ it("lets deliberate attempts race different harnesses in their own worktrees, an
 });
 
 /**
- * GitHub as the host reads it: the repository's default branch and the pull requests
- * merged from each branch. Only what a test records here counts as a merge.
+ * GitHub as the host reads it, over a real bare origin: the default branch, the pull
+ * requests merged from each branch, and GitHub's comparison of two commits, answered by
+ * Git's own ancestry. Only the pull requests a test records here count as merges.
  */
-const githubFixture = async () => {
-  const merged = new Map<string, { number: number; mergedAt: string }>();
+type FixturePull = { number: number; mergedAt: string; head: string };
+const githubFixture = async (origin: string) => {
+  const merged = new Map<string, FixturePull[]>();
   const server = createServer((request, response) => {
-    const url = new URL(request.url ?? "/", "http://fixture");
-    let body: unknown = { message: "Not Found" };
-    if (url.pathname === "/repos/Volpestyle/clankie") body = { default_branch: "main" };
-    if (url.pathname === "/repos/Volpestyle/clankie/pulls") {
-      const branch = url.searchParams.get("head")?.replace(/^Volpestyle:/u, "") ?? "";
-      const pull = merged.get(branch);
-      body = pull
-        ? [
-            {
-              number: pull.number,
-              html_url: `https://github.com/Volpestyle/clankie/pull/${pull.number}`,
-              merged_at: pull.mergedAt,
-              head: { ref: branch, repo: { full_name: "Volpestyle/clankie" } },
-              base: { ref: "main" },
-            },
-          ]
-        : [];
-    }
-    response.writeHead(Array.isArray(body) || "default_branch" in (body as object) ? 200 : 404, {
-      "content-type": "application/json",
-    });
-    response.end(JSON.stringify(body));
+    const send = (status: number, body: unknown) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    void (async () => {
+      const url = new URL(request.url ?? "/", "http://fixture");
+      if (url.pathname === "/repos/Volpestyle/clankie") return send(200, { default_branch: "main" });
+      if (url.pathname === "/repos/Volpestyle/clankie/pulls") {
+        const branch = url.searchParams.get("head")?.replace(/^Volpestyle:/u, "") ?? "";
+        return send(
+          200,
+          (merged.get(branch) ?? []).map((pull) => ({
+            number: pull.number,
+            html_url: `https://github.com/Volpestyle/clankie/pull/${pull.number}`,
+            merged_at: pull.mergedAt,
+            head: { ref: branch, sha: pull.head, repo: { full_name: "Volpestyle/clankie" } },
+            base: { ref: "main" },
+          })),
+        );
+      }
+      const compare = /^\/repos\/Volpestyle\/clankie\/compare\/([a-f0-9]+)\.\.\.([a-f0-9]+)$/u.exec(
+        url.pathname,
+      );
+      if (compare) {
+        if (compare[1] === compare[2]) return send(200, { status: "identical" });
+        const ahead = await exec("git", ["merge-base", "--is-ancestor", compare[1]!, compare[2]!], {
+          cwd: origin,
+        }).then(
+          () => true,
+          () => false,
+        );
+        return send(200, { status: ahead ? "ahead" : "diverged" });
+      }
+      send(404, { message: "Not Found" });
+    })();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   closers.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
   return { baseUrl: `http://127.0.0.1:${port}`, merged };
 };
-
-it("an attempt wins only by the pull request GitHub merged first from its hire branch, never by what its worktree writes", async () => {
-  const root = await scratch();
+/** A real origin whose main has moved on, and checkouts of it as attempts start them. */
+const repository = async (root: string) => {
   const git = (cwd: string, ...args: string[]) =>
     exec("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], {
       cwd,
@@ -211,24 +231,44 @@ it("an attempt wins only by the pull request GitHub merged first from its hire b
   await exec("git", ["clone", "-q", origin, seed]);
   await git(seed, "commit", "-q", "--allow-empty", "-m", "base");
   await git(seed, "push", "-q", "origin", "HEAD:main");
-  // Two attempts start from the same main in their own checkouts, each on the branch the
-  // host recorded at its hire.
-  const a = join(root, "attempt-a");
-  const b = join(root, "attempt-b");
-  await exec("git", ["clone", "-q", origin, a]);
-  await exec("git", ["clone", "-q", origin, b]);
-  await git(a, "switch", "-q", "-c", "clankie/attempt-a");
-  await git(b, "switch", "-q", "-c", "clankie/attempt-b");
+  // Hires work in linked worktrees of the shared checkout, on a new branch from origin's main.
+  const checkout = async (name: string, branch: string) => {
+    const dir = join(root, name);
+    await git(seed, "fetch", "-q", "origin");
+    await git(seed, "worktree", "add", "-q", "-b", branch, dir, "origin/main");
+    return dir;
+  };
+  return { git, origin, seed, checkout };
+};
+const owner = { conversationId: "lead" };
+const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+
+it("an attempt wins only by a pull request GitHub merged from its hire branch after the hire, never by what its worktree writes", async () => {
+  const root = await scratch();
+  const repo = await repository(root);
+  const { git } = repo;
+  // An old pull request from a branch named like B's merged long before these hires,
+  // made in another checkout; main has moved on since.
+  const earlier = join(root, "earlier");
+  await exec("git", ["clone", "-q", repo.origin, earlier]);
+  await git(earlier, "commit", "-q", "--allow-empty", "-m", "old work");
+  const old = (await git(earlier, "rev-parse", "HEAD")).stdout.trim();
+  await git(earlier, "push", "-q", "origin", "HEAD:clankie/attempt-b");
+  await git(repo.seed, "commit", "-q", "--allow-empty", "-m", "main moves on");
+  await git(repo.seed, "push", "-q", "origin", "HEAD:main");
+  // Two attempts start from the same main, each on the branch its hire records before launch.
+  const a = await repo.checkout("attempt-a", "clankie/attempt-a");
+  const b = await repo.checkout("attempt-b", "clankie/attempt-b");
+  const efficiency = new SeatEfficiencyStore(join(root, "seat-efficiency.json"));
+  efficiency.assign("occupant-w1:p1", { owner, commitBaseline: (await readSeatCommitBaseline(a))! });
+  efficiency.assign("occupant-w1:p2", { owner, commitBaseline: (await readSeatCommitBaseline(b))! });
   const ledger = new ProjectHires(join(root, "project-hires.json"));
   const claude = ledger.reserve(settings(), "game", hire(a, { attempt: true }));
   running(ledger, claude.id, "w1:p1");
   const codex = ledger.reserve(settings(), "game", hire(b, { harness: "codex", attempt: true }));
   running(ledger, codex.id, "w1:p2");
-  const hireBranch = new Map([
-    ["occupant-w1:p1", "clankie/attempt-a"],
-    ["occupant-w1:p2", "clankie/attempt-b"],
-  ]);
-  const github = await githubFixture();
+  const github = await githubFixture(repo.origin);
+  github.merged.set("clankie/attempt-b", [{ number: 5, mergedAt: minutesFromNow(-24 * 60), head: old }]);
   const service = createWorkItemsService({
     stateDirectory: root,
     githubToken: async () => "fixture-only",
@@ -238,10 +278,16 @@ it("an attempt wins only by the pull request GitHub merged first from its hire b
     settleAttemptByMerge(
       ledger,
       record,
-      (candidate) => hireBranch.get(candidate.occupantId ?? ""),
-      (repository, branch) => service.mergedPull(repository, branch),
+      (candidate) => attemptLaunch(efficiency.readLaunchBaseline(candidate.occupantId ?? "", owner)),
+      (repository, launch) => service.mergedPull(repository, launch),
     );
   const closingB = { allocation: codex.id, occupantId: "occupant-w1:p2" };
+  const unsettled = () => {
+    for (const id of [claude.id, codex.id]) {
+      expect(ledger.allocation(id)?.attemptWon).toBeUndefined();
+      expect(ledger.allocation(id)?.supersededBy).toBeUndefined();
+    }
+  };
 
   // A lands its fix on main directly; GitHub records no merged pull request for it.
   await writeFile(join(a, "fix.txt"), "fix\n");
@@ -257,25 +303,38 @@ it("an attempt wins only by the pull request GitHub merged first from its hire b
   });
   expect((await git(b, "reflog", "-1", "--format=%gs")).stdout).toMatch(/^commit:/u);
   expect((await git(b, "rev-parse", "HEAD")).stdout.trim()).toBe(landed);
-  // Nothing the worktree says counts, and no attempt's hire branch merged: no winner.
   const forged = await settle(closingB);
   expect(forged).toMatchObject({ outcome: "unsettled" });
-  expect(forged?.detail).toContain("no attempt's hire branch has a merged pull request");
+  expect(forged?.detail).toContain("has no pull request merged from its hire branch since its hire");
   expect(forged?.detail).toContain("pane w1:p1, branch clankie/attempt-a");
   expect(forged?.detail).toContain("pane w1:p2, branch clankie/attempt-b");
-  expect(ledger.allocation(codex.id)?.attemptWon).toBeUndefined();
-  expect(ledger.allocation(claude.id)?.supersededBy).toBeUndefined();
+  unsettled();
 
-  // B copies A's fix with a cherry-pick onto its own branch and pushes it.
+  // B copies A's fix with a cherry-pick onto its own branch and pushes it: still nothing.
   await git(b, "reset", "-q", "--hard", "origin/main~1");
   await git(b, "cherry-pick", landed);
-  await git(b, "push", "-q", "origin", "HEAD:clankie/attempt-b");
-  // The copy alone proves nothing either.
+  await git(b, "push", "-q", "--force", "origin", "HEAD:clankie/attempt-b");
+  const copy = (await git(b, "rev-parse", "HEAD")).stdout.trim();
   expect(await settle(closingB)).toMatchObject({ outcome: "unsettled" });
-  // A's hire branch merges as a pull request, then B merges its copied cherry-pick as its
-  // own: A's merged first, so A wins even though B's pane is the one closing.
-  github.merged.set("clankie/attempt-a", { number: 11, mergedAt: "2026-11-03T10:00:00Z" });
-  github.merged.set("clankie/attempt-b", { number: 12, mergedAt: "2026-11-03T10:05:00Z" });
+  unsettled();
+
+  // A's hire branch merges as a pull request. B has only the old pull request on the reused
+  // branch name, merged before its hire from a head that lacks its start: one merged
+  // attempt beside one without a merge settles nothing.
+  await git(a, "push", "-q", "origin", "HEAD:clankie/attempt-a");
+  github.merged.set("clankie/attempt-a", [{ number: 11, mergedAt: minutesFromNow(1), head: landed }]);
+  const half = await settle(closingB);
+  expect(half?.detail).toContain(
+    "codex (pane w1:p2, branch clankie/attempt-b) has no pull request merged from its hire branch since its hire",
+  );
+  unsettled();
+
+  // B then merges its copied cherry-pick as its own pull request: both merged, A first, so
+  // A wins even though B's pane is the one closing.
+  github.merged.set("clankie/attempt-b", [
+    { number: 5, mergedAt: minutesFromNow(-24 * 60), head: old },
+    { number: 12, mergedAt: minutesFromNow(2), head: copy },
+  ]);
   const settled = await settle(closingB);
   expect(settled).toMatchObject({ outcome: "won", allocation: claude.id, superseded: ["w1:p2"] });
   expect(settled?.detail).toContain("https://github.com/Volpestyle/clankie/pull/11");
@@ -286,7 +345,81 @@ it("an attempt wins only by the pull request GitHub merged first from its hire b
   expect(await settle({ allocation: claude.id, occupantId: "occupant-w1:p1" })).toBeUndefined();
 });
 
-it("leaves an attempt unsettled when its deliverable names no GitHub issue or a hire branch is unknown", async () => {
+it("a hire branch first seen after launch is no evidence", async () => {
+  const root = await scratch();
+  const repo = await repository(root);
+  const a = await repo.checkout("attempt-a", "clankie/attempt-a");
+  const b = await repo.checkout("attempt-b", "clankie/attempt-b");
+  const efficiency = new SeatEfficiencyStore(join(root, "seat-efficiency.json"));
+  efficiency.assign("occupant-w1:p1", { owner, commitBaseline: (await readSeatCommitBaseline(a))! });
+  // B's baseline came only from its first projection after launch.
+  efficiency.assign("occupant-w1:p2", { owner });
+  efficiency.setCommitBaseline("occupant-w1:p2", owner, (await readSeatCommitBaseline(b))!);
+  expect(efficiency.readCommitBaseline("occupant-w1:p2", owner)).toBeDefined();
+  expect(efficiency.readLaunchBaseline("occupant-w1:p2", owner)).toBeUndefined();
+  const ledger = new ProjectHires(join(root, "project-hires.json"));
+  const claude = ledger.reserve(settings(), "game", hire(a, { attempt: true }));
+  running(ledger, claude.id, "w1:p1");
+  const codex = ledger.reserve(settings(), "game", hire(b, { harness: "codex", attempt: true }));
+  running(ledger, codex.id, "w1:p2");
+  const settled = await settleAttemptByMerge(
+    ledger,
+    { allocation: claude.id, occupantId: "occupant-w1:p1" },
+    (candidate) => attemptLaunch(efficiency.readLaunchBaseline(candidate.occupantId ?? "", owner)),
+    async () => {
+      throw new Error("GitHub must not be read");
+    },
+  );
+  expect(settled?.detail).toContain("no launch record holds the hire branch of codex (pane w1:p2)");
+  expect(ledger.allocation(claude.id)?.attemptWon).toBeUndefined();
+});
+
+it("an attempt that joins while GitHub is read leaves the deliverable unsettled", async () => {
+  const root = await scratch();
+  const ledger = new ProjectHires(join(root, "project-hires.json"));
+  const claude = ledger.reserve(settings(), "game", hire(join(root, "a"), { attempt: true }));
+  running(ledger, claude.id, "w1:p1");
+  const codex = ledger.reserve(
+    settings(),
+    "game",
+    hire(join(root, "b"), { harness: "codex", attempt: true }),
+  );
+  running(ledger, codex.id, "w1:p2");
+  const launchOf = (candidate: { allocation: string }) => ({
+    branch: `clankie/${candidate.allocation}`,
+    startHead: "0".repeat(40),
+    hiredAt: minutesFromNow(-5),
+  });
+  let joined: string | undefined;
+  const settled = await settleAttemptByMerge(
+    ledger,
+    { allocation: codex.id, occupantId: "occupant-w1:p2" },
+    launchOf,
+    async (_repository, launch) => {
+      // Attempt C is hired while the first answer is in flight.
+      if (joined === undefined) {
+        joined = ledger.reserve(
+          settings(),
+          "game",
+          hire(join(root, "c"), { model: "Opus", attempt: true }),
+        ).id;
+        running(ledger, joined, "w1:p3");
+      }
+      return {
+        number: launch.branch.endsWith(claude.id) ? 1 : 2,
+        url: "https://github.com/Volpestyle/clankie/pull/1",
+        mergedAt: launch.branch.endsWith(claude.id) ? minutesFromNow(1) : minutesFromNow(2),
+      };
+    },
+  );
+  expect(settled?.detail).toContain("the attempts changed while GitHub was read");
+  for (const id of [claude.id, codex.id, joined!]) {
+    expect(ledger.allocation(id)?.attemptWon).toBeUndefined();
+    expect(ledger.allocation(id)?.supersededBy).toBeUndefined();
+  }
+});
+
+it("leaves an attempt unsettled when its deliverable names no GitHub issue", async () => {
   const root = await scratch();
   const ledger = new ProjectHires(join(root, "project-hires.json"));
   const one = ledger.reserve(
@@ -295,31 +428,14 @@ it("leaves an attempt unsettled when its deliverable names no GitHub issue or a 
     hire(join(root, "one"), { deliverable: "VUH-602", attempt: true }),
   );
   running(ledger, one.id, "w1:p1");
-  const two = ledger.reserve(
-    settings(),
-    "game",
-    hire(join(root, "two"), { deliverable: "VUH-602", harness: "codex", attempt: true }),
-  );
-  running(ledger, two.id, "w1:p2");
-  const never = async () => {
-    throw new Error("GitHub must not be read");
-  };
-  const record = { allocation: one.id, occupantId: "occupant-w1:p1" };
-  expect((await settleAttemptByMerge(ledger, record, () => "b", never))?.detail).toContain(
-    "the deliverable names no GitHub issue",
-  );
-  const github = ledger.reserve(
-    settings(),
-    "game",
-    hire(join(root, "three"), { harness: "codex", attempt: true }),
-  );
-  running(ledger, github.id, "w1:p3");
-  const remote = await settleAttemptByMerge(
+  const settled = await settleAttemptByMerge(
     ledger,
-    { allocation: github.id, occupantId: "occupant-w1:p3" },
-    () => undefined,
-    never,
+    { allocation: one.id, occupantId: "occupant-w1:p1" },
+    () => ({ branch: "b", startHead: "0".repeat(40), hiredAt: minutesFromNow(-5) }),
+    async () => {
+      throw new Error("GitHub must not be read");
+    },
   );
-  expect(remote?.detail).toContain("no hire branch is recorded for codex (pane w1:p3)");
-  expect(ledger.allocation(github.id)?.attemptWon).toBeUndefined();
+  expect(settled?.detail).toContain("the deliverable names no GitHub issue");
+  expect(ledger.allocation(one.id)?.attemptWon).toBeUndefined();
 });
