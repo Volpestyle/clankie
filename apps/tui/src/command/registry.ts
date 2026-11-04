@@ -363,6 +363,14 @@ const HEADLESS_COMMAND_HELP = [
       "                           Declare an OpenAI-compatible local runtime (ds4, Ollama, LM Studio)",
     ],
   },
+  {
+    nouns: ["model"],
+    lines: [
+      "  model local [list]       List Ollama, LM Studio and vLLM answering on this Mac",
+      "  model local use RUNTIME MODEL",
+      "                           Prove a local model answers, add its endpoint and select it",
+    ],
+  },
   { nouns: ["model"], lines: ["  model set provider/model Select the captain model"] },
   { nouns: ["effort"], lines: ["  effort [status]          Read reasoning effort for the captain model"] },
   {

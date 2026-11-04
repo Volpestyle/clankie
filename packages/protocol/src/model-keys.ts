@@ -27,6 +27,9 @@ export const MODEL_SUBSCRIPTIONS_PATH = "/v1/model-keys/subscriptions";
 /** What the owner can switch to now: usable providers and the running model's reasoning effort. */
 export const MODEL_OPTIONS_PATH = "/v1/model-keys/options";
 export const MODEL_EFFORT_SET_PATH = "/v1/model-keys/effort";
+/** What answers on this Mac's own loopback, and the one-step add of a model from it. */
+export const MODEL_LOCAL_ENDPOINTS_PATH = "/v1/model-keys/local";
+export const MODEL_LOCAL_ENDPOINT_ADD_PATH = "/v1/model-keys/local/add";
 
 const ProviderIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._-]{0,127}$/u);
 const ModelIdSchema = z
@@ -214,6 +217,69 @@ export const ModelKeyResultSchema = z.discriminatedUnion("ok", [
     .strict(),
 ]);
 export type ModelKeyResult = z.infer<typeof ModelKeyResultSchema>;
+
+/**
+ * A device names a runtime, never a URL: the service reaches only the fixed
+ * loopback address behind each id, so these routes cannot be aimed at another host.
+ */
+export const LocalRuntimeIdSchema = z.enum(["ollama", "lm-studio", "vllm"]);
+export type LocalRuntimeId = z.infer<typeof LocalRuntimeIdSchema>;
+
+export const LocalEndpointModelSchema = z
+  .object({
+    id: ModelIdSchema,
+    /** The window the endpoint reports, or null when it does not say. */
+    context: z.number().positive().nullable(),
+  })
+  .strict();
+
+/** Only runtimes that answered with at least one usable model are listed. */
+export const LocalEndpointsResponseSchema = z
+  .object({
+    endpoints: z
+      .array(
+        z
+          .object({
+            runtime: LocalRuntimeIdSchema,
+            name: z.string().min(1).max(64),
+            baseURL: z.string().url(),
+            models: z.array(LocalEndpointModelSchema).min(1).max(256),
+          })
+          .strict(),
+      )
+      .max(3),
+  })
+  .strict();
+export type LocalEndpointsResponse = z.infer<typeof LocalEndpointsResponseSchema>;
+
+export const LocalEndpointAddRequestSchema = z
+  .object({ runtime: LocalRuntimeIdSchema, modelId: ModelIdSchema })
+  .strict();
+export type LocalEndpointAddRequest = z.infer<typeof LocalEndpointAddRequestSchema>;
+
+/** Success names the model now selected; a refusal leaves the owner's settings as they were. */
+export const LocalEndpointAddResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), model: ModelRefSchema }).strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z.enum([
+        "managed_credits_only",
+        "authentication_required",
+        "forbidden",
+        "malformed",
+        "endpoint_unavailable",
+        "provider_conflict",
+        "unsupported_provider",
+        "unsupported_model",
+        "validation_failed",
+        "validation_timeout",
+        "unavailable",
+      ]),
+    })
+    .strict(),
+]);
+export type LocalEndpointAddResult = z.infer<typeof LocalEndpointAddResultSchema>;
 
 /** Separate from the strict subscriptions listing, which remains names only. */
 export const MODEL_SUBSCRIPTION_METHODS_PATH = "/v1/model-keys/subscriptions/methods";

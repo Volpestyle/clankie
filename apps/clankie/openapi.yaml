@@ -1467,6 +1467,65 @@ paths:
         "403": { description: forbidden or machine_setup_owner_approval_required }
         "409": { description: busy (another install runs), already_installed or installer_unavailable }
         "503": { description: unavailable }
+  /v1/model-keys/local:
+    get:
+      tags: [Operator]
+      operationId: listLocalModelEndpoints
+      summary: List the local model runtimes answering on this Mac
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. Probes Ollama, LM Studio
+        and vLLM at their fixed loopback defaults on every call. Lists only
+        runtimes that answered with a model. Changes nothing. Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Runtimes found, with the models each serves
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalEndpointsResponse" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required }
+        "503": { description: unavailable }
+  /v1/model-keys/local/add:
+    post:
+      tags: [Operator]
+      operationId: addLocalModelEndpoint
+      summary: Prove a local model answers, add its endpoint and select it
+      description: |
+        Owner operator bearer or active device with terminalControl only. Public
+        gateway calls require the encrypted envelope. The request names a
+        runtime, never a URL: the service reaches only that runtime's fixed
+        loopback address. It sends one bounded completion before writing
+        anything, repeats authorization inside the device's revoke lock, then declares the endpoint
+        and selects the model through the same config as `clankie model set`.
+        The choice applies on the next turn without a restart. Cache-Control no-store.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocalEndpointAddRequest" }
+      responses:
+        "200":
+          description: The endpoint is declared and the model selected
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalEndpointAddResult" }
+        "400":
+          description: Malformed input, or a runtime or model that could not be used
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalEndpointAddResult" }
+        "401": { description: authentication_required }
+        "403": { description: forbidden — terminalControl required, or revoked during validation }
+        "409":
+          description: provider_conflict — the provider id already names another entry
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LocalEndpointAddResult" }
+        "413": { description: malformed — body exceeds 16 KiB }
+        "503": { description: unavailable }
   /v1/model-keys/set:
     post:
       tags: [Operator]
@@ -8837,6 +8896,68 @@ components:
                   type: array
                   maxItems: 7
                   items: { $ref: "#/components/schemas/ModelEffort" }
+    LocalRuntimeId:
+      type: string
+      enum: [ollama, lm-studio, vllm]
+    LocalEndpointsResponse:
+      type: object
+      additionalProperties: false
+      required: [endpoints]
+      properties:
+        endpoints:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [runtime, name, baseURL, models]
+            properties:
+              runtime: { $ref: "#/components/schemas/LocalRuntimeId" }
+              name: { type: string, minLength: 1, maxLength: 64 }
+              baseURL: { type: string, format: uri }
+              models:
+                type: array
+                minItems: 1
+                maxItems: 256
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [id, context]
+                  properties:
+                    id: { type: string, minLength: 1, maxLength: 512 }
+                    context:
+                      type: [number, "null"]
+                      description: The window the endpoint reports, or null when it does not say.
+    LocalEndpointAddRequest:
+      type: object
+      additionalProperties: false
+      required: [runtime, modelId]
+      properties:
+        runtime: { $ref: "#/components/schemas/LocalRuntimeId" }
+        modelId: { type: string, minLength: 1, maxLength: 512 }
+    LocalEndpointAddResult:
+      type: object
+      additionalProperties: false
+      required: [ok]
+      properties:
+        ok: { type: boolean }
+        model:
+          type: string
+          description: The selected provider/model reference, present when ok is true.
+        error:
+          type: string
+          enum:
+            - managed_credits_only
+            - authentication_required
+            - forbidden
+            - malformed
+            - endpoint_unavailable
+            - provider_conflict
+            - unsupported_provider
+            - unsupported_model
+            - validation_failed
+            - validation_timeout
+            - unavailable
     ModelEffortSetRequest:
       type: object
       additionalProperties: false

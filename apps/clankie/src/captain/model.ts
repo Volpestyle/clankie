@@ -12,6 +12,8 @@ import {
   isHostedModelEnvironment,
   configForRef,
   loadConfig,
+  loadConfigLayers,
+  mergeConfigLayers,
   registerConfiguredPiProviders,
   resolvePiModelSelection,
   routeFor,
@@ -244,12 +246,24 @@ export async function createCaptainModelRuntime(
   const initialConfig = await loadConfig({ cwd: repoRoot });
   const catalog = await createModelRegistry().catalog();
   registerConfiguredPiProviders(runtime, initialConfig.config, catalog);
+  // The repository layer stays as it booted: a worker can write that file, and
+  // provider addresses it changes wait for a restart, as they always have.
+  const bootLayers = await loadConfigLayers({ cwd: repoRoot });
+  let registeredOwnerProviders = JSON.stringify(bootLayers.global?.provider);
   const select = async (
     config: Awaited<ReturnType<typeof loadConfig>>["config"],
     label?: string,
   ): Promise<PiModelSelection> => {
     await options.refuse?.();
     try {
+      // An endpoint the owner added since boot must register here, or a device
+      // that just selected it would need a restart it cannot ask for.
+      const { global: owner } = await loadConfigLayers({ cwd: repoRoot });
+      const ownerProviders = JSON.stringify(owner?.provider);
+      if (owner !== undefined && ownerProviders !== registeredOwnerProviders) {
+        registerConfiguredPiProviders(runtime, mergeConfigLayers(owner, bootLayers.repo ?? {}), catalog);
+        registeredOwnerProviders = ownerProviders;
+      }
       const selection = resolvePiModelSelection(config, runtime, {
         hasCodexSubscription:
           !isHostedModelEnvironment() && (await broker.get(CODEX_PROVIDER_ID)) !== undefined,

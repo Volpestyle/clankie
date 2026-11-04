@@ -21,6 +21,18 @@ const LOCAL_PROVIDER_NAME_SUFFIX = " (local)";
  */
 export const LOCAL_PLACEHOLDER_API_KEY = "local";
 
+/**
+ * The runtimes setup looks for on this machine, at their default addresses. An
+ * id is also the provider id it is declared under, so none may be a models.dev
+ * provider (`lmstudio` is), whose catalog would merge into the endpoint's list.
+ * Port 8000 is vLLM's default but any OpenAI-compatible server can hold it.
+ */
+export const LOCAL_RUNTIMES = [
+  { id: "ollama", name: "Ollama", baseURL: "http://127.0.0.1:11434/v1" },
+  { id: "lm-studio", name: "LM Studio", baseURL: "http://127.0.0.1:1234/v1" },
+  { id: "vllm", name: "vLLM", baseURL: "http://127.0.0.1:8000/v1" },
+] as const;
+
 export interface ProbedLocalModel {
   readonly id: string;
   readonly context?: number;
@@ -59,13 +71,15 @@ export function normalizeLocalBaseUrl(value: string): string {
  * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`).
  * Local runtimes are unknown to models.dev, so the endpoint itself is the catalog.
  * A model Ollama says only embeds is left out: it cannot chat, and listed
- * newest first it was the one setup preselected (VUH-2626).
+ * newest first it was the one setup preselected (VUH-2626). A redirect is
+ * refused, so whatever holds the port cannot point the probe at another address.
  */
 export async function probeLocalModels(
   baseURL: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<readonly ProbedLocalModel[]> {
   const response = await fetchImpl(`${normalizeLocalBaseUrl(baseURL)}/models`, {
+    redirect: "error",
     signal: AbortSignal.timeout(3_000),
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -106,6 +120,7 @@ async function probeOllamaShow(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model }),
+      redirect: "error",
       signal: AbortSignal.timeout(3_000),
     });
     if (!response.ok) return undefined;
@@ -212,6 +227,25 @@ export function localProviderConfig(
       input.models.map((model) => [model.id, localModelCatalogEntry(model.context ?? fallbackContext)]),
     ),
   };
+}
+
+/**
+ * True when `providerId` already names something other than Clankie's own
+ * declaration of this endpoint, such as a hand-written entry or the same id
+ * pointed elsewhere. Declaring replaces the entry whole, so that must be refused.
+ */
+export function localProviderConflict(config: ClankieConfig, providerId: string, baseURL: string): boolean {
+  const existing = config.provider?.[providerId];
+  if (existing === undefined) return false;
+  const declaredBaseURL = existing.options?.baseURL;
+  const address = (value: string) => normalizeLocalBaseUrl(value.replace("//localhost", "//127.0.0.1"));
+  return (
+    existing.npm !== OPENAI_COMPATIBLE_NPM ||
+    !existing.name?.endsWith(LOCAL_PROVIDER_NAME_SUFFIX) ||
+    typeof declaredBaseURL !== "string" ||
+    validateLocalBaseUrl(declaredBaseURL) !== undefined ||
+    address(declaredBaseURL) !== address(baseURL)
+  );
 }
 
 /** Writes a credential-less OpenAI-compatible local provider into global clankie.json. */
