@@ -82,13 +82,24 @@ Acquire reuses the current holder's booted lease; for a new lease it prefers
 stopped devices with native boot history. An unleased booted device still needs
 an explicit UDID: a booted device is not proof that this seat owns it.
 
-The #333 handoff measured an idle iPhone 17e on iOS 27 at about 26.5 GiB kernel
+The [#333](https://github.com/Volpestyle/clankie/issues/333) handoff measured an idle iPhone 17e on iOS 27 at about 26.5 GiB kernel
 footprint after a repeat boot and 36.9 GiB after its first boot. Repeat boot took
 about 20 seconds, with about two cores of CPU for two minutes; first boot used
 about four times the boot CPU. Keeping a device warm saves boot time but retains
 tens of GiB between rounds, so shut down and reuse its data instead. These are
 device/runtime observations, not a universal memory ceiling. No simulator system
 services are disabled or trimmed.
+
+The follow-up headless Settings capture on the same model/runtime acquired a
+previously booted device in 21.9 seconds. Seven screenshots over 124 seconds
+reached 33.8 GiB kernel footprint, with sampled interval CPU peaking at 14.7
+cores. On the busy 18-core, 128 GiB host, OS free memory fell from 37.8 GiB to
+0.18 GiB. The probe was interrupted for memory pressure; its `finally` release
+returned `released`, the exact device was observed `Shutdown`, and OS free
+memory recovered to 36.3 GiB. Host load includes other fleet work; free memory
+is not total reclaimable memory. This proves reclaiming the device between
+rounds, not a memory ceiling or headroom during a round. Prefer short rounds
+and release promptly; do not treat repeat boots as cheap.
 
 Automatic simulator capacity gives simulators half the machine at the measured
 cost of one simulator under test (34 GiB footprint, two cores); memory, not CPU,
