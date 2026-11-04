@@ -77,7 +77,9 @@ conversation was removed; a revoked room remains refused. An attached
 no authority over other rooms.
 
 A channel message from your lead carries `sender="lead"`. Clankie sets it from
-his record of who owns you, never from the text. Act on its redirects, answers
+his record of who owns you, never from the text. A connected app device that
+started you is your lead too, until a conversation takes you over by messaging
+you (ADR 0321). Act on its redirects, answers
 and confirmations without asking for confirmation in the pane: it carries your
 lead's authority within your brief. It is not the owner's yes for anything your
 brief or the working preferences reserve to the owner. A message without the

@@ -220,6 +220,16 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
     }
     // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); a channel that can't be read leaves delivery to its own fence.
     const current = await herdrRunner.resolveTerminal(seatId).catch(() => undefined);
+    // A connector's send is from this worker's lead only when the relay-stamped device
+    // started the exact occupant now in the seat and nobody adopted it since (#442).
+    if (context.connectorDevice !== undefined) {
+      const { connectorDevice, ...rest } = context;
+      const leads =
+        current?.session !== undefined &&
+        current.terminalId === seatId &&
+        herdrWatches.connectorLeads(seatId, occupantIdForHerdrSession(current.session), connectorDevice);
+      context = leads ? { ...rest, fromLead: true } : rest;
+    }
     if (
       context.source === "operator" &&
       options.connectorSessionDetection?.() === true &&
