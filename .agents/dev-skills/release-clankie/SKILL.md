@@ -128,10 +128,13 @@ tag, so the docs site and README describe what the release ships.
 
 Every release requires a clean, committed release change and a tag exactly
 matching `v` plus the root `package.json` version. Push the new tag once, then
-run `clankie work releases sync` from the checkout. This records the release
-and moves the built-in items it shipped to delivered. Watch
-the Release workflow through completion, verify every uploaded archive (macOS
-and both Linux targets) against its checksum, then test the documented installer against that published version.
+watch the Release workflow through successful publication and verify every
+uploaded archive (macOS and both Linux targets) against its checksum. Only then
+run `clankie work releases sync` from the checkout: it requires the published
+GitHub Release and uploaded assets (#358). A failed or unpublished tag must not
+credit delivery; its work belongs to the next published version. The sync records
+the release and moves the built-in items it shipped to delivered. Then test the
+documented installer against that published version.
 Run that installer proof under an isolated `HOME`, never the owner's home:
 
 ```sh
