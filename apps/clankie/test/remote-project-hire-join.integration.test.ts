@@ -124,6 +124,7 @@ async function fixture(pcCreateMs: number) {
     afterInventory?: () => Promise<void>;
     authorize?: () => Promise<void>;
     createGate?: Promise<void>;
+    createEntered?: () => void;
   } = { authorized: true };
   const channel = runJoinedMachineChannel(credential, {
     store,
@@ -133,6 +134,7 @@ async function fixture(pcCreateMs: number) {
       shell: async (command, directory, signal) => {
         commands.push(command);
         if (command === refusedCreate) {
+          controls.createEntered?.();
           await controls.createGate;
           return JSON.stringify({ error: "fixture workspace create timed out before creating a pane" });
         }
@@ -606,11 +608,19 @@ nativeIt(
     f.controls.createGate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    const entered = new Promise<void>((resolve) => {
+      f.controls.createEntered = resolve;
+    });
     let first: ReturnType<typeof f.hire> | undefined;
     try {
       const directory = join(f.home, "starting-project-place");
       first = f.hire(directory, undefined, "Inspect a still-starting fixture issue.");
-      await expect.poll(() => f.creates.length).toBe(1);
+      await Promise.race([
+        entered,
+        first.then(() => {
+          throw new Error("Original hire ended before entering the fixture's pending create");
+        }),
+      ]);
       const [, original] = f.receipt();
       const second = await f.hire(directory, undefined, "Inspect a still-starting fixture issue.");
       expect(second).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
@@ -755,6 +765,85 @@ nativeIt(
       expect(f.controls.authorized).toBe(false);
       expect((await f.allocations())[0]).toMatchObject({ gone: false });
       expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "the allocation's persisted harness must match its sealed receipt when the next harness is unspecified",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "allocation-harness-mismatch");
+      await f.hire(directory, undefined, "Inspect a persisted-scope fixture issue.");
+      const [, original] = f.receipt();
+      const state = JSON.parse(await readFile(f.allocationPath, "utf8"));
+      state.allocations[0].request.harness = "codex";
+      await writeFile(f.allocationPath, JSON.stringify(state));
+      await f.store.retireUnsentRemoteAt(
+        { fleet: "pc", workingDirectory: directory },
+        async () => {},
+        "fixture",
+      );
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toMatchObject({
+        journal: "launch-committed-command-unsent",
+      });
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "unavailable allocation inventory after host settlement keeps the place held",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "unavailable-allocation-inventory");
+      await f.hire(directory, undefined, "Inspect an unavailable-inventory fixture issue.");
+      const [, original] = f.receipt();
+      f.controls.afterInventory = async () => {
+        if (new DeliveryFence(f.nativePath).settlement(original.messageId))
+          throw new Error("Fixture inventory unavailable");
+      };
+      await f.hire(directory, undefined, "Inspect an unavailable-inventory fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeDefined();
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a fresh intent stays held on its own retry",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "fresh-intent-retry-place");
+      await f.hire(directory, undefined, "Inspect the original fresh-retry fixture issue.");
+      const second = await f.hire(directory, undefined, "Inspect the original fresh-retry fixture issue.");
+      const detail = second.outcome === "failed" ? (second.detail ?? "") : "";
+      const encoded = /freshIntent (\{.*?\})/u.exec(detail)?.[1];
+      expect(encoded).toBeDefined();
+      const fresh = JSON.parse(encoded!);
+      await f.hire(directory, fresh, "Inspect a distinct fresh-retry fixture issue.");
+      const [, original] = f.receipt();
+      await f.hire(directory, fresh, "Inspect a distinct fresh-retry fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect((await f.allocations()).at(-1)).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(2);
       expect(f.effects).toEqual([]);
     } finally {
       await f.close();

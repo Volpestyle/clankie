@@ -4259,6 +4259,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
           !receipt ||
           candidates.filter((entry) => isDeepStrictEqual(entry.nativeReceipt, receipt)).length !== 1 ||
           !matches(receipt.key) ||
+          !isDeepStrictEqual(JSON.parse(receipt.key), [
+            candidate.request.fleet ?? "local",
+            candidate.request.harness,
+            candidate.request.workingDirectory,
+            "new",
+          ]) ||
           candidate.request.freshIntent ||
           candidate.pane !== undefined ||
           candidate.seat !== undefined ||
