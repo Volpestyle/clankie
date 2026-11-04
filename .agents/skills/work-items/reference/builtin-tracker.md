@@ -2,7 +2,7 @@
 
 Built-in tracker mechanics for [work-items](../SKILL.md). Other backends refuse
 these arguments and tools explicitly; never substitute a local store for a
-failed connected call.
+failed connected call ([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 ## Identifiers and priority
 
@@ -16,7 +16,8 @@ a writable store holding an imported `TEAM` allocates `LOCAL-TEAM-n` from its ow
 starting at 1. Imported items keep their `TEAM-n` identifiers and UUIDs. The
 numeric suffixes belong to separate sequences. Use the entire identifier for
 reads, links, evidence and commits: `LOCAL-TEAM-2` must never become `TEAM-2`.
-Do not renumber items or alter the counter to continue Linear's sequence.
+Do not renumber items or alter the counter to continue Linear's sequence
+([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 Keyed create retries return the original item without allocating another number.
 The supported scheme is in [docs/cli.md](../../../../docs/cli.md#built-in-item-identifiers-after-cutover).
 
@@ -47,7 +48,7 @@ and the ordinary CLI's operator credential do not establish lead scope: close
 with the tracker tool from the project's lead conversation, never
 `clankie work update --status done` from a shell. That refusal
 (`owner_verification_required`) is about the route, not the policy, so changing
-closure settings never clears it.
+closure settings never clears it ([ADR 0230](../../../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)).
 Only the owner verifies or reopens work. Under `closure: owner`, landing raises
 a "check it works" ask; its answer verifies the item or sends it back to accepted.
 Lead closure creates no automatic verification ask. Existing pending and
@@ -59,7 +60,8 @@ what to look at; `null` removes it (lines saved before the limit, up to 160, are
 kept). Only marked items reach his Proof deck and his feed, where they show as
 proofs with the bundle's clips and screenshots. Workers can't set it; put a suggested
 one-line check in your report to the lead instead. Never ask him to read
-evidence gaps, logs or review records; the lead closes those items.
+evidence gaps, logs or review records; the lead closes those items
+([ADR 0299](../../../../docs/adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md)).
 Read `linear_list_issue_events` (resume
 with its cursor) for the item's history; `selfEcho` marks Clankie's and workers'
 own events.
@@ -83,7 +85,7 @@ are listed by key only. Nobody types a release's items, so name the item key in
 the commit message. Read releases with `linear_list_releases` (`query` also
 matches an item key), `linear_get_release` and
 `linear_get_issue {includeReleases: true}`, or `clankie work releases`,
-`work release ID|VERSION` and `work releases --item KEY`.
+`work release ID|VERSION` and `work releases --item KEY` ([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 Cycles are per project on the built-in tracker. The default length is one week,
 and `clankie work cycle length PROJECT DAYS` changes it. The owner or the lead
@@ -106,7 +108,7 @@ done. Record each attempt with
 `{id, status, tokens, costUsd, summary}`, and start a retry with
 `parentRunId`. Your seat and hire are linked from your identity. Owner and lead
 see `linear_list_drift` (stale leases, runs on closed items, idle items) and
-`clankie work ready|drift|runs|lease`.
+`clankie work ready|drift|runs|lease` ([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 ## Evidence bundles and independent checks
 
@@ -118,10 +120,11 @@ first. Read with `linear_get_evidence_bundle`; item/run reads include their
 current bundle. Completion past landed requires the item's bundle and an
 independent `linear_post_bundle_check {bundleId, body?}`. Whoever did the work
 cannot check it. The owner's verify answer counts as a check, and so does a
-`post_owner_verdict` from the owner's own paired app (ADR 0299). No agent, the
+`post_owner_verdict` from the owner's own paired app ([ADR 0299](../../../../docs/adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md)). No agent, the
 lead included, can call that verb; never try to stand in for it. Replacing a bundle
 requires another check; the owner must reopen an item past landed before its
-completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate.
+completion bundle can be replaced. Name gaps honestly. Release sync obeys the same gate
+([ADR 0258](../../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
 
 For a built-in native-first item's independent ISSUE check, ask an already-hired, genuinely independent peer in that same project to inspect the current issue bundle and call `linear_post_bundle_check {bundleId, body}` through its own `clankie_call`. Keep the existing producer, deliverable, holds and receipts. The peer must not have implemented the code/runtime proof, published the packet, or recorded implementation work for the item. Read the issue bundle with `runId` omitted, then read back the same current bundle's `checked` actor/eventId and the matching `bundle_checked` issue event. A run-bundle check does not replace the ISSUE check. A replaced bundle requires fresh inspection and a new check.
 
@@ -130,7 +133,7 @@ A native child sharing its implementation parent's bridge has that parent's trac
 ## Asks, gates and run controls
 
 Use `linear_post_issue_ask {issueId, purpose: "decision", body}` for an item
-question. This raises the existing ADR 0245 owner ask, linked by `requestId`,
+question. This raises the existing [ADR 0245](../../../../docs/adr/0245-one-owner-ask-across-surfaces.md) owner ask, linked by `requestId`,
 not a "Needs owner" comment. For a gate, supply `purpose: "gate"`, `runId` and
 `gate: plan|spend|destructive_action|merge|external_write`. The run blocks
 immediately, then the host links the mailbox ask. Only its authenticated owner
@@ -148,7 +151,7 @@ owner, never as the owner: so the lead cannot check a bundle he published, and
 the owner's "It works" is the check. Only the owner's app and his explicit
 `clankie work owner` call speak as the owner; agents never use `work owner`
 and reach any other tool with `clankie work call TOOL --json ARGS`. Other
-tracker backends refuse these additions.
+tracker backends refuse these additions ([ADR 0253](../../../../docs/adr/0253-owner-confirmation-needs-an-isolated-authority.md)).
 
 ## Following changes
 
@@ -184,7 +187,7 @@ instead of retrying. Each hired seat has 600 requests an hour and 60 writes a
 minute, counted separately for interactive calls and for `background: true`
 polling. `tracker_request_budget` gives `retryAt` and `retryAfterMs`: wait until
 then. `clankie doctor` and `clankie work status` show what each seat has left
-and its refusals in the last hour.
+and its refusals in the last hour ([ADR 0216](../../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md)).
 
 ## Sync
 
@@ -292,7 +295,7 @@ treat it as current state.
 `... --switch-back [--dry-run]` restores Linear as the project's tracker and
 reports the pilot writes Linear never saw. Those writes, including every
 `LOCAL-TEAM-n` item, then exist only in the kept pilot file, never in Linear.
-Show the owner that count before a switch-back.
+Show the owner that count before a switch-back ([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 ## Checkpoint capacity and rollback
 

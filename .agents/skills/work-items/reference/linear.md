@@ -12,7 +12,8 @@ verified connected-account tools with `clankie_tools` and invoke them with
 `clankie_call`; no short manual grant/revoke cycle is needed for ordinary fleet
 access. Persona-bound worker publishing still needs an exact grant or the lead.
 Missing tools do not authorize a harness's independent Linear connector. A Herdr
-environment variable or executable alone does not establish fleet admission.
+environment variable or executable alone does not establish fleet admission
+([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md), [ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 ## Mechanics that destroy data quietly
 
@@ -39,7 +40,8 @@ environment variable or executable alone does not establish fleet admission.
 - **Fenced project heads cannot expand relations.** A remote project head fenced
   to its tracker project gets
   `remote_lead_tracker_project_denied` for `includeRelations`: omit it, take the
-  parent from `parentId` and list sub-issues with `list_issues` by `parentId`.
+  parent from `parentId` and list sub-issues with `list_issues` by `parentId`
+  ([ADR 0259](../../../../docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md)).
 - **`save_release` into a completed stage can change every attached issue.** Treat
   it as a release action needing authorization for that bulk effect.
 
@@ -73,7 +75,7 @@ Answer an owner's comment in its existing thread: pass the wake's `replyParentId
 (or `commentId`) as `parentId`, together with `issueId`, `projectId` or
 `statusUpdateId` (the wake's `projectUpdateId`). A reply to a reply resolves to
 the thread root. When relaying a comment to another worker, include its comment
-ID and target so they can answer in the same thread. Wakes, routes and the
+ID and target so they can answer in the same thread ([ADR 0167](../../../../docs/adr/0167-a-linear-comment-is-answered-on-the-ticket.md)). Wakes, routes and the
 request budget: the `this-machine` skill's Linear reference.
 
 ## Worker results
@@ -84,7 +86,8 @@ from the operator seat), with its existing fleet `personaId`, `issueId` and
 `body`. The service derives the worker's name and colored portrait. This is one
 app identity, not an email alias or a separate Linear member. A worker bridge
 grant must pin the exact `personaId`; without that grant, send the result to
-the lead to publish. Never substitute an inherited personal tracker connector.
+the lead to publish. Never substitute an inherited personal tracker connector
+([ADR 0278](../../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)).
 For setup and supported paths, read `docs/linear-worker-posts.md` in Clankie's
 repository or the worker-posts section of the CLI reference.
 
@@ -113,7 +116,7 @@ A write the Clankie GitHub App's token is refused for (HTTP 403/404) carries the
 app's install page: pass that link to the owner, since installing the app on a
 repository is theirs to do.
 Do not create another queue to compensate for an uncertain write. Explicit
-export/import identity mapping is designed in ADR 0226; migration is not yet
+export/import identity mapping is designed in [ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md); migration is not yet
 implemented.
 
 ## Wake extension
@@ -125,4 +128,4 @@ service start. Saved rules and queued wake cursors are retained.
 switch in `clankie extensions`, `clankie status` or `clankie doctor --json`.
 The independent `tracker-linear` switch controls request budget, mirror and
 cutover routes; it does not control the wake. Connected tracker tools keep
-their existing account and posting authority checks.
+their existing account and posting authority checks ([ADR 0328](../../../../docs/adr/0328-clankie-is-a-core-with-extensions.md)).

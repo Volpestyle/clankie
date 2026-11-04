@@ -40,7 +40,7 @@ with no restart. They use the owner routes `/v1/model-keys/local` and
 other address, use `clankie model add-local` on the Mac itself.
 
 The same devices link the owner's GitHub, Linear and Google accounts through
-`/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow
+`/v1/accounts` ([ADR 0196](../../../../docs/adr/0196-account-connections-keep-tokens-on-the-body.md); `clankie accounts` on the CLI): a GitHub device flow
 and browser OAuth with PKCE, run by this machine, tokens only in its broker. A
 GitHub App connection's 8-hour token refreshes itself; `reconnect_required` means
 the owner connects GitHub again. Google

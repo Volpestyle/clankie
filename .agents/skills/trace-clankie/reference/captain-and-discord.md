@@ -49,7 +49,8 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   remain `kind="watch"`, and self-wakes remain `kind="wake"`. Match the original
   receipt and service-resolved lead conversation. A room-owned worker message
   still needs its correlated native reply through the original room authority;
-  its tag does not turn the worker's words into owner instructions.
+  its tag does not turn the worker's words into owner instructions
+  ([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).
 
 - **Bridge age is a reload hint, not build or delivery evidence.** Doctor and
   the roster report `freshness: older-than-runtime` when the observed bridge
@@ -98,7 +99,8 @@ Traps that cost real time when reading captain turns, Discord text, presence, th
   uncertainty fence, because the next poll implicitly acknowledges previous
   takes. Installing newer source on disk does not revive an already loaded
   stopped pump. Recover only the original harness session under the lead's
-  operational authority; never substitute a route or replay uncertain input.
+  operational authority; never substitute a route or replay uncertain input
+  ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
   A `pump_error` with `errorName: "ZodError"` means the bridge dropped a page
   it could not parse; the service had already taken those events, so they stay
   `uncertain` (2026-10-06: a 24k service handoff, before events were bounded to
@@ -129,7 +131,8 @@ list` and `clankie doctor` show each with its age (legacy entries have none).
   Never edit the journal. If the native transcript proves the event arrived,
   acknowledge that exact ID; if it never arrived or cannot be known, the owner
   runs `clankie seat-delivery settle ID abandoned-unknown --conversation C`,
-  which records `abandoned-unknown`, claims no receipt and resends nothing.
+  which records `abandoned-unknown`, claims no receipt and resends nothing
+  ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 - **An `accepted` receipt establishes admission, not execution or liveness.**
   The input may be queued, preparing, executing or awaiting native delivery.

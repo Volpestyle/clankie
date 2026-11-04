@@ -12,7 +12,9 @@ Exact Codex message watches poll retained turn IDs/statuses, then verify against
 a fresh full-history response when those change or after 30 seconds unchanged.
 Native summary pages omit later queued input IDs and earlier result text, so they
 cannot establish exact completion. An unresolved identity stays pending; inspect
-the retained receipt rather than sending the input again.
+the retained receipt rather than sending the input again
+([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md),
+[ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).
 
 ## Start with the conversation
 
@@ -22,7 +24,8 @@ streams live events. The TUI's `/conversation` picker exposes the same records,
 with `Ctrl+O` for tool details. Discord rooms group their trusted, social, and
 one-shot Pi histories in a read-only conversation; source entries name the
 native journals when bounded/redacted details are insufficient. Those sessions
-keep separate authority and model context. Voice rooms show captain handoffs,
+keep separate authority and model context
+([ADR 0176](../../../docs/adr/0176-every-room-is-an-inspectable-conversation.md)). Voice rooms show captain handoffs,
 not ambient speech. Historical discovery covers native room journals modified
 within conversation retention (30 days); older source files remain inspectable
 through the trail map.
@@ -35,11 +38,14 @@ only after native ancestry is verified. Under a Codex head, every non-owner
 executes as a Pi room thread with their original grant; only the verified owner
 can use native Codex children. Finished jobs remain inspectable in history
 without occupying the active dock above fleet seats.
-An execution result is not proof that Discord delivered or spoke the answer.
+An execution result is not proof that Discord delivered or spoke the answer
+([ADR 0229](../../../docs/adr/0229-room-handoffs-are-visible-parallel-threads.md)).
 
 A live attached native seat receives that conversation's worker reports, wakes
 and watches. Worker reports follow the hiring/adopting conversation, not always
-`global-default`. Peer exchanges are agent-role audit context and do not wake him.
+`global-default` ([ADR 0218](../../../docs/adr/0218-native-seats-drive-their-attached-conversation.md)).
+Peer exchanges are agent-role audit context and do not wake him
+([ADR 0213](../../../docs/adr/0213-clankie-retires-swarm.md#direct-peer-messages-vuh-1608)).
 Use `this-machine` for current routing and the retained delivery receipt for its
 stage; transcript presence alone does not prove an effect or model awareness.
 
@@ -68,7 +74,8 @@ For a Discord room, start with `clankie discord rooms` and its `/conversation`
 heard/said/tool history. Counters are bounded observed deliveries, not proof of
 complete gateway coverage. Pending/absorbed is not confirmed answered.
 `clankie discord call` shows current voice activity and handoffs; exact words
-require opt-in transcript logging. See `docs/discord-rooms.md`. Private owner
+require opt-in transcript logging
+([ADR 0121](../../../docs/adr/0121-development-voice-transcripts-are-explicit.md)). See `docs/discord-rooms.md`. Private owner
 guidance queues through its dedicated API/CLI and never posts as the owner or
 grants room tools.
 

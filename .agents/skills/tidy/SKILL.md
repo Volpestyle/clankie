@@ -13,7 +13,8 @@ Read the current roster, the selected panes if any, and their reports. Decide
 which workers have finished useful work and whose results are kept. A settled
 status is a cue to inspect, not proof of completion. Keep a worker around when
 follow-up work would benefit from its live context. You can tidy after harvesting
-without waiting for the owner to list panes or approve each close.
+without waiting for the owner to list panes or approve each close
+([ADR 0228](../../../docs/adr/0228-quick-actions-are-skills-and-tidy-keeps-results.md)).
 
 Acknowledge a report only once you have its result; that is what lets the pane
 go. The service also tidies on its own under the owner's `autoTidy` fleet setting
@@ -32,7 +33,8 @@ local hire whose start never confirmed only from the exact native session its
 original receipt recorded. Your fleet round lists hires idle past the window that
 it could not close, with each blocker: close them yourself, acknowledge their
 reports, or keep them, rather than carrying them. Where the
-owner turned automatic tidy off, leave it off until they decide otherwise.
+owner turned automatic tidy off, leave it off until they decide otherwise
+([ADR 0280](../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)).
 When a worker's live context is worth keeping, or the owner asks, call
 `keep_worker_pane({ pane, reason })` (CLI `clankie agents keep PANE --conversation ID`);
 `keep: false` (or `clankie agents unkeep`) releases it and starts a new idle
@@ -74,7 +76,7 @@ the close. An explicit unlanded reason leaves the tree even if it is landed.
 `undo_worker_pane` reopens and resumes the session only while its directory still
 exists; removal keeps the harvested session/output and evidence but prevents Undo. Abandoned fresh
 hires, restored remote hires and the owner's roster routes have their own
-guarded paths in [mechanics](reference/mechanics.md).
+guarded paths in [mechanics](reference/mechanics.md) ([ADR 0228](../../../docs/adr/0228-quick-actions-are-skills-and-tidy-keeps-results.md)).
 
 The service protects unsent drafts, owner-interactive or hand-started panes you
 did not hire, results not kept, and unlanded work: `unlanded_work` names the
@@ -103,11 +105,11 @@ parked. Unknown draft state or provenance is a technical
 failure: leave that pane alone and explain the gap. A missing Herdr session on a
 reattached pane is not evidence that the worker is finished or that its results
 are lost. Never bypass a refusal with raw pane-close or keystrokes, and never
-retry a mutation automatically after an uncertain response.
+retry a mutation automatically after an uncertain response ([ADR 0280](../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)).
 
 Messaging or re-adopting a hand-started pane does not make it a hire. A legacy
 record with lost provenance fails closed; do not infer a hire from its name,
-report route or re-adoption.
+report route or re-adoption ([ADR 0321](../../../docs/adr/0321-the-roster-says-who-started-each-agent.md)).
 
 ## Worktrees
 
@@ -140,7 +142,7 @@ owner's tree with that owner, and keep live workers' trees even when their pane
 reports the main checkout as its cwd. Do not remove a tree just because its pane
 closed or its last turn contained only a plan. Never treat a removal refusal as
 permission to force it. A worker that acknowledged queued work still needs to
-continue the authorized action or supply an actionable blocker.
+continue the authorized action or supply an actionable blocker ([ADR 0223](../../../docs/adr/0223-hires-use-repo-workspaces-and-pipeline-tabs.md)).
 
 Say what you closed and why in the conversation you are working in, and offer
 the returned undo IDs and deadlines. Name any panes you left because of a

@@ -14,7 +14,7 @@ reasoning mostly confirms it, so brief the reviewer from the acceptance and the
 artifact, not the producer's transcript, and settle a behavioral question by
 running the real thing. Models rate output like their own more favorably: for a
 consequential change, prefer a reviewer from another model family when usage
-allows.
+allows ([ADR 0208](../../../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md)).
 
 For projects that want independent review of every landing, set a standing
 reviewer instead of relaying packets by hand
@@ -32,7 +32,8 @@ disagree with. Look at the candidate with `clankie review list|show`.
 Ask for coverage of the changed boundary in this order: full E2E with real
 dependencies and nothing mocked, integration across data, API and schema
 boundaries, then goldens grounded in real examples. Push back on new unit-test
-bloat; pruning existing tests is a separate reviewed effort.
+bloat; pruning existing tests is a separate reviewed effort
+([ADR 0221](../../../../docs/adr/0221-tests-prove-the-product-and-its-boundaries.md)).
 
 When correctness depends on interpreting observations (pixels, audio, sensor
 readings, extracted labels), pair the first producer change with a small
@@ -75,7 +76,8 @@ queue
 
 A deploy hold (`clankie update holds|hold|release`) keeps `clankie update` from
 replacing the running service for a live test and never holds `main`; release
-one that has outlived its purpose, yours or a worker's, with a recorded reason.
+one that has outlived its purpose, yours or a worker's, with a recorded reason
+([ADR 0240](../../../../docs/adr/0240-changes-land-directly-on-main.md)).
 
 ## Work repositories
 
@@ -98,7 +100,7 @@ remembered paragraph is not a lock. Repair a demonstrated gap in the tool
 instead of adding warnings.
 
 Keep one owned worktree per deliverable; its native slices and reviews share it
-under distinct paths. After landing, keep needed reports and evidence, verify
+under distinct paths ([ADR 0223](../../../../docs/adr/0223-hires-use-repo-workspaces-and-pipeline-tabs.md)). After landing, keep needed reports and evidence, verify
 the branch is merged at the requested destination and the tree is clean, then
 remove it ([tidying](fleet-tools.md#closing-panes-and-tidying-worktrees)).
 

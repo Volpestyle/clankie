@@ -65,7 +65,8 @@ strict. It creates only when no suitable idle device exists. The CLI reads a pla
 first and warns when a new device is needed, since a first boot is expensive;
 `clankie simulator plan JSON` reads that advice without reserving or booting. If
 you already booted a device by hand, lease it instead of booting another:
-`clankie simulator acquire '{"seatId":"SEAT","deviceId":"UDID"}'`.
+`clankie simulator acquire '{"seatId":"SEAT","deviceId":"UDID"}'`
+([ADR 0249](../../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md#amendment--retain-and-reuse-devices-2026-10-08)).
 
 A successful `verify` describes the existing owned lease: it checks the live
 occupant, holder, lease and exact UDID and requires a booted device, acquires
@@ -156,7 +157,8 @@ state-change time (or its first verified idle observation). Repeated idle report
 cannot move that deadline. Lost observation starts expiry from the last proven
 activity; it never freezes a cached working state. Explicit touch still extends
 the normal idle deadline. Run long waits as blocking, process-owned jobs in the
-harness background; never run model sleep/touch loops. Release when finished.
+harness background; never run model sleep/touch loops
+([ADR 0293](../../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)). Release when finished.
 
 Activity observations are deliberately not durable authority: an observer restart
 must re-prove activity and otherwise falls back to the lease's explicit-use
@@ -179,7 +181,8 @@ with its reason (`released`, `idle`, `owner_exited`, ...) in
 `idle` or `owner_exited` end ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)).
 
 Clankie never shuts down a device it did not lease; it names such devices in
-status and doctor and tells the lead of the seat using one. A missing or
+status and doctor and tells the lead of the seat using one
+([ADR 0249](../../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md)). A missing or
 uncertain create receipt remains held for operator review: do not retry native
 create or infer ownership from a device name. A stopped observer preserves
 leases.

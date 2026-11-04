@@ -20,13 +20,15 @@ wake with issue IDs/titles,
 changes, actors and links. The lead chooses any delegation from there. Events
 that do not match stay visible without a model turn. Own-write echoes and
 activity from the connected account or attributed workers never wake him;
-unknown or ambiguous authors stay quiet. There is no separate inbox or per-issue
+unknown or ambiguous authors stay quiet ([ADR 0214](../../../../docs/adr/0214-linear-wakes-require-attribution-and-rules.md)).
+There is no separate inbox or per-issue
 owner route. On upgrade, old unread
 inbox items are dropped once with a service log entry rather than replayed.
 
 If the native receiver is unavailable before taking a wake, its signed activity
 stays pending. The next poll for that chat retries it as one compact wake;
-confirmed or uncertain native takes are never replayed. Following off still
+confirmed or uncertain native takes are never replayed
+([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). Following off still
 suppresses pending wakes. A connected MCP tool bank alone does not prove the
 seat's channel is polling. An interrupted offered wake without a definite
 unavailable receipt keeps its cursor across shutdown, cancellation and restart;
@@ -73,7 +75,8 @@ Only events that wake a chat appear in it; the rest are only logged.
 Never add `global-default` as a `projectChats` target. That makes it that
 project's configured lead, and hires into other projects then refuse with
 lead-ownership errors. Unrouted projects already wake `global-default`, so
-remove the project's entry instead.
+remove the project's entry instead
+([ADR 0214](../../../../docs/adr/0214-linear-wakes-require-attribution-and-rules.md)).
 
 ## Wake rules
 

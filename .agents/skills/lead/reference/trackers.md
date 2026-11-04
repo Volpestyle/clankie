@@ -6,7 +6,8 @@ Use the existing tracker and workflow. Local records suit a bounded delivery who
 owners share a checkout; an external tracker helps when work spans sessions,
 projects or people who need to find decisions without reading agent transcripts.
 Recommend adoption for that concrete need, not because an integration exists.
-Tracking supports delivery; setting up a tracker must not preempt a ready result.
+Tracking supports delivery; setting up a tracker must not preempt a ready result
+([ADR 0191](../../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)).
 
 ## One record per owned outcome
 
@@ -52,7 +53,7 @@ mark missing verification as passed. Blockers name the missing prerequisite and
 next action, not merely "waiting."
 
 For Clankie's fleet, `fleet.closure` and owner-only gates follow "Status stays
-true" in `work-items`; missing product behavior still needs the scope owner's
+true" in `work-items` ([ADR 0230](../../../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)); missing product behavior still needs the scope owner's
 disposition above.
 
 ## What stays out of the record
@@ -76,14 +77,14 @@ Keep durable records under version control and land them with the relevant work
 under repository policy. A scratchpad is a continuation aid, not the sole home
 of an accepted result. Link retained evidence from the record; do not duplicate
 archives or commit large media merely to make it discoverable; raw captures go
-through `clankie evidence push`, as `work-items` describes.
+through `clankie evidence push`, as `work-items` describes ([ADR 0258](../../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
 
 ## Mapping to Linear
 
 For Clankie's fleet, write through Clankie's connected Linear account (his own
 tools, or `clankie_tools` / `clankie_call` for a worker), never a harness's own
 connector, and load `work-items` before writing; it owns read-before-write,
-media publication and result-update mechanics.
+media publication and result-update mechanics ([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md), [ADR 0278](../../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)).
 Inspect the existing project, issues and workflow before creating anything.
 Remote project heads write only inside their registered tracker project
 ([tracker fence](project-leads.md#tracker-fence-for-remote-heads)).

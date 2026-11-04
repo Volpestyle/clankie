@@ -29,7 +29,7 @@ an authorized catalog using `verifyLeadSkinArtifact`.
 
 Keep private art, references and reference-derived palettes in their authorized
 private location. This package ships only generic contracts and deterministic
-tooling. Image generation, spend limits, catalog publication and applying the
+tooling ([ADR 0267](../../../docs/adr/0267-skins-share-one-public-animation-spec.md)). Image generation, spend limits, catalog publication and applying the
 live look require their own authorized flow.
 
 ## Durable owner pose approval

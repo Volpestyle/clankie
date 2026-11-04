@@ -4,7 +4,7 @@ For an app that leads through Clankie's connector (Claude Duet, Grok, Claude
 Code, Codex and others), beside [lead](../SKILL.md). Every connected lead follows
 it; none takes precedence over another.
 
-- Pass `channel` with your owner-known chat or channel name on `start_agent` and `message_agent` (also `answer_prompt`, `press_keys`, and `close_agent`); omit it if you have none. It is trimmed, 1–64 characters, grants nothing, and is never shown to the worker.
+- Pass `channel` with your owner-known chat or channel name on `start_agent` and `message_agent` (also `answer_prompt`, `press_keys`, and `close_agent`); omit it if you have none. It is trimmed, 1–64 characters, grants nothing, and is never shown to the worker ([ADR 0346](../../../../docs/adr/0346-the-fleet-says-who-is-leading.md)).
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
   their machines go to a Clankie worker with `start_agent`. Read
@@ -13,7 +13,8 @@ it; none takes precedence over another.
   the owner held is never chosen for you, but you may name it as overflow
   ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
   Screen work goes to a Codex computer-use seat: `harness: "codex"` with
-  `mcpServers: ["node_repl"]`, briefed to stay in background windows.
+  `mcpServers: ["node_repl"]`, briefed to stay in background windows
+  ([ADR 0199](../../../../docs/adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)).
   Give each hire a `name`, a few words saying its job ("Worker names"): the
   owner sees it as its project and that ("clankie · Worker names") in their app
   and Herdr. Left out, the brief's first line names it.
@@ -31,7 +32,8 @@ it; none takes precedence over another.
   exists. Call `start_agent` with only that `startId` for progress; the service
   keeps delivering the original brief after an HTTP disconnect. Never repeat
   the hire to check it. Receipts belong to the hiring app and the current service
-  lifetime; after a restart, inspect `list_agents` before a new hire.
+  lifetime; after a restart, inspect `list_agents` before a new hire
+  ([ADR 0301](../../../../docs/adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)).
 - **Hear a pending start settle.** A `start_agent` with `notify` that answers
   `pending` wakes that lead once the hire settles, so there's no need to poll its
   `startId`. The wake goes at once, outside the report batch window, with kind
@@ -45,7 +47,8 @@ it; none takes precedence over another.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
   A blocking hire whose pane never appeared settles itself once it is five
-  minutes old and nothing runs in its directory; start again after that.
+  minutes old and nothing runs in its directory; start again after that
+  ([ADR 0331](../../../../docs/adr/0331-clankie-settles-a-hire-whose-agent-is-gone.md)).
   A gateway failure or timeout is uncertain: call `list_agents` and inspect that
   place before retrying; a lost answer can leave an agent running.
 - **Answer blocked workers first.** Workers label each report `kind`: `blocked`
@@ -72,7 +75,8 @@ it; none takes precedence over another.
   fire starts a fresh session and cannot resume the hiring Duet thread; use
   this bounded wait when that thread needs the answer directly.
   Wakes are best effort: the durable inbox remains readable after a failed fire.
-  A successful fire proves webhook acceptance, not that your thread read it.
+  A successful fire proves webhook acceptance, not that your thread read it
+  ([ADR 0343](../../../../docs/adr/0343-connected-hires-wake-their-lead-on-reports.md)).
 - **One watcher per worker.** Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
@@ -90,7 +94,8 @@ it; none takes precedence over another.
   session, under "Waiting on input, for this call in its session:", and
   `expect` takes text the prompt shows about it (a command's first words, or the
   harness's own question). A Claude Code or
-  Codex worker whose session can't be read is refused, not shown from its screen.
+  Codex worker whose session can't be read is refused, not shown from its screen
+  ([ADR 0307](../../../../docs/adr/0307-a-connector-reads-only-a-live-agents-own-output.md)).
   Other harnesses are read from their screen: a hire launched as its pane's own
   command whole, and any other agent (one the owner started, or a hire run under
   a shell, the usual Herdr hire) comes back empty with a note until it prints
@@ -117,10 +122,11 @@ it; none takes precedence over another.
   ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 - **Keep workers off the same files.** Don't put two workers on the same files at
   once. Sequence them, or give the shared file one owner, and route a conflict a
-  worker flags in someone else's files to whoever owns them.
+  worker flags in someone else's files to whoever owns them
+  ([ADR 0345](../../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 - **Worker questions go to leads, not the owner.** Answer what you can. Only a
   decision that is the owner's (money, accounts, anything that can't be undone)
-  goes to the owner.
+  goes to the owner ([ADR 0304](../../../../docs/adr/0304-the-owner-hands-the-lead-to-connected-apps.md), [ADR 0322](../../../../docs/adr/0322-an-open-worker-question-keeps-reaching-a-lead.md)).
 - **Wake another lead for what only it can do.** A lead that runs elsewhere
   (Grok Bot, as a Cursor agent with a terminal on the owner's Mac) takes jobs at
   a wake webhook the owner stored with `clankie connector wake set NAME`. Hand

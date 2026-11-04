@@ -20,7 +20,7 @@ keep their meaning. `herdr add/remove/fleets`, `runtime connect` and `agents hos
 remain aliases. Only a changed default workspace needs `clankie restart captain`.
 
 Setup can also hire one read-only Claude agent to look around first
-(`clankie setup-agent start`, ADR 0320). It reads, never changes anything, and
+(`clankie setup-agent start`, [ADR 0320](../../../../docs/adr/0320-setup-starts-with-one-read-only-agent.md)). It reads, never changes anything, and
 reports one proposal; `setup-agent status` shows it and
 `setup-agent apply SURVEY LINE...` runs only the lines the owner approved. Never
 approve lines for the owner: show him the proposal and pass on his choice.
@@ -64,7 +64,7 @@ the owner's login shell with the owner's environment restored; the private
 XDG roots that isolate that Herdr never reach an agent.
 
 The binding is resolved fresh at every service start and never written back
-(ADR 0181): the explicitly named session, else Clankie's own Herdr session.
+([ADR 0181](../../../../docs/adr/0181-clankie-is-independent-of-his-connections.md)): the explicitly named session, else Clankie's own Herdr session.
 The invoking terminal never selects the fleet. A candidate that does not answer is stepped
 over. If his own runtime cannot start, he continues with Herdr unavailable.
 `clankie herdr disable` (or **Run without Herdr** in `/herdr`) selects no execution
@@ -107,13 +107,14 @@ parks clean unlanded commits on a `keep/` branch and refuses dirty work; a refus
 never authorizes a raw `herdr pane close`). Keep panes
 needed for follow-up or requested by your person; leave borrowed or repurposed
 panes and operator drafts alone. Your own finished-worker cleanup is already
-authorized.
+authorized ([ADR 0280](../../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)).
 
 `clankie herdr use NAME` rewrites the saved fleet binding, and a session
 different from the startup one revokes every local fleet binding (proofs,
 simulator leases and admissions fail as `missing_binding`). Never use it to look
 at another session's roster; read remote rosters through worker reports,
-`list_fleet_seats` or `clankie herdr agent list`.
+`list_fleet_seats` or `clankie herdr agent list`
+([ADR 0149](../../../../docs/adr/0149-his-herdr-session-is-chosen-not-inherited.md)).
 
 ## In a desktop-app hire
 
@@ -122,7 +123,8 @@ A hire in a Herdr desktop app terminal has an empty `HERDR_PANE_ID`; its seat is
 session, so the stock `herdr` CLI (`herdr pane list`, `herdr api snapshot`) works
 there and shows his Herdr panes, not the desktop app's terminals. Always pass an
 explicit pane there; never use `--current` or a focus-based target, which resolve
-to the owner's focused pane, not yours. The desktop app's terminals are reached
+to the owner's focused pane, not yours
+([ADR 0319](../../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md)). The desktop app's terminals are reached
 through `hc` and its core socket (`HC_TERMINAL_SOCKET`).
 
 ## Messages to external Codex sessions
@@ -133,14 +135,15 @@ local or linked machine, using the pane's exact session and active turn. A
 `state: queued`, `status: queued_until_turn_end`, and an explicit detail: it waits
 until the turn ends, potentially the entire goal. Do not interpret it as seen.
 An unconfirmed steer must be reconciled before retrying; never type a fallback
-into the pane. Owner approval/input remains pending.
+into the pane ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
+Owner approval/input remains pending.
 
 ## Agents with no channel
 
 An agent with no harness channel, Codex queue or hook receiver (Claude started
 without the worker plugin, for one) gets an owner's or lead's message typed
 through `herdr agent prompt`, but only while Herdr shows it idle, its input line
-reads empty and its session can be read (ADR 0334). The receipt then says
+reads empty and its session can be read ([ADR 0334](../../../../docs/adr/0334-herdr-direct-prompting-is-the-fallback.md)). The receipt then says
 `consumed` once the session shows the message, or `unconfirmed`: read the agent
 before sending it again. A refusal names what blocked it (busy, a question open,
 someone's draft, an input line Clankie can't read yet); nothing was typed, so
@@ -158,7 +161,8 @@ MCP tools: shared-daemon local MCP membership continues to fail closed. Private
 `deliveryStage` (`stored`, `delivered`, `consumed`, `responded`, and where it
 stopped) is read separately from the native outcome and work status; none of them
 proves the model read or finished it, and `uncertain` blocks every retry and
-fallback until the original receipt is reconciled. Leads: `lead`'s
+fallback until the original receipt is reconciled
+([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)). Leads: `lead`'s
 [receipts](../../lead/reference/fleet-tools.md#receipts-questions-and-recovery);
 workers: the `clankie` skill. Keep the native queue/steer state and detail when
 reporting to the owner.

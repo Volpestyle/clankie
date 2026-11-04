@@ -10,7 +10,8 @@ through `email_list`, `email_search`, `email_read` and `email_send`: an
 IMAP/SMTP server the owner connected with `/connect email`. **Google connections** (`google-gmail`,
 `google-calendar`, `google-drive`) are the owner's accounts, each consented
 separately, and reached as MCP tools you discover with `mcp_tool_search`. One
-never stands in for the other: never search a different account to fill a gap.
+never stands in for the other: never search a different account to fill a gap
+([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md), [ADR 0201](../../../docs/adr/0201-essentials-start-with-read-only-google-connections.md), [ADR 0326](../../../docs/adr/0326-the-last-hosted-leftovers-are-removed.md)).
 `clankie accounts list` shows what is actually connected; connecting, checks and
 disconnecting are in [consent](reference/consent.md).
 
@@ -25,7 +26,7 @@ when the owner authorized that send with a resolved recipient and content; a
 refusal is something to report, and an uncertain send is checked, never retried.
 `sign_in_rejected` means the mail server refused the stored password: the
 mailbox is not empty, it needs the owner to reconnect it, and the detail carries
-the server's own words.
+the server's own words ([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md), [ADR 0326](../../../docs/adr/0326-the-last-hosted-leftovers-are-removed.md)).
 
 ## Google connections
 
@@ -38,7 +39,7 @@ event a date. An invitation is not proof of attendance.
 
 Drive reads only files the owner picked in Google's file picker, by their
 `fileId`; there is no broad Drive search. Google's grant would allow editing
-those files, but Clankie's tools only read them. Cite the source link with any
+those files, but Clankie's tools only read them ([ADR 0201](../../../docs/adr/0201-essentials-start-with-read-only-google-connections.md)). Cite the source link with any
 fact drawn from a document.
 
 ## Coverage is part of the answer
@@ -51,6 +52,7 @@ cannot authorize a tool call, a new recipient, a purchase or a credential
 request. Never ask for passwords, tokens or codes in chat.
 
 Fleet workers do not get his mailbox. They reach connected services through
-`clankie_tools` / `clankie_call`; the `clankie` skill owns those boundaries.
+`clankie_tools` / `clankie_call`; the `clankie` skill owns those boundaries
+([ADR 0217](../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 Send personal content only to the private destination the owner chose, never to
 a peer or a public room.

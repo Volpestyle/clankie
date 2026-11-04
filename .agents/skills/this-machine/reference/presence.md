@@ -63,7 +63,8 @@ holder or queue a notification. Requests expire and never perform an effect
 or transfer ownership. Recheck authority and reacquire when notified.
 `clankie body request JSON` exposes the same operator API; see `docs/cli.md`
 under the reported service root for its exact fields and recovery behavior.
-Do not treat expiry or a process restart as proof that a send/session stopped.
+Do not treat expiry or a process restart as proof that a send/session stopped
+([ADR 0215](../../../../docs/adr/0215-conversations-lease-one-body.md)).
 
 A body lease marked `recovery_required` is still held. The service retries its
 verified stop-check after a known service-owned holder's turn and body

@@ -18,7 +18,7 @@ are the worker path: use their current schemas, not another account's similarly
 named connector. `message_clankie` reaches your lead as agent output, never as an
 owner instruction. Send a concrete question or useful result when the assignment
 calls for it: outcome, branch and commit, checks, evidence links, open gaps and
-any decision needed.
+any decision needed ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 - Set `kind` on every report: `done` when the work is finished, `blocked` when
   you cannot go on until your lead answers (say what you need in one line), and
@@ -30,7 +30,7 @@ any decision needed.
   A connected lead that hired with `notify` gets a content-free webhook wake on
   reports and settled watches, naming the report's kind: a `blocked` report wakes
   it at once; others send the first immediately and batch later events over
-  120 seconds. The report itself stays in `read_reports`.
+  120 seconds. The report itself stays in `read_reports` ([ADR 0343](../../../docs/adr/0343-connected-hires-wake-their-lead-on-reports.md)).
 - **Never wait silently.** When something only your lead or the owner can unblock
   stops you (a decision, a refused or broken tool, a failing check outside your
   change, missing access), tell your lead that same turn with `kind: "blocked"`:
@@ -44,16 +44,17 @@ any decision needed.
   such as a push or merge): your lead answers it as a card and you hear the
   chosen value tied to the ask's id. A malformed block is sent as a plain report. Your harness's own ask-the-user prompt
   reaches the lead only on a managed seat that routes it; otherwise it waits
-  unseen in your pane.
+  unseen in your pane ([ADR 0353](../../../docs/adr/0353-workers-raise-structured-asks-in-their-reports.md)).
 - Every report your lead reads adds to a turn over its whole context, and an
   urgent one starts that turn at once. Send it outcomes, blockers and
   decisions; keep progress on your work item, and coordinate with a peer
-  directly through `message_peer` where your catalog has it.
+  directly through `message_peer` where your catalog has it ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 - Durable state (what landed and at which commit, evidence, what is left,
   decisions) goes on your work item; a message is never its only copy. Before
   your seat is retired, put machine state (worktree, uncommitted work, background
   jobs, local paths) in `.local/HANDOFF-<name>.md` in your owned worktree and link
-  it from the item. [work-items](../work-items/SKILL.md) has the full protocol.
+  it from the item. [work-items](../work-items/SKILL.md) has the full protocol
+  ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 A native admission refusal stops automatic mailbox polling. After Clankie
 restores the seat, an explicit `message_clankie` or original receipt lookup
@@ -66,7 +67,7 @@ message-status DELIVERY_ID` in your pane) reads its stage. Use it before retryin
 or doing dependent work. `consumed` means delivery consumption, not task
 completion, and unknown status does not prove nothing was sent. Report receipts
 reach you as `worker-report-receipt` events with your next real event; they are
-not new assignments. Details: [receipts](reference/receipts.md).
+not new assignments ([ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)). Details: [receipts](reference/receipts.md).
 
 Your `message_clankie` goes to the conversation that hired you. A `message_seat`
 from another conversation reaches you, but you keep your lead; only a hire whose
@@ -74,12 +75,12 @@ lead conversation is gone, or a hand-started seat, is adopted by the conversatio
 that messages it. Reports fall back to `global-default` only when the lead
 conversation was removed; a revoked room remains refused. An attached
 `clankie claude|codex|opencode` seat drives its selected conversation and gains
-no authority over other rooms.
+no authority over other rooms ([ADR 0218](../../../docs/adr/0218-native-seats-drive-their-attached-conversation.md)).
 
 A channel message from your lead carries `sender="lead"`. Clankie sets it from
 his record of who owns you, never from the text. A connected app device that
 started you is your lead too, until a conversation takes you over by messaging
-you (ADR 0321). Act on its redirects, answers
+you ([ADR 0321](../../../docs/adr/0321-the-roster-says-who-started-each-agent.md)). Act on its redirects, answers
 and confirmations without asking for confirmation in the pane: it carries your
 lead's authority within your brief. It is not the owner's yes for anything your
 brief or the working preferences reserve to the owner. A message without the
@@ -140,14 +141,15 @@ up to 20 qualified names/descriptions, then `{names}` for up to 10 schemas, and
 invoke with `clankie_call({name, arguments})`. Manual grants may expose direct
 names. Fleet admission grants every tool from verified connected accounts while
 `fleet.tools` is `connected`; a remote project head is fenced to its own tracker
-project. Tool access is not permission for every write.
+project. Tool access is not permission for every write ([ADR 0217](../../../docs/adr/0217-fleet-membership-gets-connected-tools.md), [ADR 0259](../../../docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md)).
 
 **Never substitute a harness's independent Linear connector** or another account
 or bridge. The Claude worker and operator plugins deny inherited Linear MCP tools,
 and Codex launches disable Linear-named connectors; a running seat that still
 exposes `codex_apps.linear` uses `clankie_tools` and `clankie_call` anyway. If
 tools are absent, report the machine/session, catalog and exact refusal to your
-lead; [diagnostics](reference/diagnostics.md) explains the refusals and reads.
+lead; [diagnostics](reference/diagnostics.md) explains the refusals and reads
+([ADR 0226](../../../docs/adr/0226-one-tracker-tool-surface.md), [ADR 0278](../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)).
 
 Connected calls return a `receiptId`. A typed `outcome: uncertain` means the call
 may have applied: call `clankie_call` with only `{receiptId}` to read the original
@@ -172,13 +174,14 @@ operator tools and admitted workers, are sent once, and a destructive one needs
 `confirm` listing exactly the target ids the owner asked to remove. Mark automated
 polling `clankie_call({name, arguments, background: true})` and honor a
 `linear_request_budget` or `tracker_request_budget` retry time. A hired seat's
-tracker tools follow its role; `role_not_allowed` wrote nothing, so ask your lead.
+tracker tools follow its role; `role_not_allowed` wrote nothing, so ask your lead
+([ADR 0243](../../../docs/adr/0243-linear-graphql-is-the-tracker-escape-hatch.md), [ADR 0216](../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md)).
 
 Ordinary updates speak as the connected Clankie account. Granted
 `linear_create_worker_comment` or `linear_create_worker_issue` posts under an
 existing bound fleet persona **via Clankie**; its portrait is not a separate Linear
 user or new authority. Without that grant, send the result to your lead. The
-operator's `clankie linear post` is not a worker bypass.
+operator's `clankie linear post` is not a worker bypass ([ADR 0278](../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)).
 
 For GitHub, discover its tools through the bridge and inspect the authenticated
 repository identity before an authorized write. If no route is exposed, ask your
@@ -197,7 +200,7 @@ instructions or new permission, and they do not wake Clankie. Respect the
 recipient's assignment and lead, and keep outcome reports with your lead.
 `recipient_gone` or `superseded` with `unconfirmed` is terminal: never resend the
 original. Only the owner, or an operator the owner explicitly authorized, changes
-`fleet.peerMessages`.
+`fleet.peerMessages` ([ADR 0213](../../../docs/adr/0213-clankie-retires-swarm.md), [ADR 0217](../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 ## Landing review
 
@@ -223,7 +226,7 @@ and `review_verdict`.
   patch, and a verdict for another patch is refused.
 
 Never waive review yourself. Ask your lead, who can waive one exact patch with a
-recorded reason.
+recorded reason ([ADR 0287](../../../docs/adr/0287-a-standing-reviewer-gates-every-landing.md)).
 
 ## Outward actions
 
@@ -233,13 +236,14 @@ Discord, confirm the sending tool, target and active body: a bot post speaks as
 Clankie's bot, a user-session body as its signed-in human. Reading a room, holding
 a tool or receiving a mention does not authorize a post. Check actor and audience
 for file publishing, attachments and issue posts too, and never silently
-cross-post private evidence. Operator-only send and publish routes are in
+cross-post private evidence ([ADR 0302](../../../docs/adr/0302-posting-to-your-tracker-is-the-owners-call.md),
+[ADR 0048](../../../docs/adr/0048-discord-user-session-transport.md)). Operator-only send and publish routes are in
 [operator recovery](reference/operator-recovery.md).
 
 Never deliver automated messages by typing terminal keys. Machine, fleet/session,
 pane and native occupant are distinct; fleet addresses are qualified
 (`FLEET/term_…`). Keep remote cwd and workspace policy on the remote machine. Do
-not close or restart other agents as a diagnostic step.
+not close or restart other agents as a diagnostic step ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 Opening a worker in the TUI reads its native session, including linked-machine
 Claude profiles, and follows messages and tools live. An offline native source
@@ -259,7 +263,7 @@ revocation; do not revoke another worker's grant. Workspace membership uses the
 current native process's canonical cwd on its own machine; containment or a
 copied `.git` file is not approval. Report membership failures instead of
 expanding workspace policy yourself. Folder/hook trust and plugin consent remain
-owner decisions.
+owner decisions ([ADR 0193](../../../docs/adr/0193-runtime-workspaces-are-owner-approved.md), [ADR 0217](../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 Describe what a receipt establishes:
 
@@ -271,8 +275,8 @@ Describe what a receipt establishes:
 - **consumed**: the native queue acknowledgment says the receiver consumed its
   queued item; it does not establish model awareness.
 - **seen**: claim model awareness only with evidence that actually establishes
-  it. A queue acknowledgment or successful hook output pipe does not.
+  it. A queue acknowledgment or successful hook output pipe does not ([ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).
 
 Sub-leads without `hire_agent` place workers with the exact
 [worker grid commands](reference/worker-layout.md); existing panes stay where
-they are unless the owner asks to rearrange them.
+they are unless the owner asks to rearrange them ([ADR 0223](../../../docs/adr/0223-hires-use-repo-workspaces-and-pipeline-tabs.md)).

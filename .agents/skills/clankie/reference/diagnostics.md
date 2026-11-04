@@ -9,7 +9,7 @@ Local Linux workers require kernel-backed admission on a host in its initial PID
 namespace, with genuine, fully visible procfs. Containers are unsupported;
 `unsupported_pid_namespace` in `clankie metrics --fleet` means this host boundary
 refused the request. Do not substitute a bearer, caller PID, another account or
-weaker process scan. The hosted containment-receipt route is not yet available.
+weaker process scan ([ADR 0348](../../../../docs/adr/0348-the-linux-socket-census-reads-births-as-they-appear.md)). The hosted containment-receipt route is not yet available.
 Details: `integrations/fleet-proof/README.md`.
 
 Fleet admission grants every tool from verified connected accounts while
@@ -18,7 +18,8 @@ needed for tools. Bearer links prove only the fleet, not a pane or mailbox.
 Linear worker-publishing tools requiring an exact `personaId` remain excluded.
 Project roles, caps, hiring and tracker binding are separate. Tool access is not
 permission for every write. If tools are absent, report the machine/session,
-catalog and refusal so the lead can inspect admission, the setting and account.
+catalog and refusal so the lead can inspect admission, the setting and account
+([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 A local HTTP 403 `local_process_membership_required` names the native refusal
 in `refusal` (for example `not_member`, `pane_unavailable`, `pane_moved`) and gives
@@ -46,7 +47,8 @@ for owner wakes, but user-authenticated external connector output may be
 indistinguishable from human comments; do not claim actor identity proves origin.
 Codex launches discover and disable Linear-named app connectors as well as inherited
 Linear MCP servers for that session. Existing running seats may still expose
-`codex_apps.linear`; always use `clankie_tools` and `clankie_call` for Linear.
+`codex_apps.linear`; always use `clankie_tools` and `clankie_call` for Linear
+([ADR 0278](../../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)).
 
 ## Bounded reads
 
@@ -74,7 +76,7 @@ On a host with the owner-authorized CLI, these bounded reads explain a gap:
   clients request `GET /v1/fleet/roster?includeWork=true`; the unnegotiated strict
   v1 response stays unchanged for shipped apps. The CLI also reads `startedBy`
   (`owner`, `clankie`, `app` with its device name, or `agent` with its parent's
-  name; ADR 0321). It says who asked, never who may act.
+  name; [ADR 0321](../../../../docs/adr/0321-the-roster-says-who-started-each-agent.md)). It says who asked, never who may act.
 - `clankie fleet status`: inspect `fleet.tools` (`connected` or `off`) and
   `fleet.peerMessages` (`on` or `off`).
 - A linked Claude seat with no live receive loop on an older worker bridge gets
@@ -101,7 +103,8 @@ link instead of assuming the Mac service lives there.
 
 ## Catalogs and schemas
 
-Project roles and caps govern hires independently of fleet connected tools.
+Project roles and caps govern hires independently of fleet connected tools
+([ADR 0216](../../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md), [ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 Native Codex subagents expose optional stable IDs and `startedAt`/`endedAt`
 in the roster; older hosts can omit them. They remain children of their parent
 session; a child result

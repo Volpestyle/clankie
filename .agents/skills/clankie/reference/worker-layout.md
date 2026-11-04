@@ -3,7 +3,8 @@
 Use the group's repository workspace, explicit pane IDs and `--no-focus`.
 Create your own named worker tab, fill four positions, then open a second
 named tab. Do not reuse a lead pane or rearrange existing owner panes.
-Record each returned ID; labels are display names, never ownership proof.
+Record each returned ID; labels are display names, never ownership proof
+([ADR 0223](../../../../docs/adr/0223-hires-use-repo-workspaces-and-pipeline-tabs.md)).
 Clankie creates a new repo workspace around the hire with `workspace create`
 (a prepared initial command goes into it, and its idle starter shell closes);
 no blank starter shell is left beside it. Never move a hire into a new
@@ -42,7 +43,7 @@ herdr agent start ada --kind codex --pane P1 --timeout 30000
 Choose an unused native slug: lowercase letter first, then lowercase letters,
 digits, `-` or `_`, at most 32 characters. Its display label may stay human.
 Success confirms the visible TUI is ready; no brief was sent. Dispatch briefs
-through native channels, never terminal typing. Native harness subagents stay inside their harness.
+through native channels, never terminal typing ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). Native harness subagents stay inside their harness.
 
 For initial-command launches, create only the new worker's temporary tab, then
 move that new pane into the group with the target/direction from above:
@@ -65,4 +66,5 @@ herdr pane move MOVED_PANE --tab TAB --split down --target-pane TARGET --ratio 0
 ```
 
 If creation or move loses its reply, inspect the original pane and tab before
-doing anything else. Never allocate a replacement to test an uncertain receipt.
+doing anything else. Never allocate a replacement to test an uncertain receipt
+([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).

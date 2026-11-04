@@ -15,7 +15,8 @@ Set a level through the authenticated owner API with
 `clankie machines access NAME portal|workers|shell|screen`, or through
 Settings → Machines / `/machines`. Existing local installs default to screen;
 new or ungranted remote machines default to portal. Never infer a machine
-level from its name, an SSH connection, a Discord owner or a room skill grant.
+level from its name, an SSH connection, a Discord owner or a room skill grant
+([ADR 0244](../../../../docs/adr/0244-machines-join-clankie-at-an-access-level.md)).
 Machine permission and who may ask are independent checks. A bounded service
 adapter doing its own I/O is not a grant of the caller's general shell.
 
@@ -56,13 +57,15 @@ bounded worker cannot remove its controls or raise the OS ceiling. A changed
 installed runtime needs owner re-preparation. Do not activate/restart or provision
 live credentials without owner authority. Live lower/hire/refusal and restore
 proof remain an owner-held gap. Apple's deprecated `sandbox-exec` is
-the process boundary; do not describe it as a signed App Sandbox app or VM.
+the process boundary; do not describe it as a signed App Sandbox app or VM
+([ADR 0257](../../../../docs/adr/0257-a-lowered-local-runtime-keeps-an-os-boundary.md)).
 
 ## Joined machines
 
 A joined receiver
 must check its own owner-approved level and directory grants before executing
-worker, shell or screen requests, regardless of what the sender claims.
+worker, shell or screen requests, regardless of what the sender claims
+([ADR 0244](../../../../docs/adr/0244-machines-join-clankie-at-an-access-level.md)).
 
 Use `clankie join --gateway URL --host HOST_ID --directory PATH` on the joining
 host. From an existing authenticated owner CLI/device approve its code with
@@ -128,7 +131,9 @@ is the default. Desktop parents can supervise `join resume --json` with local
 An unavailable or held Stop is not quiescence proof. Native accessibility
 press/text and bounded navigation key/drag/scroll require exact receipts; no
 fallback or replay. Native observer acknowledgments do not prove queue drain:
-after any attempted input, Stop keeps the lease held. Read the
+after any attempted input, Stop keeps the lease held
+([ADR 0255](../../../../docs/adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md),
+[ADR 0256](../../../../docs/adr/0256-lent-input-needs-native-drain-proof.md)). Read the
 [desktop-control skill](../../desktop-control/SKILL.md) before driving, and the
 [CLI contract](../../../../docs/cli.md#lent-computer-selection).
 

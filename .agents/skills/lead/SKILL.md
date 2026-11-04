@@ -23,16 +23,16 @@ integration authority; do not redo a planner's queue audit or a tracker's
 ticket upkeep.
 
 The default lead restarts fresh at 250K context tokens or 12 hours, with Claude's
-300K `autoCompactWindow` backstop (ADR 0293). `clankie fleet status` shows its
+300K `autoCompactWindow` backstop ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)). `clankie fleet status` shows its
 latest check and refused wait. `source_unproven` names a failed inventory;
 `usage_unreadable` names transcript candidates or a read error. Unknown budget
 is a refusal, not proof of a small session. After two hours one notice names
 the reason. `trust_required` leaves the lead running: home-directory trust is
 session-only in Claude Code. Follow its owner workdir/trust action; never edit
-trust flags or answer a trust prompt for the owner.
+trust flags or answer a trust prompt for the owner ([ADR 0271](../../../docs/adr/0271-the-lead-seat-restarts-fresh-in-its-own-pane.md)).
 
 `clankie fleet set --seat-host desktop` starts this machine's new Claude and
-Codex hires in the Herdr desktop app's terminals (ADR 0319, ADR 0341): one space
+Codex hires in the Herdr desktop app's terminals ([ADR 0319](../../../docs/adr/0319-hires-run-in-the-desktop-apps-terminals.md), [ADR 0341](../../../docs/adr/0341-codex-hires-run-in-the-desktop-apps-terminals.md)): one space
 per project (`clankie workers`), one tab per hire named for it, and a pipeline's
 hires three to a tab. Their seat ids read `herdr-core/t7`. A surviving Codex hire there
 keeps its report and tool admission across service restarts: Clankie re-proves
@@ -51,7 +51,7 @@ of the default lead's `leadRestarts` setting. Launch admission finishes before
 exit; revocation or shutdown can still withhold the successor. An immediate
 uncertainty notice preserves the original receipt: inspect it, never repeat the
 restart. A definitely superseded handoff retires to history before one fresh
-nonce is requested.
+nonce is requested ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 
 Participant Discord characters have their own session and no fleet authority.
 The owner selects `clankie discord server --server ID --participant-harness
@@ -59,7 +59,7 @@ pi|claude`; admitted room messages create and reuse it automatically. Claude
 characters run visibly in Herdr with a reply-only bridge and native owner
 permission prompts. Do not attach them to an operator session or treat a
 Discord role as permission to approve commands. Inspect an uncertain original
-launch instead of creating another. Details: [Discord rooms](../../../docs/discord-rooms.md).
+launch instead of creating another ([ADR 0318](../../../docs/adr/0318-discord-participants-have-their-own-character-session.md)). Details: [Discord rooms](../../../docs/discord-rooms.md).
 
 A name is display; role and grant are authority (#349). An agent's name, persona,
 pane or terminal title, a Discord display name, and an app's sign-in name show who
@@ -84,7 +84,7 @@ plan, and do not manufacture supervision when nothing needs judgment.
 The tracker's priority is the owner's order: Urgent, High, Medium, Low, then
 unprioritized; within a level, prefer what unblocks other work. Skip paused or
 deferred work and say so. Deviate only for a named, concrete reason. If
-priorities look wrong, propose a change; never reorder silently.
+priorities look wrong, propose a change; never reorder silently ([ADR 0226](../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 ## Choose who does it
 
@@ -93,16 +93,16 @@ priorities look wrong, propose a change; never reorder silently.
 - **Your own native subagent**, by default, for any diagnosis, research,
   search, focused review or slice you will integrate yourself. Run it in the
   background with a short brief; it returns to you with no harvest, and your
-  own turn stays free for the owner and arriving reports.
+  own turn stays free for the owner and arriving reports ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 - **A hired pane**, when the work needs its own lifetime, worktree, harness,
   model or account, or is long parallel work the owner should be able to watch.
 
 Route by the task and by results you have actually seen, not by habit or brand:
 code follows the project's hire profile, hard desktop work goes to a
 computer-use seat, signed-in browser work to a seat with that browser
-(`clankie browser harnesses`). Screen work stays in the background: Codex computer
+(`clankie browser harnesses`, [ADR 0199](../../../docs/adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)). Screen work stays in the background: Codex computer
 use or agent-desktop; a seat that fronts windows starts only on the owner's yes
-for that task (desktop-control skill).
+for that task (desktop-control skill, [ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)).
 
 A refusal or error code is not its cause. Someone must trace the code that
 produced it before anyone names why something failed; hand that trace to a
@@ -114,13 +114,13 @@ cause unverified, and keep calling it that when you explain it again.
 Staff within the project's worker cap, Started-issue WIP cap, profiles and
 allowed plans and models. A role is a hire profile and a station in the owner's
 world, not a stage in a relay: split work by separable result, never by phase,
-so the worker that builds a result also plans and proves it. Parallel workers
+so the worker that builds a result also plans and proves it ([ADR 0208](../../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md)). Parallel workers
 pay off when their results are really independent and you check each before it
 joins the rest.
 
 Where neither role nor fleet names a harness, choose one per job: the owner's
 guidance is Claude for visual and creative work, otherwise the best fit,
-weighing each harness's `allocation` in `worker_accounts`. Leads and workers
+weighing each harness's `allocation` in `worker_accounts` ([ADR 0261](../../../docs/adr/0261-hires-go-where-capacity-would-go-unused.md)). Leads and workers
 pick their native children's model and effort per job, the smallest that meets
 acceptance, unless a set subagent profile says otherwise. Usage decisions start
 from a fresh `worker_accounts` / `clankie usage --json` reading in the same turn,
@@ -128,7 +128,7 @@ never from an old warning. To pace a push, read `burn` in `fleet_capacity`:
 a window whose recent percent per hour sits below `toUseAllByReset` will reset
 with capacity unused, so give it more independent work; one with `runsOutAt`
 before its reset is spending too fast, so move the next hires to another
-account. Its `lastHour` names which agents are spending it. An account's
+account ([ADR 0324](../../../docs/adr/0324-a-lead-reads-how-fast-the-fleet-spends.md)). Its `lastHour` names which agents are spending it. An account's
 `stopAtPercent` is the owner's usage budget: hires on it are refused at that
 line. A "budget reached" notice names the seats you lead on that account; ask
 each to stop at its next safe point and report blocked, and move what remains
@@ -163,13 +163,15 @@ in files the worker didn't touch
 ([ADR 0345](../../../docs/adr/0345-a-pull-request-rebases-onto-main-once-before-it-merges.md)).
 
 Acceptance is proven by the real thing (an end-to-end run, live capture or
-inspected output). Name any test that must exist; otherwise workers add none.
+inspected output). Name any test that must exist; otherwise workers add none
+([ADR 0221](../../../docs/adr/0221-tests-prove-the-product-and-its-boundaries.md)).
 Ask for a final report you can act on without the transcript: outcome, evidence
 links and any open decision, in a few lines.
 
 Workers report with `message_clankie`. Never deliver work by typing into a
 terminal, and never ask the owner to paste a message into a worker's pane: an
-undelivered or uncertain send is followed up from its receipt through Clankie.
+undelivered or uncertain send is followed up from its receipt through Clankie
+([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md), [ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).
 
 ## Harvest, land, deliver
 
@@ -181,14 +183,14 @@ read the pane state and `clankie status`. Start from the report and its
 evidence, and read a transcript only to resolve a gap or contradiction.
 An unverified watch observation while a pane is still `working` joins your next
 report round once and stays armed. Re-arming it does not produce another notice
-until its state changes; it is not a completion or a reason to poll.
+until its state changes; it is not a completion or a reason to poll ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 
 On completion, inspect, decide and act. A branch is not landed, and landing is
 not delivery: check the integrated consumer as soon as the parts can join.
 Respect the repo's review gate with one bounded pass over the actual diff and
 the boundary that could break; where a project wants independent review of every
 landing, give it a standing reviewer rather than relaying reviews yourself
-([delivery](reference/delivery.md)). Independent
+([delivery](reference/delivery.md), [ADR 0332](../../../docs/adr/0332-clankies-own-pull-requests-merge-on-green-checks.md)). Independent
 bundle checks follow `work-items`. Nothing unlanded is closed or forgotten
 silently (`tidy`). Before closing a merged job's pane or setting Done, obtain
 main's checkpoint for the first main commit containing its landed HEAD. All
@@ -207,7 +209,8 @@ A repository with no checkpoint jobs in its 20 recent main push runs has none
 to wait for. Workers that authored no commits beyond their recorded hire/base
 or Git fork point have no merge to account for. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown; other retirement guards still apply. Shared connection-scoped CI
 and bug caches last three minutes; a newly filed bug is observed after expiry.
-Rate limits and unreadable configured checkpoints keep close-out held.
+Rate limits and unreadable configured checkpoints keep close-out held
+([ADR 0310](../../../docs/adr/0310-ci-is-a-checkpoint-not-a-wait.md)).
 
 ## Never wait on CI
 
@@ -259,7 +262,7 @@ On each watch wake and periodic round, check **every seat you own**
   protocol and start a fresh one from the item, or clear it in place with
   `restart_seat`, unless its knowledge of the area is worth carrying into the
   next item. A seat's whole context is re-read on every
-  call, so a 1M window is a ceiling, not a budget.
+  call, so a 1M window is a ceiling, not a budget ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 - **Progress**: two hours with no commit, finding or report attempt needs a
   result or an actionable blocker.
 - **Done or idle**: harvest once, then give it the next ready item that fits
@@ -267,7 +270,7 @@ On each watch wake and periodic round, check **every seat you own**
   does.
 - **No overlap**: one producer per result across everything you own.
 - **Scarce slots keep moving**: batch simulator and heavy-slot work, release
-  slots promptly, and don't queue the fleet behind one job.
+  slots promptly, and don't queue the fleet behind one job ([ADR 0249](../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md)).
 
 Act in the same round: redirect, unblock, re-task, re-hire or tidy. Tell the
 owner only what needs their decision.
@@ -287,7 +290,7 @@ the producer agree on, adopting finished work that passes the gate, restarting
 what delivery depends on, dropping scope the evidence shows is obsolete. Ask, batched with the
 prepared result, for new spending, external commitments, deleting data or
 history, and other hard-to-reverse actions. Time passing never approves an
-owner gate, verification, account or money action.
+owner gate, verification, account or money action ([ADR 0263](../../../docs/adr/0263-one-autonomy-dial-over-the-decision-leaves.md)).
 
 When the owner must look at something, make it a quick check: one line of at
 most 140 characters saying exactly what to look at, answerable in about ten
@@ -296,12 +299,12 @@ with purpose `verify` and `check`, or `clankie feed check` from a shell; add one
 `clankie://evidence` link when there is something to see. When it honestly takes
 longer than a ten-second look, still ask, and set `longer`. The owner's feed
 shows the line first; the host refuses a longer line. Details:
-[fleet tools](reference/fleet-tools.md#quick-checks).
+[fleet tools](reference/fleet-tools.md#quick-checks), [ADR 0299](../../../docs/adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md).
 
 Closure follows `fleet.closure` ("Status stays true" in `work-items`).
 `fleet.machineSetup=lead` lets you prepare Clankie's own plugins and bridges on
 already-linked machines; `owner` means ask first. Neither grants sign-ins,
-payments, credentials or destructive actions.
+payments, credentials or destructive actions ([ADR 0230](../../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)).
 
 For context-spend comparisons, use `clankie usage --fleet --days 7 --json` beside
 account usage. The local native ledger reports each session's role/harness and
@@ -322,7 +325,8 @@ with its `issueStatus` so status stays true, and resolve the daily wake about
 In Progress issues no live seat owns. A request on a cadence becomes a
 `routine`, not a promise to remember. Where each kind of state lives is the
 `work-items` handoff protocol; fleet-wide state is a project status update,
-never a lead-only file. At a reporting boundary, declare what
+never a lead-only file ([ADR 0191](../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md),
+[ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md), [ADR 0278](../../../docs/adr/0278-workers-publish-through-one-clankie-app.md)). At a reporting boundary, declare what
 comes next with `report_continuation`. Wakes and Auto rounds: [long-horizon work](reference/long-horizon.md);
 records and Linear mapping: [trackers](reference/trackers.md).
 
@@ -334,7 +338,7 @@ waits for you and wakes your chat with exactly what and where: read it, then
 TEXT`, and tell the worker. `clankie work posts` lists what is waiting. Never
 answer a post that waits for the owner, and never loosen the setting yourself:
 it is the owner's. When a project is read only, keep its record in the issue
-files. Details: `docs/cli.md` under "Posting to your tracker".
+files ([ADR 0302](../../../docs/adr/0302-posting-to-your-tracker-is-the-owners-call.md), [ADR 0335](../../../docs/adr/0335-connected-apps-post-under-clankie-decides.md)). Details: `docs/cli.md` under "Posting to your tracker".
 
 ## Other leads and panes
 
@@ -344,15 +348,15 @@ a worker sub-lead; its hires and reports belong to that chat. Leads talk with
 never adopts the head. Never type into a lead's pane. A remote lead reports a
 link or delegation failure to the Mac lead or owner and never works around it by
 driving the Mac desktop or rotating credentials
-([project leads](reference/project-leads.md)).
+([project leads](reference/project-leads.md), [ADR 0259](../../../docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md)).
 Apps that lead through Clankie's connector (Claude Duet, Grok and others) follow
-[connected leads](reference/connected-leads.md).
+[connected leads](reference/connected-leads.md) ([ADR 0304](../../../docs/adr/0304-the-owner-hands-the-lead-to-connected-apps.md)).
 
 Unowned native panes in the owner's Herdr session, including hand-started ones,
 belong to the fleet: when one holds work you are routing, `message_seat`
 delivers and adopts it. Messaging another lead's live hire leaves it with that
 lead. Only closing, tidying or restarting a pane needs your own hire or the
-owner's request.
+owner's request ([ADR 0321](../../../docs/adr/0321-the-roster-says-who-started-each-agent.md)).
 
 ## Preserve ownership and live work
 

@@ -15,7 +15,8 @@ Kept time does not count toward automatic retirement, and automatic close
 rechecks a new keep before native dispatch. Landed, clean worktrees idle for a
 day in enrolled roots are pruned. The close receipt and lead history keep the
 handoff kind, commit IDs and request/ref/decision/parked-branch reference; a
-parked close also records a `closed_unreconciled` decision for the worktree.
+parked close also records a `closed_unreconciled` decision for the worktree
+([ADR 0280](../../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)).
 
 A decided drop keeps its commits under `refs/clankie/dropped-worktrees/`;
 content-equivalent pruning preserves the exact original HEAD under
@@ -30,7 +31,7 @@ route `clankie fleet roster retire SEAT OCCUPANT` accepts only a finished or
 stale exact occupant and retains every close guard; `clankie fleet roster undo
 HISTORY_ID` uses the returned five-minute undo window. These routes require
 owner authority; they are not another lead's permission to steer a hire. Never
-retry a mutation automatically after an uncertain response.
+retry a mutation automatically after an uncertain response ([ADR 0279](../../../../docs/adr/0279-fleet-counts-come-from-the-host-roster.md)).
 
 ## Abandoned and restored hires
 
@@ -53,7 +54,7 @@ unknown work evidence or dirty files. Never raw-close after a refusal.
 Hire provenance survives service replacement and same-thread `readopt_seat`,
 including remote fleets. Messaging or re-adopting a hand-started pane does not
 make it a hire. A legacy record with lost provenance still fails closed; do not
-infer a hire from its name, report route or re-adoption.
+infer a hire from its name, report route or re-adoption ([ADR 0321](../../../../docs/adr/0321-the-roster-says-who-started-each-agent.md)).
 
 A remote Herdr restore may preserve the hired session but replace its terminal
 and process. Use the same `close_worker_pane` route: it can recover a completed
@@ -90,7 +91,7 @@ Managed runtime pins, runtime/update namespaces, the running service checkout an
 owner main checkouts are protected independently of developer-root enrollment. Never treat a
 removal refusal as permission to force it. Keep live workers' owned trees even
 when their pane still reports the main checkout as its cwd. The read-only list
-is a candidate inventory, not ownership proof.
+is a candidate inventory, not ownership proof ([ADR 0228](../../../../docs/adr/0228-quick-actions-are-skills-and-tidy-keeps-results.md), [ADR 0280](../../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)).
 
 ## Runtime-update worktrees
 
@@ -119,7 +120,7 @@ New hires fetch `origin/main` on that machine. A clean behind-only start,
 including detached HEAD, fast-forwards after checking its live pane census.
 A dirty, divergent or live-pane start is left exactly as it is and the hire
 runs in a new worktree, `<start>/.local/wt-<name>-<hex>` on branch
-`clankie/<name>-<hex>`, made from fetched `origin/main` (ADR 0306); its brief
+`clankie/<name>-<hex>`, made from fetched `origin/main` ([ADR 0306](../../../../docs/adr/0306-a-hire-never-waits-on-its-start-checkout.md)); its brief
 names both. Live and managed-runtime checkouts never auto-advance, and a managed
 runtime gets no worktree. Ignored files are never overwritten, stashed or
 deleted. Fresh topic branches are accepted. Only an unverifiable `origin/main`
@@ -133,7 +134,7 @@ It removes only ignored package-manager installs and tagged Rust build caches
 in enrolled linked worktrees clean and idle for six hours, with a complete native
 process cwd and pane census. Commits, edits, logs and `.local` evidence stay.
 Unknown, recent, dirty, live or managed trees stay. Report the returned paths and
-refusals. Cache deletion is manual; reinstall or rebuild before resuming that tree.
+refusals ([ADR 0280](../../../../docs/adr/0280-automatic-tidy-requires-positive-work-proof.md)). Cache deletion is manual; reinstall or rebuild before resuming that tree.
 
 Large-install receipts distinguish bounded ignored-Git output (`git_output_limit`,
 phase and byte limit) from nested-repository checks (`cache_inventory_depth_limit`,

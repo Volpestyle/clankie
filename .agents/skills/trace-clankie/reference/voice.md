@@ -33,7 +33,7 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   permissions or availability.
 
 - **Voice leaves a room transcript only when the owner enables the development
-  toggle.** `get_self_state.voiceHistory` is
+  toggle** ([ADR 0121](../../../../docs/adr/0121-development-voice-transcripts-are-explicit.md)). `get_self_state.voiceHistory` is
   closed stays only (join/leave), and it is empty while he is still in the
   channel. `get_self_state.recentVoiceSpeech` is the content-free projection:
   spoken vs suppressed, trigger, latency, tokens, stay id. `observe_room` on
@@ -109,7 +109,8 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   Invitation text is bounded untrusted model context and is absent from receipts.
   A `left` reason of `self_decided` follows the realtime `voice_leave` tool.
   There is no empty-room leave timer. Membership observations carry no human
-  authority; they do not become privileged captain requests.
+  authority; they do not become privileged captain requests
+  ([ADR 0105](../../../../docs/adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)).
 
 - **Hearing and answering are separate evidence.** An accepted transcription
   with `floor_decision: listen` means the old floor withheld a model turn, not
@@ -220,5 +221,5 @@ Traps that cost real time when reading voice: hearing, answering, playback, Vox 
   valid leave closes `voice` while active watch/publish evidence continues;
   only body shutdown closes all roles and the child. If process inspection
   finds two Vox children or a Node voice media owner, the sole-owner proof
-  fails. A text-only official-bot process is the intentional exception: it
+  fails ([ADR 0128](../../../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md)). A text-only official-bot process is the intentional exception: it
   records `mediaOwner: none` and spawns no Vox child.

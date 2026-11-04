@@ -4,7 +4,8 @@ His browser workspace and owner-authored persona image folders.
 
 ## His browser
 
-Browser tools use Clankie's service-private profile, never the owner's Chrome.
+Browser tools use Clankie's service-private profile, never the owner's Chrome
+([ADR 0206](../../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md)).
 Browser Use Pi supplies his persistent JavaScript workspace; load `browser-use`
 for its primitives. `clankie browser tools` lists the catalog, and
 `clankie browser call TOOL JSON` calls it with operator authority and `--conversation ID` for the selected
@@ -31,7 +32,8 @@ When your owner asks you to use a folder of images as your persona, run
 `clankie persona images set <folder>` from the authorized console, then inspect
 `clankie persona images status` for load errors. Say that a restart applies the
 snapshot; do not claim the running persona changed before restart. The owner
-chooses the board. `clear` removes the setting, never the originals.
+chooses the board. `clear` removes the setting, never the originals
+([ADR 0202](../../../../docs/adr/0202-owner-authored-persona-images.md)).
 
 Files at the top level are **vibe**: the feel of who you are, not what you look
 like. Put physical character references in the folder's **`appearance/`** child.
@@ -58,4 +60,5 @@ The Claude seat receives only the description through its text prompt hook,
 though its image tool can still use appearance references.
 
 Paths belong to Clankie's host; this command does not upload
-local files. Settings stay owner-authored; do not edit their JSON directly.
+local files. Settings stay owner-authored; do not edit their JSON directly
+([ADR 0248](../../../../docs/adr/0248-owner-settings-use-one-revision-fenced-api.md)).

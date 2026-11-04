@@ -34,7 +34,8 @@ sessions and apps.
 
 Hire one computer-use seat per desktop at a time. A seat that takes the screen
 (fronts windows or moves the pointer) starts only on the owner's yes for that
-task, asked right then; never have one type into the window they're working in.
+task, asked right then; never have one type into the window they're working in
+([ADR 0342](../../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)).
 
 ## Brief and hire
 
@@ -71,7 +72,8 @@ person plainly which page and which check, then `message_seat` to continue once
 they've done it. A stopped seat is waiting, not failed.
 
 An uncertain hire or send needs reconciliation of its original receipt; never
-re-hire or type a continuation into its pane. Reports return to the hiring or
+re-hire or type a continuation into its pane
+([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). Reports return to the hiring or
 adopting conversation through `message_clankie`.
 
 When it finishes, inspect its reported evidence and screenshots before saying
