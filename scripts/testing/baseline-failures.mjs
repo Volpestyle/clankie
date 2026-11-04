@@ -14,7 +14,7 @@
 // error has no test name to match, so it is never matched with the base. Failures the base shares are printed
 // as warnings: they belong to main, and the lead files and fixes them there.
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,11 +26,16 @@ const value = (name) => {
   return args[index + 1];
 };
 const git = (...command) => execFileSync("git", command, { cwd: root, encoding: "utf8" }).trim();
-const base = git("rev-parse", "--verify", `${value("--base")}^{commit}`);
+const verifyOnly = args.includes("--verify-only");
+const generic = args.includes("--generic");
+const base = verifyOnly ? undefined : git("rev-parse", "--verify", `${value("--base")}^{commit}`);
 const reportPath = resolve(value("--report"));
 
 const FILE_FAILURE = "> (failed outside a test)";
-const reporter = join(root, "scripts", "testing", "release-test-reporter.mjs");
+const reporter = args.includes("--reporter")
+  ? resolve(root, value("--reporter"))
+  : join(root, "scripts", "testing", "release-test-reporter.mjs");
+const config = args.includes("--config") ? value("--config") : "vitest.config.ts";
 
 /** Failed tests in a complete run report, as `file > full name`, plus files that failed outside a test. */
 const failures = (path) => {
@@ -70,6 +75,44 @@ try {
   console.error(`[baseline] ${error.message}`);
   process.exit(1);
 }
+// A generic starter cannot call an empty or ambiguous selection a checked suite.
+const completeSelection = (path) => {
+  const report = JSON.parse(readFileSync(path, "utf8"));
+  if (
+    !report.selected.length ||
+    new Set(report.selected).size !== report.selected.length ||
+    report.files.length !== report.selected.length ||
+    new Set(report.files.map((file) => file.path)).size !== report.files.length ||
+    !report.files.some((file) => file.tests.some((test) => ["passed", "failed"].includes(test.state)))
+  )
+    throw new Error("Empty, duplicate-file or unexecuted test selection cannot prove the starter gate");
+};
+if (generic || verifyOnly) completeSelection(reportPath);
+// The starter verifies a fresh completed report even when the test step succeeds.
+if (args.includes("--status")) {
+  const status = value("--status");
+  const reason = JSON.parse(readFileSync(reportPath, "utf8")).reason;
+  if (
+    !(
+      (status === "success" && reason === "passed" && changeFailed.size === 0) ||
+      (status === "failure" && reason === "failed" && changeFailed.size > 0)
+    )
+  )
+    throw new Error("The test step outcome and completed report disagree");
+}
+if (args.includes("--exit-code")) {
+  const code = value("--exit-code");
+  const reason = JSON.parse(readFileSync(reportPath, "utf8")).reason;
+  if (
+    !(
+      (code === "0" && reason === "passed" && changeFailed.size === 0) ||
+      (code === "1" && reason === "failed" && changeFailed.size > 0)
+    )
+  )
+    throw new Error("The test process exit code and completed report disagree");
+}
+if (verifyOnly) process.exit(changeFailed.size ? 1 : 0);
+if (generic && !changeFailed.size) process.exit(0);
 if (!changeFailed.size) {
   console.error("[baseline] The report shows no failed test, so the failure was not a test result.");
   process.exit(1);
@@ -85,9 +128,14 @@ console.log(
 
 let baseline = new Set();
 if (present.length) {
-  const tree = join(root, ".local", `baseline-${base.slice(0, 12)}`);
-  rmSync(tree, { recursive: true, force: true });
-  spawnSync("git", ["worktree", "prune"], { cwd: root });
+  mkdirSync(join(root, ".local"), { recursive: true });
+  const tree = generic
+    ? mkdtempSync(join(root, ".local", "fast-ci-base-"))
+    : join(root, ".local", `baseline-${base.slice(0, 12)}`);
+  if (!generic) {
+    rmSync(tree, { recursive: true, force: true });
+    spawnSync("git", ["worktree", "prune"], { cwd: root });
+  }
   execFileSync("git", ["worktree", "add", "--detach", tree, base], { cwd: root, stdio: "inherit" });
   try {
     const install = spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
@@ -98,14 +146,14 @@ if (present.length) {
     const output = join(tree, ".local", "baseline-run.json");
     mkdirSync(join(tree, ".local"), { recursive: true });
     // Same runner, same environment, same selected files: only the commit differs.
-    spawnSync(
+    const result = spawnSync(
       "pnpm",
       [
         "exec",
         "vitest",
         "run",
         "--config",
-        "vitest.config.ts",
+        config,
         ...present,
         "--bail",
         "0",
@@ -116,11 +164,28 @@ if (present.length) {
       {
         cwd: tree,
         stdio: "inherit",
-        env: { ...process.env, CLANKIE_LANDING_TESTS: "1", CLANKIE_RELEASE_TEST_REPORT: output },
+        env: {
+          ...process.env,
+          ...(generic ? {} : { CLANKIE_LANDING_TESTS: "1" }),
+          CLANKIE_RELEASE_TEST_REPORT: output,
+        },
       },
     );
     if (!existsSync(output)) throw new Error("The base run wrote no report");
     baseline = failures(output);
+    if (generic) {
+      completeSelection(output);
+      const reason = JSON.parse(readFileSync(output, "utf8")).reason;
+      if (
+        result.error ||
+        result.signal ||
+        !(
+          (result.status === 0 && reason === "passed" && !baseline.size) ||
+          (result.status === 1 && reason === "failed" && baseline.size > 0)
+        )
+      )
+        throw new Error("The base test process and completed report disagree");
+    }
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", tree], { cwd: root, stdio: "inherit" });
   }

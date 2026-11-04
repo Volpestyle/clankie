@@ -230,6 +230,10 @@ fleet stands behind
   simulator and full-suite runs happen on `main` and nightly, never per pull
   request and never as a gate
   ([ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
+- When an outside project has slow CI, offer an owner-chosen starter with
+  `clankie project ci offer --json-stdin`; follow the
+  [preview and adoption boundary](reference/delivery.md#offer-a-faster-project-ci-setup).
+  Do not impose Clankie's own CI or merge policy on that project.
 - Work two queues in parallel. Red background runs there become `ci-finding`
   issues (filed automatically, deduped by test). Keep some workers on the
   `ci-finding` queue beside the regular issue queue so neither starves the

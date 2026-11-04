@@ -86,7 +86,11 @@ before calling its CI slow. Notice full suites on every draft push, superseded
 runs that keep running, cold dependency/compiler caches, and failures shared
 with the base that hold unrelated work. No run history means unknown, not slow.
 
-Offer the owner a concrete fast-CI starter as a draft pull request: quick checks
+Prepare a preview with `clankie project ci offer --json-stdin` (owner API
+`POST /v1/operator/projects/ci-starter`); see the
+[request and first-profile limits](../../../../docs/fast-ci-starter.md). The
+pnpm/Vitest profile returns proposed files and never applies them. Offer the
+owner a concrete fast-CI starter, then open its draft PR only after they choose it: quick checks
 on draft pushes, full checks on the final ready head, cancellation of superseded
 runs, caches seeded from the default branch, and a strict base comparison for
 existing failures. New failures, missing/incomplete results and infrastructure
@@ -98,7 +102,8 @@ permission to rewrite another repository's CI. Show the proposed files and
 tradeoffs first. After the owner chooses the offer, use the normal project
 worker and forge path to open its draft PR. Their review, branch protection and
 merge choices remain theirs. Record the offer and decision on the existing work
-item; an unanswered offer changes nothing.
+item; an unanswered offer changes nothing. An explicit owner request for this
+CI change already supplies the choice; do not ask twice.
 
 ## Work repositories
 

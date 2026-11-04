@@ -102,6 +102,7 @@ alongside its landing instructions. If full suites repeat on draft pushes,
 superseded jobs keep running, caches start cold or base failures block unrelated
 work, offer the owner a fast-CI starter using the lead skill's
 [delivery guidance](../lead/reference/delivery.md#offer-a-faster-project-ci-setup).
-A missing run history is unknown; do not invent timing evidence. Read-only
+A missing run history is unknown; do not invent timing evidence. Workers send
+these observations and the proposed offer to their lead, never directly to the owner. Read-only
 orientation never changes CI or opens a project PR. The owner chooses the offer
 before the normal project worker makes the reviewed change.

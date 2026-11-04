@@ -1,3 +1,4 @@
+import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { BODY_TRANSFER_ROUTES, BODY_TRANSFER_PEER_PATH } from "./body-transfer.ts";
@@ -279,6 +280,7 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: "/v1/operator/voice", target: "relay" },
   { method: "GET", path: PROJECTS_PATH, target: "relay" },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: PROJECT_CI_STARTER_PATH, target: "relay" },
 ] as const;
 
 /**

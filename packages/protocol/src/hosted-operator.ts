@@ -1,3 +1,4 @@
+import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
@@ -213,6 +214,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/support/grants",
     ],
     POST: [
+      PROJECT_CI_STARTER_PATH,
       WORK_TRACKER_SETTINGS_PATH,
       HTTP_SETTINGS_PATH,
       EVIDENCE_STORAGE_SETTINGS_PATH,

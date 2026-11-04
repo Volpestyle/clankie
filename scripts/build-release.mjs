@@ -240,6 +240,8 @@ async function copyRuntimeAssets(targetRoot) {
   await copySkillAssets(repoRoot, targetRoot);
   const files = [
     ["apps/clankie/operator-seat-policy.json", "apps/clankie/operator-seat-policy.json"],
+    ["scripts/testing/baseline-failures.mjs", "scripts/testing/baseline-failures.mjs"],
+    ["scripts/testing/release-test-reporter.mjs", "scripts/testing/release-test-reporter.mjs"],
     ["integrations/remote-lead/bootstrap.mjs", "integrations/remote-lead/bootstrap.mjs"],
     ["integrations/remote-lead/claude-setup.mjs", "integrations/remote-lead/claude-setup.mjs"],
     [
