@@ -243,6 +243,59 @@ test("launcher bridge authenticates and binds one session without copying operat
   }
 });
 
+test("a throwaway --new seat leaves --resume on the owner's session", async () => {
+  const root = await mkdtemp(join(tmpdir(), "opencode-resume-target-"));
+  const elsewhere = join(root, "elsewhere");
+  const env = {
+    XDG_STATE_HOME: root,
+    CLANKIE_SETTINGS_FILE: join(root, "settings.json"),
+    CLANKIE_CREDENTIALS_FILE: join(root, "credentials.json"),
+    CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
+  };
+  const owners = "ses_ownerSession123";
+  const throwaway = "ses_throwawaySeat12";
+  const chats: Record<string, string> = { "owner-chat": root, throwaway: elsewhere };
+  const fetchImpl = async (url: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const asked = new URL(String(url)).searchParams.get("conversationId");
+    const conversationId = init?.method === "POST" ? "throwaway" : asked!;
+    return Response.json({ conversationId, cwd: chats[conversationId] });
+  };
+  const options = { repoRoot, env, execFileImpl, fetchImpl, stderr: { write: () => {} } };
+  const seat = (args: string[], sessionId: string) =>
+    runOpenCodeSeat(parseSeatArgs(["--harness", "opencode", ...args]), {
+      ...options,
+      spawnImpl: async (_command, _args, _cwd, childEnv) => {
+        const bound = await fetch(`${childEnv!.CLANKIE_OPENCODE_BRIDGE}/bind`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${childEnv!.CLANKIE_OPENCODE_BRIDGE_TOKEN}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ sessionId }),
+        });
+        expect(bound.status).toBe(200);
+        return 0;
+      },
+    });
+  const resume = (...args: string[]) =>
+    planSeat(parseSeatArgs(["--harness", "opencode", "--resume", ...args]), options);
+  try {
+    await mkdir(elsewhere);
+    await seat(["--conversation", "owner-chat"], owners);
+    await seat(["--new"], throwaway);
+
+    const original = await resume();
+    expect(original.args.slice(-2)).toEqual(["--session", owners]);
+    expect(original).toMatchObject({ conversationId: "owner-chat", cwd: root });
+
+    await expect(resume("--conversation", "throwaway")).rejects.toThrow("cannot change");
+    chats["owner-chat"] = elsewhere;
+    await expect(resume()).rejects.toThrow("Resume workspace changed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("projection waits for completed assistant text and preserves long replies", () => {
   const info = { id: "msg", sessionID: id, role: "assistant", time: { created: 1 } };
   const parts = [{ id: "part", sessionID: id, messageID: "msg", type: "text", text: "x".repeat(20000) }];

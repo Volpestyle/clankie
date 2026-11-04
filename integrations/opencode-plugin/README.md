@@ -48,6 +48,9 @@ files removes support; do not run `opencode uninstall`. Resume metadata and
 receipt journals live under the Clankie state directory in `opencode-seat.json`
 and `opencode-seat-launches/`. Preserve uncertain receipts until reconciled.
 
+`clankie opencode --resume` opens the one recorded session. A `--new` seat records
+itself only when there is none yet, so a throwaway seat never replaces it.
+
 ## Delivery and failures
 
 Delivery starts only after the bound session has loaded its operator context.
