@@ -45,6 +45,7 @@ export function createWorkerAskRoutes(
   // Every result is a closed outcome the caller reads, refusals included; only a malformed request is 400.
   app.post(WORKER_ASK_ANSWER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
     const askId = WorkerAskIdSchema.safeParse(context.req.param("askId"));
+    // allow-swallowed-rejection -- an unparseable body is refused below as invalid_request.
     const answer = WorkerAskAnswerSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!askId.success || !answer.success) return context.json({ error: "invalid_request" }, 400);
     // The caller's authority is read again at the send, not only at the door.
