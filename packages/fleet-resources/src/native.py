@@ -372,17 +372,41 @@ LEFTOVER_GRACE_SECONDS = 10
 LEFTOVER_TERM_SECONDS = 5
 
 
+# One `ps` census may take seconds on a loaded Mac. A single slow or failed one used to end a
+# command that had already finished as a failure (#444), so a census is tried a few times.
+SNAPSHOT_ATTEMPTS = 3
+SNAPSHOT_TIMEOUT_SECONDS = 5
+
+
+def process_census(columns, limit):
+    """One whole-machine `ps` census: the observer's PID and its output.
+
+    Retries a census that timed out or exited non-zero; only every attempt failing makes
+    the group unobservable, and the error then says which way the last one failed."""
+    failure = "Process group snapshot unavailable"
+    for attempt in range(SNAPSHOT_ATTEMPTS):
+        if attempt:
+            time.sleep(0.25)
+        observer = subprocess.Popen(["/bin/ps", "-axo", columns], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            output, _ = observer.communicate(timeout=SNAPSHOT_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            observer.kill()
+            observer.communicate()
+            failure = "Process group snapshot timed out"
+            continue
+        if observer.returncode != 0:
+            failure = "Process group snapshot failed (ps exited %d)" % observer.returncode
+            continue
+        if len(output) > limit:
+            raise RuntimeError("Process group snapshot too large")
+        return observer.pid, output
+    raise RuntimeError(failure)
+
+
 def group_members(pgid):
     """Live members of one process group with executable names only, never arguments."""
-    observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat=,comm="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        output, _ = observer.communicate(timeout=2)
-    except subprocess.TimeoutExpired:
-        observer.kill()
-        observer.communicate()
-        raise RuntimeError("Process group snapshot unavailable")
-    if observer.returncode != 0 or len(output) > 4 * 1024 * 1024:
-        raise RuntimeError("Process group snapshot unavailable")
+    observer_pid, output = process_census("pid=,pgid=,stat=,comm=", 4 * 1024 * 1024)
     members = []
     for row in output.splitlines():
         fields = row.split(None, 3)
@@ -390,7 +414,7 @@ def group_members(pgid):
             raise RuntimeError("Process group snapshot unavailable")
         pid, group, status = int(fields[0]), int(fields[1]), fields[2]
         # The observer is born inside the caller's group; it is not a member.
-        if group != pgid or pid == observer.pid or status.startswith(b"Z"):
+        if group != pgid or pid == observer_pid or status.startswith(b"Z"):
             continue
         name = os.path.basename(os.fsdecode(fields[3])) if len(fields) == 4 else ""
         members.append({"pid": pid, "name": name[:128]})
@@ -526,23 +550,13 @@ def record_leftovers(directory, lease, pgid, members):
 
 def group_occupied(pgid):
     """Count occupancy only, across all UIDs; this is never signal authority."""
-    observer = subprocess.Popen(["/bin/ps", "-axo", "pid=,pgid=,stat="], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        output, _ = observer.communicate(timeout=2)
-    except subprocess.TimeoutExpired:
-        observer.kill()
-        observer.communicate()
-        raise RuntimeError("Process group snapshot unavailable")
-    if observer.returncode != 0:
-        raise RuntimeError("Process group snapshot unavailable")
-    if len(output) > 1024 * 1024:
-        raise RuntimeError("Process group snapshot too large")
+    observer_pid, output = process_census("pid=,pgid=,stat=", 1024 * 1024)
     census = [row.split() for row in output.splitlines()]
     if len(census) > 10000 or any(len(row) != 3 for row in census):
         raise RuntimeError("Process group snapshot unavailable")
     # The observer is born inside the runner's group and appears in its own
     # census. Its exact receipt is not a surviving command member.
-    return any(int(pid) not in (pgid, observer.pid) and int(group) == pgid and not status.startswith(b"Z")
+    return any(int(pid) not in (pgid, observer_pid) and int(group) == pgid and not status.startswith(b"Z")
                for pid, group, status in census)
 
 
