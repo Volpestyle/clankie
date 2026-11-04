@@ -4443,6 +4443,8 @@ Update one or more persona fields atomically:
 JSON contains `{ "ok": true, "persona": { … }, "settingsFile": "…", "restart": "clankie restart captain" }`.
 The TUI `/persona` modal calls this same writer.
 
+<a id="desktop-quiet-hours"></a>
+
 ### `desktop [status]` / `desktop quiet-hours START END TIME_ZONE|off`
 
 Read or set desktop quiet hours. Times use `HH:mm` and an IANA time zone,
@@ -4451,6 +4453,7 @@ Overnight ranges are supported; the start is inclusive and the end exclusive.
 Equal start and end times are rejected. `clankie desktop quiet-hours off`
 removes the range. The TUI `/desktop` takes the same arguments. Changes apply
 immediately without restarting. JSON returns `desktop` and `settingsFile`.
+`desktop status` also returns `quiet` and, while quiet, `quietUntil`.
 
 The captain's `desktop` tool can emote, move within the current display using
 normalized coordinates, or show a short bubble. Expressions carry a unique ID
@@ -10657,6 +10660,15 @@ resumed seat, failed hire or uncertain report never creates a beat. The desktop
 client consumes IDs once and skips history and bursts; this metadata does not
 contain worker output or identify a private conversation. See
 [ADR 0220](adr/0220-clankie-has-one-present-tense.md).
+
+A client deciding whether to play an attention-grabbing alert may request
+`includeQuiet: true`. The read adds `quiet`, which is true while the owner's
+[quiet hours](#desktop-quiet-hours) are in
+effect, and `quietUntil` while quiet. `quietUntil` is omitted if its end can't be
+found. Both join the cursor, so a parked read wakes within half a second of
+either edge. A device needs no extra grant beyond reading presence, so these
+readers can learn when the owner's quiet hours fall. Legacy requests omit the
+fields and keep their existing cursor. `clankie status` opts in for the owner.
 
 ## Computer body
 

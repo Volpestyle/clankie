@@ -558,6 +558,7 @@ export function createOperatorService(
             {
               expression,
               thinking,
+              ...(request.includeQuiet ? { quietHours: await ctx.desktop.quietHours() } : {}),
               ...(request.includeCurrentActivity
                 ? {
                     currentActivity: ctx.conversations.currentPresenceActivity(

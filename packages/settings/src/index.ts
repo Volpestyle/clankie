@@ -158,7 +158,7 @@ export { ProjectsSettingsSchema, type ProjectsSettings } from "@clankie/protocol
 export * from "./project-worktrees.ts";
 export * from "./project-worktree-observer.ts";
 
-export { DesktopSettingsSchema, desktopIsQuiet, type DesktopSettings } from "./desktop.ts";
+export { DesktopSettingsSchema, desktopIsQuiet, desktopQuietUntil, type DesktopSettings } from "./desktop.ts";
 
 export * from "./checkouts.ts";
 export * from "./local-sandbox.ts";

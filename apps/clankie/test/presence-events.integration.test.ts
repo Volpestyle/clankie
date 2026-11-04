@@ -172,6 +172,20 @@ async function fixture() {
     mode: (value: typeof mode) => {
       mode = value;
     },
+    quietPresence: async (cursor?: string, waitMs?: number) =>
+      OperatorPresenceResultSchema.parse(
+        JSON.parse(
+          JSON.stringify(
+            await serve({
+              op: "presence",
+              schemaVersion: 1,
+              includeQuiet: true,
+              ...(cursor === undefined ? {} : { cursor }),
+              ...(waitMs === undefined ? {} : { waitMs }),
+            }),
+          ),
+        ),
+      ).snapshot,
     presence: async (includeFace = true, includeBeats = false, includeActivities = false) =>
       OperatorPresenceResultSchema.parse(
         JSON.parse(
@@ -568,4 +582,37 @@ it("observes a native captain's live reply while only presence is open", async (
   } finally {
     await captain.close();
   }
+});
+
+it("reports quiet hours to a reader that opts in, flipping at both window edges", async () => {
+  const f = await fixture();
+  const quietHours = { start: "22:00", end: "07:00", timeZone: "America/Chicago" };
+  await f.settings.update((current) => ({ ...current, desktop: { quietHours } }));
+
+  // 21:59:59 in Chicago on 2026-11-03, a day away from any clock change.
+  vi.setSystemTime(new Date("2026-11-04T03:59:59.000Z"));
+  const before = await f.quietPresence();
+  expect(before.quiet).toBe(false);
+  expect(before.quietUntil).toBeUndefined();
+  const legacy = await f.presence(false);
+  expect(legacy.quiet).toBeUndefined();
+
+  vi.setSystemTime(new Date("2026-11-04T04:00:00.000Z"));
+  const during = await f.quietPresence(before.cursor);
+  expect(during.quiet).toBe(true);
+  expect(during.quietUntil).toBe("2026-11-04T13:00:00.000Z");
+  expect(during.cursor).not.toBe(before.cursor);
+  expect((await f.presence(false)).cursor).toBe(legacy.cursor);
+
+  vi.setSystemTime(new Date("2026-11-04T12:59:59.000Z"));
+  expect((await f.quietPresence()).cursor).toBe(during.cursor);
+
+  vi.setSystemTime(new Date("2026-11-04T13:00:00.000Z"));
+  const after = await f.quietPresence(during.cursor);
+  expect(after.quiet).toBe(false);
+  expect(after.quietUntil).toBeUndefined();
+  expect(after.cursor).not.toBe(during.cursor);
+
+  await f.settings.update((current) => ({ ...current, desktop: {} }));
+  expect(await f.quietPresence()).toMatchObject({ quiet: false });
 });

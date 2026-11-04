@@ -1,4 +1,10 @@
-import { SettingsStore, defaultSettingsPath, DesktopSettingsSchema } from "@clankie/settings";
+import {
+  SettingsStore,
+  defaultSettingsPath,
+  DesktopSettingsSchema,
+  desktopIsQuiet,
+  desktopQuietUntil,
+} from "@clankie/settings";
 
 const DESKTOP_USAGE =
   "Usage: clankie desktop [status]\n       clankie desktop quiet-hours START END TIME_ZONE\n       clankie desktop quiet-hours off";
@@ -9,7 +15,15 @@ export async function runDesktopCommand(
   const settings = options.settings ?? new SettingsStore(defaultSettingsPath(options.env ?? process.env));
   let current = await settings.load();
   if (args.length === 0 || (args.length === 1 && args[0] === "status")) {
-    return { ok: true as const, desktop: current.desktop, settingsFile: settings.path };
+    const now = new Date();
+    const until = desktopQuietUntil(current.desktop, now);
+    return {
+      ok: true as const,
+      desktop: current.desktop,
+      quiet: desktopIsQuiet(current.desktop, now),
+      ...(until === undefined ? {} : { quietUntil: until.toISOString() }),
+      settingsFile: settings.path,
+    };
   }
   if (args[0] !== "quiet-hours") throw new Error(DESKTOP_USAGE);
   const desktop =

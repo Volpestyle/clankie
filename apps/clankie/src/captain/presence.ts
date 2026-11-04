@@ -19,6 +19,8 @@ export interface PresenceSources {
   newMessage?: boolean;
   error?: boolean;
   beats?: OperatorPresenceSnapshot["beats"];
+  /** Set only for a reader that opted in, so a legacy cursor never moves with it. */
+  quietHours?: Pick<OperatorPresenceSnapshot, "quiet" | "quietUntil">;
 }
 
 /** Pure projection: no persisted presence state or invented transition time. */
@@ -101,6 +103,7 @@ export function projectPresence(
     (sources.currentActivity.kind !== "tool" || includeToolActivity)
       ? { currentActivity: sources.currentActivity }
       : {}),
+    ...sources.quietHours,
   };
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }

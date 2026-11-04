@@ -3,7 +3,7 @@ import { z } from "zod";
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { DesktopSettings } from "@clankie/settings";
-import { desktopIsQuiet } from "@clankie/settings";
+import { desktopIsQuiet, desktopQuietUntil } from "@clankie/settings";
 import {
   DesktopAnimationSchema,
   DesktopExpressionSchema,
@@ -67,6 +67,17 @@ export class DesktopExpressions {
 
   async beatsAreQuiet(): Promise<boolean> {
     return desktopIsQuiet(await this.settings(), new Date(this.now()));
+  }
+
+  /** For clients deciding whether to play an alert; the flip at either edge changes the cursor. */
+  async quietHours(): Promise<{ readonly quiet: boolean; readonly quietUntil?: string }> {
+    const settings = await this.settings();
+    const now = new Date(this.now());
+    const until = desktopQuietUntil(settings, now);
+    return {
+      quiet: desktopIsQuiet(settings, now),
+      ...(until === undefined ? {} : { quietUntil: until.toISOString() }),
+    };
   }
 
   async current(): Promise<DesktopExpression | undefined> {
