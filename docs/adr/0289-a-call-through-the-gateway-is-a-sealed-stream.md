@@ -124,3 +124,11 @@ sequenceDiagram
 - Bandwidth on the existing gateway instance is at most about 225 KB/s per call,
   counting both legs in and out with base64 on the tunnel. That is roughly
   0.8 GB per call-hour.
+
+## Evidence and limits
+
+This record retains the sealed-record sizes and bounded response capacity for PCM audio. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when gateway limits, codecs or observed stream memory/latency change; measure frame delivery and resource use, preserving ordering, authentication and end-to-end sealing.

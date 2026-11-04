@@ -1,6 +1,7 @@
 # Design docs
 
 Writing guidance for [work-items](../SKILL.md) when an issue outgrows its body.
+The structure and writing style here are owner preferences.
 
 Bigger than an issue body: a living doc attached to the project, revised in
 place as decisions land.

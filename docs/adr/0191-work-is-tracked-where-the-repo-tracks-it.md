@@ -245,3 +245,11 @@ the app's design and release presentation remain separate work.
 - A backend that is unavailable (Linear disconnected, `gh` signed out) fails
   loudly with the recorded convention named, rather than silently falling back
   to files that would fork the record.
+
+## Evidence and limits
+
+This record retains the provider-collection coalescing and failure cooldown bounds. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when tracker quotas, mutation invalidation or observed read traffic change; measure scan frequency and stale projections, keeping fresh account binding and write authority separate from read caching.

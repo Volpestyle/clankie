@@ -157,3 +157,11 @@ own `/mcp` on a trusted network.
   page receives the access.
 - Connector budgets are per host because Claude's servers share a few
   addresses; the sign-in page also has a per-client budget.
+
+## Evidence and limits
+
+This record retains the 60-second parallel-refresh race window. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when real client refresh concurrency or token/registration behavior changes; repeat race/replay/revocation proofs before altering the window, never treating a cached registration as current authority.

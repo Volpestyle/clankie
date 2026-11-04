@@ -132,3 +132,11 @@ WebRTC. Proof: `apps/clankie/test/browser-public-web.integration.test.ts` drives
 real Chrome against local HTTP and UDP fixtures. The private fixtures record no
 request or datagram from a restricted turn, and the machine control reaches
 both.
+
+## Evidence and limits
+
+This record retains the 750 ms recording sample period and per-conversation idle cleanup. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when the Browser Use SDK, browser lifecycle or capture/encoding cost changes; measure representative recordings and lost/retained tabs while keeping owner consent and conversation isolation.

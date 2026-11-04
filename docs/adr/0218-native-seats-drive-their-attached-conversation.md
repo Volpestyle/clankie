@@ -625,3 +625,11 @@ watch queued before it, a resolved worker question reaching a bound head as a
 wake, an explicit takeover after the hold, and a held Queue settling unsent at
 the grace when its bridge leaves. No live harness or production
 state was exercised.
+
+## Evidence and limits
+
+This record retains the roughly 38-minute linked-message delay and native-head serialization incident. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when harness channels, scheduling or observed queue latency change; prove ordering and exact-session delivery on the new path before altering turn routing.

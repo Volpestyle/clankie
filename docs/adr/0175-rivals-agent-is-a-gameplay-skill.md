@@ -100,3 +100,11 @@ The old core record `<state>/body/rivals-session.json` is not migrated; the
 extension keeps its own under `<state>/game-extensions/rivals/`. When it moved,
 the owner's state root had no such record and no `play` claim (checked
 2026-10-17), so nothing was held across the move.
+
+## Evidence and limits
+
+This record retains the bounded Rivals sitting duration and settling lifecycle. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when the external game driver, runtime or actual sitting durations change; verify that stop settles and releases only the owned controls before changing duration defaults.

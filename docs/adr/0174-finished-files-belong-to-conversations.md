@@ -91,3 +91,11 @@ streaming object store if measured use requires it.
   into every repo a seat works in.
 - Keeping source paths in transcript events was rejected because paths disclose
   host layout and are meaningless off the host.
+
+## Evidence and limits
+
+This record retains the 15 MiB artifact ceiling justified by relay and mobile memory bounds. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when relay/mobile memory or attachment requirements change; measure upload/download memory and cancellation before raising sizes or changing storage.

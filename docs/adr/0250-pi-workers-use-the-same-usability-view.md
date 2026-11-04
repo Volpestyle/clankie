@@ -67,3 +67,11 @@ admission. A file that changes after the probe refuses control, as before.
 
 The public Linux image still installs one Pi release at build time, now 1.3.0,
 for reproducibility. That pin is a build choice, not an adapter refusal.
+
+## Evidence and limits
+
+The VUH-2417 amendment records which release had live-hire evidence and links the [installed-release capability probe](../../integrations/pi-plugin/probe.mjs). The probe checks the named offline surfaces; it cannot prove an interactive TUI hire, deployed identity, billing or Discord completion. The old image pin is explicitly historical deployment detail.
+
+## Revisit when
+
+Pi changes its CLI layout, SDK, extension loader or session/settlement behavior, or Node changes. Rerun the probe and a real interactive hire before lowering the proven floor or broadening automatic selection; a passing version string alone is not evidence.

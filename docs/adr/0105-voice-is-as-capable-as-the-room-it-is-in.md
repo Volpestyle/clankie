@@ -97,3 +97,11 @@ and the operator lane never consult the list.
 - A privileged voice turn inherits the one-shot 10-minute ceiling. An expiry
   settles as `captain_turn_timeout` and the room hears the captain-unreachable
   sentence rather than silence.
+
+## Evidence and limits
+
+This record retains the inherited ten-minute privileged voice-turn ceiling. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when model/tool latency or voice workload changes enough that the ceiling regularly interrupts useful work; measure those interruptions while preserving each room's machine-authority ceiling.

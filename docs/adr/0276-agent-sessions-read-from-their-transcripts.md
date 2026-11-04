@@ -88,3 +88,11 @@ them before resuming that history. Quiet history is not proof they are closed.
 CLI, API and TUI project the same hire path (`agents resume`,
 `POST /v1/agent-sessions/resume`, and the saved-session action). Remote Claude
 and Codex delivery uses their native channels over the per-fleet link (ADR 0213).
+
+## Evidence and limits
+
+This record retains the 4 MiB transcript read bound and harness-specific parsing capabilities. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when a harness changes its transcript layout or reads omit useful history or become expensive; verify bounded parsing and redaction on real transcripts, keeping read, message and execution authority separate.

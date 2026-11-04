@@ -93,3 +93,11 @@ the plan is made against an unloaded map.
   in this change: `walk_to`'s wall/off-map refusals split into three named
   codes with detail, and a targeted blocked warp is walked beside and entered
   rather than refused.
+
+## Evidence and limits
+
+The context retains the original seven `no_path_to_target` refusals in thirty turns and the earlier 14-call doorway example from ADR 0058. These are observations of the then-local FireRed body, not measurements of the current PokeAgents world. This record does not retain the raw run alongside those counts; do not infer a current latency or refusal rate from them.
+
+## Revisit when
+
+A new world/profile supplies different map semantics, or live runs show that the observation no longer reduces blocked navigation. Re-measure the refusal rate and completed routes on that body before transplanting the old decoder or its assumptions.

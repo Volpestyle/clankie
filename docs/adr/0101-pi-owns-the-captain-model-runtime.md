@@ -76,3 +76,11 @@ TUI's "refresh model catalogs", and the not-in-either-catalog failure names it.
 - `pnpm --filter @clankie/clankie verify-model` drives one selection down all
   three executors — captain tool + image, gameplay action, play commentary —
   against a throwaway config, and is how a model is accepted across them.
+
+## Evidence and limits
+
+This record retains Pi's model-runtime capabilities and the amended two-catalog/effort contract. These are version-specific observations or bounded design choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Pi or provider catalogs change effort/model support or observed runtime behavior; recheck the actual selected model and named refusals rather than treating catalog presence as universal capability.

@@ -172,3 +172,11 @@ stance-only in practice. Codex report outcomes come from the native
 `McpToolCall` items, never from the `exec` source: in 40 rollouts those items
 recorded all 723 `message_clankie` calls, and the single-call match would have
 found only 306 of them.
+
+## Evidence and limits
+
+This record retains the bounded transcript-tail cache used for native figure/work observations. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when harness transcript formats or observed history size change; inspect missed observations and read cost while keeping exact-session and caller-ownership checks.

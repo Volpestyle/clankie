@@ -249,3 +249,11 @@ flowchart LR
 Separating the owner's route from Clankie's (LOCAL-VUH-4) stays outside this
 amendment. Today a hire that uses the operator credential through `clankie work`
 still writes as Clankie for the owner.
+
+## Evidence and limits
+
+The context retains the observed 2.2-second first-exec assessment delay and the tracker burst that motivated request budgets. These are distinct from the socket-ownership proof: increasing a timeout is not permission to accept an incomplete census. The later Linux settle proof is recorded in [ADR 0348](0348-the-linux-socket-census-reads-births-as-they-appear.md). Neither observation establishes universally optimal queue, transport or per-actor limits.
+
+## Revisit when
+
+Native-helper start costs, platform observation behavior, tracker rate limits or observed actor traffic change. Measure queueing separately from active proof time and examine refusal counts; keep fresh ownership, revocation and uncertain-receipt fences while tuning bounds.

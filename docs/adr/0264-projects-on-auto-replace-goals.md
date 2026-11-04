@@ -146,3 +146,11 @@ On first upgrade, initialize the deadline from the latest retained round, or
 save a first deadline for a new store. Older rounds have no fingerprint, so the
 first upgrade may wake an unchanged lead once; subsequent restarts preserve its
 accepted fingerprint. Milestone report claims remain in the existing journal.
+
+## Evidence and limits
+
+This record retains the 30-minute Auto cadence and deployment-reset failure. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when deploy frequency or measured responsiveness makes the cadence inappropriate; verify persisted deadlines and one accepted round before tuning, retaining the owner's Auto switch.

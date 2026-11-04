@@ -221,3 +221,4 @@ refuse without fallback. After `tracker_uncertain`, retain the original key and
 inspect current attention plus `get_write_receipt`; never retry with a new key.
 The API/CLI contract and file map are in `docs/work-inbox.md`; UI discovery and
 phone/tablet/Mac visual acceptance remain separate.
+That distinction follows [ADR 0299](../../../../docs/adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md): attention is not acceptance.

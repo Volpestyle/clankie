@@ -110,3 +110,11 @@ A burst can overshoot a choice — sixteen A presses through the tutorial reach
 the boy/girl question and answer it. That is the cost of the coarser
 granularity, it is his to manage with the count he picks, and it is cheaper
 than the minutes the one-page-per-turn loop spent.
+
+## Evidence and limits
+
+The context records one 2026-08-17 run: 13 turns and 4m38s in the opening tutorial, with 20–40-second model turns. It also records the choice-overshoot cost of a larger input burst. Those are historical observations, not a comparative benchmark across models or current world versions; the raw journal is not linked here.
+
+## Revisit when
+
+Model-turn latency, world input limits or the opening scenes change; or a burst crosses a meaningful choice often enough to outweigh saved turns. Compare useful progress, decision overshoots and wall time on the current body, preserving the distinction between capability evidence and model choice.

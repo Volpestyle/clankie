@@ -13,6 +13,8 @@ not proof of membership or permission.
 
 ## Report, ask and never wait silently
 
+Rationale: [ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md).
+
 Start with the route your session actually exposes. Native `worker` MCP tools
 are the worker path: use their current schemas, not another account's similarly
 named connector. `message_clankie` reaches your lead as agent output, never as an
@@ -127,7 +129,7 @@ before it merges
 ([ADR 0347](../../../docs/adr/0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).
 
 Publish raw captures through `clankie evidence push` as
-[work-items](../work-items/SKILL.md) rule 3 describes, and cite the printed
+[work-items](../work-items/SKILL.md) describes, and cite the printed
 `clankie://evidence` links.
 
 In the TUI agent picker, version skew and an unverified catalog are observations,

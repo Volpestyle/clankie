@@ -27,3 +27,11 @@ Several leads drive the same fleet: Clankie's own captain, and connected apps su
 - Connected leads pass their owner-known chat or channel name as optional `channel` on worker tools. It is trimmed, 1–64 characters, grants nothing, and is never sent to the worker. Hires persist it with the starting device.
 - `?includeChannels=true` groups leads by device and channel, with stable `${deviceId}:${channel}` ids, `appId`, exact live `hires`, and optional `channel`. A channel is listed while seen in the last 24 hours or holding a live hire; activity expires after 15 minutes. Unnamed traffic has a device lead. The default v1 response stays unchanged.
 - Each expanded lead has `touches`: up to 20 confirmed worker acts from the last 30 minutes, newest first (`hire`, `message`, `answer`, `close`), with exact seat and occupant ids and time. Activity and touches are in memory; hire attribution survives restart. Clankie's own recorded worker visits supply his touches.
+
+## Evidence and limits
+
+This record retains the proposed 24-hour channel listing and 15-minute activity expiry. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when observed lead activity or app rendering shows stale or disappearing leaders; evaluate those cases before accepting or tuning the proposal, keeping channel/name metadata non-authoritative.

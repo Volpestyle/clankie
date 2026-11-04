@@ -49,3 +49,11 @@ found three places where that breaks:
   reminders; the owner can still answer it in the pane.
 - The refusal reasons that tell a lead it lost are kept only for the current
   run of the service; after a restart a late answer reads as resolved.
+
+## Evidence and limits
+
+This record retains the deferred-question retry and reminder timing. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when measured unanswered-question latency or duplicate wake cost changes; inspect accepted/deferred wakes and live questions before tuning reminders, without treating a reminder as permission to answer.

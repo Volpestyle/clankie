@@ -156,9 +156,9 @@ evidence gaps, logs or review records ([ADR 0299](../../../docs/adr/0299-the-own
    retain their recorded destination and need its own read authority. Offline
    MinIO proof is not hosted STS/IAM/revocation proof; cloud work, startup and
    owner activation need separate authorization ([ADR 0258](../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md), [ADR 0300](../../../docs/adr/0300-clankie-runs-only-on-the-owners-machine.md)).
-5. **One owner per item.** Set `--owner` when you take an item; do not edit an
+5. **One owner per item** (owner preference). Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
-6. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
+6. **Keep it small** (owner preference). Status, criteria, ownership and evidence only. No sprints,
    estimates or extra workflow.
 
 For a bug investigation where a tracker is in use, search in-progress and recent
@@ -172,7 +172,8 @@ what you remember and what the tracker holds is intentional.**
 - **Read immediately before each write**, not once at the start of the task, and
   base the new text on what you just read, not on your own earlier draft.
 - **Their edit wins, even when it reverses something agreed.** Do not restore a
-  dropped label, revert a changed priority or re-add deleted text unless asked.
+  dropped label, revert a changed priority or re-add deleted text unless asked
+  (owner preference).
 - After a timed-out write, inspect the record before retrying: a missing
   acknowledgment does not prove the write failed.
 

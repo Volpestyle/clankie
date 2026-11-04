@@ -204,3 +204,11 @@ feature.
 - [Caddy reverse proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
 - [Tailscale Funnel requirements and limitations](https://tailscale.com/docs/features/tailscale-funnel)
 - [Apple App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/)
+
+## Evidence and limits
+
+The alternatives and source links above record the transport quotas and deployment constraints used when this choice was made. They are vendor-dependent limits, not permanent properties of WebSockets. This amendment has not rerun vendor benchmarks or changed those historical comparisons. ADR 0173 separately owns the later encryption boundary.
+
+## Revisit when
+
+Vendor connection/message quotas, pricing or the supported deployment layout change, or measured demand exceeds the single-gateway capacity. Recheck the linked vendor specifications and measure reconnect, chunking and operational cost before changing carriers; preserve the device and encryption authority boundaries.

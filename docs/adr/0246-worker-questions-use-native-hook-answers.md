@@ -120,3 +120,11 @@ leaves work visibly blocked instead of silently granting permission. The public
 core owns hooks, protocol and fleet settings; app rendering and World visit
 animation remain a later lane. This decision authorizes no deployment, restart,
 or steering of an existing worker session.
+
+## Evidence and limits
+
+The existing [VUH-1868 verification](../verification/vuh-1868-claude-workers.md) distinguishes a real hook-pipe write from live Claude acceptance and identifies the tested harness release. It is version-specific evidence, not a promise that every future hook schema or nine-minute deadline behaves identically.
+
+## Revisit when
+
+Claude changes its hook input/output schema, synchronous permission semantics, timeout or question lifetime. Repeat the native hook and live acceptance proofs on the new release before changing the bridge; expiry and lost answers must still leave work blocked.

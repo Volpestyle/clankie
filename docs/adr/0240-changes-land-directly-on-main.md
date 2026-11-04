@@ -226,3 +226,11 @@ result. Legacy receipts that never started, saved before restart recovery
 existed, show as `interrupted`. These records stay as history. Member receipts of a
 passed or held attempt now take that attempt's state for retention, so they
 fence it only until it expires.
+
+## Evidence and limits
+
+This record retains the release hold that lasted over 90 minutes and 15–20-minute resubmission costs. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when the current landing/update lifecycle changes or observed holds again block unrelated work; compare deadline/hold outcomes under the successor ADRs before reviving retired queue policy.

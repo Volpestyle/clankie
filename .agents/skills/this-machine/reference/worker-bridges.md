@@ -128,6 +128,7 @@ controller-created server whose original hire is proven closed and idle;
 everything else stays report-only. Never retry an uncertain retirement or fall
 back to `kill`, group signals or KILL. Conditions: `docs/cli.md` under
 `fleet processes`.
+([ADR 0359](../../../../docs/adr/0359-owned-runtime-work-shares-one-account-governor.md)).
 
 ## Preparing linked machines
 

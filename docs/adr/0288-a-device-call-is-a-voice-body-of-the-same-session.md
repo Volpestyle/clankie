@@ -162,3 +162,11 @@ spoken conversation nowhere. For an owner's device call that no longer holds.
 
 His text can arrive slightly ahead of his voice, because the provider
 transcribes his reply as it generates it. The device paces nothing yet.
+
+## Evidence and limits
+
+This record retains the 500 ms silence endpoint and 30-second device recheck. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when speech patterns, transport behavior or measured revocation/audio latency change; evaluate real utterances and revoked calls while preserving session ownership and current device grants.

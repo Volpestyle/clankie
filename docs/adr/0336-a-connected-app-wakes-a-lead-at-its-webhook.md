@@ -120,3 +120,11 @@ journal (which now records each note's device), so a restart keeps it, and the
 check claims its slot before anything is awaited, so concurrent posts can't overrun
 it. Past the bound the note still posts; its receipt says `reached: "none"` with
 step `{via: "clankie", outcome: "limited"}`. The bound is fixed, not a setting.
+
+## Evidence and limits
+
+This record retains the webhook deadline and six app-note wakes per ten minutes. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when webhook providers, app traffic or measured wake costs change; compare accepted/deferred deliveries and note volume, keeping authenticated sender attribution and no automatic instruction authority.

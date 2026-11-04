@@ -15,6 +15,7 @@ source. The service reads the sources live under the owner's authority. The TUI
 (`/view ID`) and the app render the same spec, so you never write HTML or script.
 Views are private to the owner. A view is temporary by default (24 hours, up to
 7 days); a pinned view stays until someone expires it.
+([ADR 0360](../../../docs/adr/0360-temporary-views-stay-private-to-the-owner.md)).
 
 Make a view when someone wants to _watch_ something: "show me the heavy queue",
 "keep a board of open release issues". A one-time question ("is the queue busy?")

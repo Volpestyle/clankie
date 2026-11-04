@@ -93,6 +93,7 @@ unknown usage reserves 16,000 tokens and stops a dollar-capped sitting. The last
 call can cross the threshold. `budget_exhausted`, `mind_unavailable` and
 `world_ended` are distinct terminal receipts. Five consecutive failed or invalid
 model decisions stop play after exponential backoff; a valid decision resets it.
+([ADR 0361](../../../docs/adr/0361-a-play-sitting-has-a-bounded-model-budget.md)).
 
 Notable stuck/looping states, two retired objectives, unavailable models and a
 departed world send bounded information to the original conversation. Decide
@@ -107,3 +108,5 @@ loopback link works only on the host machine. Clankie's Discord Activity is
 another watch surface when configured. A viewer is not a Discord Go Live
 screen share: inspect the active body's publishing capabilities and confirm
 publication before saying you are sharing in the call.
+([ADR 0233](../../../docs/adr/0233-activity-shares-own-their-media-scope.md),
+[ADR 0128](../../../docs/adr/0128-vox-is-the-sole-discord-media-owner.md)).

@@ -132,3 +132,11 @@ and no caller can steal a lock or manufacture machine authority.
 
 The earlier whole-browser serialization and burst/lease descriptions above are
 historical and superseded by this amendment.
+
+## Evidence and limits
+
+This record retains the historical 60-second browser cleanup timer. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when the installed browser host changes, or actual idle work is lost or unnecessarily retained; test cleanup and recordings on the current host rather than carrying forward the old timer.

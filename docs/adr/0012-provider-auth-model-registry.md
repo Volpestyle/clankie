@@ -75,3 +75,11 @@ Only the Clankie service and privileged connectors resolve provider credentials.
 Coding-agent harnesses use their provider-native authentication. Command modules
 are the sole writers for non-secret owner configuration; argv and TUI are
 consumers of their typed, JSON-shaped results.
+
+## Evidence and limits
+
+This record retains the five-minute catalog cache and vendored fallback. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when catalog availability, vendor authentication or model capabilities change; measure stale results and request cost before changing freshness or fallback.

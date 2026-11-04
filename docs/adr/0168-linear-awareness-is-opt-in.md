@@ -265,3 +265,11 @@ This is retry-safe event admission and recoverable wake delivery, not exactly-on
 external side effects. A process can stop after a provider write but before the
 turn settles. The existing conversation, write receipts and Swarm work IDs are
 context for reconciliation; a recovered owner checks them before repeating work.
+
+## Evidence and limits
+
+This record retains the 1.5-second webhook debounce and one delayed retry for notification propagation. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when Linear propagation, webhook behavior or account rate limits change; measure missed notifications and request volume before changing coalescing, while retaining explicit opt-in and signed ingress.

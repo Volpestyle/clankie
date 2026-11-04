@@ -126,6 +126,8 @@ Sub-leads without `hire_agent` use the exact
 
 ## Huddles
 
+Rationale: [ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md).
+
 `huddle` asks every seat in a project, or the whole fleet, what it is on, what
 blocks it and what it will land when, and compiles one board. Use it to
 sequence landings before gates collide, file blockers that cost the fleet time
@@ -166,6 +168,8 @@ reread before assigning ownership or changing a persona. Remote seat IDs keep
 their fleet prefix (`FLEET/term_…`); a local pane ID is a different terminal.
 
 ## Watching and harvesting
+
+Rationale: [ADR 0293](../../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md).
 
 Use the returned seat ID with `herdr_watch` when a completion watch is needed,
 and reuse an existing one. An accepted Codex follow-up arms a harvest for its
@@ -372,6 +376,7 @@ the pull requests its done reports named. `list_agents` shows the newest three a
 one line. It is evidence for routing related work to a worker that already knows
 the area, and it controls nothing. Areas need the same exclusive linked worktree
 as commit evidence; a seat in a shared checkout records only its issue.
+([ADR 0293](../../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md): route related work without carrying unrelated context.)
 
 Record a changed inspected scope or real progress with `action: "review"`, the
 `seatId` and `evidence`, plus whatever you can establish of `assignmentStatus`,
@@ -429,6 +434,8 @@ exactly one issue also count. Message or report mentions and completed or
 ambiguous child labels do not establish ownership.
 
 ## Continuation and restarts
+
+Rationale: [ADR 0293](../../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md).
 
 At a reporting boundary, `report_continuation` declares `active`, `paused`,
 `complete`, or `blocked_on_owner` with the exact question; a settled report may

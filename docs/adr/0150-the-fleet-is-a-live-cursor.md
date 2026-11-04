@@ -69,3 +69,11 @@ recovers; durable personas and channels remain visible.
   agents. Durable contacts and conversations remain available offline.
 - Existing hosts and rolling deployments continue through the bounded polling
   fallback; no second compatibility route exists.
+
+## Evidence and limits
+
+This record retains the 30-second parked-read cap and coherent fleet cursor snapshot. These are version-specific observations or bounded implementation choices, not a new measurement of optimal defaults. This documentation update does not rerun their original proof or change their status.
+
+## Revisit when
+
+Revisit when fleet size, update cadence or client connection constraints change; measure reader latency and snapshot work while preserving coherent current bindings.

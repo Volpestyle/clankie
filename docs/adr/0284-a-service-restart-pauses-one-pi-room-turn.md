@@ -372,3 +372,7 @@ Before enabling more lanes:
    Sandbox, gateway or managed World is required by this decision.
 
 The live service is never restarted by this prototype proof or its rollout checks.
+
+## Revisit when
+
+The provider retry classification/backoff, journal retention or room audience changes, or an outage no longer recovers under the documented bounds. Rerun the existing restart, delivery, outage and revocation integration proofs, with a separate live proof for audience delivery. The existing verification plan still governs any expansion to general scheduling or new execution lanes.

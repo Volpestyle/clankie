@@ -77,7 +77,7 @@ it; none takes precedence over another.
   Wakes are best effort: the durable inbox remains readable after a failed fire.
   A successful fire proves webhook acceptance, not that your thread read it
   ([ADR 0343](../../../../docs/adr/0343-connected-hires-wake-their-lead-on-reports.md)).
-- **One watcher per worker.** Each local worker you start has exactly one lead
+- **One watcher per worker** ([ADR 0293](../../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)). Each local worker you start has exactly one lead
   thread or task that watches it: reads it with `read_agent`, answers it with
   `message_agent`, and carries its result on. Don't leave a worker unwatched, and
   don't watch another lead's worker. `read_agent` reads a Claude Code or Codex
