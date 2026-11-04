@@ -388,14 +388,24 @@ export const ConnectorPromptAnswerAppSchema = z
     deviceId: z.string().min(1).max(256),
     name: z.string().min(1).max(64),
     allowed: z.boolean(),
+    /**
+     * Agent ids the owner granted this app beyond its own hires (amended ADR 0303).
+     * An app that is on answers only the agents it hired, plus these.
+     */
+    panes: z.array(z.string().min(1).max(256)).max(256).optional(),
   })
   .strict();
 export const ConnectorPromptAnswersResponseSchema = z
   .object({ apps: z.array(ConnectorPromptAnswerAppSchema).max(256) })
   .strict();
 export type ConnectorPromptAnswersResponse = z.infer<typeof ConnectorPromptAnswersResponseSchema>;
+/** With `terminalId`, grants or withdraws that one agent for the app instead of its switch. */
 export const ConnectorPromptAnswersRequestSchema = z
-  .object({ deviceId: z.string().min(1).max(256), allowed: z.boolean() })
+  .object({
+    deviceId: z.string().min(1).max(256),
+    allowed: z.boolean(),
+    terminalId: z.string().min(1).max(256).optional(),
+  })
   .strict();
 
 export const ConnectorDetectionAppSchema = z

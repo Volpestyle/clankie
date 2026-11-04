@@ -140,6 +140,8 @@ export async function startHerdrConnection(
     repoRoot: string;
     stateRoot: string;
     env: NodeJS.ProcessEnv;
+    /** Names loaded from `.env.local`, withheld from the fleet's environment. */
+    withheld?: readonly string[];
     warn(message: string): void;
   },
   dependencies: {

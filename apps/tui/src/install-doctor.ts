@@ -109,6 +109,8 @@ interface HerdrPluginReport {
 export interface InstallDoctorReport {
   readonly ok: true;
   readonly credentialStoreHealth?: CredentialStoreHealth;
+  /** Clankie bearers still in the login keychain (ids only); `operator-credential protect` moves them. */
+  readonly unprotectedCredentials?: { readonly ids: readonly string[] } | { readonly error: string };
   readonly checkouts?: import("@clankie/protocol").CheckoutReport | { status: "unavailable"; detail: string };
   readonly resources?: FleetResourceSnapshot | { readonly status: "unavailable"; readonly detail: string };
   /** Simulator leases and devices booted outside them; absent when the service could not say. */

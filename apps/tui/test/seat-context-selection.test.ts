@@ -3,7 +3,6 @@ import { resolveSeatContext } from "../src/command/seat-context.ts";
 
 const env = {
   CLANKIE_OPERATOR_TOKEN: "clankie_op_" + "a".repeat(43),
-  CLANKIE_CAPTAIN_TOKEN: "captain-discovery",
 };
 const room = {
   schemaVersion: 1,
@@ -64,7 +63,7 @@ it.each([
       const url = new URL(String(raw));
       const bearer = new Headers(init?.headers).get("authorization");
       if (url.pathname === "/operator/v1/dispatch") {
-        expect(bearer).toBe("Bearer captain-discovery");
+        expect(bearer).toBe(`Bearer ${env.CLANKIE_OPERATOR_TOKEN}`);
         expect(JSON.parse(String(init?.body))).toMatchObject({ op: "list" });
         return Response.json({ schemaVersion: 1, op: "list", conversations: [room, child] });
       }

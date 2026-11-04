@@ -852,6 +852,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const target = await ctx.dependencies.captain.fleetLeadTarget?.(request.terminalId);
         const result = await ctx.dependencies.captain.answerPrompt({
           app: named.name,
+          deviceId: named.deviceId,
+          paneGranted: (terminalId) => ctx.promptAnswers?.paneGranted(named.deviceId, terminalId) === true,
           // Rechecked before the first key: a revoked app or a switch turned off presses nothing.
           current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
           terminalId: request.terminalId,
@@ -901,6 +903,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const target = await ctx.dependencies.captain.fleetLeadTarget?.(request.terminalId);
         const result = await ctx.dependencies.captain.pressKeys({
           app: named.name,
+          deviceId: named.deviceId,
+          paneGranted: (terminalId) => ctx.promptAnswers?.paneGranted(named.deviceId, terminalId) === true,
           // Rechecked before every key: a revoked app or a switch turned off presses nothing more.
           current: () => app() !== undefined && ctx.promptAnswers?.allowed(named.deviceId) === true,
           terminalId: request.terminalId,
@@ -1142,6 +1146,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
     if (ownerHireOp && !owner) return context.json({ error: "owner_hire_required" }, 403);
+    // Taking a terminal's control lease or typing into it is the owner's: this
+    // machine's operator or a paired device holding terminal control, never the
+    // captain bearer alone, which every trusted local client shares.
+    const terminalOwnerOp = parsed.data.op === "terminal_control" || parsed.data.op === "terminal_input";
+    if (terminalOwnerOp && !owner) return context.json({ error: "terminal_owner_required" }, 403);
     const nativeMessageOp = parsed.data.op === "pending_messages" || parsed.data.op === "stop_task";
     if (nativeMessageOp && !owner) return context.json({ error: "operator_authority_required" }, 403);
     const questionOp =
@@ -1165,6 +1174,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         goalOwnerOp ||
         questionOp ||
         workerOwnerOp ||
+        terminalOwnerOp ||
         // The owner reads and sets who leads with their own credential.
         parsed.data.op === "lead" ||
         parsed.data.op === "send" ||

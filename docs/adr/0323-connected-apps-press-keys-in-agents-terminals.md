@@ -59,3 +59,13 @@ pane send-keys`, over ssh for a linked PC. Herdr 0.9.3 names no `home`, `end`,
   tool's description tells the app to leave anything that spends money, touches
   accounts or can't be undone to him.
 - A desktop-app hire's Stop presses `esc` the same way a Herdr pane's does.
+
+## Amended 2026-11-02
+
+Keys follow the same limits as amended ADR 0303: only in agents the app hired
+itself or one James granted it, and never on a risky screen. Letters and digits
+are pressed only at a menu or yes/no prompt, never typed into an agent's input,
+and `shift+tab` is refused everywhere (it cycles the permission mode, and in a
+Claude Code edit prompt it allows all edits for the session). On a menu that
+offers to approve more than the one prompt, the app picks an option by its
+number. The protocol is unchanged; the service enforces this.

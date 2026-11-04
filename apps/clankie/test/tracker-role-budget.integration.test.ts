@@ -290,6 +290,39 @@ async function fixture(budget = new TrackerRequestBudget()) {
       env: { CLANKIE_OPERATOR_TOKEN: "owner", CLANKIE_CONTROL_PLANE_URL: "http://clankie.test" },
       fetchImpl: (input, init) => Promise.resolve(app.app.request(String(input), init)),
     }) as Promise<{ ok: boolean; body: Record<string, any> }>;
+  const workerCli = async (pane: string, ...args: string[]) => {
+    const state = join(root, "worker-cli-state");
+    await mkdir(join(state, "links"), { recursive: true });
+    const socket = join(root, "fixture-herdr.sock");
+    await writeFile(
+      join(state, "links/local.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        authentication: "local-process",
+        fleet: "default",
+        socket,
+        url: "http://127.0.0.1:43199",
+      }),
+    );
+    return runWorkCommand(args, {
+      cwd: workspace,
+      env: {
+        CLANKIE_WORKER_PANE: "1",
+        CLANKIE_STATE: state,
+        HERDR_SOCKET_PATH: socket,
+        HERDR_PANE_ID: pane,
+        CLANKIE_OPERATOR_TOKEN: "must-not-be-used",
+        CLANKIE_CAPTAIN_TOKEN: "must-not-be-used",
+      },
+      fetchImpl: async (input, init) => {
+        const request = new Request(input, init);
+        expect(request.headers.get("authorization")).toBeNull();
+        expect(request.headers.get("x-clankie-pane")).toBe(pane);
+        request.headers.set("x-test-local-pane", pane);
+        return app.app.fetch(request);
+      },
+    });
+  };
   /** The same owner route without asserting success, for refusals. */
   const ownerRaw = async (name: string, args: Record<string, unknown>) => {
     const response = await app.app.request("/v1/tracker/owner/call", {
@@ -313,6 +346,7 @@ async function fixture(budget = new TrackerRequestBudget()) {
     schemas,
     budgetReport,
     work,
+    workerCli,
     logged,
     personas,
     /** A census round: the roster the captain projects from these observations and its hire ledger. */
@@ -358,6 +392,43 @@ const KEPT = [
   "linear_save_status_update",
   "linear_save_guided_review",
 ];
+
+it("the worker CLI retains native tracker attribution, role refusals and receipts without an owner bearer", async () => {
+  const f = await fixture();
+  await f.hire("w1:p1", "builder");
+  const issue = await f.owner("save_issue", { team: f.team, project: f.project.id, title: "CLI fixture" });
+  expect((await f.workerCli("w1:p1", "show", issue.id)).ok).toBe(true);
+  expect((await f.workerCli("w1:p1", "list")).ok).toBe(true);
+  const result = await f.workerCli(
+    "w1:p1",
+    "call",
+    "save_comment",
+    "--json",
+    JSON.stringify({ issueId: issue.id, body: "From the worker CLI" }),
+  );
+  expect(result.ok, JSON.stringify(result.body)).toBe(true);
+  expect(result.body).toMatchObject({ receiptId: expect.any(String) });
+  const comments = (await f.owner("list_comments", { issueId: issue.id })).comments;
+  expect(comments.find((entry: { body: string }) => entry.body === "From the worker CLI")).toMatchObject({
+    createdByActor: { type: "agent-worker", id: "fleet:default:pane:w1:p1", name: "seat-w1:p1" },
+  });
+  const denied = await f.workerCli(
+    "w1:p1",
+    "call",
+    "save_issue",
+    "--json",
+    JSON.stringify({ id: issue.id, state: "Done", idempotencyKey: "worker-cli-close" }),
+  );
+  expect(denied).toMatchObject({ ok: false, body: { outcome: "refused", reason: "role_not_allowed" } });
+  expect((await f.owner("get_issue", { id: issue.id })).status).not.toBe("Done");
+  expect(await f.workerCli("w1:p1", "close", issue.id)).toMatchObject({
+    ok: false,
+    body: { outcome: "refused", reason: "role_not_allowed" },
+  });
+  await expect(f.workerCli("w1:p1", "owner", "save_issue", "--json", "{}")).rejects.toThrow(
+    "requires the owner",
+  );
+});
 
 it("a worker's catalog drops the lead and owner verbs; called by name they are refused with its role and nothing is written", async () => {
   const f = await fixture();

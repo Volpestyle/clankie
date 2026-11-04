@@ -1,4 +1,5 @@
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { createOwnerCredentialStore } from "./protected-credentials.ts";
 
 /** Operator-provisioned bearer that authenticates this Mac to the public gateway. */
 export const PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID = "clankie-public-gateway";
@@ -18,7 +19,7 @@ export async function resolvePublicGatewayCredential(
       `${PUBLIC_GATEWAY_FORBIDDEN_ENV} must not be set; the public gateway bearer lives in the credential broker`,
     );
   }
-  const store = options.store ?? createDefaultCredentialStore({ env });
+  const store = options.store ?? createOwnerCredentialStore(env);
   const credential = await store.get(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
   if (credential === undefined) return undefined;
   if (credential.type !== "api" || credential.key.length < 32 || credential.key.length > 512) {

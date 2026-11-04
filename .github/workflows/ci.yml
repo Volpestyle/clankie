@@ -27,17 +27,17 @@ jobs:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && 'macos-26' || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 60 || 30 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
         if: github.event_name == 'workflow_dispatch'
         with:
           components: clippy, rustfmt
@@ -84,7 +84,7 @@ jobs:
         run: pnpm check:load
       - run: pnpm --filter @clankie/vox build
         if: github.event_name == 'workflow_dispatch'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && github.event_name == 'workflow_dispatch'
         with:
           name: qa-results
@@ -108,17 +108,17 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
           cache: pnpm
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
         with:
           components: clippy, rustfmt
       # Vox's turbojpeg-sys builds libjpeg-turbo's SIMD code with NASM; the activity-sharing
@@ -126,7 +126,7 @@ jobs:
       # numbered Claude commands through a real zsh login shell.
       - run: sudo apt-get install -y --no-install-recommends nasm ffmpeg zsh
       # The cargo cache the vox-cache job saves on main.
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -137,7 +137,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # Compiler state the typecheck-cache job saved on main, so the typecheck
       # rechecks only what changed since (ADR 0310).
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .local/tsbuildinfo
           key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
@@ -168,7 +168,7 @@ jobs:
             exit $?
           fi
           test "$checks" = 0
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: landing-gate
@@ -196,14 +196,14 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           filter: blob:none
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
           cache: pnpm
@@ -251,12 +251,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@360a4e93673de6630fac2478bc9e35244b01a759 # 1.88.0
         with:
           components: clippy, rustfmt
       - run: sudo apt-get install -y --no-install-recommends nasm
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry
@@ -274,16 +274,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: .local/tsbuildinfo
           key: tsbuildinfo-${{ runner.os }}-main-${{ github.sha }}
@@ -292,7 +292,7 @@ jobs:
       - run: pnpm exec turbo run typecheck --concurrency=1 --filter=!@clankie/vox
         env:
           CLANKIE_TYPECHECK_JOBS: 3
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         if: always()
         with:
           path: .local/tsbuildinfo
@@ -303,7 +303,9 @@ jobs:
   # wait (ADR 0310): on a pull request it is skipped, which passes the required
   # check. Only pushes to this repository run here, so no fork code reaches the
   # Mac. It stays off until the Mac's runner for this repository is registered
-  # and the CLANKIE_MAC_RUNNER variable is "true".
+  # and the CLANKIE_MAC_RUNNER variable is "true". The `if:` states the intent;
+  # the runner's own job-started guard enforces it, since a pull request can
+  # change this file (ADR 0352, docs/mac-runner.md).
   mac:
     if: vars.CLANKIE_MAC_RUNNER == 'true' && github.event_name == 'push'
     runs-on: [self-hosted, macOS, james-mac]
@@ -313,7 +315,7 @@ jobs:
       issues: write
     steps:
       # The runner's own work directory, never the owner's ~/dev checkout.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           filter: blob:none
@@ -321,11 +323,11 @@ jobs:
       # ~/setup-pnpm is shared by every runner on the machine, and setup
       # empties it. The package store stays shared and outside it (install
       # below), where pnpm handles parallel installs and it survives the job.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
           dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
       # The Mac CLIs the suites spawn (Claude, Codex, OpenCode), from the
@@ -402,6 +404,7 @@ jobs:
   # agent or the app would, every outcome checked through the API, the files and
   # the service's own logs. It runs on main after merges and on request, never per
   # pull request, and never gates a merge (ADR 0347).
+  # The runner-side guard also rejects fork jobs (ADR 0352).
   real-run:
     if: vars.CLANKIE_MAC_RUNNER == 'true' && github.event_name != 'pull_request'
     runs-on: [self-hosted, macOS, james-mac]
@@ -410,18 +413,18 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           filter: blob:none
       # Each Mac runner installs pnpm in its own temp folder: the default
       # ~/setup-pnpm is shared by every runner on the machine, and setup
       # empties it. The package store stays shared and outside it (install
       # below), where pnpm handles parallel installs and it survives the job.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 11.11.0
           dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
       # The Mac CLIs the suites spawn (Claude, Codex, OpenCode), from the
@@ -446,7 +449,7 @@ jobs:
       - run: pnpm herdr:build
       - name: Real-app run
         run: $HEAVY pnpm real-run --out "$RUNNER_TEMP/real-run"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: real-run
@@ -480,11 +483,11 @@ jobs:
       issues: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           sparse-checkout: scripts/ci-finding.mjs
           sparse-checkout-cone-mode: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 26.7.0
       - name: File findings the Mac jobs couldn't

@@ -26,6 +26,7 @@ import {
 import { commandHost } from "./io.ts";
 import { text } from "node:stream/consumers";
 import { z } from "zod";
+import { workerLink } from "./worker-link.ts";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
@@ -200,6 +201,8 @@ export async function runAgentsCommand(
   }
   if (args[0] === "message-status") {
     if (args.length !== 2) throw new Error(AGENTS_USAGE);
+    const link = workerLink(options);
+    if (link) return readMessageStatus((suffix) => link.request("messages", suffix), args[1]);
     const env = options.env ?? process.env;
     const pane = env.HERDR_PANE_ID?.trim();
     if (!pane) throw new Error("Message status needs your native HERDR_PANE_ID.");

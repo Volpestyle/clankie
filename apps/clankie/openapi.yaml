@@ -5957,6 +5957,58 @@ paths:
         "404":
           description: No exact original receipt available; delivery remains uncertain
 
+  /v1/fleet/seats/{paneId}/simulators:
+    parameters:
+      - in: path
+        name: paneId
+        required: true
+        schema: { type: string }
+      - in: header
+        name: x-clankie-pane
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Captain]
+      summary: Read simulator status from a proven local worker pane
+      description: Native process/session proof on the local fleet listener is required; an owner bearer does not grant this route.
+      security: []
+      responses:
+        "200": { description: Simulator status snapshot }
+        "403": { description: No current local native seat proof }
+        "503": { description: Resource runtime unavailable }
+    post:
+      tags: [Captain]
+      summary: Plan or manage this worker's own simulator lease
+      description: Accepts the simulator CLI request schema. seatId must exactly match the proven pane and fleet must match its proof. Uses the existing simulator native holder proof, queue and revocation checks. No owner credential is read or minted.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, seatId]
+              additionalProperties: false
+              properties:
+                action: { type: string, enum: [plan, acquire, verify, touch, release, cancel] }
+                seatId: { type: string }
+                fleet: { type: string }
+                holderId: { type: string }
+                id: { type: string }
+                deviceId: { type: string }
+                deviceType: { type: string }
+                runtime: { type: string }
+                exact: { type: boolean }
+                waitMs: { type: integer, minimum: 0, maximum: 3600000 }
+                ticketId: { type: string }
+      responses:
+        "200": { description: Simulator operation result }
+        "400": { description: Malformed simulator request }
+        "403": { description: Missing proof or another seat or fleet }
+        "409": { description: Simulator operation rejected }
+        "500": { description: Unexpected simulator runtime failure }
+        "503": { description: Resource runtime unavailable or restarting }
+
   /v1/fleet/seats/{paneId}/review-candidates:
     post:
       tags: [Captain]

@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { resolveCaptainCredential, resolveOperatorCredential } from "@clankie/credential-broker";
+import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { OperatorConversationIdSchema } from "@clankie/protocol";
 import {
   createCaptainOperatorConversationClient,
@@ -84,13 +84,10 @@ export async function resolveSeatContext(
   if (response.status === 404 && input.conversationId !== undefined) {
     // An exact ID is the fast path. Resolve only a definite miss through the
     // same authenticated discovery contract `conversations show` already uses.
-    const captain = await resolveCaptainCredential({ env });
-    if (captain === undefined)
-      throw new Error("Use an exact conversation ID from clankie conversations list.");
     const client = createCaptainOperatorConversationClient(
       createCaptainRouteClient({
         host: commandHost({ ...options, env }),
-        captainToken: captain.token,
+        captainToken: credential.token,
         fetchImpl,
       }),
     );

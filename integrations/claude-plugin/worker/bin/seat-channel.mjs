@@ -510,8 +510,8 @@ async function receiptAwareFleetCall(granted, name, args) {
   }
 }
 
-/** One native receipt operation through this seat's existing linked fleet authority. */
-export async function callNativeReceipt(args, { env = process.env, fetchImpl = fetch } = {}) {
+/** One connected call or receipt lookup through this seat's existing authority. */
+export async function callNativeConnectedTool(args, { env = process.env, fetchImpl = fetch } = {}) {
   const { pane: paneId, socket } = seatIdentity(env);
   if (!paneId || !socket)
     throw new Error("Call receipts need your seat's Herdr pane or desktop-app terminal.");
@@ -532,6 +532,11 @@ export async function callNativeReceipt(args, { env = process.env, fetchImpl = f
     { fetchImpl, paneId },
   );
   return (await receiptAwareFleetCall(granted, "clankie_call", args)).result;
+}
+
+/** Retained receipt-only entrypoint for native clients. */
+export function callNativeReceipt(args, options) {
+  return callNativeConnectedTool(args, options);
 }
 
 export function runSeatChannel({

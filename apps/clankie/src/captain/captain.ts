@@ -3829,7 +3829,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     cancel: (requestId, reason) =>
       conversations.withdrawAsk(conversations.defaultGlobalConversationId(), requestId, reason),
     pending: () => conversations.pendingAsks(conversations.defaultGlobalConversationId(), PANE_PROMPT_ORIGIN),
-    answer: (input) => panePromptAnswer({ app: "Your feed", current: () => true, ...input }),
+    answer: (input) => panePromptAnswer({ app: "Your feed", owner: true, current: () => true, ...input }),
   });
   conversations.paneAnswer = panePrompts;
   const panePromptRounds = setInterval(() => {
@@ -5366,6 +5366,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
       record: (app, text) => fleetRoom.postAppNote(app, text),
       watching: () => watch.watching(),
+      appHire: (agent, deviceId) => herdrWatches.hiredByApp(agent, deviceId),
     }),
     pressKeys: createKeyPresser({
       paneAddress: (terminalId) => terminals.paneAddress(terminalId),
@@ -5373,6 +5374,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ownerAskPending: (seatId) => conversations.ownerAskPendingFor(seatId),
       record: (app, text) => fleetRoom.postAppNote(app, text),
       watching: () => watch.watching(),
+      appHire: (agent, deviceId) => herdrWatches.hiredByApp(agent, deviceId),
     }),
     recordInbound: (arrival) => noteFleetRoom(inboundFleetRoomRecord(arrival)),
     readWorkerAccounts,

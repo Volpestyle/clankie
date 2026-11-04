@@ -59,3 +59,5 @@ Nothing here becomes a default the product imposes.
 - The repos' agent guides, the lead guide, the quality-gates guide and the
   `codex-review` skill say merges wait on the fast checks only. No GitHub
   ruleset requires a check on these repos, so no repository setting changes.
+
+Amended 2026-11-02 by [ADR 0352](0352-mac-runners-run-as-their-own-user-behind-a-runner-side-guard.md): merging on green applies to pull requests from branches of this repository, opened by the owner or the fleet. A pull request from a fork waits for the owner, and no agent approves its workflow runs.

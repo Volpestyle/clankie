@@ -284,10 +284,12 @@ const CLANKIE: ManagedService = {
    * prefix. Guild and channel allowlists are deliberately absent: settings.json
    * is their source of truth and `@clankie/settings` fills the unset env.
    *
-   * The captain token preserves explicit launcher overrides. Direct service
-   * starts bootstrap the same credential from the broker.
+   * The captain bearer never rides in the environment: any same-user process
+   * reads a live process's environment, and Herdr would hand it to every pane.
+   * The service and the relay each read it from the broker; an explicit
+   * `CLANKIE_CAPTAIN_TOKEN` the owner exported still passes through `env`.
    */
-  serviceEnv: ({ env, repoRoot, captainToken }) => ({
+  serviceEnv: ({ env, repoRoot }) => ({
     ...env,
     CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE:
       env.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE ?? runtimeModule(repoRoot, "discord-bridge"),
@@ -297,7 +299,6 @@ const CLANKIE: ManagedService = {
     // about any crash it has not reported yet, however it was started again.
     CLANKIE_CRASH_REPORT:
       env.CLANKIE_CRASH_REPORT ?? join(clankieStateHome(env), "clankie", "clankie-recovery.json"),
-    ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl, timeoutMs }) => {
     try {
@@ -333,10 +334,10 @@ const RELAY: ManagedService = {
     listPortOwners(Number(relayPort(env))) ?? matchingPids,
   restartsWith: ["clankie"],
   restartWhenUnhealthy: true,
-  serviceEnv: ({ env, captainToken }) => ({
+  // Reads the captain bearer from the broker itself, as the service does.
+  serviceEnv: ({ env }) => ({
     ...env,
     CLANKIE_RELAY_PORT: relayPort(env),
-    ...(captainToken === undefined ? {} : { CLANKIE_CAPTAIN_TOKEN: captainToken }),
   }),
   probe: async ({ env, fetchImpl, timeoutMs }) => {
     const port = relayPort(env);

@@ -5,6 +5,11 @@ export function callNativeReceipt(
   options?: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch },
 ): Promise<unknown>;
 
+export function callNativeConnectedTool(
+  args: { name: string; arguments: Record<string, unknown> },
+  options?: { env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch },
+): Promise<unknown>;
+
 export function runSeatChannel(options: {
   paneId?: string;
   parentArgv?: string;

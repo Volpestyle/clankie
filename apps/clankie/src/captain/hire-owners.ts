@@ -308,10 +308,33 @@ export class HireOwners {
       (entry) => entry.hired === true && entry.seatId === seatId && entry.sessionKey === sessionKey,
     );
   }
-  /** Who asked for this exact occupant's hire; display only, never authority (ADR 0321). */
+  /**
+   * Who asked for this exact occupant's hire; display only, never authority (ADR 0321).
+   * Authority uses {@link HireOwners.hiredByApp}, which matches the pane too.
+   */
   public starter(seatId: string, occupantId: string): HireStarter | undefined {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
     return held?.hired === true ? held.startedBy : undefined;
+  }
+  /**
+   * Whether this exact native occupant (pane, seat and session occupant all matching one
+   * record) is a hire the connected app with this device id asked for. This is authority:
+   * it gates which agents' prompts and keys an app may answer (ADR 0303, ADR 0323,
+   * amended). A record that matches only in part, a hire without an app starter, an
+   * adopted seat or a hand-started one is never the app's.
+   */
+  public hiredByApp(paneId: string, seatId: string, occupantId: string, deviceId: string): boolean {
+    const matches = this.state.hires.filter((entry) => entry.paneId === paneId || entry.seatId === seatId);
+    const held = matches.length === 1 ? matches[0] : undefined;
+    return (
+      held !== undefined &&
+      held.paneId === paneId &&
+      held.seatId === seatId &&
+      held.occupantId === occupantId &&
+      held.hired === true &&
+      held.startedBy?.kind === "app" &&
+      held.startedBy.deviceId === deviceId
+    );
   }
   /** An original runtime's journaled fresh restart, never ordinary re-adoption. */
   public restartSuccessor(input: {

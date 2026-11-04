@@ -2332,6 +2332,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return agent;
   }
 
+  /**
+   * Whether this exact native occupant (pane, seat and session) is a hire the connected
+   * app with this device id asked for. Authority: it gates which agents an app may answer
+   * prompts and press keys in (ADR 0303, ADR 0323, amended). No session, no match.
+   */
+  public hiredByApp(agent: HerdrAgentSnapshot, deviceId: string): boolean {
+    return agent.session === undefined
+      ? false
+      : this.hireOwners.hiredByApp(
+          agent.paneId,
+          agent.terminalId,
+          occupantIdForHerdrSession(agent.session),
+          deviceId,
+        );
+  }
+
   /** The persisted lead of this exact native occupant, for the census; grants nothing. */
   public seatClaim(agent: HerdrAgentSnapshot): { owner: ConversationOwner; hired: boolean } | undefined {
     return agent.session === undefined

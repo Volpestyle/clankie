@@ -1368,7 +1368,11 @@ describe("native terminal NDJSON tail", () => {
           },
         }),
       },
-      dispatch: async (request) => {
+      // Typing into a terminal goes on the device's own identity, never the relay's captain bearer.
+      dispatch: async () => {
+        throw new Error("terminal control must not ride the captain bearer");
+      },
+      deviceDispatch: async (request) => {
         seen.push(request);
         if (request.op === "terminal_control") {
           return {

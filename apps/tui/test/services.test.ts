@@ -1258,7 +1258,7 @@ describe("captain credential injection", () => {
     }) as unknown as typeof fetch;
   }
 
-  it("gives the clankie service the shared captain secret and its presence runtime", async () => {
+  it("keeps the captain bearer out of the clankie service's environment and gives it its presence runtime", async () => {
     const env = await stateEnv();
     const { spawnImpl, started, envFor } = capturingSpawn();
 
@@ -1274,7 +1274,8 @@ describe("captain credential injection", () => {
     });
 
     expect(started()).toBe(true);
-    expect(envFor()?.CLANKIE_CAPTAIN_TOKEN).toBe("clankie_cap_test");
+    // Any same-user process reads a live environment; the service reads the broker.
+    expect(envFor()).not.toHaveProperty("CLANKIE_CAPTAIN_TOKEN");
     expect(envFor()?.CLANKIE_DISCORD_PRESENCE_RUNTIME_MODULE).toBe(
       "/repo/apps/discord-bridge/src/presence-runtime-module.ts",
     );
@@ -1511,14 +1512,14 @@ describe("restart carries dependents", () => {
     expect(resolveRestartTargets("clankie")).toContain("relay");
   });
 
-  it("gives the relay its canonical port and the brokered captain bearer", () => {
+  it("gives the relay its canonical port and never the captain bearer", () => {
     const env = managedService("relay").serviceEnv?.({
       env: {},
       repoRoot: "/repo",
       captainToken: "captain-secret",
     });
     expect(env?.CLANKIE_RELAY_PORT).toBe("4321");
-    expect(env?.CLANKIE_CAPTAIN_TOKEN).toBe("captain-secret");
+    expect(env !== undefined && "CLANKIE_CAPTAIN_TOKEN" in env).toBe(false);
     const overridden = managedService("relay").serviceEnv?.({
       env: { CLANKIE_RELAY_PORT: "5555" },
       repoRoot: "/repo",

@@ -41,6 +41,10 @@ clankie heavy -- node path/to/owned-runtime.js
 clankie heavy --server -- node path/to/owned-service.js
 ```
 
+A hired pane's simulator CLI uses its process-proven local fleet link, without
+reading the owner bearer. Name your own exact seat in its JSON; another seat or
+fleet is refused. A missing link needs your lead's repair, never a credential fallback.
+
 ## Lanes
 
 `clankie heavy` sizes the command for you. Focused checks run in the **light

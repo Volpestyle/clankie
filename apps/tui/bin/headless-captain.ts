@@ -3,6 +3,7 @@ import type { CredentialStore } from "@clankie/credential-broker";
 import type { ServiceRegistryOptions } from "./services.ts";
 import type { ExecFileImpl } from "../src/command/doctor.ts";
 import { commandHelp } from "../src/command/registry.ts";
+import { operatorHarness } from "../src/command/harness-command.ts";
 import { outputJson, type Writable } from "../src/command/io.ts";
 export { isHeadlessCaptainCommand, unknownLauncherCommand } from "../src/command/registry.ts";
 
@@ -47,6 +48,13 @@ export async function runHeadlessCaptainCommand(
   const stderr = options.stderr ?? process.stderr;
   try {
     const env = options.env ?? process.env;
+    if (
+      env.CLANKIE_WORKER_PANE === "1" &&
+      (["start", "restart", "recover"].includes(command ?? "") || operatorHarness(command) !== undefined)
+    )
+      throw new Error(
+        "Owner service and conversation-seat launches require the owner's terminal; ask your lead.",
+      );
     if (["start", "restart", "recover"].includes(command ?? "")) {
       const { createDefaultCredentialStore } = await import("@clankie/credential-broker");
       const joined = await (

@@ -708,8 +708,13 @@ the owner's credentials (VUH-2592, [ADR 0296](adr/0296-hired-workers-run-under-a
 
 Every local hire's environment carries `CLANKIE_WORKER_PANE=1` and blank
 `CLANKIE_OPERATOR_TOKEN` and `CLANKIE_CAPTAIN_TOKEN`. That happens whether or not
-the sandbox is on: a bearer that Herdr's server inherited never reaches the
-worker. In a worker pane, a blank bearer counts as absent. When no credential can
+the sandbox is on. Herdr's server itself starts with no Clankie bearer and no
+provider key the service read from `.env.local`, and the launcher no longer puts
+the captain bearer in the service's or the relay's environment: each reads it
+from the broker. A worker reaches Clankie through its own seat (`clankie mcp
+--seat`, proven by its native session), never the captain bearer. Typing into a
+terminal or taking its control lease needs the owner (this machine's operator or
+a paired device with terminal control), not the captain bearer. In a worker pane, a blank bearer counts as absent. When no credential can
 be read there, `clankie` says hired workers don't hold the owner's credential,
 instead of reporting a Keychain fault.
 
@@ -727,7 +732,7 @@ starts under `/usr/bin/sandbox-exec`:
 The profile allows everything else and denies reading or writing:
 
 - the protected keychain (`clankie operator-credential protect` moves the
-  operator bearer there);
+  operator bearer, the captain bearer and Clankie's other bearers there);
 - the file broker, `~/.config/clankie/credentials.json` or `$CLANKIE_CREDENTIALS_FILE`;
 - the service checkout's and `~/.clankie/pinned`'s `.env.local`.
 
@@ -743,14 +748,20 @@ Limits until the follow-ups land:
 - **Escapes:** a confined worker can still ask the unconfined Herdr server for a
   new pane, submit a launchd job, drive another app with Apple Events, or write
   code the owner or service runs later (VUH-2836).
-- **Worker commands:** `evidence push`, `simulator` and `work` still use the
-  operator bearer until VUH-2837, so protect the bearer only after that lands.
+- **Worker commands:** `evidence push`, `agents message-status`, local simulator
+  commands and role-checked tracker calls now use the pane link. Worker panes
+  refuse owner and captain credential resolution before reading any store.
+  Owner conversation seats, delivery settlement, tracker administration and
+  review waivers stay owner-only. The [CLI guide](cli.md#operator-credential-protect---json)
+  describes native tracker receipts and legacy-command limits. This rollout
+  does not enable the live worker sandbox.
 - **Other secrets:** the remaining broker items, `~/.config/clankie`, `~/.ssh`,
   `~/.config/gh` and provider keys aren't covered yet (VUH-2838, VUH-2839, VUH-2840).
 
 ## Owner-authorized work-item gestures
 
-Workers keep using `clankie work` for the repo’s recorded tracker. Paired devices
+Workers use `clankie work call` and their native tracker tools for the hire's
+recorded tracker and role. Paired devices
 with `terminalControl` can assign work metadata, add or remove a role label,
 and append a blocker through the narrow `work_item_write` operator operation.
 This authority stays with the original owner identity through the relay;

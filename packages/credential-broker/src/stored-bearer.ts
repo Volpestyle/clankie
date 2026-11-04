@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { createDefaultCredentialStore, type CredentialStore } from "./credential-store.ts";
+import type { CredentialStore } from "./credential-store.ts";
+import { createOwnerCredentialStore } from "./protected-credentials.ts";
 
 const STORED_BEARER_BYTES = 32;
 
@@ -70,7 +71,7 @@ async function ensureStoredBearer<TOptions extends StoredBearerOptions>(
 }
 
 function storeFor(options: StoredBearerOptions): CredentialStore {
-  return options.store ?? createDefaultCredentialStore(options.env === undefined ? {} : { env: options.env });
+  return options.store ?? createOwnerCredentialStore(options.env);
 }
 
 function sentenceCase(value: string): string {

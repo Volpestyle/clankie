@@ -53,7 +53,9 @@ Questions go to the lead that asked, never to the owner.
 ## As the builder or lead
 
 - Open the pull request as a draft early and push often (ADR 0310).
-- Merge once the checks are green; don't wait for a review.
+- Merge once the checks are green; don't wait for a review. That holds for the
+  owner's and the fleet's own branches only: a fork's pull request waits for
+  the owner, and its workflow runs are never approved by an agent.
 - When a reviewer is free, ask it through Clankie (`message_agent` to its
   pane, or `message_seat`), naming `OWNER/REPO#N`. File each finding as a
   follow-up issue, or fix it in the same pull request if it hasn't merged.

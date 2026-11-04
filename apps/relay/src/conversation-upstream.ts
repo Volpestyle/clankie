@@ -102,7 +102,9 @@ export type DeviceConversationRequest = Extract<
       | "app_notes"
       | "presence"
       | "autonomy"
-      | "lead";
+      | "lead"
+      | "terminal_control"
+      | "terminal_input";
   }
 >;
 export type DeviceConversationDispatch = (
@@ -156,6 +158,8 @@ export function createDeviceConversationDispatch(options: {
         "presence",
         "autonomy",
         "lead",
+        "terminal_control",
+        "terminal_input",
       ].includes(request.op)
     )
       throw new Error("Unsupported device conversation operation");

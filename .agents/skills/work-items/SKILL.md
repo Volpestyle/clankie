@@ -61,6 +61,11 @@ operator-only. The operator fallback for bundle/run ids in per-repo stores also
 requires `repo`. Saved
 views still require `project`/`storeId`; guided reviews still require `issueId`.
 Routing never raises a worker's role or request budget.
+In a hired pane, the CLI's worker work commands use that same native tool path,
+without reading the owner or captain bearer. Prefer `clankie work call TOOL --json ARGS`
+for the complete tracker vocabulary and atomic description patches.
+Keep its original receipt on an uncertain result and inspect it; never replay
+the write. Repository overrides and tracker setup/import/cutover remain owner-only.
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.

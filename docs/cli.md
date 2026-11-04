@@ -1834,7 +1834,7 @@ permission. The public gateway holds the APNs signing key and delivery registrat
 
 Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device": { … } }`.
 
-### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]` / `connector wake [list | set LEAD | clear LEAD | send LEAD TEXT]`
+### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP | pane APP AGENT on|off]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]` / `connector wake [list | set LEAD | clear LEAD | send LEAD TEXT]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
 a remote MCP server that lets Claude list your agents, read their screens and
@@ -1954,17 +1954,25 @@ agent's pane ([ADR 0303](adr/0303-connected-apps-answer-agents-prompts.md)).
 It is off for every app until you turn it on: `clankie connector prompts`
 lists the connected apps as `NAME: on|off  (DEVICE_ID)`, and `clankie connector
 prompts on APP` or `off APP` changes one, named by its approved name or device
-id. JSON: `{ "ok": true, "apps": [{ "deviceId", "name", "allowed" }] }`. Exit 1
+id. JSON: `{ "ok": true, "apps": [{ "deviceId", "name", "allowed", "panes"? }] }`. Exit 1
 with status `unknown_app` when no connected app matches, or `ambiguous_app`
-when two share the name. An app that is on presses keys only while the agent
+when two share the name. An app that is on answers only the agents it hired;
+`clankie connector prompts pane APP AGENT on|off` grants or withdraws one more
+exact agent (its `list_agents` id, with or without `herdr:`), listed under the
+app as `also answers agent ID (your grant)`. It presses keys only while the agent
 waits on input and the prompt it read is still on screen, once per prompt, and
-never on a question Clankie sent to you. Each answer leaves a note in that
+never on a question Clankie sent to you. Risky prompts stay yours: a
+permission-mode switch, an option that approves more than this prompt ("don't
+ask again", "always"), recursive deletes, force pushes, and password, token,
+key, sign-in or payment prompts are refused. Each answer leaves a note in that
 app's name on the board.
 
 `press_keys` presses named keys in an agent's terminal whatever it is doing
 ([ADR 0323](adr/0323-connected-apps-press-keys-in-agents-terminals.md)): `up`,
-`down`, `esc`, `ctrl+c`, `shift+tab`, `enter`, a letter or a digit, up to 24 at
-a time. The same `clankie connector prompts` switch turns it on, because a key
+`down`, `esc`, `ctrl+c`, `enter`, a letter or a digit, up to 24 at
+a time, under the same limits: only its own hires or a granted agent, letters
+and digits only at a menu or yes/no prompt, never `shift+tab`, and never on a
+risky screen. The same `clankie connector prompts` switch turns it on, because a key
 can approve a prompt too. It works for Herdr panes on every machine and for
 hires in the Herdr desktop app, never types text, and never touches a screen
 whose question Clankie sent to you. Each press leaves a note in that app's name
@@ -3941,11 +3949,28 @@ the login keychain into Clankie's protected keychain,
 random unlock password for it lives in the login keychain. The token is
 unchanged, so running sessions keep working, and the login copy is deleted only
 after the protected copy reads back. Hired workers under the worker sandbox
-can't read the protected keychain. JSON:
-`{ "ok": true, "status": "protected"|"already_protected", "created", "moved" }`.
-Refused from a hired worker pane. Run it only once worker CLI commands no
-longer need the bearer (VUH-2837); until then a worker's `evidence push`,
-`simulator` and `work` stop working after protection.
+can't read the protected keychain. It then moves every other bearer that grants
+authority over Clankie itself the same way: the captain's, the Discord bridges',
+the activity producer's and play voice's, joined hosts', the public gateway's and
+its wrapping key. Provider accounts stay where they are. Owner processes read
+those bearers from the protected keychain first, then the login keychain, so
+running it again moves nothing and changes no value. `clankie doctor` names any
+that are still in the login keychain. JSON:
+`{ "ok", "status": "protected"|"already_protected", "created", "moved", "credentials": { "moved": [ids], "failed": [ids] } }`;
+it exits 1 when a copy did not read back, keeping that login copy.
+Refused from a hired worker pane. Worker CLI commands never resolve the owner
+or captain bearer, even if one was inherited in the environment. `evidence push`
+and `agents message-status` use that pane's fleet link. Local `simulator` commands
+use the same link, with native holder proof and only the caller's own seat.
+`work list|show|activity|create|update|attach` and `work call TOOL --json ARGS`
+use the worker's native tracker tools, role and original call receipts. A missing
+link refuses without a bearer fallback. Owner-only commands, including tracker
+setup/import/cutover, `work owner`, `--repo` overrides, owner-seat launch/resume,
+seat-delivery settlement and review waivers, refuse from a worker pane.
+Worker work results retain the native tool receipt, including an uncertain
+outcome; inspect its original receipt instead of resending. Legacy criterion
+updates use `work call save_issue` with an atomic description patch; a create
+without a saved team uses that same native call with an explicit team and title.
 
 ### `play status`
 

@@ -13,6 +13,7 @@ import {
 } from "@clankie/protocol";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { commandHost } from "./io.ts";
+import { workerLink } from "./worker-link.ts";
 
 async function request(
   path: string,
@@ -21,11 +22,16 @@ async function request(
   timeoutMs?: number,
 ): Promise<unknown> {
   const env = options.env ?? process.env;
-  const credential = await resolveOperatorCredential({
-    env,
-    ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
-  });
-  if (!credential?.token) throw new Error("No operator credential is available");
+  const link = workerLink(options);
+  if (link && path !== FLEET_SIMULATORS_PATH)
+    throw new Error("Worker panes use simulator status; fleet-wide resources need the owner.");
+  const credential = link
+    ? undefined
+    : await resolveOperatorCredential({
+        env,
+        ...(options.operatorCredentialStore === undefined ? {} : { store: options.operatorCredentialStore }),
+      });
+  if (!link && !credential?.token) throw new Error("No operator credential is available");
   const deadlineMs =
     timeoutMs ?? (body !== undefined ? 60_000 : path === FLEET_SIMULATORS_PATH ? 10_000 : 5_000);
   // Undici otherwise stops waiting for headers after 300 seconds, before the
@@ -41,14 +47,18 @@ async function request(
   try {
     const init: RequestInit & { dispatcher?: Agent } = {
       method: body === undefined ? "GET" : "POST",
-      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      headers: {
+        ...(credential ? { authorization: `Bearer ${credential.token}` } : {}),
+        "content-type": "application/json",
+      },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...(dispatcher === undefined ? {} : { dispatcher }),
       signal: AbortSignal.timeout(deadlineMs),
     };
-    const response = await (options.fetchImpl ?? fetch)(
-      new URL(path, commandHost({ ...options, env })),
-      init,
+    const response = await (
+      link
+        ? link.request("simulators", "", init)
+        : (options.fetchImpl ?? fetch)(new URL(path, commandHost({ ...options, env })), init)
     ).catch((error: unknown) => {
       throw transportError(error);
     });
