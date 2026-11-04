@@ -8,7 +8,12 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { SettingsStore } from "@clankie/settings";
-import { ProjectSchema } from "@clankie/protocol/projects";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { AutonomyStore } from "../src/captain/autonomy.ts";
+import { createAutoRounds } from "../src/captain/captain-auto-rounds.ts";
+import { createWatchGate } from "../src/watch.ts";
+import { OperatorFleetSeatSchema } from "@clankie/protocol";
+import { ProjectSchema, ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER } from "@clankie/work-items";
 import {
   autoPlanCapacity,
@@ -727,6 +732,13 @@ it("uses the registered PC identity for staffing, without hiding a different fai
   });
   const raw = [
     {
+      seatId: "offline/t1",
+      occupantId: "one",
+      fleet: "offline",
+      workingDirectory: "C:/Repos/KH2/work",
+      status: "unknown",
+    },
+    {
       seatId: "online/t1",
       occupantId: "one",
       fleet: "online",
@@ -758,6 +770,17 @@ it("uses the registered PC identity for staffing, without hiding a different fai
     },
   ];
   const read = (failures: string[]) => autoStaffingCensus(raw, saved, new Set(failures));
+  // The former raw-route join leaves this very same registered folder unknown.
+  expect(
+    projectStaffing({
+      project,
+      seats: autoStaffingSeats(raw),
+      unavailableMachines: new Set(["offline"]),
+      queue: { state: "known", ready: [], backlog: [], blocked: [] },
+      plans: [],
+      started: { state: "known", total: 0, byState: {}, cap: null },
+    }),
+  ).toMatchObject({ activeSeats: null, occupiedSeats: null, reason: "unknown" });
   const census = read(["herdr:offline"]);
   const staffing = projectStaffing({
     project: census.project(project),
@@ -780,30 +803,114 @@ it("uses the registered PC identity for staffing, without hiding a different fai
   expect(
     read(["herdr:offline", "herdr:online", "herdr:other"]).seats.some((s) => s.machine === "builder"),
   ).toBe(false);
-  const record = new AutoRoundRecord(join(root, "rounds"));
-  record.measured(
-    "lead",
-    [
-      {
-        ...(await measureVelocity(
-          project,
-          null,
-          {
-            outcomes: async () => ({ state: "unavailable", reason: "fixture" }),
-            history: async () => ({ state: "unknown", reason: "fixture" }),
-            churn: async () => ({ state: "unknown", reason: "fixture" }),
-            timeZone: "UTC",
-          },
-          at,
-        )),
-        staffing,
+  const unknown = read(["herdr:other"]);
+  expect(
+    projectStaffing({
+      project: unknown.project(project),
+      seats: unknown.seats,
+      unavailableMachines: unknown.unavailableMachines,
+      queue: { state: "known", ready: [], backlog: [], blocked: [] },
+      plans: [],
+      started: { state: "known", total: 0, byState: {}, cap: null },
+    }),
+  ).toMatchObject({ activeSeats: null, idleSeats: null, occupiedSeats: null, reason: "unknown" });
+  expect(read(["herdr:offline", "herdr:online"]).unavailableMachines.has("builder")).toBe(true);
+  const disabled = autoStaffingCensus(
+    raw,
+    {
+      ...saved,
+      execution: {
+        ...saved.execution,
+        connections: saved.execution.connections.map((c) =>
+          c.id === "online" ? { ...c, enabled: false } : c,
+        ),
       },
-    ],
-    at,
+    },
+    new Set(["herdr:offline"]),
   );
-  expect(new AutoRoundRecord(join(root, "rounds")).read()[0]!.projects[0]!.staffing).toMatchObject({
-    activeSeats: 1,
-    idleSeats: 1,
-    occupiedSeats: 2,
+  expect(disabled.unavailableMachines.has("builder")).toBe(true);
+  const ambiguous = autoStaffingCensus(
+    raw,
+    {
+      ...saved,
+      execution: {
+        ...saved.execution,
+        connections: [
+          ...saved.execution.connections,
+          {
+            ...saved.execution.connections[0]!,
+            id: "old-pc",
+            machine: "another",
+            ssh: { host: "fixture-other", shell: "powershell" },
+          },
+        ],
+      },
+    },
+    new Set(),
+  );
+  expect(ambiguous.unavailableMachines.has("builder")).toBe(true);
+  expect(ambiguous.unavailableMachines.has("another")).toBe(true);
+  // Actual Auto cadence, account-route selection, persisted round and prompt preparation.
+  await store.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({ ...current.projects, projects: [project] }),
+  }));
+  const autonomy = new AutonomyStore(join(root, "autonomy.json"));
+  autonomy.command("global-default", { action: "set_enabled", enabled: true });
+  const shutdown = new AbortController();
+  const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  const routes: (string | undefined)[] = [];
+  const pending = new Set<string>();
+  const rounds = createAutoRounds({
+    options: { stateDir: root, autoRoundIntervalMs: 100 },
+    settings: () => store.load(),
+    shutdown,
+    autonomy,
+    watch: createWatchGate(store),
+    conversations,
+    namedLocal: [],
+    unansweredFleetSources: new Set(["herdr:offline"]),
+    pendingFleetSources: pending,
+    refreshFleet: async () =>
+      raw.map((s) =>
+        OperatorFleetSeatSchema.parse({
+          ...s,
+          personaId: "agent-fixture",
+          harness: "codex",
+          title: "Fixture",
+        }),
+      ),
+    autoRoutingLeads: async () => [],
+    readWorkerAccounts: async (machine) => {
+      routes.push(machine);
+      return { ...accounts, machine: machine ?? "local" };
+    },
+    wakeConversation: async (_request, _prompt, guard) => {
+      await guard?.();
+      return true;
+    },
+    noteFleetRoom: () => {},
+    leadParty: () => ({ kind: "clankie", label: "Clankie" }),
   });
+  try {
+    const read = () => new AutoRoundRecord(join(root, "auto-rounds")).read();
+    await expect
+      .poll(() => read()[0]?.projects[0]?.staffing, { timeout: 10000 })
+      .toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+    expect(read()[0]!.staffing).toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+    expect(new Set(routes)).toEqual(new Set(["online"]));
+    expect(read()[0]!.staffing?.plans).toHaveLength(2);
+    expect(read()[0]!.staffing?.plans.every((plan) => plan.machine === "builder")).toBe(true);
+    expect((await store.load()).projects.projects[0]!.workspaces[0]!.machineId).toBe("offline");
+    pending.add("herdr:online");
+    await expect.poll(() => read()[0]?.projects[0]?.staffing?.activeSeats, { timeout: 10000 }).toBe(null);
+    expect(read()[0]!.staffing?.activeSeats).toBe(null);
+    pending.delete("herdr:online");
+    await expect.poll(() => read()[0]?.projects[0]?.staffing?.activeSeats, { timeout: 10000 }).toBe(1);
+  } finally {
+    shutdown.abort();
+    rounds.stopAutoRounds();
+    autonomy.close();
+    await conversations.close();
+  }
 });

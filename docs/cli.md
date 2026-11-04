@@ -5830,6 +5830,12 @@ service measured before waking the lead, and whether that wake was delivered
   Unknown sources stay unknown/null; unset caps are null. Plan headroom requires
   fresh usage within five minutes, sign-in, no owner hold, more than 10% remaining
   in every general window, and positive spare capacity at the observed pace.
+  Staffing joins folder and connection names through the saved machine registry, never
+  display hostnames. Duplicate observations of one native occupant count once. A failed
+  remote connection is covered only by a responding connection to the same registered
+  machine and Herdr session; a different failed session keeps the census unknown.
+  Account capacity is read through a responding connection. These measurement aliases
+  do not rewrite project folders or transfer permissions.
   Staffing is advisory: ordinary project, machine, model and hire admission still apply.
   The CLI requests `includeStaffing=true`; HTTP clients must opt in so older strict
   clients retain their response shape. Historical rounds may omit staffing.

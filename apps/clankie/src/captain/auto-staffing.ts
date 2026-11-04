@@ -133,18 +133,28 @@ export function autoStaffingCensus(
   unavailableSources: ReadonlySet<string>,
   localFleets: readonly string[] = [],
 ) {
-  const ids = new Map<string, string>();
+  const ids = new Map(["local", "default", ...localFleets].map((id) => [id, "local"]));
+  const ambiguous = new Set<string>();
+  const unavailableMachines = new Set<string>();
+  const bind = (id: string, machine: string) => {
+    const previous = ids.get(id);
+    if (previous !== undefined && previous !== machine) {
+      ambiguous.add(id);
+      unavailableMachines.add(previous);
+      unavailableMachines.add(machine);
+    } else ids.set(id, machine);
+  };
   for (const machine of settings.machines)
-    for (const id of [machine.id, ...machine.aliases]) ids.set(id, machine.id);
+    for (const id of [machine.id, ...machine.aliases]) bind(id, machine.id);
   for (const connection of settings.execution.connections)
-    if (connection.machine !== undefined) ids.set(connection.id, connection.machine);
-  const machineId = (id: string) =>
-    id === "default" || localFleets.includes(id) ? "local" : (ids.get(id) ?? id);
+    if (connection.machine !== undefined) bind(connection.id, connection.machine);
+  const machineId = (id: string) => ids.get(id) ?? id;
   const failed = new Set(
     [...unavailableSources].filter((s) => s.startsWith("herdr:")).map((s) => s.slice(6)),
   );
-  const healthy = settings.execution.connections.filter((c) => c.enabled !== false && !failed.has(c.id));
-  const unavailableMachines = new Set<string>();
+  const healthy = settings.execution.connections.filter(
+    (c) => c.enabled !== false && !failed.has(c.id) && !ambiguous.has(c.id),
+  );
   for (const id of failed) {
     const connection = settings.execution.connections.find((c) => c.id === id);
     const covered =
@@ -156,7 +166,7 @@ export function autoStaffingCensus(
   }
   return {
     seats: autoStaffingSeats(
-      seats.filter((seat) => !failed.has(seat.fleet ?? "default")),
+      seats.filter((seat) => !failed.has(seat.fleet ?? "default") && !ambiguous.has(seat.fleet ?? "default")),
       localFleets,
       machineId,
     ),

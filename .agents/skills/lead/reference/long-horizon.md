@@ -91,6 +91,12 @@ edges current and continue unrelated ready work.
 than idle while plan capacity remains. The next round checks active staffing
 increased, or records `cap_reached`, `no_ready_work` or `plan_reserve`. An
 unresolved check needs action again; unknown telemetry is not spare capacity.
+Staffing uses registered machine identities and counts a native occupant once
+across connections. A failed connection is covered only by another responding
+connection to the same registered PC and Herdr session. Other failed sessions
+keep the census unknown; display hostnames never establish identity. This does
+not rebind folders or transfer permissions.
+
 Re-read usage before a hire. Detection does not grant authority, change caps,
 pick an issue or start a worker; those remain your decisions.
 
