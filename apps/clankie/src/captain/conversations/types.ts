@@ -162,6 +162,8 @@ export interface ConversationDriver<T> {
 
 interface SeatTranscriptCheckpoint {
   readonly sessionKey: string;
+  /** Head/workspace membership lives in the conversation's paged index. */
+  readonly index?: "sqlite-v1";
   readonly entryIds?: readonly string[];
   /** Pre-tool transcript checkpoints; read once and rewritten as `entryIds`. */
   readonly messageIds?: readonly string[];
