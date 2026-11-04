@@ -25,7 +25,12 @@ afterEach(async () => {
  * load request (`POST /api/generate` without a prompt) moves it to `afterLoad`.
  * `ollama: false` is a runtime with no native API.
  */
-async function serve(options: { ollama: boolean; loaded?: unknown; afterLoad?: unknown }) {
+async function serve(options: {
+  ollama: boolean;
+  loaded?: unknown;
+  afterLoad?: unknown;
+  redirect?: { readonly path: string; readonly to: string };
+}) {
   const calls: string[] = [];
   let ps = options.loaded;
   const server: Server = createServer((request, response) => {
@@ -33,6 +38,10 @@ async function serve(options: { ollama: boolean; loaded?: unknown; afterLoad?: u
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       calls.push(`${request.method} ${request.url}`);
+      if (request.url === options.redirect?.path) {
+        response.writeHead(307, { location: `${options.redirect.to}${request.url}` }).end();
+        return;
+      }
       response.setHeader("content-type", "application/json");
       if (options.ollama && request.method === "GET" && request.url === "/api/ps") {
         response.end(JSON.stringify(ps));
@@ -101,6 +110,29 @@ describe("the context a local runtime actually serves", () => {
     expect(served.contextWindow).toBe(65_536);
     expect(ollama.calls).toEqual(["GET /api/ps"]);
   });
+
+  it.each(["/api/ps", "/api/generate"])(
+    "refuses a redirect from %s and keeps the declared window",
+    async (path) => {
+      const model = "vuh2647-qwen3-vl-8b-ctx8k:latest";
+      const elsewhere = await serve({ ollama: true, loaded: capture.ctx8kLoaded });
+      const ollama = await serve({
+        ollama: true,
+        loaded: capture.nothingLoaded,
+        redirect: { path, to: elsewhere.baseURL.replace("/v1", "") },
+      });
+
+      const served = await servedLocalContextModel(localConfig(ollama.baseURL, model), {
+        provider: "ollama",
+        id: model,
+        contextWindow: NATIVE,
+      });
+
+      expect(served.contextWindow).toBe(NATIVE);
+      expect(ollama.calls).toContain(`${path === "/api/ps" ? "GET" : "POST"} ${path}`);
+      expect(elsewhere.calls).toEqual([]);
+    },
+  );
 
   it("keeps the declared window on a runtime without Ollama's API, and asks nothing of other providers", async () => {
     const other = await serve({ ollama: false });
