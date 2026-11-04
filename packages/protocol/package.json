@@ -37,7 +37,6 @@
     "./reviews": "./src/reviews.ts",
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",
-    "./integrate": "./src/integrate.ts",
     "./deploy-holds": "./src/deploy-holds.ts",
     "./mcp-result": "./src/mcp-result.mjs",
     "./tool-output": "./src/tool-output.ts",
