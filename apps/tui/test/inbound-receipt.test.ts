@@ -60,33 +60,57 @@ it("an old responder cannot settle a newer original claim", async () => {
   );
   expect(claim.deliveryId).toBe(newer.deliveryId);
 });
-it.each(["corrupt", "locked"])("%s original state fails closed before any network request", async (mode) => {
+it.each([
+  { mode: "corrupt", title: "corrupt original state fails closed before any network request" },
+  {
+    mode: "locked",
+    title: "locked original state permits receipt reads but never settles or sends a replacement",
+  },
+])("$title", async ({ mode }) => {
   const directory = root();
   const file = join(directory, `${createHash("sha256").update("pane").digest("hex")}.json`);
-  writeFileSync(
-    file,
-    mode === "corrupt"
-      ? "bad"
-      : JSON.stringify({
-          schemaVersion: 1,
-          deliveryId: "00000000-0000-4000-8000-000000000001",
-          binding: "a".repeat(64),
-          fingerprint: createHash("sha256").update("text").digest("hex"),
-          text: "text",
-        }),
-  );
+  const original = {
+    schemaVersion: 1,
+    deliveryId: "00000000-0000-4000-8000-000000000001",
+    binding: "a".repeat(64),
+    fingerprint: createHash("sha256").update("text").digest("hex"),
+    text: "text",
+  };
+  const bytes = mode === "corrupt" ? "bad" : JSON.stringify(original);
+  writeFileSync(file, bytes);
   if (mode === "locked") writeFileSync(`${file}.lock`, "exclusive");
-  let posts = 0;
+  const requests: { suffix: string; method: string }[] = [];
   const send = createInboundSender({
     directory,
     scope: "pane",
-    request: async (_suffix, init) => {
-      if (init) posts++;
-      return response({});
+    request: async (suffix, init) => {
+      requests.push({ suffix, method: init?.method ?? "GET" });
+      // An exact positive receipt must still respect the local settlement lock.
+      return response({ ...original, received: true, deliveryStage: "stored" });
     },
   });
-  expect((await send("text")).deliveryStage).toBe("uncertain");
-  expect(posts).toBe(0);
+  for (const receipt of [await send("text"), await send("replacement"), await send.reconcilePending()]) {
+    if (mode === "corrupt") {
+      expect(receipt).toMatchObject({ received: false, deliveryStage: "unavailable", retryable: false });
+      expect(receipt).not.toHaveProperty("deliveryId");
+    } else {
+      expect(receipt).toMatchObject({
+        received: false,
+        deliveryStage: "uncertain",
+        deliveryId: original.deliveryId,
+      });
+    }
+  }
+  if (mode === "corrupt") expect(requests).toEqual([]);
+  else {
+    expect(requests).toHaveLength(3);
+    for (const request of requests) {
+      expect(request.method).toBe("GET");
+      expect(request.suffix).toContain(`/${original.deliveryId}?`);
+    }
+    expect(readFileSync(`${file}.lock`, "utf8")).toBe("exclusive");
+  }
+  expect(readFileSync(file, "utf8")).toBe(bytes);
 });
 it.each(["rejected", "unavailable"] as const)(
   "keeps an exact known %s before-dispatch refusal honest",
