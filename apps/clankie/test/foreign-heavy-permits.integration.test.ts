@@ -109,7 +109,7 @@ async function eventually(check: () => Promise<boolean>, timeoutMs = 15_000) {
 const acl = async (path: string) => (await exec("/bin/ls", ["-led", path])).stdout;
 
 describe.runIf(process.platform === "darwin")("foreign heavy permits", () => {
-  it("is off until the owner turns it on, then makes a private directory and socket with one user ACL each", async () => {
+  it("is off until the owner turns it on, then makes a private directory with one user ACL and a socket only that user can reach", async () => {
     const { directory, permits } = await fixture();
     expect(permits.snapshot()).toMatchObject({ enabled: false, listening: false });
     const snapshot = await permits.apply({ user: me, maxLeases: 1, maxHoldMinutes: 60 });
@@ -122,13 +122,11 @@ describe.runIf(process.platform === "darwin")("foreign heavy permits", () => {
     expect(dir.mode & 0o777).toBe(0o700);
     const sock = await lstat(join(directory, "heavy.sock"));
     expect(sock.isSocket()).toBe(true);
-    expect(sock.mode & 0o777).toBe(0o700);
+    expect(sock.mode & 0o777).toBe(0o702);
     const dirAcl = await acl(directory);
     expect(dirAcl).toContain(`user:${me} allow search`);
     expect(dirAcl.match(/^ \d+: /gmu)).toHaveLength(1);
-    const sockAcl = await acl(join(directory, "heavy.sock"));
-    expect(sockAcl).toContain(`user:${me} allow write`);
-    expect(sockAcl.match(/^ \d+: /gmu)).toHaveLength(1);
+    expect((await acl(join(directory, "heavy.sock"))).match(/^ \d+: /gmu)).toBeNull();
   });
 
   it("holds a full slot for the permitted peer and releases it when the connection closes", async () => {
@@ -192,6 +190,27 @@ describe.runIf(process.platform === "darwin")("foreign heavy permits", () => {
     first.socket.destroy();
     await second.until("granted");
     expect(await used()).toBe(1);
+  });
+
+  it("a caller that hangs up while waiting leaves the queue, so abandoned places never fill it", async () => {
+    const { directory, permits } = await fixture();
+    await permits.apply({ user: me, maxLeases: 1, maxHoldMinutes: 60 });
+    const path = join(directory, "heavy.sock");
+    const holder = client(path);
+    holder.send({ op: "acquire", lane: "full", label: "holder" });
+    await holder.until("granted");
+    // Fill the whole queue (four places per lease), then hang up every one.
+    for (let round = 0; round < 2; round++) {
+      const waiters = Array.from({ length: 4 }, () => client(path));
+      for (const waiter of waiters) waiter.send({ op: "acquire", lane: "full", label: "waiter" });
+      for (const waiter of waiters) await waiter.until("waiting");
+      for (const waiter of waiters) waiter.socket.destroy();
+      await eventually(async () => waiters.every((waiter) => waiter.closed()));
+      await delay(100);
+    }
+    const next = client(path);
+    next.send({ op: "acquire", lane: "full", label: "next" });
+    expect(await next.until("waiting")).toMatchObject({ reason: "foreign_cap" });
   });
 
   it("takes the lease back at the maximum hold and says it is lost", async () => {

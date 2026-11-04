@@ -116,8 +116,9 @@ export function createForeignHeavyPermits(options: {
       });
     });
     try {
-      await chmodNoFollow(socketPath, "0700");
-      await setSocketAcl(socketPath, `user:${next.user} allow write`);
+      // Other-write lets USER connect; the directory's one search ACL keeps
+      // everyone else from reaching it, and the peer check refuses any other uid.
+      await chmodNoFollow(socketPath, "0702");
     } catch (error) {
       await new Promise<void>((resolve) => listening.close(() => resolve()));
       await removeOwnSocket(socketPath).catch(() => undefined);
@@ -207,7 +208,12 @@ export function createForeignHeavyPermits(options: {
     }
     const permit: Permit = { socket, abort: new AbortController(), label, started: false };
     permits.add(permit);
-    socket.once("close", () => permit.abort.abort("connection_closed"));
+    socket.once("close", () => {
+      permit.abort.abort("connection_closed");
+      // A caller that hangs up while waiting leaves the queue at once, so a
+      // reconnecting client cannot fill it with its own abandoned places.
+      if (!permit.started) permits.delete(permit);
+    });
     logger.info({ event: "foreign_permits.requested", label, pid }, "Foreign heavy permit requested");
     pump();
   }
@@ -404,26 +410,21 @@ async function chmodNoFollow(path: string, mode: string): Promise<void> {
 }
 
 /** Replace every ACL entry with exactly one; `-h` never follows a link. */
-async function setAcl(path: string, entry: string, noFollow = true): Promise<void> {
-  const flags = noFollow ? ["-h"] : [];
+async function setAcl(path: string, entry: string): Promise<void> {
+  let listed: string;
   try {
-    await run("/bin/chmod", [...flags, "-N", path], { timeout: 5_000 });
-    await run("/bin/chmod", [...flags, "+a", entry, path], { timeout: 5_000 });
+    await run("/bin/chmod", ["-h", "-N", path], { timeout: 5_000 });
+    await run("/bin/chmod", ["-h", "+a", entry, path], { timeout: 5_000 });
+    listed = (await run("/bin/ls", ["-led", path], { timeout: 5_000 })).stdout;
   } catch {
     throw new PermitSetupError("acl_failed");
   }
-}
-
-/**
- * macOS cannot set an ACL on a socket through `chmod -h` ("Operation not
- * supported on socket": it opens the path itself). The socket lives in our own
- * 0700 directory, where no one else can create or swap an entry, so check that
- * it is still our socket and set the ACL by path.
- */
-async function setSocketAcl(path: string, entry: string): Promise<void> {
-  const seen = await lstat(path);
-  if (!seen.isSocket() || seen.uid !== process.getuid!()) throw new PermitSetupError("socket_path_taken");
-  await setAcl(path, entry, false);
+  // Read it back and fail closed unless exactly that one entry is there.
+  const entries = listed
+    .split("\n")
+    .map((line) => /^\s*\d+: (.+)$/u.exec(line)?.[1]?.trim())
+    .filter((value) => value !== undefined);
+  if (entries.length !== 1 || entries[0] !== entry) throw new PermitSetupError("acl_mismatch");
 }
 
 /** The kernel's peer, via the native helper (getpeereid + LOCAL_PEERPID on fd 3). */

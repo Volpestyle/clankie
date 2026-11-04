@@ -11002,10 +11002,11 @@ Take Control credentials, and fleet settings never carry it. macOS only.
 
 When on, the service creates `/Users/Shared/clankie-permits` (mode 0700, owned
 by the service user, refused if it is a symlink, someone else's or has group or
-other bits) and listens on `heavy.sock` inside it (mode 0700). Each has exactly
-one ACL entry for `USER`: search on the directory, write on the socket. The
-service checks every connecting process's uid with the kernel (`getpeereid`)
-and refuses anyone but `USER`, the owner included.
+other bits) with exactly one ACL entry, `USER` allowed search, read back and
+refused if anything else is there. It listens on `heavy.sock` inside it (mode
+0702: only someone who can reach the directory can connect). The service checks
+every connecting process's uid with the kernel (`getpeereid`) and refuses
+anyone but `USER`, the owner included.
 
 A client sends one line, at most 1 KiB, within 5 seconds:
 `{"op":"acquire","lane":"full","label":"NAME"}`. `full` is the only lane. The
