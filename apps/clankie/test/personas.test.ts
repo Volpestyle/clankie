@@ -472,6 +472,80 @@ describe("PersonaStore", () => {
     expect(back.personaId).toBe(holder.personaId);
   });
 
+  describe("a held character never moves through a key stored before names and panes had separate keys (#349)", () => {
+    const OCCUPANT_THREE = `session-${"c".repeat(64)}`;
+    /** A Herdr seat as the census reports it: unnamed, or renamed from its own pane's key. */
+    const seen = (paneId: string, occupantId: string, name?: string): ObservedFleetSeat => ({
+      seatId: paneId,
+      paneId,
+      occupantId,
+      harness: "codex",
+      status: "working",
+      title: "Build",
+      subject: name === undefined ? subjectForHerdrPane(paneId) : subjectForHerdrName(name)!,
+      ...(name === undefined ? {} : { renamed: { name, from: subjectForHerdrPane(paneId) } }),
+    });
+    /** A character a name filed under `key` before the keys were separated, holding `role`. */
+    const legacy = (store: PersonaStore, paneId: string, occupantId: string, key: string, role: string) => {
+      const held = store.reconcile([
+        {
+          ...seen(paneId, occupantId),
+          subject: key,
+          renamed: { name: key, from: subjectForHerdrPane(paneId) },
+        },
+      ])[0]!;
+      store.setRole({ schemaVersion: 1, personaId: held.personaId, role });
+      return held;
+    };
+    const fresh = (prefix: string) => {
+      const root = mkdtempSync(join(tmpdir(), prefix));
+      roots.push(root);
+      return root;
+    };
+
+    it.each([false, true])(
+      "a rename in another pane leaves it where it is (pane record lost: %s)",
+      (lost) => {
+        const root = fresh("clankie-personas-legacy-rename-");
+        const holder = legacy(
+          new PersonaStore(root),
+          "w1:p3",
+          OCCUPANT_THREE,
+          subjectForHerdrPane("w1:p2"),
+          "reviewer",
+        );
+        if (lost) rmSync(join(root, "personas.panes.json"));
+        const [renamed] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO, "fresh-name")]);
+        expect(renamed!.personaId).not.toBe(holder.personaId);
+        const roles = new PersonaStore(root).all([], () => undefined);
+        expect(roles.find((entry) => entry.personaId === holder.personaId)?.role).toBe("reviewer");
+      },
+    );
+
+    it("a seat refused one name can't land in a held character under its own pane's key", () => {
+      const root = fresh("clankie-personas-legacy-refile-");
+      const store = new PersonaStore(root);
+      const holder = legacy(store, "w1:p3", OCCUPANT_THREE, subjectForHerdrPane("w1:p2"), "reviewer");
+      store.adoptSpawn(seen("w1:p1", OCCUPANT_ONE, "atlas-ab12"), "Atlas", "lead");
+      const [refused] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO, "atlas-ab12")]);
+      expect(refused!.personaId).not.toBe(holder.personaId);
+    });
+
+    it("nor in a held character under any key it falls back to", () => {
+      const root = fresh("clankie-personas-legacy-fallback-");
+      const store = new PersonaStore(root);
+      const own = subjectForHerdrPane("w1:p2");
+      legacy(store, "w1:p3", OCCUPANT_THREE, own, "lead");
+      const occupantKey = `${own}-${createHash("sha256").update(OCCUPANT_TWO).digest("hex").slice(0, 5)}`;
+      const holders = [
+        legacy(store, "w1:p4", OCCUPANT_ONE, `${own}-p`, "reviewer"),
+        legacy(store, "w1:p5", `session-${"e".repeat(64)}`, occupantKey, "reviewer"),
+      ];
+      const [refused] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO)]);
+      expect(holders.map((holder) => holder.personaId)).not.toContain(refused!.personaId);
+    });
+  });
+
   it("rejects malformed image bytes without replacing the current identity", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);

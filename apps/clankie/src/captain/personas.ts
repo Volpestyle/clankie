@@ -784,8 +784,8 @@ export class PersonaStore {
     minted: (subject: string) => boolean,
     /** The service's own hire or move of this exact seat proves this subject. */
     proven: boolean,
-    /** This subject is the one this seat's own pane derives, after a name was refused. */
-    refiled = false,
+    /** How many keys this seat was already refused under; each fallback key is checked again. */
+    refused = 0,
   ): { readonly seat: OperatorFleetSeat; readonly binding: PersonaBinding; changed: boolean } {
     let changed = false;
     // The key this seat is bound under: its observed subject, or its hire's when Herdr lost the name.
@@ -810,7 +810,8 @@ export class PersonaStore {
       // rename strands that persona and its conversation offline, and the
       // replacement takes its name from a terminal title nobody chose.
       const previous = this.bindings.get(observed.renamed.from);
-      if (previous !== undefined) {
+      // The character under the old key moves with the rename only when this seat may take it.
+      if (previous !== undefined && this.mayTake(previous, observed, proven)) {
         this.bindings.delete(observed.renamed.from);
         // The new subject is Clankie's only if it minted it; `minted` decides that below.
         const { account, hired: _hired, ...identity } = previous;
@@ -834,23 +835,16 @@ export class PersonaStore {
       this.bindings.set(subject, binding);
       changed = true;
     } else if (binding.occupantId !== observed.occupantId) {
-      // A character that carries authority, a hire or a project role, moves to a new occupant
-      // only in its own pane or through the service's own hire or move record. Its name alone
-      // never moves it (#349). Another pane taking that name is filed under its own pane.
-      const authority =
-        binding.hired === true ||
-        this.roleHolders.has(binding.personaId) ||
-        this.records.get(binding.personaId)?.role !== undefined;
-      // The recorded pane decides, whatever the key looks like: a key stored before names and
-      // panes had separate keys can still read like another pane's.
-      if (authority && !proven && !refiled && binding.paneId !== observed.paneId) {
-        const own = subjectForHerdrPane(observed.paneId);
+      // A character that carries authority moves to a new occupant only in its own pane or through
+      // the service's own hire or move. Its name alone never moves it (#349). A refused seat is
+      // filed under a key of its own, which is checked the same way.
+      if (!this.mayTake(binding, observed, proven)) {
         const { renamed: _renamed, ...unnamed } = observed;
         return this.bindSeat(
-          { ...unnamed, subject: own === observed.subject ? `${own}-p` : own },
+          { ...unnamed, subject: refusedKey(observed, refused) },
           minted,
           false,
-          true,
+          refused + 1,
         );
       }
       binding = {
@@ -982,6 +976,21 @@ export class PersonaStore {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Whether this seat may become the binding's occupant. A character with a hire or a project role
+   * passes to another occupant only in the pane it was last seen in, or through the service's own
+   * hire or move. The recorded pane decides, whatever the key looks like: a key stored before names
+   * and panes had separate keys can still read like another pane's (#349).
+   */
+  private mayTake(binding: PersonaBinding, observed: ObservedFleetSeat, proven: boolean): boolean {
+    if (proven || binding.occupantId === observed.occupantId) return true;
+    const authority =
+      binding.hired === true ||
+      this.roleHolders.has(binding.personaId) ||
+      this.records.get(binding.personaId)?.role !== undefined;
+    return !authority || (binding.paneId !== undefined && binding.paneId === observed.paneId);
   }
 
   private writeAvatar(personaId: string, revision: string, image: Buffer): void {
@@ -1139,6 +1148,19 @@ function acquireJournalWriter(journal: string): { path: string; nonce: string } 
 
 /** The census's key for a pane whose agent Herdr has not named (subjectForHerdrPane). */
 const isPaneSubject = (subject: string) => subject.startsWith("adhoc-");
+/**
+ * Where a seat refused a character is filed: its own pane's key, then a key from its own occupant,
+ * then a fresh one. Each is checked like any other key, so none can hand over a held character.
+ */
+const refusedKey = (observed: ObservedFleetSeat, refused: number) => {
+  const own = subjectForHerdrPane(observed.paneId);
+  if (refused === 0 && own !== observed.subject) return own;
+  const tail =
+    refused <= 1
+      ? createHash("sha256").update(observed.occupantId).digest("hex")
+      : randomUUID().replaceAll("-", "");
+  return `${own}-${tail.slice(0, 5)}`;
+};
 /** The census's key for a Herdr name on this pane (subjectForHerdrName, with a remote seat's fleet). */
 const keyOf = (name: string, paneId: string) => subjectForHerdrName(name, /^([^/]+)\//u.exec(paneId)?.[1]);
 /**
