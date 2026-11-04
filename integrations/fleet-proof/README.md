@@ -118,6 +118,27 @@ expires can restart within the existing 32-scan ceiling. Retries wait 1–8 ms,
 clipped to the total budget. Hard identity, unavailable/changed ancestry and shared-owner refusals
 remain fail-closed. Persistent uncertainty or exceeded bounds refuses access.
 
+A same-user process may be stuck in macOS kernel exit before it becomes a
+zombie. If a full BSD observation returns `ESRCH`, the helper brackets one more
+failed full observation with two agreeing `KERN_PROC_PID` reads: effective user,
+PID, birth, parent and `P_WEXIT` must agree. It then refuses with the fixed
+`process_exiting` diagnostic on that attempt, rather than exhausting local
+retries. This never omits the process: it may still hold socket descriptors or
+a cwd, so both socket admission and the account cwd inventory remain unavailable.
+Unverified or inconsistent exit observations retain the existing refusal/retry
+behavior. The helper's private diagnostic includes PID and birth; the service's
+private refusal log adds first/latest observation times (not the time exit began).
+Worker responses carry only `observation: "process_exiting"`, no process identity.
+A service restart does not clear a kernel-exiting process; recovery of that
+process or an owner-approved machine restart is separate from this diagnostic.
+
+A read-only real-kernel integration probe is available while this condition is
+present: `FLEET_PROOF_EXITING_TEST=1 clankie heavy -- pnpm exec vitest run
+apps/clankie/test/native-exiting-process.integration.test.ts`. It uses an owned
+loopback report connection and compares the independently refused cwd census.
+It never creates, signals or skips the exiting process. Ordinary test runs do
+not require the machine to have a stuck process.
+
 The body takes two fresh snapshots around live Herdr and private-seat checks and
 requires agreement. Its per-connection identity pin adds a refusal fence against
 PID or socket replacement. It never accepts a caller-supplied PID. A missing

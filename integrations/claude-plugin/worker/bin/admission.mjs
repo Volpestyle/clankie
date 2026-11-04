@@ -13,6 +13,7 @@ const proofReasons = new Set([
   "caller_exited",
   "ancestor_exited",
   "native_initial_unavailable",
+  "process_exiting",
   "native_final_unavailable",
   "pane_unavailable",
   "pane_moved",

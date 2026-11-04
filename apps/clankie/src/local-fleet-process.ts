@@ -313,6 +313,8 @@ export const NativeProcessDiagnosticSchema = z
           .max(1 << 22),
       })
       .optional(),
+    // A verified same-user kernel exit blocks the census; private diagnostics only.
+    exitingProcess: z.strictObject({ pid, birth }).optional(),
     // The same-user process whose FD table the Linux census could not read (#564).
     deniedProcess: z
       .strictObject({

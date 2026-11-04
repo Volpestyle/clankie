@@ -71,6 +71,9 @@ export function localProofDiagnostics(
     string,
     { event: Extract<LocalFleetProofDiagnostic, { source: "native" }>["event"]; observedAt: string }
   >();
+  // First observed kernel exit for the exact lifetime, not the time exit began.
+  // Private diagnostics only; these identities never enter metrics or worker responses.
+  const exitingSince = new Map<string, string>();
   // The last native or transport reason seen for each request, so a refusal with no reason of
   // its own (native_initial_unavailable) says which observation failed (#574).
   const lastNative = new Map<string, string>();
@@ -81,8 +84,18 @@ export function localProofDiagnostics(
       return;
     }
     if (observation.source === "native" && context) {
-      if (observation.event.ancestryFailure && !observation.event.retry)
-        failures.set(context.requestId, { event: observation.event, observedAt: new Date().toISOString() });
+      if (
+        (observation.event.ancestryFailure || observation.event.exitingProcess) &&
+        !observation.event.retry
+      ) {
+        const observedAt = new Date().toISOString();
+        failures.set(context.requestId, { event: observation.event, observedAt });
+        if (observation.event.exitingProcess) {
+          const key = JSON.stringify(observation.event.exitingProcess);
+          if (!exitingSince.has(key)) exitingSince.set(key, observedAt);
+          while (exitingSince.size > 512) exitingSince.delete(exitingSince.keys().next().value!);
+        }
+      }
       // Bound diagnostic history; a reused connection does not reuse a failure.
       while (failures.size > 512) failures.delete(failures.keys().next().value!);
     }
@@ -139,19 +152,31 @@ export function localProofDiagnostics(
     const native = lastNative.get(context.requestId);
     lastNative.delete(context.requestId);
     const ancestry = failure?.event.ancestryFailure;
+    const exitingProcess = failure?.event.exitingProcess;
     const callerRead = ancestry
       ? Promise.resolve({
           owner: { pid: ancestry.claimantPid, birth: ancestry.claimantBirth },
           observedAt: failure!.observedAt,
           attribution: "failure_time_kernel_observation" as const,
         })
-      : refusalCaller(context.socket);
+      : exitingProcess
+        ? Promise.resolve(undefined)
+        : refusalCaller(context.socket);
     return callerRead.then((caller) => {
       logger.warn(
         {
           ...fields,
           callerAttribution: caller?.attribution ?? "unknown",
           ...(native === undefined ? {} : { lastNativeReason: native }),
+          ...(exitingProcess
+            ? {
+                exitingProcess: {
+                  ...exitingProcess,
+                  firstObservedAt: exitingSince.get(JSON.stringify(exitingProcess)),
+                  observedAt: failure!.observedAt,
+                },
+              }
+            : {}),
           ...(ancestry
             ? {
                 claimantStatus: ancestry.claimantStatus,

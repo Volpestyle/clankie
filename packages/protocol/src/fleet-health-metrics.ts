@@ -11,6 +11,7 @@ export const FleetProofRefusalReasonSchema = z.enum([
   "caller_exited",
   "ancestor_exited",
   "native_initial_unavailable",
+  "process_exiting",
   "native_final_unavailable",
   "pane_unavailable",
   /** The claimed pane ID now names a moved pane with a different ID; its process kept the old one. */
@@ -31,6 +32,7 @@ export const FleetNativeDiagnosticReasonSchema = z.enum([
   "process_census_changed",
   "allocation_failed",
   "process_unavailable",
+  "process_exiting",
   "process_changed",
   "fd_list_unavailable",
   "fd_list_bounds",

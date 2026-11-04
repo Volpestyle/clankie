@@ -78,6 +78,8 @@ struct large_table_observation {
   int fds;
 };
 static const struct large_table_observation *large_table_observation;
+/* A refusal cause only: never substitutes for an FD read or socket owner. */
+static const struct identity *exiting_process_observation;
 
 /* Fixed vocabulary only: this observation is never an admission input. */
 static void diagnostic(const char *stage, const char *reason, int error, int retry) {
@@ -98,6 +100,10 @@ static void diagnostic(const char *stage, const char *reason, int error, int ret
   if (large_table_observation)
     fprintf(proof_error, ",\"largeFdTable\":{\"pid\":%d,\"fds\":%d}",
             large_table_observation->pid, large_table_observation->fds);
+  if (exiting_process_observation)
+    fprintf(proof_error, ",\"exitingProcess\":{\"pid\":%d,\"birth\":[\"%" PRIu64 "\",\"%" PRIu64 "\"]}",
+            exiting_process_observation->pid, exiting_process_observation->sec,
+            exiting_process_observation->usec);
   fputs("}\n", proof_error);
   errno = saved_error;
 }
@@ -242,6 +248,51 @@ static int observe(pid_t pid, struct identity *out) {
 static int same_process(const struct identity *a, const struct identity *b) {
   return a->pid == b->pid && a->ppid == b->ppid && a->uid == b->uid &&
          a->ruid == b->ruid && a->sec == b->sec && a->usec == b->usec;
+}
+
+/* A process can be in kernel exit before it is a zombie: proc_find refuses
+ * its full BSD/FD observations while KERN_PROC_PID still exposes P_WEXIT.
+ * Name that bounded unavailable cause; never skip it (it may still hold FDs).
+ * Bracket another failed full read with the same kernel lifetime and effective
+ * account. A missing, changed or incomplete observation retains the old refusal. */
+static int observe_exiting_process(pid_t pid, int error, const struct identity *expected) {
+  if (error != ESRCH || pid <= 1 || !within_budget()) return 0;
+  int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+  struct kinfo_proc first, last;
+  size_t bytes = sizeof(first);
+  if (sysctl(mib, 4, &first, &bytes, NULL, 0) != 0 || bytes != sizeof(first) ||
+      first.kp_proc.p_pid != pid || first.kp_eproc.e_ucred.cr_uid != getuid() ||
+      !(first.kp_proc.p_flag & P_WEXIT) || first.kp_proc.p_stat == SZOMB ||
+      first.kp_proc.p_starttime.tv_sec <= 0 || first.kp_proc.p_starttime.tv_usec < 0 ||
+      first.kp_proc.p_starttime.tv_usec >= 1000000 || first.kp_eproc.e_ppid < 0 ||
+      !within_budget()) return 0;
+  struct identity process = {pid, first.kp_eproc.e_ppid, first.kp_eproc.e_ucred.cr_uid,
+                             first.kp_eproc.e_pcred.p_ruid,
+                             (uint64_t)first.kp_proc.p_starttime.tv_sec,
+                             (uint64_t)first.kp_proc.p_starttime.tv_usec};
+  if (expected && !same_process(expected, &process)) return 0;
+  struct proc_bsdinfo full;
+  errno = 0;
+  int observed = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &full, sizeof(full));
+  if (observed != 0 || errno != ESRCH || !within_budget()) return 0;
+  bytes = sizeof(last);
+  if (sysctl(mib, 4, &last, &bytes, NULL, 0) != 0 || bytes != sizeof(last) ||
+      last.kp_proc.p_pid != pid || !(last.kp_proc.p_flag & P_WEXIT) ||
+      last.kp_proc.p_stat == SZOMB || last.kp_eproc.e_ppid != process.ppid ||
+      last.kp_eproc.e_ucred.cr_uid != process.uid || last.kp_eproc.e_pcred.p_ruid != process.ruid ||
+      last.kp_proc.p_starttime.tv_sec != (int64_t)process.sec ||
+      last.kp_proc.p_starttime.tv_usec != (int32_t)process.usec || !within_budget()) return 0;
+  exiting_process_observation = &process;
+  diagnostic("process", "process_exiting", ESRCH, 0);
+  exiting_process_observation = NULL;
+  return 1;
+}
+
+static int refuse_exiting_process(pid_t pid, int error, const struct identity *expected) {
+  int saved_error = errno;
+  int exiting = observe_exiting_process(pid, error, expected);
+  errno = saved_error;
+  return exiting;
 }
 
 /* Reparenting changes ancestry, not the socket claimant's lifetime. */
@@ -768,6 +819,7 @@ static int read_cwd(pid_t pid, int required, struct cwd_record *record) {
   if (observed != 1) {
     int error = errno;
     if (!required && protected_other_user(pid)) return 0;
+    if (refuse_exiting_process(pid, error, NULL)) return 1;
     if (left_account(pid, error)) {
       diagnostic("census", "process_census_changed", error, 1);
       return 2;
@@ -781,6 +833,7 @@ static int read_cwd(pid_t pid, int required, struct cwd_record *record) {
   if (result != 0) {
     int error = errno;
     if (exited(pid) || (!required && (error == EPERM || error == EACCES))) return 0;
+    if (refuse_exiting_process(pid, error, &first)) return 1;
     if (error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN ||
         left_account(pid, error)) {
       diagnostic("census", "process_census_changed", error, 1);
@@ -791,6 +844,7 @@ static int read_cwd(pid_t pid, int required, struct cwd_record *record) {
   observed = observe(pid, &second);
   if (observed == 0) return 0;
   if (observed != 1 || !same_lifetime(&first, &second)) {
+    if (observed < 0 && refuse_exiting_process(pid, errno, &first)) return 1;
     diagnostic("census", "process_census_changed", 0, 1);
     return 2;
   }
@@ -846,6 +900,7 @@ static int prove_cwds(int argc) {
       if (observed == 0) continue;
       if (observed != 1) {
         int error = errno;
+        if (refuse_exiting_process(pid, error, NULL)) { result = 1; break; }
         if (left_account(pid, error)) {
           diagnostic("census", "process_census_changed", error, 1);
           result = 2;
@@ -1049,6 +1104,7 @@ static int scan_process(pid_t pid, int same_uid, struct fd_table *table,
   if (observed < 0) {
     int error = errno;
     if ((error == EPERM || error == EACCES) && protected_other_user(pid)) return 0;
+    if (refuse_exiting_process(pid, error, NULL)) return 1;
     int retry = error == ESRCH;
     diagnostic("process", "process_unavailable", error, retry);
     return retry ? 2 : refuse();
@@ -1061,6 +1117,7 @@ static int scan_process(pid_t pid, int same_uid, struct fd_table *table,
   if (listed == -1) {
     if (exited(pid)) return 0;
     if (!same_uid && (error == EPERM || error == EACCES)) return 0;
+    if (refuse_exiting_process(pid, error, &before)) return 1;
     int retry = error == ESRCH;
     diagnostic("fd_list", "fd_list_unavailable", error, retry);
     return retry ? 2 : refuse();
@@ -1080,6 +1137,7 @@ static int scan_process(pid_t pid, int same_uid, struct fd_table *table,
         return restart ? 3 : 0;
       }
       if (!same_uid && (error == EPERM || error == EACCES)) continue;
+      if (refuse_exiting_process(pid, error, &before)) return 1;
       int retry = error == ESRCH || error == EBADF || error == ENOENT || error == ENOTSOCK;
       diagnostic("fd_socket", "socket_unavailable", error, retry);
       return retry ? (candidate->process.pid != 0 ? 3 : 2) : refuse();
@@ -1100,6 +1158,7 @@ static int scan_process(pid_t pid, int same_uid, struct fd_table *table,
     return restart ? 3 : 0;
   }
   if (observed != 1 || !same_process(&before, &after)) {
+    if (observed < 0 && refuse_exiting_process(pid, errno, &before)) return 1;
     diagnostic("process", "process_changed", observed == 1 ? 0 : errno, 1);
     return candidate->process.pid != 0 ? 3 : 2;
   }
@@ -1270,6 +1329,7 @@ static int execute_proof(int argc, char **argv) {
   budget_expired = 0;
   ancestry_rewalk_used = 0;
   failure_observation = NULL;
+  exiting_process_observation = NULL;
   memset(&began, 0, sizeof(began));
   memset(&overall_began, 0, sizeof(overall_began));
   if (argc > 1 && strcmp(argv[argc - 1], "--diagnostics") == 0) {
