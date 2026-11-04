@@ -1299,6 +1299,30 @@ describe("native terminal NDJSON tail", () => {
     expect(authCalls).toBe(3);
   });
 
+  it("ends a terminal tail without an auth failure when the device check cannot answer", async () => {
+    let authCalls = 0;
+    const relay = await startRelay({
+      authorizeDevice: {
+        authorize: async () => {
+          authCalls += 1;
+          // Both checks at open pass; the emission check after the dispatch stalls out.
+          return authCalls <= 2
+            ? { authorized: true, device: activeDevice }
+            : { authorized: false, denial: "unavailable" };
+        },
+      },
+      dispatch: async (request) => {
+        if (request.op !== "terminal_tail") throw new Error("terminal tail expected");
+        return terminalPage(request);
+      },
+    });
+    const response = await post(relay.url, OPERATOR_TERMINAL_TAIL_PATH, terminalTailRequest());
+    expect(response.status).toBe(200);
+    // Nothing is written without a positive check, and nothing reads as a verdict on the device.
+    expect(await response.text()).toBe("");
+    expect(authCalls).toBe(3);
+  });
+
   it("gates terminal_control and terminal_input on the terminalControl grant (ADR 0144)", async () => {
     const controlRequest = {
       op: "terminal_control",
