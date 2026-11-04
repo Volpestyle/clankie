@@ -1146,6 +1146,142 @@ it("a settled original start no longer pins its dirty folder; a pending one stil
   }
 });
 
+it("an exact resend of a settled in-place original's brief is refused, not started again in a fresh worktree (#730)", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-resend-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner"),
+    state = join(root, "state");
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    // Only the native launch is stood in for; it records what the hire path handed it.
+    const launched: { workingDirectory: string; brief?: string; leadFingerprint?: string }[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat, ...rest) => {
+      launched.push({
+        workingDirectory: seat.workingDirectory,
+        ...(rest[1] === undefined ? {} : { brief: rest[1] }),
+        ...(rest[7] === undefined ? {} : { leadFingerprint: rest[7] }),
+      });
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    const hire = async (brief: string) => {
+      const captain = createCaptain(
+        { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: state,
+          settings: new SettingsStore(join(root, "settings.json")),
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
+        },
+      );
+      try {
+        const answer = await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: owner,
+            effort: "low",
+            effortReason: "A fixture hire only needs to reach the native launch.",
+          },
+          brief,
+        });
+        if (answer.op !== "spawn_seat") throw Error(JSON.stringify(answer));
+        return answer.result;
+      } finally {
+        await captain.close();
+      }
+    };
+
+    // The original starts in its clean start folder. The brief it launches with carries the
+    // service's standing context, so only the lead brief's own fingerprint can match a resend.
+    await hire("original brief");
+    expect(launched).toHaveLength(1);
+    const original = launched[0]!;
+    expect(original.workingDirectory).toBe(owner);
+    expect(original.leadFingerprint).toBe(deliveryFingerprint("original brief"));
+    expect(deliveryFingerprint(original.brief!)).not.toBe(original.leadFingerprint);
+
+    // Recovery settles it as adopted, its agent alive, while the owner keeps a draft there.
+    const key = JSON.stringify(["local", "codex", owner, "new"]);
+    const settle = async (leadFingerprint: string | undefined) => {
+      await mkdir(state, { recursive: true });
+      const fingerprint = deliveryFingerprint(original.brief!);
+      await writeFile(
+        join(state, "herdr-watches.json.hire-receipts.json"),
+        JSON.stringify({
+          [key]: {
+            messageId: "6f1c2a0e-3b7d-4e59-9a41-2d8e5c7b9f10",
+            fingerprint,
+            ...(leadFingerprint === undefined ? {} : { leadFingerprint }),
+            paneId: "herdr-core/t9q",
+            settlement: {
+              receiptId: "6f1c2a0e-3b7d-4e59-9a41-2d8e5c7b9f10",
+              receiptKey: key,
+              fingerprint,
+              disposition: "adopted",
+              journal: "local-host-inventory",
+              census: { observedAt: 1, panes: 1, sha256: "0".repeat(64) },
+              pane: {
+                paneId: "herdr-core/t9q",
+                present: true,
+                terminalId: "herdr-core/t9q",
+                occupantId: "session-fixture",
+                owner: { conversationId: "global-default" },
+              },
+            },
+          },
+        }),
+      );
+    };
+    await settle(original.leadFingerprint);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+
+    // The same brief again is a possible duplicate of the live original: refused, nothing launched.
+    expect(await hire("original brief")).toMatchObject({
+      outcome: "failed",
+      reason: "not_ready",
+      detail: expect.stringContaining("That brief already started a hire in this folder"),
+    });
+    expect(launched).toHaveLength(1);
+    // New work still moves to a fresh worktree, as #721 lets it.
+    await hire("new work");
+    expect(launched).toHaveLength(2);
+    expect(launched[1]!.workingDirectory).toMatch(/[/\\]\.local[/\\]wt-fixture-[0-9a-f]{6}$/u);
+    // A receipt from before the lead brief was kept matches nothing, so #721's move stands.
+    await settle(undefined);
+    await hire("original brief");
+    expect(launched).toHaveLength(3);
+    expect(launched[2]!.workingDirectory).toMatch(/[/\\]\.local[/\\]wt-fixture-[0-9a-f]{6}$/u);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("new work after a remote folder's settled hire is admitted in its fresh worktree; a pending one still holds the folder", async () => {
   const { createCaptain } = await import("../src/captain/captain.ts");
   const { SettingsStore } = await import("@clankie/settings");

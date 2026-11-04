@@ -32,6 +32,11 @@ export const ReceiptSchema = z
   .object({
     messageId: z.string().min(1),
     fingerprint: z.string(),
+    /**
+     * A hire's lead brief, before the service adds its standing context (#730). A settled
+     * original keeps it so an exact resend from the same folder is refused, not relocated.
+     */
+    leadFingerprint: z.string().optional(),
     /** The text's fingerprint as a session transcript reads it back, when the reader scrubs part of it (#639). */
     scrubbedFingerprint: z.string().optional(),
     /** Explicit fresh admission keeps its UUID, original location and host-authored owner forever. */

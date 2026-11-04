@@ -1313,6 +1313,12 @@ versions may refuse this journal; upgrade forward rather than editing its record
 A fresh intent belongs to its start folder's receipts: when the hire is moved to a
 new worktree (ADR 0306), it is dropped and the hire is admitted there as that
 worktree's first, so a connected app's start after settled history goes through.
+A settled original in the start folder no longer holds that folder in place, so
+new work moves on (#721). The exact lead brief it started with does not: a hire
+receipt keeps that brief's fingerprint, taken before the service adds its standing
+context, and a resend of it from that folder under the same harness is refused,
+because the original may still be running (#730). New work there needs a
+different brief. Receipts written before this fingerprint was kept never match.
 
 A successfully delivered hire also counts as settled after a complete native
 inventory proves its original pane absent, including after `close_worker_pane`
