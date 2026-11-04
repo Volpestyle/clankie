@@ -11,6 +11,7 @@ import { commandHost, outputJson } from "./io.ts";
 import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
 import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { writeResumeRecord } from "./seat-record.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import {
   bindLaunchedHarness,
@@ -342,9 +343,11 @@ export async function runCodexSeat(
     throw error;
   }
   // Record the server's thread even if its hooks still need owner trust.
-  writeFileSync(recordPath(env, command), JSON.stringify({ ...binding, sessionId: seat.threadId }), {
-    mode: 0o600,
-  });
+  writeResumeRecord(
+    recordPath(env, command),
+    JSON.stringify({ ...binding, sessionId: seat.threadId }),
+    flags.newConversation === true,
+  );
   void seat.checkTools?.().catch(async (error) => {
     await showCatalogStatus("unverified");
     stderr.write(`Clankie tool check failed: ${String(error)}\n`);

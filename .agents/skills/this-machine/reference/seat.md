@@ -156,8 +156,10 @@ does not reattach from a saved ID. See `integrations/opencode-plugin/README.md`
 for per-launch MCP isolation, settings, version checks and current live gaps.
 
 OpenCode seats use the same contract: a fresh `clankie opencode` takes the free global chat or creates a separate workspace chat; `--conversation ID` reuses one,
-`--resume` keeps the exact native session and chat, which a later `--new` seat leaves alone, and `--dry-run` creates none.
+`--resume` keeps the exact native session and chat, and `--dry-run` creates none.
 See [the OpenCode seat guide](../../../../integrations/opencode-plugin/README.md).
+
+On every harness, a `--new` seat fills an empty resume record but never replaces one.
 
 ### Progress and interrupted replies
 
