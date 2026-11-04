@@ -296,6 +296,9 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   recover [--autostart]    Restart launcher-owned services that crashed or stopped answering, with backoff (JSON)
   autostart enable|disable|status
                            Start clankie at login and restart crashed services every 30s (JSON)
+  cpu-profile [status]     Whether the service is profiling, and where its profile goes
+  cpu-profile on DIRECTORY | off
+                           Keep the service's CPU profiler on across restarts, or stop
   awake [status|on|off]    Keep this Mac awake while plugged in (launcher-supervised caffeinate; JSON)
   usage [--refresh] [--json]   Claude/Codex accounts on this Mac: plan, % used per limit, local resets (--json for raw)
   usage overlay [on|off]   Show or hide the desktop overlay's usage meters
