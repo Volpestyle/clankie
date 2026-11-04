@@ -17,6 +17,12 @@ export interface FleetSeatMessageContext {
    * The worker's channel event then carries `sender="lead"`.
    */
   readonly fromLead?: true;
+  /**
+   * The connector device the relay stamped on this send. Delivery marks it from
+   * the lead only when that device started this exact occupant and no
+   * conversation has adopted it since (#442, ADR 0321); otherwise it is ignored.
+   */
+  readonly connectorDevice?: string;
   readonly recipientBinding?: string;
   readonly delivery?: "steer" | "queue";
   readonly workHandoff?: import("@clankie/protocol").WorkHandoffIntent;

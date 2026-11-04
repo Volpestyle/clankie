@@ -39,6 +39,8 @@ const RecordSchema = z
     hireConversationId: z.string().min(1).optional(),
     hireProjectId: z.string().min(1).optional(),
     startedBy: HireStarterSchema.optional(),
+    /** The occupant an app hired, while that app still leads it (#442); adoption ends it. */
+    appLeadOccupantId: z.string().min(1).optional(),
     owner: ConversationOwnerSchema,
   })
   .strict();
@@ -243,6 +245,7 @@ export class HireOwners {
           ...(prior.hireConversationId === undefined ? {} : { hireConversationId: prior.hireConversationId }),
           ...(prior.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
           ...(prior.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
+          ...(prior.appLeadOccupantId === undefined ? {} : { appLeadOccupantId: prior.appLeadOccupantId }),
         },
       ],
     });
@@ -282,7 +285,8 @@ export class HireOwners {
             ? {}
             : { hireConversationId: prior.hireConversationId }),
           ...(prior?.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
-          // Adoption sets the current lead, never who asked for the hire.
+          // Adoption sets the current lead, never who asked for the hire, and ends
+          // an app's lead of it: appLeadOccupantId is not carried (#442).
           ...(prior?.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
           ...(prior === undefined
             ? { hired: false }
@@ -313,6 +317,20 @@ export class HireOwners {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
     return held?.hired === true ? held.startedBy : undefined;
   }
+  /**
+   * Whether this connector device hired this exact occupant and still leads it
+   * (#442, ADR 0321): never a replacement occupant, and never after any
+   * conversation adopted it.
+   */
+  public appLead(seatId: string, occupantId: string, deviceId: string): boolean {
+    const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
+    return (
+      held?.hired === true &&
+      held.startedBy?.kind === "app" &&
+      held.startedBy.deviceId === deviceId &&
+      held.appLeadOccupantId === occupantId
+    );
+  }
   /** An original runtime's journaled fresh restart, never ordinary re-adoption. */
   public restartSuccessor(input: {
     receiptId: string;
@@ -341,12 +359,14 @@ export class HireOwners {
       )
     )
       throw new Error("Restart successor does not match the original hire owner");
-    const next = {
+    const next: HireOwnerRecord = {
       ...prior,
       seatId: input.seatId,
       occupantId: input.occupantId,
       sessionKey: input.sessionKey,
     };
+    // A successor keeps who asked for display, never the app's lead of the old occupant (#442).
+    delete next.appLeadOccupantId;
     this.save({
       schemaVersion: 1,
       hires: this.state.hires.map((entry) => (entry !== prior ? entry : next)),
@@ -376,6 +396,10 @@ export class HireOwners {
       intentId === undefined
         ? prior?.startedBy
         : this.state.hires.find((entry) => entry.id === intentId)?.startedBy;
+    // The app that asked leads the occupant its own intent bound, and only that one.
+    const appLeadOccupantId =
+      prior?.appLeadOccupantId ??
+      (intentId !== undefined && startedBy?.kind === "app" ? occupantId : undefined);
     const sessionClaim =
       sessionKey === undefined
         ? undefined
@@ -412,6 +436,7 @@ export class HireOwners {
           ...(occupantId === undefined ? {} : { occupantId }),
           ...(sessionKey === undefined ? {} : { sessionKey }),
           ...(startedBy === undefined ? {} : { startedBy }),
+          ...(appLeadOccupantId === undefined ? {} : { appLeadOccupantId }),
         },
       ],
     });

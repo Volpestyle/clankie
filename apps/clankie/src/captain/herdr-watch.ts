@@ -2302,6 +2302,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.starter(seatId, occupantId);
   }
 
+  /** Whether this connector device hired this exact occupant and still leads it (#442). */
+  public connectorLeads(seatId: string, occupantId: string, deviceId: string): boolean {
+    return this.hireOwners.appLead(seatId, occupantId, deviceId);
+  }
+
   /** Whether a pane holds a Clankie hire, for fleet-health alert attribution only (#324). */
   public paneHire(paneId: string): "starting" | "hired" | undefined {
     return this.hireOwners.paneHire(paneId);

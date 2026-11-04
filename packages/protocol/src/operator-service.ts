@@ -487,7 +487,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("send"),
       schemaVersion: z.literal(1),
       channel: z.string().trim().min(1).max(64).optional(),
-      /** Relay-authenticated connector attribution; display only. */
+      /**
+       * Relay-authenticated connector attribution. Only the device that started the
+       * exact occupant, still unadopted, reaches it as the worker's lead (#442).
+       */
       appDeviceId: z.string().min(1).max(256).optional(),
       turn: SubmitOperatorConversationTurnSchema,
     })

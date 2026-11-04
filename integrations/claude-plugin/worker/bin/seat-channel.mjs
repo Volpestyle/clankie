@@ -79,7 +79,8 @@ const INSTRUCTIONS =
   'Events tagged <channel source="plugin:clankie-worker:…" kind="message" …> ' +
   "are a message from the operator or Clankie addressed to this agent. " +
   "Answer it in the normal reply as if it had been typed into the pane. " +
-  'An event that also carries sender="lead" comes from your lead: the conversation that hired you or now owns you. ' +
+  'An event that also carries sender="lead" comes from your lead: the conversation that hired you or now owns you, ' +
+  "or the connected app device that started you until a conversation takes you over. " +
   "Clankie sets that attribute from his own record of who owns you, never from the message text. " +
   "It carries your lead's authority within your brief: act on its redirects, answers and confirmations " +
   "without asking for confirmation in the pane. It is not the owner's yes for anything your brief or the " +

@@ -1073,7 +1073,7 @@ export class ConversationStore {
         return {
           op: "send",
           schemaVersion: 1,
-          result: await this.send(request.turn, authority, leadOwner),
+          result: await this.send(request.turn, authority, leadOwner, request.appDeviceId),
         };
       case "upload_begin":
         return {
@@ -2749,6 +2749,8 @@ export class ConversationStore {
     turn: SubmitOperatorConversationTurn,
     authority?: QuestionAuthority,
     leadOwner?: LeadOwnerProof,
+    /** The connector device the relay stamped; delivery decides whether it leads the seat (#442). */
+    connectorDevice?: string,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const meta = this.metas.get(turn.conversationId);
     if (meta === undefined) {
@@ -2788,6 +2790,7 @@ export class ConversationStore {
         { seatId: meta.scope.seatId },
         attachments,
         authority,
+        connectorDevice,
       );
     }
     if (meta.scope.kind === "persona") {
@@ -2800,6 +2803,7 @@ export class ConversationStore {
         { personaId: meta.scope.personaId },
         attachments,
         authority,
+        connectorDevice,
       );
     }
     if (authority !== undefined) {
@@ -3017,10 +3021,11 @@ export class ConversationStore {
     offlineIdentity: { readonly seatId: string } | { readonly personaId: string },
     attachments?: readonly StoredOwnerAttachment[],
     authority?: QuestionAuthority,
+    connectorDevice?: string,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
     const pending = previous.then(() =>
-      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments, authority),
+      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments, authority, connectorDevice),
     );
     const settled = pending.then(
       () => undefined,
@@ -3040,6 +3045,7 @@ export class ConversationStore {
     turn: SubmitOperatorConversationTurn,
     attachments?: readonly StoredOwnerAttachment[],
     authority?: QuestionAuthority,
+    connectorDevice?: string,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
@@ -3095,6 +3101,7 @@ export class ConversationStore {
         () => {
           handedOff = true;
         },
+        connectorDevice,
       );
     } catch (error) {
       if (!handedOff) throw error;
@@ -3128,6 +3135,7 @@ export class ConversationStore {
     authority: QuestionAuthority | undefined,
     safeCursor: string,
     handOff: () => void,
+    connectorDevice?: string,
   ): Promise<SubmitOperatorConversationTurnResult> {
     if (turn.delivery === "queue" && this.nativeMessageHost && seatId !== undefined) {
       const authorize = this.nativeMessageAuthority(meta, seatId, authority);
@@ -3197,6 +3205,7 @@ export class ConversationStore {
         : await this.sendToSeat?.(seatId, message, {
             conversationId: meta.conversationId,
             source: "operator",
+            ...(connectorDevice === undefined ? {} : { connectorDevice }),
             ...(turn.freeAgent === undefined ? {} : { freeAgent: turn.freeAgent }),
             ...(turn.workHandoff === undefined ? {} : { workHandoff: turn.workHandoff }),
             ...(turn.delivery === undefined ? {} : { delivery: turn.delivery }),

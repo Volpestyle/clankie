@@ -1,10 +1,18 @@
 import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import {
   ClosedWorkerPaneSchema,
@@ -56,6 +64,10 @@ async function fixture(
     unreachable?: boolean;
     /** The worker's folder; its own temp root by default. */
     workingDirectory?: (root: string) => string;
+    /** Clankie's thread hired it for this connector device and channel (#442). */
+    appStarted?: { deviceId: string; channel: string };
+    /** A journaled restart replaced the hired occupant in the same pane (#442). */
+    successor?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "worker-lead-integration-"));
@@ -76,11 +88,18 @@ async function fixture(
     agent: "codex",
     status: "working",
     title: "Noor",
-    session: { source: "herdr:codex", kind: "id", value: "native-one" },
+    session: { source: "herdr:codex", kind: "id", value: options.successor ? "native-two" : "native-one" },
     workingDirectory: cwd,
   };
+  const hiredSession = { source: "herdr:codex", kind: "id" as const, value: "native-one" };
   const owner: ConversationOwner = {
-    conversationId: options.gone ? "removed-conversation" : options.room ? room : leads[0]!,
+    conversationId: options.gone
+      ? "removed-conversation"
+      : options.room
+        ? room
+        : options.appStarted
+          ? "global-default"
+          : leads[0]!,
     ...(options.room
       ? {
           discord: {
@@ -95,7 +114,33 @@ async function fixture(
         }
       : {}),
   };
-  if (options.adopted)
+  const sessionKey = (value: string) => JSON.stringify([options.remote ? "away" : "local", "codex", value]);
+  if (options.appStarted) {
+    // The same records a connector start_agent writes: its intent, then the bound occupant.
+    const owners = new HireOwners(join(root, "herdr-watches.json.owners.json"));
+    const intentId = owners.intent(owner, { kind: "app", ...options.appStarted });
+    owners.bind(agent.paneId, owner, undefined, intentId);
+    owners.bind(
+      agent.paneId,
+      owner,
+      agent.terminalId,
+      intentId,
+      occupantIdForHerdrSession(hiredSession),
+      sessionKey("native-one"),
+    );
+    if (options.successor)
+      owners.restartSuccessor({
+        receiptId: "restart-receipt",
+        paneId: agent.paneId,
+        previousSeatId: agent.terminalId,
+        previousOccupantId: occupantIdForHerdrSession(hiredSession),
+        previousSessionKey: sessionKey("native-one"),
+        seatId: agent.terminalId,
+        occupantId: occupantIdForHerdrSession(agent.session!),
+        sessionKey: sessionKey("native-two"),
+        owner,
+      });
+  } else if (options.adopted)
     new HireOwners(join(root, "herdr-watches.json.owners.json")).adopt(
       agent.paneId,
       agent.terminalId,
@@ -1249,4 +1294,90 @@ it("a worker ask's answer reaches only the occupant and lead that raised it, thr
   expect(original).not.toContain(revoked.id);
   expect(original).not.toContain(retired.id);
   expect(mailbox.take(f.agent.terminalId, replacementBinding!)).toBeUndefined();
+});
+
+// #442: a connector's message_agent goes to the agent's persona thread. The relay stamps the
+// authenticated device; only the device that started this exact occupant, with nobody having
+// adopted it since, reaches it as its lead. A caller's channel never counts.
+describe("a connector device's messages to an agent it started", () => {
+  const hiring = { deviceId: "phone-a", channel: "duet" };
+  async function connectorSend(
+    f: Awaited<ReturnType<typeof fixture>>,
+    stamp: { appDeviceId: string; channel?: string },
+  ) {
+    const sessions = createHerdrSessionSource(
+      {
+        // What the relay forwards: the caller's request, with its authenticated device stamped.
+        dispatch: (request) =>
+          f.captain.serveOperatorConversation(request.op === "send" ? { ...request, ...stamp } : request),
+        terminalTail: async () => {
+          throw new Error("No terminal tails in this fixture");
+        },
+        tailRefusal: async () => new Error("No terminal tails in this fixture"),
+      },
+      { surfaceClientId: "connector" },
+    );
+    const before = vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls.length;
+    await sessions.send(f.agent.terminalId, "Next: run the docs check");
+    const calls = vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls.slice(before);
+    expect(calls).toHaveLength(1);
+    return calls[0]![3];
+  }
+
+  it("marks the hiring device's send as the lead's, whatever channel it names", async () => {
+    const f = await fixture({ appStarted: hiring });
+    expect((await connectorSend(f, { appDeviceId: "phone-a", channel: "duet" }))?.fromLead).toBe(true);
+    expect((await connectorSend(f, { appDeviceId: "phone-a" }))?.fromLead).toBe(true);
+  });
+
+  it("leaves another device unmarked, even when it names the hiring channel", async () => {
+    const f = await fixture({ appStarted: hiring });
+    expect((await connectorSend(f, { appDeviceId: "phone-b", channel: "duet" }))?.fromLead).toBeUndefined();
+    expect((await connectorSend(f, { appDeviceId: "phone-b" }))?.fromLead).toBeUndefined();
+  });
+
+  it("leaves a replacement occupant in the same pane unmarked", async () => {
+    const f = await fixture({ appStarted: hiring, successor: true });
+    // The successor keeps who asked for display, but not the app's lead of the old occupant.
+    const record = JSON.parse(
+      readFileSync(join(f.root, "herdr-watches.json.owners.json"), "utf8"),
+    ).hires.find((hire: { seatId?: string }) => hire.seatId === f.agent.terminalId);
+    expect(record).toMatchObject({ startedBy: { kind: "app", deviceId: "phone-a" } });
+    expect(record).not.toHaveProperty("appLeadOccupantId");
+    expect((await connectorSend(f, { appDeviceId: "phone-a", channel: "duet" }))?.fromLead).toBeUndefined();
+  });
+
+  it("stops marking the device once Clankie's thread adopts the occupant by messaging it", async () => {
+    const f = await fixture({ appStarted: hiring });
+    // Clankie's thread sees the seat in his census before he messages it.
+    await f.captain.serveOperatorConversation({ schemaVersion: 1, op: "roster" });
+    const bank = await f.captain.laneToolBank("operator", "global-default");
+    const sent = await bank.tools
+      .find((tool) => tool.name === "message_seat")!
+      .call({ seat: f.agent.terminalId, message: "I'll take it from here" });
+    const part = sent.content.find((item) => item.type === "text");
+    expect(JSON.parse(part?.type === "text" ? part.text : "null")).toMatchObject({ outcome: "delivered" });
+    expect(vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls.at(-1)![3]?.fromLead).toBe(true);
+    expect((await connectorSend(f, { appDeviceId: "phone-a", channel: "duet" }))?.fromLead).toBeUndefined();
+    // Adoption is durable: a restarted service still does not mark the device.
+    await f.captain.close();
+    const reopened = f.open();
+    const sessions = createHerdrSessionSource(
+      {
+        dispatch: (request) =>
+          reopened.serveOperatorConversation(
+            request.op === "send" ? { ...request, appDeviceId: "phone-a", channel: "duet" } : request,
+          ),
+        terminalTail: async () => {
+          throw new Error("No terminal tails in this fixture");
+        },
+        tailRefusal: async () => new Error("No terminal tails in this fixture"),
+      },
+      { surfaceClientId: "connector" },
+    );
+    await sessions.send(f.agent.terminalId, "Still there?");
+    expect(
+      vi.mocked(HerdrWatchStore.prototype.deliverToSeat).mock.calls.at(-1)![3]?.fromLead,
+    ).toBeUndefined();
+  });
 });
