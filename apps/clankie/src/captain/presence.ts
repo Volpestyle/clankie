@@ -105,6 +105,13 @@ export function projectPresence(
       : {}),
     ...sources.quietHours,
   };
+  return withPresenceCursor(projection);
+}
+
+/** Hash only the fields the caller is authorized to receive. */
+export function withPresenceCursor(
+  projection: Omit<OperatorPresenceSnapshot, "cursor">,
+): OperatorPresenceSnapshot {
   return { ...projection, cursor: createHash("sha256").update(JSON.stringify(projection)).digest("hex") };
 }
 

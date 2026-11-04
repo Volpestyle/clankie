@@ -1,4 +1,5 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { LocalCompanionBoundary } from "../src/local-companion-boundary.ts";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
@@ -36,9 +37,9 @@ const NOT_THE_OWNERS = {
   support: { mintedBy: "local-operator", supportGrantId: randomUUID() },
 };
 
-function deviceEvents(now: number) {
+function deviceEvents(now: number, extra: Record<string, { mintedBy: string }> = {}) {
   const iso = (offset: number) => new Date(now + offset).toISOString();
-  return Object.entries(NOT_THE_OWNERS).flatMap(([deviceId, device]) => {
+  return Object.entries({ ...NOT_THE_OWNERS, ...extra }).flatMap(([deviceId, device]) => {
     const event = (type: string, data: object) => ({
       id: randomUUID(),
       type,
@@ -62,7 +63,7 @@ function deviceEvents(now: number) {
   });
 }
 
-async function fixture(held?: Promise<void>) {
+async function fixture(held?: Promise<void>, extra: Record<string, { mintedBy: string }> = {}) {
   const root = await mkdtemp(join(tmpdir(), "presence-quiet-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const now = Date.now();
@@ -70,7 +71,7 @@ async function fixture(held?: Promise<void>) {
   const eventLogPath = join(root, "events.jsonl");
   await writeFile(
     eventLogPath,
-    deviceEvents(now)
+    deviceEvents(now, extra)
       .map((row) => JSON.stringify(row))
       .join("\n") + "\n",
   );
@@ -106,7 +107,9 @@ async function fixture(held?: Promise<void>) {
     } as Parameters<typeof projectPresence>[0]);
     return { op: "presence", schemaVersion: 1, snapshot };
   }) as unknown as CaptainPort["serveOperatorConversation"];
+  const boundary = new LocalCompanionBoundary();
   const app = await createClankieApp({
+    isSameMacRequest: (request) => boundary.isSameMac(request),
     settings: new SettingsStore(join(root, "settings.json")),
     captain: createStubCaptain({ serveOperatorConversation }),
     eventLogPath,
@@ -118,7 +121,7 @@ async function fixture(held?: Promise<void>) {
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
   });
-  const server = serve({ fetch: app.app.fetch, hostname: "127.0.0.1", port: 0 }) as Server;
+  const server = serve({ fetch: boundary.fetch(app.app.fetch), hostname: "127.0.0.1", port: 0 }) as Server;
   if (!server.listening) await once(server, "listening");
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   cleanup.push(async () => {
@@ -151,16 +154,24 @@ async function fixture(held?: Promise<void>) {
     });
   const read = (bearer: string) =>
     call("/operator/v1/dispatch", { op: "presence", schemaVersion: 1, includeQuiet: true }, bearer);
-  const pair = async (grants: typeof TAKE_CONTROL_GRANTS | typeof SUPERVISE_GRANTS) => {
-    const offer = await (await call("/v1/pairing/offer", {})).json();
+  const pair = async (grants: typeof TAKE_CONTROL_GRANTS | typeof SUPERVISE_GRANTS, bearer = "owner") => {
+    const offer = await (await call("/v1/pairing/offer", {}, bearer)).json();
     const pending = await (
-      await call("/v1/pairing/redeem", {
-        offerSecret: new URL(offer.deepLink).searchParams.get("offer"),
-        device: { name: "Phone", platform: "ios" },
-      })
+      await call(
+        "/v1/pairing/redeem",
+        {
+          offerSecret: new URL(offer.deepLink).searchParams.get("offer"),
+          device: { name: "Phone", platform: "ios" },
+        },
+        bearer,
+      )
     ).json();
     return (await (
-      await call("/v1/pairing/complete", { completionToken: pending.completionToken, acceptedGrants: grants })
+      await call(
+        "/v1/pairing/complete",
+        { completionToken: pending.completionToken, acceptedGrants: grants },
+        bearer,
+      )
     ).json()) as { deviceId: string; deviceToken: string };
   };
   const relayRead = (bearer: string) =>
@@ -266,4 +277,71 @@ it("takes the fields back from a read that outlasts its device's Take Control", 
   const snapshot = await snapshotOf(await pending);
   expect(snapshot).not.toHaveProperty("quiet");
   expect(snapshot).not.toHaveProperty("quietUntil");
+});
+
+it("keeps device offer minting within recorded owner provenance on native loopback HTTP", async () => {
+  const f = await fixture();
+  for (const id of ["visitor"]) {
+    expect((await f.self(f.tokenFor(id))).ownerDevice).toBe(false);
+    expect((await f.call("/v1/pairing/offer", {}, f.tokenFor(id))).status).toBe(403);
+  }
+  // Scoped connector sessions are refused before the ordinary device minter.
+  expect((await f.call("/v1/pairing/offer", {}, f.tokenFor("connector"))).status).toBe(401);
+  // Every device-minted offer below uses only the preceding signed device session.
+  const original = await f.pair(TAKE_CONTROL_GRANTS);
+  const child = await f.pair(TAKE_CONTROL_GRANTS, original.deviceToken);
+  const grandchild = await f.pair(TAKE_CONTROL_GRANTS, child.deviceToken);
+  for (const paired of [original, child, grandchild]) {
+    expect((await f.self(paired.deviceToken)).ownerDevice).toBe(true);
+    expect(await snapshotOf(await f.relayRead(paired.deviceToken))).toMatchObject(quiet);
+  }
+});
+
+it("keeps ordinary presence for persisted device lineages without complete owner provenance", async () => {
+  const f = await fixture(undefined, {
+    child: { mintedBy: "device:visitor" },
+    grandchild: { mintedBy: "device:child" },
+    supportChild: { mintedBy: "device:support" },
+    connectorChild: { mintedBy: "device:connector" },
+    missingParent: { mintedBy: "device:absent" },
+    cycleA: { mintedBy: "device:cycleB" },
+    cycleB: { mintedBy: "device:cycleA" },
+  });
+  for (const id of [
+    "child",
+    "grandchild",
+    "supportChild",
+    "connectorChild",
+    "missingParent",
+    "cycleA",
+    "cycleB",
+  ]) {
+    const token = f.tokenFor(id);
+    expect((await f.self(token)).ownerDevice).toBe(false);
+    expect((await f.call("/v1/pairing/offer", {}, token)).status).toBe(403);
+    const snapshot = await snapshotOf(await f.relayRead(token));
+    expect(snapshot).not.toHaveProperty("quiet");
+    expect(snapshot).not.toHaveProperty("quietUntil");
+  }
+});
+
+it("derives a revoked direct read's cursor from exactly its sanitized HTTP response", async () => {
+  let release = () => {};
+  const f = await fixture(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  const owner = await f.pair(TAKE_CONTROL_GRANTS);
+  const pending = f.read(owner.deviceToken);
+  await f.parked;
+  expect((await f.call(`/v1/devices/${owner.deviceId}/revoke`, {})).status).toBe(200);
+  release();
+  const snapshot = await snapshotOf(await pending);
+  expect(snapshot).not.toHaveProperty("quiet");
+  expect(snapshot).not.toHaveProperty("quietUntil");
+  const { cursor, ...projection } = snapshot;
+  const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  expect(cursor).toBe(digest(projection));
+  expect(cursor).not.toBe(digest({ ...projection, ...quiet }));
 });
