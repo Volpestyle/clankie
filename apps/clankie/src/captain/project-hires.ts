@@ -170,9 +170,13 @@ export class ProjectHires {
   private read(): z.infer<typeof StateSchema> {
     let stat;
     try {
-      stat = statSync(this.path, { bigint: true });
+      stat = statSync(this.path, { bigint: true, throwIfNoEntry: false });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      this.cached = undefined;
+      return { version: 1, allocations: [] };
+    }
+    if (stat === undefined) {
       this.cached = undefined;
       return { version: 1, allocations: [] };
     }
