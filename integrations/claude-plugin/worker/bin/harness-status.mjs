@@ -24,6 +24,7 @@ const managedSettingsText = (text) =>
   /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
 /** Whether a settings file still enables the old worker; only its owner may change that. */
 async function declaresOldWorker(path) {
+  // allow-swallowed-rejection -- a missing or unreadable settings file declares nothing
   const text = await readFile(path, "utf8").catch(() => undefined);
   if (text === undefined) return false;
   try {
@@ -87,6 +88,7 @@ export async function oldClaudeWorker(profile) {
   }
   const projects = [];
   for (const project of recorded) {
+    // allow-swallowed-rejection -- a recorded project that no longer exists holds no settings
     if (!(await lstat(project).catch(() => undefined))?.isDirectory()) continue;
     const settings = [];
     for (const name of ["settings.json", "settings.local.json"])

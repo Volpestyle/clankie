@@ -306,6 +306,7 @@ export async function inspectHarnessBridges(
     profiles.claude
       .filter((profile) => profile.installed)
       .map(async (profile) => {
+        // allow-swallowed-rejection -- an unreadable profile falls back to the plain update advice below
         const old = await oldClaudeWorker(profile.profile).catch(() => undefined);
         const update = `clankie update, or clankie harness install --refresh-linked`;
         const copy = `the old clankie-worker ${profile.version ?? "unknown"} copy`;
