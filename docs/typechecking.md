@@ -14,6 +14,13 @@ an element access from another module (`ctx["name"]`) as reading a private membe
 State or helpers that only another module uses therefore belong in that module,
 not as private members of the class.
 
+For just the service, use `clankie heavy -- pnpm --filter @clankie/clankie typecheck:ts7`.
+The root runner also accepts explicit project names, for example
+`clankie heavy -- pnpm typecheck:ts7 apps/clankie packages/protocol`.
+Names must identify projects the default run checks; unknown names fail instead
+of producing an empty successful check. With no arguments, it still checks every
+TypeScript package. This opt-in does not replace `typecheck` or change CI's gates.
+
 Each compiler has a **2,512 MiB old-space ceiling** and a **16 MiB semi-space
 ceiling**, giving Node 26 a **2,560 MiB (2.5 GiB) total V8 heap ceiling**. These explicit
 Node arguments take precedence over inherited `NODE_OPTIONS`. This is a heap

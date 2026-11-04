@@ -19,9 +19,17 @@ const packages = ["apps", "integrations", "packages"].flatMap((group) =>
       return /typecheck\.mjs|\btsc\b/u.test(script);
     }),
 );
+const requested = process.argv.slice(2);
+const selected = requested.length
+  ? requested.map((name) => {
+      const dir = packages.find((dir) => relative(root, dir).replaceAll("\\", "/") === name);
+      if (!dir) throw new Error(`Unknown TypeScript project: ${name}`);
+      return dir;
+    })
+  : packages;
 let failed = 0;
 const started = performance.now();
-for (const dir of packages) {
+for (const dir of new Set(selected)) {
   const at = performance.now();
   const run = spawnSync(process.execPath, [compiler, "-p", join(dir, "tsconfig.json"), "--noEmit"], {
     cwd: root,
@@ -38,5 +46,6 @@ for (const dir of packages) {
   }
 }
 const total = ((performance.now() - started) / 1000).toFixed(1);
-console.log(`[typecheck:ts7] ${packages.length - failed}/${packages.length} packages passed in ${total}s`);
+const count = new Set(selected).size;
+console.log(`[typecheck:ts7] ${count - failed}/${count} packages passed in ${total}s`);
 process.exitCode = failed ? 1 : 0;
