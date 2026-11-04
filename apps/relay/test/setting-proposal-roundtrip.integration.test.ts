@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { ClankieApiClient } from "../../../packages/api-client/src/index.ts";
 import {
+  CONNECTOR_GRANTS,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
   OperatorConversationServiceResultSchema,
   SUPERVISE_GRANTS,
   TAKE_CONTROL_GRANTS,
@@ -65,6 +67,9 @@ const PROPOSAL = {
   reason: "You asked me to check with you more.",
 };
 
+/** The bearer a hired worker's seat on a linked fleet presents (`~/.clankie/links/<fleet>.json`). */
+const WORKER_BEARER = "fixture-worker-link-token-for-the-pc-fleet";
+
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), "relay-setting-proposal-"));
   const workspace = join(root, "workspace");
@@ -72,7 +77,7 @@ async function fixture() {
   const now = Date.now();
   const key = randomBytes(32),
     signer = new DeviceSessionSigner(key);
-  const names = ["control", "chat", "read"] as const;
+  const names = ["control", "chat", "read", "connector"] as const;
   const tokens = Object.fromEntries(
     names.map((deviceId) => [
       deviceId,
@@ -87,7 +92,9 @@ async function fixture() {
         ? TAKE_CONTROL_GRANTS
         : deviceId === "read"
           ? SUPERVISE_GRANTS
-          : { chat: true, steer: false, terminalObserve: true, terminalControl: false };
+          : deviceId === "connector"
+            ? CONNECTOR_GRANTS
+            : { chat: true, steer: false, terminalObserve: true, terminalControl: false };
     const base = {
       occurredAt: new Date(now).toISOString(),
       missionId: `device:${deviceId}`,
@@ -107,6 +114,8 @@ async function fixture() {
           platform: "ios",
           offeredGrants: grants,
           mintedBy: "local-owner",
+          // An app signed in through the connector (ADR 0301), as the OAuth token route records it.
+          ...(deviceId === "connector" ? { scope: "connector" } : {}),
           pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
@@ -160,6 +169,8 @@ async function fixture() {
     }),
     eventLogPath: log,
     deviceSessionKey: key,
+    // A hired worker's seat bearer is a live fleet link here, good for its fleet's seat tools.
+    fleetLinks: { authenticate: (token) => (token === WORKER_BEARER ? "pc" : undefined) },
     clock: () => new Date(now),
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer fixture-captain-token"
@@ -194,20 +205,28 @@ async function fixture() {
     result.headers.forEach((value, name) => response.setHeader(name, value));
     response.end(Buffer.from(await result.arrayBuffer()));
   });
+  // Runs after the relay has authorized a device and before it forwards to the service.
+  const hooks: { before?: (() => Promise<void>) | undefined } = {};
+  const ownerDispatch = createDeviceConversationDispatch({ baseUrl: controlUrl });
   const handler = createOperatorConversationRelayHandler({
     authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: controlUrl }),
-    deviceDispatch: createDeviceConversationDispatch({ baseUrl: controlUrl }),
+    deviceDispatch: async (request, authority, signal) => {
+      await hooks.before?.();
+      return ownerDispatch(request, authority, signal);
+    },
     dispatch: createCaptainConversationDispatch({
       baseUrl: controlUrl,
       bearerToken: "fixture-captain-token",
     }),
-    roomRequest: (path, method, token, body) =>
-      fetch(new URL(path, controlUrl), {
+    roomRequest: async (path, method, token, body) => {
+      await hooks.before?.();
+      return fetch(new URL(path, controlUrl), {
         method,
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         ...(body === undefined ? {} : { body }),
         redirect: "error",
-      }),
+      });
+    },
   });
   const relayUrl = await listen(async (request, response) => {
     if (!(await handler(request, response))) {
@@ -216,8 +235,12 @@ async function fixture() {
     }
   });
 
-  const dispatch = (request: OperatorConversationServiceRequest | Record<string, unknown>, token: string) =>
-    fetch(`${relayUrl}/operator/v1/dispatch`, {
+  const dispatch = (
+    request: OperatorConversationServiceRequest | Record<string, unknown>,
+    token: string,
+    base = relayUrl,
+  ) =>
+    fetch(`${base}${OPERATOR_CONVERSATION_DISPATCH_PATH}`, {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(request),
@@ -242,10 +265,16 @@ async function fixture() {
     if (result.status !== "accepted") throw new Error(result.status);
     await store.awaitRun(result.runId);
   };
-  const settingsClient = (token: string) => new ClankieApiClient({ baseUrl: relayUrl, operatorToken: token });
+  const settingsClient = (token: string, base = relayUrl) =>
+    new ClankieApiClient({ baseUrl: base, operatorToken: token });
   const fleet = () => settingsClient(tokens.control).fleetSettings();
-  const setLevel = (token: string, expectedRevision: string, level: "off" | "low" | "high" | "full") =>
-    settingsClient(token).updateFleetSettings({
+  const setLevel = (
+    token: string,
+    expectedRevision: string,
+    level: "off" | "low" | "high" | "full",
+    base = relayUrl,
+  ) =>
+    settingsClient(token, base).updateFleetSettings({
       schemaVersion: 1,
       expectedRevision,
       changes: { autonomyLevel: level },
@@ -262,6 +291,9 @@ async function fixture() {
   return {
     id,
     tokens,
+    hooks,
+    relayUrl,
+    controlUrl,
     turns,
     dispatch,
     client,
@@ -390,6 +422,97 @@ it("a revoked owner device can neither apply the change nor answer the ask", asy
   expect(f.updates()).toBe(0);
   expect(await f.durable()).toEqual(durable);
   expect(f.turns.some((entry) => entry.context.inputAnswer)).toBe(false);
+});
+
+it("a hired worker's seat bearer and a connector app's device can neither apply the change nor answer the ask", async () => {
+  const f = await fixture();
+  await f.send("propose");
+  const before = await f.fleet();
+  const durable = await f.durable();
+  const asked = await f.question();
+  const change = asked.question!.options.find((option) => option.label === "Change it")!;
+
+  // Both are live credentials for what they are for: the worker's bearer is past the
+  // service's fleet-link check (no worker tools are wired here), the connector's device
+  // reads its own record through the relay's authorizer.
+  const mcp = async (token: string) =>
+    (
+      await fetch(`${f.controlUrl}/v1/fleet/mcp`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      })
+    ).status;
+  expect(await mcp(WORKER_BEARER)).toBe(503);
+  expect(await mcp("not-a-fleet-link")).toBe(401);
+  const self = await fetch(`${f.controlUrl}/v1/devices/self`, {
+    headers: { authorization: `Bearer ${f.tokens.connector}` },
+  });
+  expect(self.status).toBe(200);
+
+  for (const token of [WORKER_BEARER, f.tokens.connector])
+    // Through the app's relay, and straight at the service.
+    for (const base of [f.relayUrl, f.controlUrl]) {
+      await expect(f.setLevel(token, before.revision, "low", base), base).rejects.toThrow(/40[13]/u);
+      const answered = await f.dispatch(
+        {
+          op: "input_answer",
+          schemaVersion: 1,
+          conversationId: f.id,
+          incarnationId: asked.question!.incarnationId,
+          requestId: asked.question!.requestId,
+          expectedRevision: asked.revision!,
+          answer: { kind: "choice", optionId: change.optionId },
+        },
+        token,
+        base,
+      );
+      expect([401, 403], base).toContain(answered.status);
+    }
+  expect(f.updates()).toBe(0);
+  expect(await f.durable()).toEqual(durable);
+  expect((await f.fleet()).revision).toBe(before.revision);
+  expect((await f.question()).question?.status).toBe("pending");
+  expect(f.turns.some((entry) => entry.context.inputAnswer)).toBe(false);
+});
+
+it("an owner device revoked after the relay authorized its write or answer changes nothing and answers nothing", async () => {
+  for (const call of ["settings write", "Change it answer"] as const) {
+    const f = await fixture();
+    await f.send("propose");
+    const before = await f.fleet();
+    const durable = await f.durable();
+    const asked = await f.question();
+    const change = asked.question!.options.find((option) => option.label === "Change it")!;
+
+    // The relay has authorized the owner's device; the service is the next to see the call.
+    f.hooks.before = () => f.revoke("control");
+    if (call === "settings write")
+      await expect(f.setLevel(f.tokens.control, before.revision, "low"), call).rejects.toThrow(/401/u);
+    else {
+      const answered = await f.dispatch(
+        {
+          op: "input_answer",
+          schemaVersion: 1,
+          conversationId: f.id,
+          incarnationId: asked.question!.incarnationId,
+          requestId: asked.question!.requestId,
+          expectedRevision: asked.revision!,
+          answer: { kind: "choice", optionId: change.optionId },
+        },
+        f.tokens.control,
+      );
+      expect([401, 403], call).toContain(answered.status);
+    }
+    f.hooks.before = undefined;
+    // Give a continuation that should not exist the time a real one takes to start.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(
+      f.turns.some((entry) => entry.context.inputAnswer),
+      call,
+    ).toBe(false);
+    expect(f.updates(), call).toBe(0);
+    expect(await f.durable(), call).toEqual(durable);
+  }
 });
 
 async function waitForContinuation(turns: { context: ConversationTurnContext }[]) {
