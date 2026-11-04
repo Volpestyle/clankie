@@ -31,17 +31,14 @@ const hc = (process.env.PATH ?? "")
   .find((path) => existsSync(path));
 // Short: the session names the socket twice, and macOS caps a socket path at 103 bytes.
 const session = `cs-${process.pid}`;
-// Its own session and none of a calling hc terminal's identity, but a Herdr pane's: the
-// owner's core on the Mac was started from a Herdr pane, and every terminal it starts
-// inherits that pane's identity unless the run clears it. It also carries a Codex shell
-// tool's colorless settings, as a core started by a Codex worker does.
+// Its own session and none of the identity of the pane running this test, whatever that
+// pane is, but a fixed Herdr pane's: the owner's core on the Mac was started from a Herdr
+// pane, and every terminal it starts inherits that pane's identity unless the run clears
+// it. It also carries a Codex shell tool's colorless settings, as a core started by a
+// Codex worker does.
+const PANE_ENV = /^(?:BROWSER$|CLANKIE_|CLAUDE|CODEX_|HC_|HERDR_|SWARM_)/u;
 const env: NodeJS.ProcessEnv = {
-  ...Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !["HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"].includes(key) && !key.startsWith("HERDR_"),
-    ),
-  ),
+  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !PANE_ENV.test(key))),
   HC_SESSION: session,
   // The core's own stitch deadline, longer than the 5 s every other core call gets (#243).
   HC_STITCH_MS: "8000",
@@ -190,7 +187,7 @@ it.skipIf(hc === undefined || process.platform !== "darwin")(
     });
     const off = await seen({ ...env, PATH: plain }, "browser-off");
     expect(off.HERDR_BROWSER ?? "").toBe("");
-    expect(off.BROWSER ?? "").not.toBe("herdr-browser-open");
+    expect(off.BROWSER ?? "").toBe("");
     expect(
       await seen({ ...env, PATH: `${browserBin}${delimiter}${plain}` }, "browser-own", {
         HERDR_BROWSER: "",
@@ -308,7 +305,7 @@ coreAndHerdrIt(
   async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-hire-herdr-"));
     const herdrEnv: NodeJS.ProcessEnv = {
-      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("HERDR_"))),
+      ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !PANE_ENV.test(key))),
       HERDR_SOCKET_PATH: join(root, "herdr.sock"),
       HERDR_CONFIG_PATH: join(root, "config/config.toml"),
       XDG_CONFIG_HOME: join(root, "config"),
