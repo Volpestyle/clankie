@@ -62,7 +62,10 @@ async function downloadOnce(
       chunks.push(value);
     }
   } finally {
-    await reader.cancel();
+    // On a stream that failed or timed out, cancel rejects with that same failure; letting it
+    // through replaced the transient error above and the download was never retried (#628).
+    // allow-swallowed-rejection -- the read's own error, already thrown, says what went wrong.
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
   return Buffer.concat(chunks);
