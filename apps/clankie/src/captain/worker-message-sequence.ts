@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { quotedLine } from "./quoted-line.ts";
 
 const MAX_RECENT = 1000;
 const JournalSchema = z
@@ -50,7 +51,8 @@ export class WorkerMessageSequence {
         delete this.journal.recent[id];
       this.save();
     }
-    const from = `conversation ${input.conversationId}${input.title ? ` ("${input.title}")` : ""}`;
+    // The title is the lead's own words: one quoted string, so it can't end this header (#349).
+    const from = `conversation ${input.conversationId}${input.title ? ` (titled ${quotedLine(input.title)})` : ""}`;
     const header =
       input.replaces === true && n > 1
         ? `[Lead message #${n} from ${from}. It replaces this lead's earlier messages #1–#${n - 1}: any of them you have not acted on yet is superseded; follow this one.]`

@@ -359,7 +359,7 @@ export class ReviewGate {
     else
       await this.options.notifyLead(
         lead,
-        `Review candidate ${candidate.id} from ${authorSeat.title ?? authorSeat.seatId} did not reach reviewer ${reviewer.terminalId}: ${delivery.detail}. The author resubmits the same patch to retry delivery.`,
+        `Review candidate ${candidate.id} from ${seatLabel(authorSeat)} did not reach reviewer ${reviewer.terminalId}: ${delivery.detail}. The author resubmits the same patch to retry delivery.`,
       );
     return updated;
   }
