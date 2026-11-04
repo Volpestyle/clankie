@@ -413,7 +413,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]
                            Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
   maximum-trust-mode [status|on|off]
-                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)
+                           Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you (JSON)
   fleet leads [--json]  Read active Clankie and connected app leads
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
   fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
@@ -5981,8 +5981,8 @@ service; older services refuse the query.
 
 ### `maximum-trust-mode [status|on|off]`
 
-The owner's switch requests native bypass overrides for supported harnesses
-(VUH-2048). Off, the default, leaves each coding agent's own permission settings alone: `clankie claude`
+The owner's switch for whether Claude, Codex and Grok ask permission when
+Clankie starts them (VUH-2048). Off, the default, leaves each coding agent's own permission settings alone: `clankie claude`
 and Claude hires start with `--permission-mode auto`, whose classifier stops
 risky commands. Claude refuses auto mode for some models (older ones, some
 providers) and would ask before every command, so a local Claude hire first asks

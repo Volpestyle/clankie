@@ -11,25 +11,31 @@ function describeMaximumTrustMode(result: MaximumTrustModeResult): string {
   return [
     `${MAXIMUM_TRUST_MODE_WORDING.title}: ${onOff(result.enabled)}. ${result.description}`,
     ...(result.warning === undefined ? [] : [`Warning: ${result.warning}`]),
-    `Live seat status: this machine only; remote machines are not listed${result.seatsOnOtherMode === undefined ? "; local observation unavailable" : ""}.`,
+    result.seatsOnOtherMode === undefined
+      ? "Running agents: couldn't check this machine; other machines aren't listed."
+      : "Running agents: this machine only; other machines aren't listed.",
     ...(seats.length === 0
       ? []
       : [
-          `Still ${result.enabled ? "guarded" : "in maximum trust"} until relaunched: ${seats
+          `Still ${result.enabled ? "asking permission" : "skipping permission prompts"} until they restart: ${seats
             .map((seat) => `${seat.title || seat.seatId} (${seat.harness})`)
             .join(", ")}.`,
         ]),
   ].join("\n");
 }
 
-/** `/maximum-trust-mode`: the owner's switch (VUH-2048), over the same owner API as the CLI. */
+/**
+ * `/maximum-trust-mode`: the owner's switch (VUH-2048), over the same owner API as the CLI.
+ * Its description stays a literal for the public docs extractor; the test pins it to the summary.
+ */
 export function maximumTrustModeCommand(
   mode: ((args: readonly string[]) => Promise<MaximumTrustModeResult>) | undefined,
 ): FaceShellCommand {
   return {
     name: "maximum-trust-mode",
     aliases: [],
-    description: "Choose native bypass overrides for supported harnesses; owner confirmations remain",
+    description:
+      "Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you",
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {

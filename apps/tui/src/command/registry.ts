@@ -1,3 +1,4 @@
+import { MAXIMUM_TRUST_MODE_WORDING } from "@clankie/protocol/owner-settings";
 import { operatorHarness } from "./harness-command.ts";
 
 /** One census for recognition and `clankie help`. Adding a noun is this table plus a dispatcher arm. */
@@ -529,7 +530,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["maximum-trust-mode"],
     lines: [
       "  maximum-trust-mode [status|on|off]",
-      "                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)",
+      `                           ${MAXIMUM_TRUST_MODE_WORDING.summary} (JSON)`,
     ],
   },
   {
