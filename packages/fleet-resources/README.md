@@ -134,9 +134,10 @@ and tool-native fan-out is two. `server-cpu.py`, loaded by the registered native
 runner, samples group CPU without forking every 100 ms, charges reaped child
 time, and pauses/resumes exact PID births to pay back excess usage. Short bursts
 can exceed the sampled budget; reaped children already sampled can conservatively
-be charged twice. CPU sample accounting is atomic across member reads. Darwin
-zombies are skipped only after a kernel status query proves they have exited;
-libproc alone cannot observe their identity. Unknown observations resume the
+be charged twice. CPU sample accounting is atomic across member reads. A Darwin
+member libproc cannot read is skipped only when a kernel status query proves it
+exiting (`P_WEXIT`) or a zombie; libproc refuses both from the moment exit
+begins (#364). Unknown observations resume the
 owned group and report degraded enforcement while its server permit stays held.
 CPU may exceed its share during that failure; recovery starts from a fresh
 baseline, without charging historical CPU or invented machine-wide debt.

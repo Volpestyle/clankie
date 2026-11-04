@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -241,9 +241,50 @@ it.skipIf(process.platform !== "darwin")(
   20_000,
 );
 
-it.each(process.platform === "darwin" ? [false, true] : [false])(
-  "the registered native supervisor bounds CPU and preserves progress with an unreaped grandchild: %s",
-  async (zombie) => {
+it.skipIf(process.platform !== "darwin")(
+  "the server CPU reader proves an exiting member exited and leaves a live unreadable one unknown",
+  () => {
+    // libproc refuses a member from the moment it starts exiting, before it is a
+    // zombie, while kill(pid, 0) still reaches it. That alone turned enforcement
+    // off under load (#364); only the kernel's exit proof may skip it.
+    const proof = JSON.parse(
+      execFileSync(
+        resourcePython,
+        [
+          "-I",
+          join(import.meta.dirname, "fixtures/exit-proof.py"),
+          join(import.meta.dirname, "../src"),
+          "40",
+        ],
+        {
+          encoding: "utf8",
+          timeout: 60_000,
+        },
+      ),
+    ) as { unreadable: number; proven: number; live: string };
+    expect(proof.unreadable).toBeGreaterThan(0);
+    expect(proof.proven).toBe(proof.unreadable);
+    expect(proof.live).toBe("unknown");
+  },
+  90_000,
+);
+
+// The server's own members beside its burning workers. On Darwin an unreaped
+// grandchild is skipped on the kernel's exit proof; a live member the supervisor
+// cannot read stays unknown and degrades enforcement rather than being guessed away.
+const groupMembers = {
+  "an unreaped grandchild": "unreaped-child.py",
+  "a live member it cannot read": "unreadable-member.py",
+} as const;
+it.each(
+  process.platform === "darwin"
+    ? [undefined, ...(Object.keys(groupMembers) as (keyof typeof groupMembers)[])]
+    : [undefined],
+)(
+  "the registered native supervisor bounds CPU and preserves progress with %s",
+  async (member) => {
+    const zombie = member === "an unreaped grandchild";
+    const unreadable = member === "a live member it cannot read";
     const root = await mkdtemp(join(tmpdir(), "clankie-server-cpu-"));
     const store = new ResourceStore(root);
     const claimOwner = (await processIdentity())!;
@@ -277,7 +318,7 @@ it.each(process.platform === "darwin" ? [false, true] : [false])(
       // Exercise a small fractional budget on every test host. This is the
       // runner's private control pipe, not a worker environment capacity override.
       const args = [serverCommand, join(root, "server.json"), "3"];
-      if (zombie) args.push(resourcePython, join(import.meta.dirname, "fixtures/unreaped-child.py"));
+      if (member) args.push(resourcePython, join(import.meta.dirname, "fixtures", groupMembers[member]));
       input.write(`${JSON.stringify({ command: process.execPath, args, serverCpuCores: 0.5 })}\n`);
       await replies[Symbol.asyncIterator]().next();
       input.write("go\n");
@@ -287,15 +328,23 @@ it.each(process.platform === "darwin" ? [false, true] : [false])(
         (sample) => sample.workers === 3,
       );
       let zombiePid: number | undefined;
+      if (member) await until(() => receipt(join(root, "server.json.zombie")), Boolean);
       if (zombie) {
-        await until(() => receipt(join(root, "server.json.zombie")), Boolean);
         const proof = JSON.parse(await readFile(join(root, "server.json.zombie"), "utf8")) as {
           zombie: number;
         };
         zombiePid = proof.zombie;
         // The general lease observer must still report this real libproc failure
-        // as unknown. Only the CPU reader's kernel zombie proof skips its CPU.
+        // as unknown. Only the CPU reader's kernel exit proof skips its CPU.
         await expect(processIdentity(zombiePid)).rejects.toThrow();
+      }
+      if (unreadable) {
+        const { unreadable: pid } = JSON.parse(await readFile(join(root, "server.json.zombie"), "utf8")) as {
+          unreadable: number;
+        };
+        // Live and reachable, yet unreadable to its owner: an observation that is genuinely unknown.
+        await expect(processIdentity(pid)).rejects.toThrow();
+        expect(process.kill(pid, 0)).toBe(true);
       }
       // A signal to the runner alone does not end the owned server. Its CPU
       // governance must remain active while group termination still works.
@@ -307,19 +356,22 @@ it.each(process.platform === "darwin" ? [false, true] : [false])(
       const elapsedMs = performance.now() - at;
       const cpuCores = (after.cpuMs - before.cpuMs) / elapsedMs;
       if (zombiePid) await expect(processIdentity(zombiePid)).rejects.toThrow();
-      if (zombie) {
+      const degradedStatus = await readFile(join(root, "cpu", `${id}.json`), "utf8").catch(() => undefined);
+      if (unreadable) {
+        // Unknown CPU is never bounded by guessing: the server runs on, and says so.
+        expect(diagnostics).toContain("CPU enforcement degraded");
+        expect(degradedStatus).toBeDefined();
+      } else if (member) {
         expect(diagnostics).not.toContain("CPU enforcement degraded");
-        expect(
-          await readFile(join(root, "cpu", `${id}.json`), "utf8").catch(() => undefined),
-        ).toBeUndefined();
+        expect(degradedStatus).toBeUndefined();
       }
       // The old machine-max uncertainty debt left real transform workers at
       // roughly budget / machine-cores duty cycle while this zombie remained.
-      expect(cpuCores).toBeGreaterThan(zombie ? 0.2 : 0);
+      expect(cpuCores).toBeGreaterThan(member ? 0.2 : 0);
       // Allow sampling/IPC bursts; an ungoverned three-worker loop exceeds this.
-      expect(cpuCores).toBeLessThan(0.85);
+      if (!unreadable) expect(cpuCores).toBeLessThan(0.85);
       process.stdout.write(
-        `Server CPU proof: ${JSON.stringify({ zombie, budgetCores: 0.5, measuredCores: cpuCores, elapsedMs, workers: after.workers })}\n`,
+        `Server CPU proof: ${JSON.stringify({ member, budgetCores: 0.5, measuredCores: cpuCores, elapsedMs, workers: after.workers })}\n`,
       );
       await get(started.port, "/stop");
       expect(await done).toBe(7);

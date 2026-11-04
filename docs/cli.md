@@ -4677,7 +4677,8 @@ two slots, sharing 20% of machine CPU cores (at most 64 cores), divided equally
 among the slots. Its native supervisor samples aggregate owned-group CPU every
 100 ms and pauses/resumes proven process lifetimes to pay back excess usage;
 brief bursts can exceed this sampled budget. Tool-native fan-out is capped at
-two. Kernel-proven Darwin zombies are skipped before their parent reaps them.
+two. Darwin members the kernel proves exiting (`P_WEXIT`) or zombie are skipped
+before their parent reaps them.
 Unknown CPU observations resume the owned group and report degraded enforcement;
 its server permit stays held. CPU may exceed its share until observation recovers,
 when accounting restarts from a fresh baseline.
