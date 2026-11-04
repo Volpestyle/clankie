@@ -96,7 +96,11 @@ describe("authenticated operator conversation relay", () => {
       authorizeDevice: {
         authorize: async () => ({
           authorized: true,
-          device: { ...activeDevice, grants: { ...activeDevice.grants, terminalControl: true } },
+          device: {
+            ...activeDevice,
+            ownerDevice: true,
+            grants: { ...activeDevice.grants, terminalControl: true },
+          },
         }),
       },
     });
@@ -161,7 +165,11 @@ describe("authenticated operator conversation relay", () => {
     };
     const served = { op: "presence" as const, schemaVersion: 1 as const, snapshot };
     const body = { op: "presence", schemaVersion: 1, includeQuiet: true };
-    const takeControl = { ...activeDevice, grants: { ...activeDevice.grants, terminalControl: true } };
+    const takeControl = {
+      ...activeDevice,
+      ownerDevice: true,
+      grants: { ...activeDevice.grants, terminalControl: true },
+    };
     const read = async (device: typeof activeDevice & Record<string, unknown>) => {
       const dispatch = vi.fn(async () => served);
       const deviceDispatch = vi.fn(async () => served);
@@ -176,9 +184,19 @@ describe("authenticated operator conversation relay", () => {
     };
     expect(await read(takeControl)).toEqual({ own: 1, relayed: 0 });
     expect(await read(activeDevice)).toEqual({ own: 0, relayed: 1 });
-    expect(await read({ ...takeControl, controlScope: "hosted" })).toEqual({ own: 0, relayed: 1 });
+    expect(await read({ ...takeControl, ownerDevice: false })).toEqual({ own: 0, relayed: 1 });
+    expect(await read({ ...takeControl, ownerDevice: undefined })).toEqual({ own: 0, relayed: 1 });
+    expect(await read({ ...takeControl, ownerDevice: false, controlScope: "hosted" })).toEqual({
+      own: 0,
+      relayed: 1,
+    });
     expect(
-      await read({ ...takeControl, supportGrantId: "support", supportScope: "read-state" as const }),
+      await read({
+        ...takeControl,
+        ownerDevice: false,
+        supportGrantId: "support",
+        supportScope: "read-state" as const,
+      }),
     ).toEqual({ own: 0, relayed: 1 });
 
     // A connected app holds no presence read at all, on either route.
@@ -199,6 +217,41 @@ describe("authenticated operator conversation relay", () => {
     expect(await refused.json()).toEqual({ error: "connector_operation_not_allowed" });
     expect(dispatch).not.toHaveBeenCalled();
     expect(deviceDispatch).not.toHaveBeenCalled();
+  });
+  it("discards quiet fields if the service's owner-device answer changes during the read", async () => {
+    let ownerDevice = true;
+    const relay = await startRelay({
+      dispatch: vi.fn(),
+      deviceDispatch: async () => {
+        ownerDevice = false;
+        return {
+          op: "presence",
+          schemaVersion: 1,
+          snapshot: {
+            schemaVersion: 1,
+            cursor: "held-quiet",
+            mood: "idle",
+            detail: "Taking a break",
+            since: null,
+            activeSeats: 0,
+            quiet: true,
+          },
+        };
+      },
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...activeDevice, ownerDevice, grants: { ...activeDevice.grants, terminalControl: true } },
+        }),
+      },
+    });
+    const response = await post(relay.url, "/operator/v1/dispatch", {
+      op: "presence",
+      schemaVersion: 1,
+      includeQuiet: true,
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "owner_device_required" });
   });
   it("passes a paired hosted device's presence read and rechecks authorization", async () => {
     const snapshot = {

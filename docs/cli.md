@@ -11135,6 +11135,14 @@ presence read. A device that loses Take Control during the read gets a 403 from
 the relay instead. Legacy
 requests omit the fields and keep their existing cursor. `clankie status` opts in for the owner.
 
+For relay routing, `/v1/devices/self` reports the service-computed `ownerDevice`
+classification from that device's current registration, excluding visitors,
+support sessions and connector apps. Quiet reads also require Take Control.
+The service uses the same classification when it admits the read and checks it
+again before returning quiet fields. The relay uses this answer instead of
+inferring ownership from its other device metadata. If an older service omits
+the flag, the relay returns ordinary presence without quiet fields.
+
 ## Computer body
 
 ```sh

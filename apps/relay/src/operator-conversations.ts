@@ -1048,10 +1048,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.includeQuiet === true &&
       options.deviceDispatch !== undefined &&
       currentAuthorization.device.grants.terminalControl &&
-      // A second layer: connectorOperationAllowed already refuses a connector's presence read.
-      currentAuthorization.device.scope !== "connector" &&
-      currentAuthorization.device.controlScope !== "hosted" &&
-      currentAuthorization.device.supportGrantId === undefined;
+      // The service owns this decision; older services leave the private opt-in off.
+      currentAuthorization.device.ownerDevice === true;
     const ownerRoute =
       nativeMessageOp ||
       currentActivityOp ||
@@ -1148,6 +1146,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       }
       if (ownerRoute && serviceRequest.op !== "tracker_sync" && !fresh.device.grants.terminalControl) {
         writeGrantDenial(response, "terminalControl");
+        return true;
+      }
+      if (ownerQuietRead && fresh.device.ownerDevice !== true) {
+        writeJson(response, 403, { error: "owner_device_required" });
         return true;
       }
       const publicResult = connectorView(

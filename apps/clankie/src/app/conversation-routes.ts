@@ -524,7 +524,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return (
         record?.status === "active" &&
         record.grants.chat &&
-        leadSwitchDevice(record) &&
+        ownerPairedDeviceRecord(record) &&
         now.getTime() < sessionExpiresAt &&
         !isDeviceRunExpired(record, now)
       );
@@ -709,7 +709,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       // Take Control device. Anyone else takes the ordinary presence path, without it.
       const quietReader = () => {
         if (!owner?.current()) return false;
-        return owner.principal.kind === "operator" || leadSwitchDevice(ctx.devices.get(owner.principal.id));
+        return (
+          owner.principal.kind === "operator" || ownerPairedDeviceRecord(ctx.devices.get(owner.principal.id))
+        );
       };
       const admitted = quietReader() && owner !== undefined && (await owner.authorize());
       if (!admitted) delete parsed.data.includeQuiet;
@@ -1159,7 +1161,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       parsed.data.op === "lead" &&
       parsed.data.command.action === "set" &&
       owner?.principal.kind === "device" &&
-      !leadSwitchDevice(ctx.devices.get(owner.principal.id))
+      !ownerPairedDeviceRecord(ctx.devices.get(owner.principal.id))
     )
       return context.json({ error: "goal_owner_required" }, 403);
     const ownerHireOp = parsed.data.op === "spawn_seat" && parsed.data.seat.ownerWork !== undefined;
@@ -1929,7 +1931,7 @@ export function ownerDeviceRecord(record: DeviceRecord | undefined): record is D
   );
 }
 /** The owner's own paired device, never an app signed in to the connector (ADR 0350). */
-function leadSwitchDevice(record: DeviceRecord | undefined): boolean {
+export function ownerPairedDeviceRecord(record: DeviceRecord | undefined): boolean {
   return ownerDeviceRecord(record) && record.scope !== "connector";
 }
 

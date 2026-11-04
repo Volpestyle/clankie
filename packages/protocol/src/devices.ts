@@ -334,6 +334,11 @@ export type DeviceSessionRefreshResponse = z.infer<typeof DeviceSessionRefreshRe
 
 /** Device-authenticated view of its own registration, used to restore a session on launch. */
 export const DeviceSelfResponseSchema = z.object({
+  /** Service-computed owner pairing, excluding visitors, support and connector apps.
+   * Private quiet reads also require Take Control. Absent on older services; grants no private read.
+   * This is a routing classification, not a grant or a substitute for service authorization.
+   */
+  ownerDevice: z.boolean().optional(),
   /** Hosting lifecycle is never granted to a device, including through the legacy relay. */
   controlScope: z.literal("hosted").optional(),
   supportGrantId: z.string().uuid().optional(),

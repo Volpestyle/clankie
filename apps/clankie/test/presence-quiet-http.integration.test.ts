@@ -1,12 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { afterEach, expect, it } from "vitest";
-import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
+import { DeviceSelfResponseSchema, SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
 import { OperatorPresenceResultSchema } from "@clankie/protocol/presence";
 import { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
@@ -14,10 +14,17 @@ import { createStubCaptain, type CaptainPort } from "../src/captain/port.ts";
 import { DesktopExpressions } from "../src/captain/desktop.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { projectPresence } from "../src/captain/presence.ts";
+import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
+import {
+  createCaptainConversationDispatch,
+  createDeviceConversationDispatch,
+} from "../../relay/src/conversation-upstream.ts";
+import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 
 // The real service route, pairing and revocation, with the real quiet-hours
 // reading and projection behind the captain's dispatch.
 const cleanup: (() => Promise<unknown> | void)[] = [];
+const RELAY_BEARER = "quiet-presence-relay-fixture-token";
 afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
@@ -105,7 +112,7 @@ async function fixture(held?: Promise<void>) {
     eventLogPath,
     deviceSessionKey,
     authenticateCaptain: async (request) =>
-      request.headers.get("authorization") === "Bearer relay"
+      request.headers.get("authorization") === `Bearer ${RELAY_BEARER}`
         ? { captainId: "relay", steerSourceLane: "api" }
         : undefined,
     authenticateOperator: async (request) =>
@@ -118,6 +125,23 @@ async function fixture(held?: Promise<void>) {
     await app.close();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
+  });
+  const handler = createOperatorConversationRelayHandler({
+    authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: origin }),
+    dispatch: createCaptainConversationDispatch({ baseUrl: origin, bearerToken: RELAY_BEARER }),
+    deviceDispatch: createDeviceConversationDispatch({ baseUrl: origin }),
+  });
+  const relay = createServer((request, response) => {
+    void handler(request, response).then((handled) => {
+      if (!handled) response.writeHead(404).end();
+    });
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  const relayOrigin = `http://127.0.0.1:${(relay.address() as { port: number }).port}`;
+  cleanup.push(async () => {
+    relay.closeAllConnections();
+    await new Promise((resolve) => relay.close(resolve));
   });
   const call = (path: string, body: unknown, bearer = "owner") =>
     fetch(origin + path, {
@@ -139,7 +163,20 @@ async function fixture(held?: Promise<void>) {
       await call("/v1/pairing/complete", { completionToken: pending.completionToken, acceptedGrants: grants })
     ).json()) as { deviceId: string; deviceToken: string };
   };
-  return { asked, call, read, pair, parked, tokenFor };
+  const relayRead = (bearer: string) =>
+    fetch(relayOrigin + "/operator/v1/dispatch", {
+      method: "POST",
+      headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+      body: JSON.stringify({ op: "presence", schemaVersion: 1, includeQuiet: true }),
+    });
+  const self = async (bearer: string) => {
+    const response = await fetch(origin + "/v1/devices/self", {
+      headers: { authorization: `Bearer ${bearer}` },
+    });
+    expect(response.status).toBe(200);
+    return DeviceSelfResponseSchema.parse(await response.json());
+  };
+  return { asked, call, read, pair, parked, tokenFor, relayRead, self };
 }
 
 const snapshotOf = async (response: Response) => {
@@ -148,6 +185,32 @@ const snapshotOf = async (response: Response) => {
 };
 const quiet = { quiet: true, quietUntil: "2026-11-04T23:59:00.000Z" };
 
+it("shares the service's owner-device decision through the real relay without exposing quiet hours to a Take Control visitor", async () => {
+  const f = await fixture();
+  const owner = await f.pair(TAKE_CONTROL_GRANTS);
+  expect(await snapshotOf(await f.relayRead(owner.deviceToken))).toMatchObject(quiet);
+
+  // The visitor has Take Control and no relay-side support/controlScope marker.
+  // Its actual registration is sufficient for the service to refuse owner-only data.
+  const visitor = f.tokenFor("visitor");
+  const ordinary = await snapshotOf(await f.relayRead(visitor));
+  expect(ordinary).not.toHaveProperty("quiet");
+  expect(ordinary).not.toHaveProperty("quietUntil");
+  expect(f.asked).toEqual([true, false]);
+  expect((await f.self(owner.deviceToken)).ownerDevice).toBe(true);
+  expect((await f.self(visitor)).ownerDevice).toBe(false);
+  expect((await f.read(visitor)).status).toBe(401);
+
+  const supervise = await f.pair(SUPERVISE_GRANTS);
+  expect((await f.self(supervise.deviceToken)).ownerDevice).toBe(true);
+  const supervised = await snapshotOf(await f.relayRead(supervise.deviceToken));
+  expect(supervised).not.toHaveProperty("quiet");
+  expect(supervised).not.toHaveProperty("quietUntil");
+  expect((await f.self(f.tokenFor("connector"))).ownerDevice).toBe(false);
+  expect((await f.relayRead(f.tokenFor("connector"))).status).toBe(403);
+  expect(f.asked).toEqual([true, false, false]);
+});
+
 it("answers quiet hours for the operator and a Take Control device, and for nobody else", async () => {
   const f = await fixture();
   expect(await snapshotOf(await f.read("owner"))).toMatchObject(quiet);
@@ -155,7 +218,7 @@ it("answers quiet hours for the operator and a Take Control device, and for nobo
   expect(await snapshotOf(await f.read(deviceToken))).toMatchObject(quiet);
 
   // The relay's own bearer, which is how every other device's presence read arrives.
-  const relayed = await snapshotOf(await f.read("relay"));
+  const relayed = await snapshotOf(await f.read(RELAY_BEARER));
   expect(relayed).not.toHaveProperty("quiet");
   expect(relayed).not.toHaveProperty("quietUntil");
   expect(f.asked).toEqual([true, true, false]);
