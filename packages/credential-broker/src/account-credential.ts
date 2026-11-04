@@ -50,6 +50,7 @@ const AccessTokenClaimsSchema = z
 
 export type ClankieAccountAuthErrorCode =
   | "account_not_invited"
+  | "account_replaced"
   | "code_invalid"
   | "code_expired"
   | "email_invalid"
@@ -379,6 +380,8 @@ export function clankieAccountSignInRequired(error: unknown): boolean {
 export function createClankieAccountTokenProvider(input: {
   readonly gatewayUrl: string;
   readonly store: CredentialStore;
+  /** Refuse tokens once the stored account is another: a host route belongs to one account. */
+  readonly accountId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }): ClankieAccountTokenProvider {
@@ -420,27 +423,54 @@ export async function revokeClankieAccountCredential(input: {
 async function resolveClankieAccountAccessToken(input: {
   readonly gatewayUrl: string;
   readonly store: CredentialStore;
+  readonly accountId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }): Promise<ClankieAccountAccessToken> {
-  const now = input.now?.() ?? Date.now();
+  const needsRefresh = (candidate: OauthCredential) =>
+    candidate.expires < (input.now?.() ?? Date.now()) + ACCESS_REFRESH_WINDOW_MS;
   const stored = await input.store.get(CLANKIE_ACCOUNT_PROVIDER_ID);
   if (stored === undefined || stored.type !== "oauth" || stored.accountId === undefined) {
     throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
   }
   let credential = stored;
-  if (credential.expires < now + ACCESS_REFRESH_WINDOW_MS) {
-    const config = await discoverPublicGatewayAccount(input.gatewayUrl, input.fetchImpl ?? fetch);
-    credential = await refreshClankieAccountCredential(
-      credential,
-      config,
-      input.fetchImpl ?? fetch,
-      (rotated) => input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, rotated),
-    );
-    await input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
+  if (needsRefresh(stored)) {
+    if (input.store.update === undefined) {
+      throw new ClankieAccountAuthError("unexpected_response", "Credential store cannot refresh safely");
+    }
+    const fetchImpl = input.fetchImpl ?? fetch;
+    const config = await discoverPublicGatewayAccount(input.gatewayUrl, fetchImpl);
+    let failure: { readonly error: unknown } | undefined;
+    // Read, refresh and persist are one transaction under the lock `set` and
+    // `delete` take, in every process, so a sign-in lands wholly before or after.
+    const current = await input.store.update(CLANKIE_ACCOUNT_PROVIDER_ID, async (latest) => {
+      if (latest.type !== "oauth" || !needsRefresh(latest)) return latest;
+      let rotated = latest;
+      try {
+        return await refreshClankieAccountCredential(latest, config, fetchImpl, async (next) => {
+          rotated = next;
+        });
+      } catch (error) {
+        // Cognito has spent the old token: keep its replacement even when the rest failed.
+        failure = { error };
+        return rotated;
+      }
+    });
+    if (failure !== undefined) throw failure.error;
+    if (current?.type !== "oauth") {
+      throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
+    }
+    credential = current;
   }
   if (credential.accountId === undefined) {
     throw new ClankieAccountAuthError("unexpected_response", "Clankie account token has no subject");
+  }
+  if (input.accountId !== undefined) {
+    const latest = await input.store.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+    const latestAccountId = latest?.type === "oauth" ? latest.accountId : undefined;
+    if (credential.accountId !== input.accountId || latestAccountId !== input.accountId) {
+      throw new ClankieAccountAuthError("account_replaced", "This Mac signed in to another account");
+    }
   }
   return { token: credential.access, accountId: credential.accountId, expiresAt: credential.expires };
 }

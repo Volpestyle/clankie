@@ -186,7 +186,7 @@ export interface ClankieAppDependencies {
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** Owner identity proven only by the private same-user Unix mint listener. */
   localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
-  /** A native client on this Mac over loopback, not forwarded by the gateway. Grants nothing alone. */
+  /** A native client on this Mac over loopback, not forwarded by the gateway. A transport gate, never an identity. */
   isSameMacRequest?: (request: Request) => boolean;
   /** The app's sign-in to clankie.bot (#722). Absent on a body that cannot open a doorway. */
   macAccount?: {

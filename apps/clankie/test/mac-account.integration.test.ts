@@ -5,7 +5,12 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import { CLANKIE_ACCOUNT_PROVIDER_ID, FileCredentialStore } from "@clankie/credential-broker";
+import {
+  CLANKIE_ACCOUNT_PROVIDER_ID,
+  createClankieAccountTokenProvider,
+  derivePublicGatewayHostId,
+  FileCredentialStore,
+} from "@clankie/credential-broker";
 import { TAKE_CONTROL_GRANTS } from "@clankie/protocol";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import {
@@ -17,13 +22,14 @@ import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
 import { SettingsStore } from "@clankie/settings";
 import { afterEach, describe, expect, it } from "vitest";
 import { createClankieApp, type ClankieApp } from "../src/app.ts";
+import { connectBodyToGateway } from "../src/body-doorway.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { LocalCompanionBoundary } from "../src/local-companion-boundary.ts";
 
 const CLIENT_ID = "fixtureclient";
-const ACCESS = `h.${Buffer.from(
-  JSON.stringify({ sub: "account-sub", client_id: CLIENT_ID, token_use: "access" }),
-).toString("base64url")}.s`;
+const accessFor = (sub: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub, client_id: CLIENT_ID, token_use: "access" })).toString("base64url")}.s`;
+const ACCESS = accessFor("account-sub");
 const REFRESH = "refresh-token-never-leaves";
 const SESSION = "cognito-session-never-leaves";
 
@@ -34,8 +40,16 @@ afterEach(async () => {
 
 /** The public gateway's discovery and Cognito, over real HTTP. */
 async function accountService() {
+  const account = { access: ACCESS };
   const calls: { target: string; body: Record<string, unknown> }[] = [];
+  /** A refresh waits here until the test lets Cognito answer. */
+  const refresh = { hold: Promise.resolve(), reached: () => {} };
   const server: Server = createServer((request, response) => {
+    if (request.method === "HEAD") {
+      response.statusCode = 405;
+      response.end();
+      return;
+    }
     if (request.url === "/gateway/v1/config") {
       const { port } = server.address() as AddressInfo;
       response.setHeader("content-type", "application/json");
@@ -63,6 +77,19 @@ async function accountService() {
         response.statusCode = status;
         response.end(JSON.stringify(value));
       };
+      if (target === "GetTokensFromRefreshToken") {
+        refresh.reached();
+        void refresh.hold.then(() =>
+          reply(200, {
+            AuthenticationResult: {
+              AccessToken: accessFor("old-sub"),
+              RefreshToken: "old-rotated",
+              ExpiresIn: 3600,
+            },
+          }),
+        );
+        return;
+      }
       if (target === "InitiateAuth") {
         const email = (body.AuthParameters as { USERNAME: string }).USERNAME;
         if (email === "stranger@example.com")
@@ -72,13 +99,18 @@ async function accountService() {
       const code = (body.ChallengeResponses as { EMAIL_OTP_CODE: string }).EMAIL_OTP_CODE;
       if (code !== "123456") return reply(400, { __type: "CodeMismatchException", message: "no" });
       return reply(200, {
-        AuthenticationResult: { AccessToken: ACCESS, RefreshToken: REFRESH, ExpiresIn: 3600 },
+        AuthenticationResult: { AccessToken: account.access, RefreshToken: REFRESH, ExpiresIn: 3600 },
       });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanups.push(() => new Promise((resolve) => server.close(resolve)));
-  return { calls, url: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}` };
+  return {
+    account,
+    calls,
+    refresh,
+    url: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`,
+  };
 }
 
 async function fixture(options: { idle?: () => boolean; platform?: string; hosted?: boolean } = {}) {
@@ -154,6 +186,15 @@ async function fixture(options: { idle?: () => boolean; platform?: string; hoste
 }
 
 const INSTALLATION = "AAAAAAAAAAAAAAAAAAAAAA";
+
+const doorwayOptions = (f: Awaited<ReturnType<typeof fixture>>) => ({
+  publicGateway: { url: f.account.url, installationId: INSTALLATION },
+  store: f.credentials,
+  env: {},
+  port: 1,
+  relayPort: 2,
+  logger: { info: () => undefined, warn: () => undefined },
+});
 
 describe("signing this Mac in from the app", () => {
   it("takes a Take Control device from email to stored tokens without a token crossing the route", async () => {
@@ -306,6 +347,66 @@ describe("signing this Mac in from the app", () => {
     idle = true;
     await expect.poll(() => f.restarts.length, { timeout: 7_000 }).toBeGreaterThan(1);
   }, 10_000);
+
+  it.each([
+    {
+      name: "another account",
+      sub: "account-sub",
+      bootsAs: "account-sub",
+      oldConnection: "account_replaced",
+    },
+    { name: "the same account", sub: "old-sub", bootsAs: "old-sub", oldConnection: undefined },
+  ])("keeps a sign-in to $name over a refresh already in flight, through the restart", async (t) => {
+    const f = await fixture();
+    await f.useFixtureGateway(INSTALLATION);
+    await f.credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, {
+      type: "oauth",
+      access: accessFor("old-sub"),
+      refresh: "old-refresh",
+      expires: Date.now() - 1,
+      accountId: "old-sub",
+      clientId: CLIENT_ID,
+    });
+    f.account.account.access = accessFor(t.sub);
+    let answerRefresh = () => {};
+    f.account.refresh.hold = new Promise((resolve) => (answerRefresh = resolve));
+    const reached = new Promise<void>((resolve) => (f.account.refresh.reached = resolve));
+
+    // The live doorway, as boot builds it, mid-refresh when the owner signs in.
+    const { connector } = await connectBodyToGateway(doorwayOptions(f));
+    expect(connector).toBeDefined();
+    const resolveToken = createClankieAccountTokenProvider({
+      gatewayUrl: f.account.url,
+      store: f.credentials,
+      accountId: "old-sub",
+    });
+    // It finishes wholly before the sign-in lands, so its token is the old account's.
+    const inFlight = resolveToken();
+    await reached;
+    await f.call(MAC_ACCOUNT_START_PATH, { email: "owner@example.com" }, f.owner);
+    const completing = f.call(MAC_ACCOUNT_COMPLETE_PATH, { code: "123456" }, f.owner);
+    await expect.poll(() => f.account.calls.at(-1)?.target).toBe("RespondToAuthChallenge");
+    answerRefresh();
+    expect((await completing).status).toBe(200);
+    expect((await inFlight).accountId).toBe("old-sub");
+    expect(await f.credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({
+      access: accessFor(t.sub),
+      refresh: REFRESH,
+      accountId: t.sub,
+    });
+
+    // Whatever that connection does next, it never carries the replaced account again.
+    const next = await resolveToken().then(
+      (token) => ({ code: undefined, token: token.token }),
+      (error: { code?: string }) => ({ code: error.code, token: undefined }),
+    );
+    expect(next.code).toBe(t.oldConnection);
+    if (t.oldConnection === undefined) expect(next.token).toBe(accessFor(t.sub));
+
+    // The restart boots on what the sign-in stored.
+    const rebooted = await connectBodyToGateway(doorwayOptions(f));
+    expect(rebooted.connector?.hostBaseUrl).toContain(derivePublicGatewayHostId(t.bootsAs, INSTALLATION));
+  });
 
   it("does not exist on a hosted body or off macOS", async () => {
     for (const options of [{ hosted: true }, { platform: "linux" }]) {

@@ -34,7 +34,7 @@ export const MacAccountStartResponseSchema = z
   .object({ email: z.string(), expiresAt: z.string().datetime() })
   .strict();
 
-/** `restarting` now, or `waiting` for his current turn to end. Either way the tokens are stored. */
+/** The tokens are stored. `restarting` means the exit began, not that the replacement is healthy. */
 export const MacAccountCompleteResponseSchema = z
   .object({
     state: z.literal("signed_in"),

@@ -7653,6 +7653,9 @@ paths:
         Same admission as GET /v1/mac-account, and only the identity that started
         the sign-in may finish it, within five attempts. The broker stores the
         tokens, then the service restarts to open the doorway, once he is idle.
+        `restarting` means the exit began, not that the replacement is healthy:
+        read the doorway from GET /v1/mac-account. Storing can wait behind a
+        refresh already in progress, for up to about a minute.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true

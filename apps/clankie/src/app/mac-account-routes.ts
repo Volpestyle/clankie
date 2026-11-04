@@ -34,8 +34,9 @@ const MAX_CODE_ATTEMPTS = 5;
 const RESTART_RETRY_MS = 5_000;
 const LOCK = "mac-account";
 
-const ERROR_STATUS: Readonly<Record<ClankieAccountAuthErrorCode, 400 | 403 | 410 | 429 | 502 | 503>> = {
+const ERROR_STATUS: Readonly<Record<ClankieAccountAuthErrorCode, 400 | 403 | 409 | 410 | 429 | 502 | 503>> = {
   account_not_invited: 403,
+  account_replaced: 409,
   code_invalid: 400,
   code_expired: 410,
   email_invalid: 400,

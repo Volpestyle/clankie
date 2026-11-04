@@ -482,6 +482,17 @@ class MemoryStore implements CredentialStore {
     return Promise.resolve(this.values.delete(providerId));
   }
 
+  public async update(
+    providerId: string,
+    transform: (current: ProviderCredential) => Promise<ProviderCredential>,
+  ): Promise<ProviderCredential | undefined> {
+    const current = this.values.get(providerId);
+    if (current === undefined) return undefined;
+    const next = await transform(current);
+    this.values.set(providerId, next);
+    return next;
+  }
+
   public list(): Promise<Record<string, RedactedCredential>> {
     return Promise.resolve(
       Object.fromEntries(
