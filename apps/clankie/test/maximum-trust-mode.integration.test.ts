@@ -192,6 +192,10 @@ it("owner API status, TUI help and CLI help describe supported overrides without
     expect(section).not.toMatch(
       /guardrails of every harness|every permission prompt|without their permission and\s+command guardrails/u,
     );
+    const apiDocs = await readFile(new URL("../openapi.yaml", import.meta.url), "utf8");
+    const apiSection = apiDocs.split("  /v1/operator/maximum-trust-mode:")[1]?.split(/\n  \/v1\//u)[0];
+    expect(apiSection).toContain("OpenCode keeps its configured permissions");
+    expect(apiSection).not.toContain("every harness Clankie launches");
     for (const enabled of [true, false]) {
       await mode([enabled ? "on" : "off"]);
       const insertCommandResult = vi.fn();

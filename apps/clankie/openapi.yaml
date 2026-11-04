@@ -4159,7 +4159,7 @@ paths:
       tags: [Operator]
       operationId: getMaximumTrustMode
       summary: Read whether maximum trust mode is on
-      description: While on, every harness Clankie launches next starts without its own permission and command guardrails, through its native flag (Claude --dangerously-skip-permissions, Codex approval_policy=never with sandbox_mode=danger-full-access, Grok --permission-mode bypassPermissions). Running seats keep the mode they launched with. Separate from the autonomy dial.
+      description: Requests supported native bypass overrides on new Claude, Codex and Grok launches. OpenCode keeps its configured permissions. Native owner confirmations, managed denies, read-only hires and machine access ceilings remain in force. Running seats keep their launch mode. Separate from the autonomy dial.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
