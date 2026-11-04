@@ -22,7 +22,7 @@ service when he is idle. A phone or the gateway cannot reach them.
 Provider-key management uses the owner model-key API
 (`docs/model-keys.md` under the service root): GET `/v1/model-keys` lists the
 same providers/models as `/model`; POST `/set`, `/validate`, `/select`, `/remove`
-under that path manage broker API keys and the captain selection. The device
+under that path manage broker API keys and the captain selection. The owner device and its pairing ancestry must belong to the owner; it
 must accept **Take Control** (`terminalControl`) at pairing. Supervise cannot
 manage keys; the local operator bearer can. Public gateway calls must use the
 encrypted envelope. Keys are write-only: never ask for one in chat or put one in

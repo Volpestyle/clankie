@@ -143,12 +143,16 @@ follow/wake and host availability use the owner settings API. The command reads
 the current snapshot, sends its `expectedRevision`, and reports a conflict
 without retrying or writing a local fallback. The TUI uses the same path. Start
 the service and authenticate as its owner before changing these settings.
+Owner routes share one device decision: the operator credential, or an active
+owner device with Take Control whose pairing ancestry belongs to the owner.
+Owner-paired children use the same decision. Writes recheck it at their commit
+boundary, and control-session renewal follows that device decision.
 
 `GET`/`POST /v1/operator/host-settings` carries `host {keepAwake, autoUpdate}`,
 its revision and support metadata. Writes use
 `{schemaVersion: 1, expectedRevision, changes: {keepAwake?, autoUpdate?}}`.
 Keep-awake is supported only on a Mac. These routes, voice, account holds and Linear follow/wake are
-forwarded to devices with current Take Control authority.
+forwarded to owner devices with current Take Control authority.
 
 `awake --local-setup on|off` explicitly prepares this Mac when the service is
 down and refuses a remote transport. `update auto` has no offline fallback.

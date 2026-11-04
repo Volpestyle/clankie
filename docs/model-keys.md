@@ -66,7 +66,7 @@ responses label `included_catalog_policy` and `credit_rate_policy` in
 `openItems`; this slice changes neither catalog contents nor credit policy and
 publishes no invented rates.
 
-Every route requires the local operator bearer or an active paired device whose
+Every route requires the local operator bearer or an active owner device whose
 current grant includes `terminalControl` (Take Control). Chat, steer, terminal
 observation, captain and worker credentials cannot manage keys. Pairing
 offers Take Control; the app must accept it when completing pairing. Revocation

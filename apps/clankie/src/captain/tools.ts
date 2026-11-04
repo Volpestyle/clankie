@@ -940,6 +940,7 @@ function waiveReviewTool(reviews: ReviewGate, turn: TurnContext): ToolDefinition
           reason: input.reason,
         },
         { actor: "lead", conversationId: authority.owner.conversationId },
+        () => assertConversationAuthority(authority),
       );
       if ("error" in result) throw new Error(`${result.error}: ${result.detail}`);
       return json(result);

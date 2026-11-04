@@ -50,7 +50,13 @@ export function createMachineJoinRoutes(
       } catch {
         return context.json({ error: "malformed" }, 400);
       }
-      await joins.setLegacyJoinsEnabled(body.enabled);
+      try {
+        await joins.setLegacyJoinsEnabled(body.enabled, async () => {
+          if ((await authorizeOwner(context.req.raw)) !== true) throw Error("owner_revoked");
+        });
+      } catch {
+        return context.json({ error: "join_settings_conflict" }, 409);
+      }
     }
     return context.json({ enabled: await joins.legacyJoinsEnabled() });
   });

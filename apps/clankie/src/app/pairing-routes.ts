@@ -613,6 +613,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           401,
         );
       }
+      // Control-session renewal shares the owner-device decision used by owner routes.
+      if (record.grants.terminalControl && !ownerPairedDeviceRecord(record, ctx.devices))
+        return context.json({ error: "forbidden" }, 403);
       const claims = mintDeviceSessionClaims({
         deviceId: identity.deviceId,
         nowEpochSeconds: Math.floor(now.getTime() / 1000),

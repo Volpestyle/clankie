@@ -14,6 +14,8 @@ import type { ReviewGate, ReviewRefusal } from "./captain/review-gate.ts";
 /** HTTP status for each refusal; the body always names the refusal and why. */
 export function reviewRefusalStatus(refusal: ReviewRefusal): 400 | 403 | 404 | 409 | 503 {
   switch (refusal.error) {
+    case "authority_changed":
+      return 403;
     case "native_seat_required":
     case "not_reviewer":
       return 403;
@@ -81,7 +83,9 @@ export function createReviewRoutes(
       // allow-swallowed-rejection -- A malformed body is refused below as an invalid waiver.
       const input = ReviewWaiverInputSchema.safeParse(await context.req.json().catch(() => undefined));
       if (!input.success) return context.json({ error: "invalid_waiver" }, 400);
-      const result = await reviews.waive(input.data, { actor: "owner" });
+      const result = await reviews.waive(input.data, { actor: "owner" }, async () => {
+        if ((await authorize(context.req.raw)) !== true) throw Error("owner_revoked");
+      });
       return "error" in result
         ? context.json(result, reviewRefusalStatus(result))
         : context.json({ schemaVersion: 1, candidate: result });
