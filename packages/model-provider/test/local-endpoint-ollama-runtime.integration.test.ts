@@ -38,8 +38,9 @@ async function serve(options: {
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
       calls.push(`${request.method} ${request.url}`);
-      if (request.url === options.redirect?.path) {
-        response.writeHead(307, { location: `${options.redirect.to}${request.url}` }).end();
+      const { redirect } = options;
+      if (redirect !== undefined && request.url === redirect.path) {
+        response.writeHead(307, { location: `${redirect.to}${request.url}` }).end();
         return;
       }
       response.setHeader("content-type", "application/json");
