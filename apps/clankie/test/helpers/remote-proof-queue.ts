@@ -30,7 +30,7 @@ export async function queuedProofFixture(repeatMs = 0, proofMs = 0) {
   let relay!: RemoteFleetRelay;
   let stderr = "",
     closed = false;
-  child.stderr.on("data", (chunk) => {
+  child.stderr!.on("data", (chunk) => {
     stderr = (stderr + String(chunk)).slice(-4000);
   });
   const close = async () => {
