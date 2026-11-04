@@ -83,3 +83,19 @@ releases and explicit runs.
   queue's isolated environment still need fixing.
 - A repository opts out of the queue's narrow gate by not defining
   `check:landing`.
+
+## Evidence and limits
+
+The Context measurement is one 2026-10-06 app-only batch that spent over an hour
+in core's full suite and failed 13 files; the three rerun in an ordinary
+checkout passed.
+`pnpm deadcode` measured 1.8–3.1 seconds on 2026-10-07. The timing-sensitive
+exclusions rest on the linked policy evidence, which could not attribute most
+historical outcomes to individual files.
+
+## Revisit when
+
+- The core suite stops taking over an hour per batch, so running it in every
+  landing costs little again.
+- A proof in `landing-test-policy.ts` stops being timing-sensitive, or a
+  regression lands that only an excluded proof would have caught.

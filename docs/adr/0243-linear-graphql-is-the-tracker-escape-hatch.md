@@ -54,3 +54,15 @@ irreversible ones. Owner intent for those is the caller's `confirm`, which the
 host checks against the operation's real targets; it is a deliberate-intent
 check and an audit trail, not a second human approval. Live document deletion
 is verified on a scratch document after the change lands.
+
+## Evidence and limits
+
+This record links no measurement. The decision rests on Linear's hosted MCP having no
+document delete or archive, and on the MCP OAuth token being audience-restricted
+to `mcp.linear.app`, as of 2026-10-06.
+
+## Revisit when
+
+- Linear's MCP adds the operations this tool exists to reach, such as document
+  delete and archive.
+- Linear lets the MCP token call `api.linear.app/graphql`.

@@ -60,3 +60,18 @@ whose service it does not run.
   (9,038 written) to 9,037 cached; the hosted tool list from 34 tools (10,524
   prompt tokens) to 21 (9,037); after compaction at 250k, recall of four
   planted facts stayed 4/4.
+
+## Evidence and limits
+
+The figures above are the retained evidence: the proxy's 2 MiB refusal, the
+cost study's modelled difference for 250k over 64k (about $0.38 a Starter month
+and $3.1 a Pro month), and the gpt-6-luna measurements in Consequences. The
+cost-floor study is on VUH-1371; its raw data is not linked here.
+
+## Revisit when
+
+- OpenAI adds GPT-5.6 or later models to its 24-hour retention list, or changes
+  their 30-minute prefix lifetime.
+- A recall check like the 4/4 planted-fact one loses facts after compaction near
+  the threshold.
+- Pi changes its compaction reserve or how it keys the prompt cache.

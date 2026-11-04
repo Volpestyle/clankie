@@ -74,3 +74,19 @@ needs CPU for Vite transforms, the coordinator and real fixture children too
 The remote queue proof moved to a later one-worker project (VUH-2119), and the
 local one joined it the next day (VUH-2164), so competing fixtures cannot expire
 their deliberately short deadlines.
+
+## Evidence and limits
+
+The original choice rests on the crash stack quoted above and one comparison on
+an M5 Max with Node v26.7.0: about 85s with forks against 76s for the one
+threads run that finished, with 4 of 5 threads runs aborted. The worker counts
+rest on the linked gate evidence of 2026-10-06 and 2026-10-07 and the VUH-2101
+CI measurements. This record names no Node version that fixes the worker
+teardown.
+
+## Revisit when
+
+- A Node release fixes worker-isolate teardown, and a measured threads run is
+  enough faster than forks to be worth the change.
+- The CI runner's core count changes, or measured local runs show four forks
+  starving the machine.

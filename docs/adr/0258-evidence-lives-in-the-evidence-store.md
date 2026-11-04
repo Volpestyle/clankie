@@ -287,3 +287,17 @@ commit.
 The parts of the decision above that commit a manifest beside the README are
 superseded by this amendment; the store, its records and its access rules are
 unchanged.
+
+## Evidence and limits
+
+The evidence is the size count in Context: on 2026-10-09 clankie's
+`docs/testing` held 20 MB and about 165k lines, James's audit put clankie-app at
+about 294 MB of evidence media and clankie-ops at about 43 MB, and by 2026-11-02
+`docs/testing` held 525 entries and 1,650 files. The machine cost of worktrees,
+fseventsd and Spotlight on 2026-10-08 is recorded in VUH-1871 and VUH-1899, not
+measured here.
+
+## Revisit when
+
+- Git or a large-file option stops materializing every file in every worktree.
+- The evidence store's local disk use becomes a problem on the owner's machine.

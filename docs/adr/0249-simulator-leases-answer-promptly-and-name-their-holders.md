@@ -123,3 +123,18 @@ even when the latter match the requested model exactly. Among those candidates,
 exact model then close model then family determines preference. `exact: true`
 never substitutes a different model; an explicit `deviceId` remains strict.
 Missing or malformed metadata is unknown, never proof of a previous boot.
+
+## Evidence and limits
+
+No measurement record is linked. The Context cites the 2026-10-07 failures
+against the CLI's 120-second timeout and a fresh device's first boot outlasting
+it. The amendment cites repeated first boots on iOS 27 driving reported load to
+180–309 on eighteen cores while idle iPhones existed.
+
+## Revisit when
+
+- A new iOS runtime's first boot no longer drives load far above the core
+  count, which would make creating a device cheap again.
+- The native helper can prove an external device idle, which would make
+  reclaiming one safe.
+- Waiting lanes are starved under first-come fairness.

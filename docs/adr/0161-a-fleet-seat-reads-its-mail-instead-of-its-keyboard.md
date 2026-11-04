@@ -130,3 +130,19 @@ configured with that name`). So a seat hired from the app for the `claude`
   lane; so does any failure to resolve or queue.
 - pi and Grok seats still take keystrokes. Extending delivery to them waits
   on those harnesses growing an out-of-band input.
+
+## Evidence and limits
+
+The harness behaviour this rests on: Claude Code binds a `server:` channel only
+for a server in its persisted config (probed 2026-09-06), the approved
+`--channels server:clankie-seat` form starts without the dialog but rejects the
+`server:` entry as not on the allowlist, and `codex queue --thread` runs a
+message as its own user turn (probed 2026-09-06). No transcript of those probes
+is linked from this record.
+
+## Revisit when
+
+- Claude Code accepts the `server:clankie-seat` entry in `--channels`, or binds
+  a server handed over with `--mcp-config`.
+- Herdr reports a Codex session, or exposes a pane's unsent draft.
+- pi or Grok gains an input that leaves the composer untouched.

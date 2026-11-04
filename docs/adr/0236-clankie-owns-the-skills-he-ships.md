@@ -71,3 +71,16 @@ belongs beside the tools it describes and changes in the same commit.
   skill experiment uses an explicit eval fixture, not a product setting.
 - Supersedes the vendoring and two-class sections of
   [bundled skills](../bundled-skills.md) as of this date.
+
+## Evidence and limits
+
+The load counts above come from 1,232 sessions over 21 days (2026-09-16 to
+2026-10-06). The raw session data is not linked from this record. Skills new
+that month were kept for a fair trial without load data.
+
+## Revisit when
+
+- A later count over a similar window shows a kept skill rarely loading,
+  including `tidy` and `fleet-resources` after their trial.
+- A skill experiment with an explicit eval fixture shows a shipped skill does
+  not help.

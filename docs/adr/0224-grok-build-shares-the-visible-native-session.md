@@ -99,3 +99,10 @@ stands for what no probe observes: queue acknowledgments, prompt-ID echoes, the
 system-prompt override and leader mode ignoring permission flags. The leader
 IPC is still the observed internal protocol. Grok 1.0.50 passed the probe and a
 live hire ([evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-17-opencode-grok-latest/README.md)).
+
+## Revisit when
+
+- A Grok Build release fails the leader and ACP probe, or Grok publishes the
+  leader IPC as a stable interface.
+- Grok leader mode starts honouring CLI permission rules.
+- Herdr always returns the top-level `agent` after `pane.report_agent`.

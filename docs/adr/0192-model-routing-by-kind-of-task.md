@@ -83,3 +83,17 @@ Two tiers and a fixed purpose table, plus one volitional escape hatch.
   cheap model plays well enough.
 - The model proxy must accept a second model and attribute cost per tier; the
   contract is in the hosted design doc's "Model routing" section.
+
+## Evidence and limits
+
+This record links no measurement. The decision rests on cost: running the strongest
+model for every small-talk turn spends included usage or a metered key. The
+turn limit of 12 is a default, not a measured value. Gameplay stays on the work
+model because no play evaluation has yet shown a cheap model plays well enough.
+
+## Revisit when
+
+- A play evaluation shows a routine model plays well enough for gameplay.
+- Logged escalations show routine Discord turns hitting the turn limit or
+  provider errors more often than they finish on the routine model.
+- The price gap between the owner's work and routine models closes.
