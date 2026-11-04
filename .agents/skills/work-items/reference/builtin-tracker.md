@@ -67,8 +67,11 @@ own events.
 ## Releases and cycles
 
 Releases are records on the built-in tracker. `clankie work releases sync`
-reads the repository's `v*` tags and assigns each release the item keys named
-in its commits since the previous version: built-in keys (`LOCAL-…`) and the
+reads the GitHub origin's published `v*` releases with uploaded, nonempty assets
+and assigns each release the item keys named in its commits since the previous
+published version. Drafts, bare tags and releases without assets do not advance
+the range; their work belongs to the next published version. Missing publication
+reads refuse the sync, with no local-tag fallback. Item keys are built-in keys (`LOCAL-…`) and the
 convention's Linear team (`TEAM-…`). Built-in items move to `delivered` on the
 first release that ships them, as a `stage` event `via: release`, when their
 evidence bundle has an independent check. Imported items without a recorded

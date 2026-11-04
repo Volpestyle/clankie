@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { expect, it } from "vitest";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { runWorkCommand } from "../../tui/src/command/work.ts";
+import { expect, it, onTestFinished } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { createLocalTracker } from "@clankie/work-items";
@@ -25,7 +29,7 @@ const git = promisify(execFile);
  * in-process owner loop with a real conversation store (ADR 0245 asks), and a fleet
  * worker's clankie_call reads. Only the model turn a wake would start is observed.
  */
-it("derives each release's items from the commits since the previous tag, delivers built-in items on the first release that ships them, and asks the owner to check each once", async () => {
+it("derives each release's items from the commits since the previous published release, skips unpublished tags, delivers built-in items on the first release that ships them, and asks the owner to check each once", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-tracker-releases-"));
   const settings = new SettingsStore(join(root, "settings.json"));
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
@@ -65,6 +69,7 @@ it("derives each release's items from the commits since the previous tag, delive
   await commit("feat: first item (LOCAL-1)");
   await run("tag", "-a", "v0.1.0", "-m", "v0.1.0");
   await commit("fix: LOCAL-2 and VUH-10\n\nStrings are UTF-8; digests are SHA-256.");
+  await run("tag", "v0.1.5"); // CI failed: this tag was never published.
   await commit("chore: LOCAL-1 follow-up");
   await run("tag", "v0.2.0");
   await commit("feat: LOCAL-3 was canceled before it shipped");
@@ -100,7 +105,43 @@ it("derives each release's items from the commits since the previous tag, delive
   });
   const workspace = join(root, "workspace");
   await mkdir(workspace);
+  // GitHub's real REST client reads both pages over HTTP. No GitHub writes or credentials.
+  let publicationAvailable = true;
+  let readTime = Date.now();
+  const release = (tag: string, assets = [{ state: "uploaded", size: 42 }], draft = false) => ({
+    tag_name: tag,
+    draft,
+    published_at: "2026-10-09T12:00:00Z",
+    assets,
+  });
+  const publicationReads: string[] = [];
+  const github = createServer((request, response) => {
+    publicationReads.push(request.url!);
+    if (!publicationAvailable) {
+      response.writeHead(503).end();
+      return;
+    }
+    response.setHeader("content-type", "application/json");
+    if (request.url === "/repos/example/releases/releases?per_page=100") {
+      response.setHeader(
+        "link",
+        `<http://127.0.0.1:${(github.address() as AddressInfo).port}/repos/example/releases/releases?per_page=100&page=2>; rel="next"`,
+      );
+      response.end(JSON.stringify([release("v0.10.0"), release("v0.9.0", [], true), release("v0.8.0", [])]));
+    } else if (request.url === "/repos/example/releases/releases?per_page=100&page=2") {
+      response.end(JSON.stringify([release("v0.2.0"), release("v0.1.0")]));
+    } else response.writeHead(404).end();
+  });
+  github.listen(0, "127.0.0.1");
+  await once(github, "listening");
+  onTestFinished(async () => {
+    github.closeAllConnections();
+    await new Promise<void>((resolve) => github.close(() => resolve()));
+  });
   workItems = createWorkItemsService({
+    clock: () => new Date(readTime),
+    githubToken: async () => "fixture-token",
+    githubApiBase: `http://127.0.0.1:${(github.address() as AddressInfo).port}`,
     stateDirectory: join(root, "work"),
     globalTrackerDirectory: join(root, "tracker"),
     workspace: () => workspace,
@@ -186,7 +227,10 @@ it("derives each release's items from the commits since the previous tag, delive
     })
   ).headers.get("mcp-session-id")!;
   const call = async (name: string, args: Record<string, unknown>) => {
-    const response = await rpc("tools/call", { name: "clankie_call", arguments: { name, arguments: args } });
+    const response = await rpc("tools/call", {
+      name: "clankie_call",
+      arguments: { name, arguments: args },
+    });
     const result = (await response.json()).result as { content: { text: string }[] };
     const reply = JSON.parse(result.content[0]!.text) as { outcome: string; content?: string };
     expect(reply, JSON.stringify(reply)).toMatchObject({ outcome: "ok" });
@@ -206,9 +250,16 @@ it("derives each release's items from the commits since the previous tag, delive
     return reply.body.result;
   };
   const sync = async () => {
-    const reply = await post("/v1/tracker/releases/sync", { repo });
-    expect(reply.status, JSON.stringify(reply.body)).toBe(200);
-    return reply.body.result;
+    const reply = await runWorkCommand(["releases", "sync", "--repo", repo], {
+      env: {
+        NODE_ENV: "test",
+        CLANKIE_OPERATOR_TOKEN: "tracker-owner",
+        CLANKIE_CONTROL_PLANE_URL: "http://fixture.invalid",
+      },
+      fetchImpl: (input, init) => app.app.request(new URL(String(input)).pathname, init),
+    });
+    expect(reply.ok, JSON.stringify(reply.body)).toBe(true);
+    return (reply.body as { result: any }).result;
   };
 
   for (const title of ["Shipped first", "Shipped second", "Never shipped"])
@@ -227,7 +278,14 @@ it("derives each release's items from the commits since the previous tag, delive
     });
     await owner("post_bundle_check", { bundleId: bundle.id });
   }
+  publicationAvailable = false;
+  const unavailable = await post("/v1/tracker/releases/sync", { repo });
+  expect(unavailable).toMatchObject({ status: 422, body: { error: "releases_unavailable" } });
+  expect((await call("linear_list_releases", {})).releases).toEqual([]);
+  publicationAvailable = true;
+  readTime += 30_001; // Respect the production failed-read cooldown.
   const first = await sync();
+  expect(publicationReads).toContain("/repos/example/releases/releases?per_page=100&page=2");
   expect(first.repository).toBe("github.com/example/releases");
   expect(first.releases.map((release: { version: string }) => release.version)).toEqual([
     "v0.1.0",
@@ -251,7 +309,7 @@ it("derives each release's items from the commits since the previous tag, delive
     id: "github.com/example/releases:repository:v0.2.0",
     tag: "v0.2.0",
     lane: "repository",
-    dateKind: "commit",
+    dateKind: "published",
     stage: { name: "Shipped", type: "completed" },
   });
   expect(

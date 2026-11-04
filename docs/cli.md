@@ -3630,8 +3630,12 @@ default|markdown|github|linear [--directory D] [--github-repo OWNER/NAME]
 - `clankie work releases sync [--repo PATH]` records the repo's shipped `v*`
   versions as releases in the built-in tracker
   ([ADR 0226 amendment, VUH-1930](adr/0226-one-tracker-tool-surface.md#amendment-releases-2026-10-09-vuh-1930)).
-  It uses the same tag source as `work project`. Each release's items are the
-  keys named by commits since the previous version, in version order:
+  The origin must name a GitHub repository. Only non-draft GitHub Releases with
+  a publication date and at least one uploaded, nonempty asset count; a bare tag
+  or failed publication does not. GitHub reads use the connected account or the
+  local `gh` login and fail explicitly when unavailable, without a tag fallback.
+  Each release's items are the keys named by commits since the previous published
+  version, in version order:
   `LOCAL-…` plus the convention's Linear team. Built-in items move to
   `delivered` on the first release that ships them, provided their evidence bundle
   has an independent check. Imported items with no recorded delivery stage retain

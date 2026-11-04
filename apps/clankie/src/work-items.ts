@@ -2531,12 +2531,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     },
     /**
      * A repository's shipped versions and the item keys each one's commits name
-     * (VUH-1930), for the built-in tracker's release sync. Read-only: git only.
+     * (VUH-1930), for the built-in tracker's release sync. Read-only: git and GitHub.
      */
     async releaseHistory(ref: string, local: boolean): Promise<ReleaseHistory> {
       const entry = await locate(ref, local);
       const { convention } = await tracker(entry.path, false, false, local);
-      return readReleaseHistory(entry.path, convention, run);
+      const dependencies = await deps(entry.path, local);
+      return readReleaseHistory(
+        entry.path,
+        convention,
+        run,
+        dependencies.github ?? (dependencies.gh ? ghCliApi(dependencies.gh) : undefined),
+      );
     },
     /** Canonical tool requests select the repo's backend without introducing another vocabulary. */
     async callTracker(
