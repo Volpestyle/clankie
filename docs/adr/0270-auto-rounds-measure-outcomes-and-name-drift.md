@@ -51,7 +51,9 @@ agents being measured. Choosing what to do about it stays with the lead.
   tooling and unlinked. A closure is tooling when every default-branch commit
   naming its key touched only non-product paths. A closure with no such commit
   counts as owner-facing and is recorded as `unlinked`, so the gap is visible
-  rather than guessed.
+  rather than guessed. The parent closure, or the tracker milestone member's
+  closure at its completion instant, finishes the previous milestone window.
+  Daily facts retain it; the newly opened window excludes it (#350).
 - **Started against the cap.** The count of started-state issues now, against
   the project's WIP cap (VUH-2256). With no cap set the record says so.
 - **Churn.** Lines added plus deleted on the origin default branch, bucketed
@@ -74,7 +76,9 @@ reads its fetched origin default branch, as the projects status line already
 does. A project whose workspaces are all on other machines (KH2) reads a
 service-owned bare mirror fetched from the workspace's origin, at most once per
 round. Per-commit numstat is cached by SHA. An unreadable repository leaves
-churn `unknown` with its reason, never zero.
+churn `unknown` with its reason, never zero. A non-git project folder names the
+missing Git checkout and asks for a project Git folder, in the record and wake
+line (#350).
 
 **Drift.** A working day is a local day on which the project was on Auto and
 had a landing or an issue state change; idle days neither count nor break a

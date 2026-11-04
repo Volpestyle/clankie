@@ -5827,13 +5827,17 @@ service measured before waking the lead, and whether that wake was delivered
   clients retain their response shape. Historical rounds may omit staffing.
 
 - `window`: since the last milestone (a closed parent issue or a complete tracker
-  milestone), or the 14-day lookback start when none is known.
+  milestone), or the 14-day lookback start when none is known. The closure that
+  finishes that milestone belongs to the window it closes, and remains in the
+  daily closure facts; it is not counted again in the newly opened window.
 - `closures`: keys closed in the window, split `ownerFacing`, `tooling` (every
   default-branch commit naming the key touched no product path), `unlinked` (no
   commit names it; counted as owner-facing) and `unclassified` (churn unreadable).
 - `started`: started-state issues now, by state, with the configured project `wipCap` (null when unset).
 - `churn`: lines added plus deleted by bucket (product, tooling, docs, excluded) on
-  the origin default branch, local or mirrored for remote-only projects.
+  the origin default branch, local or mirrored for remote-only projects. A project
+  folder outside Git leaves churn `unknown` with an instruction to configure a
+  project Git folder, in both the stored round and its wake line.
 - `days`: per local day for the window and the last seven days, whether it was a
   working day (a landing or an issue state change), its churn, closures and state changes.
 
