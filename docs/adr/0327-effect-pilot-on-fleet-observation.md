@@ -67,3 +67,10 @@ tens of milliseconds the first time the module loads.
   one.
 - Real-Herdr proof of the seam runs on the Mac, where `hc` and Herdr exist;
   the cloud checkout skips those tests.
+
+## Revisit when
+
+- A later Effect release changes the measured costs: about 63 ms of cold
+  import by path in development, or about 12 KB gzip of release bundle.
+- Fleet reads become frequent enough that the microseconds per read matter
+  beside Herdr's milliseconds.

@@ -58,3 +58,17 @@ repeated admission return the original item.
 - Sessions the owner opened by hand live on the shared service. Reaching them
   through its prompt endpoint, and mapping a Herdr pane to the session it shows,
   is separate work under #168.
+
+## Evidence and limits
+
+Proven against the installed OpenCode 2.2.5 TUI by
+[`opencode2-worker.integration.test.ts`](../../apps/clankie/test/opencode2-worker.integration.test.ts).
+The plugin floors are 2.2.5 for V2 and 1.18.18 for V1. The decision rests on
+OpenCode 2's shared service not taking per-launch plugins without changing it
+for every session the owner has open.
+
+## Revisit when
+
+- OpenCode lets a client attach per-session server plugins on the shared
+  service, so a hire would not need `--standalone`.
+- OpenCode changes `--standalone`, the session inbox or its version output.

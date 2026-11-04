@@ -78,3 +78,19 @@ clankie-app and clankie-ops). They are not a product rule.
 - The repo guide (`AGENTS.md`, linked as `CLAUDE.md`), the lead skill, the
   `verify-clankie` and `codex-review` skills, the quality gates guide, the
   architecture overview and the retired-claims registry state the new rule.
+
+## Evidence and limits
+
+This record links no measurement. The decision cites three Mac runners that failed every
+job at "Set up runner" on 2026-11-02 and 2026-11-03, and the owner's judgment
+that a real-app or simulator run per change spends more time testing than
+building. No branch protection or ruleset required a check on `main` when read
+on 2026-11-03.
+
+## Revisit when
+
+- Background runs on `main` stop reporting because the Mac runners keep failing
+  before any code runs.
+- Regressions that only the real app or a simulator catches reach `main` faster
+  than their `ci-finding` issues close.
+- A branch protection rule or ruleset on `main` starts requiring a check.

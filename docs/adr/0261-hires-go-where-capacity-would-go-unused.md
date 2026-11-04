@@ -58,3 +58,19 @@ a hire there stalls at the theme, security and trust screens.
 - Remote machines get the ranking for hires, but run-out warnings read only
   this Mac until linked machines' seats need them.
 - The warned set lives in memory, so a service restart can repeat one warning.
+
+## Evidence and limits
+
+This record links no measurement file. The decision cites the 2026-10-09 readings above:
+16% of a Max 20x week against most of a 5x week, 84% used with 4.7 days left,
+and Codex Pro running out in 2.3 days that week without warning. The plan
+weights are coarse vendor ratios, not measured quotas, and Codex's Pro multiple
+is an estimate.
+
+## Revisit when
+
+- Claude or Codex publishes per-plan limits, or changes a plan's size against
+  its base plan.
+- An account ranked first runs out before its reset, or the ranking leaves an
+  account's capacity unused at reset while hires went elsewhere.
+- A harness adds or renames a plan tier the weight table doesn't list.

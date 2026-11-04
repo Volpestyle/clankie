@@ -298,3 +298,21 @@ is still followed; limiting page size does not truncate the queue. A failed,
 partial or nonadvancing read remains unknown. The first live check of the smaller
 selection read all fifty current KH2 issues across five pages; deployed Auto-round
 counts remain a separate verification requirement.
+
+## Evidence and limits
+
+This record links no measurement file for the drift rules. They follow the KH2 Multiplayer
+observation of 2026-10-10 to 10-13 (about 22k lines of rig and acceptance
+tooling against about 2k in the game DLL, 22 issues parked in started states)
+and KH2's own D14 pace rule. About one KH2 commit in five names its issue key,
+so KH2 sees its closures counted as `unlinked` until its commits do. The ten-issue Linear page follows the
+live provider's complexity limit, which the original fifty-issue selection
+exceeded. The first live check of the smaller page read all fifty current KH2
+issues across five pages; deployed Auto-round counts are not yet verified.
+
+## Revisit when
+
+- Linear changes its query complexity limit, so a different page size fits
+  with the nested blocker selections.
+- A replay shows `tooling_lead` or `nothing_closed` firing on days the owner
+  judged productive, or missing a stall he found by hand.

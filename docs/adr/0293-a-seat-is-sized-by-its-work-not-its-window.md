@@ -151,3 +151,23 @@ Measured over a week against the numbers above, with output held level:
   shows up as numbers, not as a surprise usage limit.
 - Budgets assume today's 1M windows and Opus 5.5. They are constants of this
   record and change with evidence, not per seat.
+
+## Evidence and limits
+
+This record links no data file; the ledger holds the before numbers. The
+numbers in the context come from one week of native transcripts (2026-10-18 to 10-25) across both Claude accounts and both Codex
+homes. They are token counts. How they weigh against each account's limits
+depends on per-model rates this record does not measure, and whether another
+model would cost less or deliver less is unmeasured. The `autoCompactWindow`
+backstop rests on Claude Code 2.1.310 supporting it; Codex seats get the
+equivalent once its native limit is verified. The Success targets are the check, read
+from the ledger.
+
+## Revisit when
+
+- A week on the ledger misses the Success targets, or output falls.
+- The default model or its context window changes from Opus 5.5 and 1M.
+- Claude Code changes its auto-compact default or `autoCompactWindow`, or
+  Codex's native limit is verified.
+- Account limits or cached-input rates change enough that context re-reads no
+  longer dominate token volume.
