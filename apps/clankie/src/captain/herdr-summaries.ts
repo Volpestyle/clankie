@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -25,6 +25,7 @@ export function herdrSummariesPath(env: NodeJS.ProcessEnv = process.env): string
 
 export function readHerdrSummariesFile(path: string = herdrSummariesPath()): HerdrSummariesFile {
   try {
+    if (!existsSync(path)) return { at: new Date(0).toISOString(), agents: {} };
     const parsed = JSON.parse(readFileSync(path, "utf8")) as { at?: unknown; agents?: unknown };
     const agents: Record<string, HerdrAgentSummary> = {};
     if (parsed.agents && typeof parsed.agents === "object" && !Array.isArray(parsed.agents)) {

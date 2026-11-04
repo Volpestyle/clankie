@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { z } from "zod";
@@ -62,6 +62,7 @@ export function readLocalCodexRecords(
   path = localCodexRecordsPath(),
 ): z.infer<typeof LocalCodexStateSchema>["seats"] {
   try {
+    if (!existsSync(path)) return [];
     return LocalCodexStateSchema.parse(JSON.parse(readFileSync(path, "utf8"))).seats;
   } catch {
     return [];
