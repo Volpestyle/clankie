@@ -106,7 +106,7 @@ it("a hired Codex server clears the service and requested operator holders befor
       const inherited = Object.fromEntries(["CLANKIE_RESOURCE_HOLDER", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID"].map(k => [k, process.env[k]]));
       // The owned executable supplies native invocation metadata, not a model.
       process.env.CODEX_THREAD_ID = ${JSON.stringify(threadId)};
-      const governor = createResourceGovernor({directory: ${JSON.stringify(join(root, "registry"))}, probe: async () => ({loadRatio: 0, availableMemoryMb: 1000000})});
+      const governor = createResourceGovernor({directory: ${JSON.stringify(join(root, "registry"))}});
       let protocol;
       process.once("SIGTERM", () => void (async () => { await governor.close(); await protocol?.close(); process.exit(0); })());
       const job = runHeavyCommand(["--", process.execPath, "-e", ${JSON.stringify("const fs=require('node:fs');const timer=setInterval(()=>{if(fs.existsSync(process.argv[1]))clearInterval(timer)},20)")}, ${JSON.stringify(release)}], {governor});

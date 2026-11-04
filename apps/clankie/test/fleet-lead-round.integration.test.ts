@@ -1729,7 +1729,7 @@ it("a periodic lead round warns from the real filesystem's low-disk observation"
       });
       resources.push(() => runtime.close());
       await runtime.refresh();
-      expect(runtime.status()?.pressure.diskWarning).toBe(true);
+      expect(runtime.status()?.disk?.warning).toBe(true);
       return runtime;
     },
   );

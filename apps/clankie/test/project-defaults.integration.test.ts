@@ -41,12 +41,6 @@ const resources: ResourceSnapshot = {
     warnFreeDiskPercent: 10,
   },
   capacity: { heavySlots: 2, simulatorSlots: 1, used: 0, simulatorUsed: 0, lightSlots: 2, lightUsed: 0 },
-  pressure: {
-    sampledAtMs: 1791293548249,
-    loadRatio: 0.4051106770833333,
-    availableMemoryMb: 48021.015625,
-    healthy: true,
-  },
   leases: [],
   queue: [],
   lightLeases: [],
@@ -223,15 +217,8 @@ it.each([1, 0])("governor capacity %i caps the proposal", async (slots) => {
   });
   expect(result.draft).toMatchObject({ workerCap: slots });
 });
-it("pressure and unavailable observations refuse new workers", async () => {
-  const root = await repo();
-  for (const state of [
-    undefined,
-    { ...resources, pressure: { ...resources.pressure, healthy: false, reason: "memory" as const } },
-  ])
-    expect((await inferProjectDefaults(root, state)).draft).toMatchObject({
-      workerCap: 0,
-    });
+it("an unavailable observation refuses new workers", async () => {
+  expect((await inferProjectDefaults(await repo(), undefined)).draft).toMatchObject({ workerCap: 0 });
 });
 
 it("large active repos propose four workers, capped by the observed governor", async () => {

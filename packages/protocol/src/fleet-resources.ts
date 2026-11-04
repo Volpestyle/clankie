@@ -9,6 +9,7 @@ export const FleetResourcePolicySchema = z
     heavySlots: z.number().int().min(1).max(64).nullable().default(null),
     simulatorSlots: z.number().int().min(0).max(64).nullable().default(null),
     simulatorIdleMs: z.number().int().min(1000).max(86_400_000).default(600_000),
+    // Retired pressure floors (#599): accepted from older settings and journals; nothing gates on them.
     maxLoadRatio: z.number().finite().positive().max(16).default(1.5),
     minAvailableMemoryMb: z.number().int().min(0).max(1_048_576).default(4096),
     minFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(20),
@@ -85,6 +86,16 @@ export const FleetResourceSnapshotSchema = z
         serverCpuCores: z.number().finite().positive().max(64).optional(),
       })
       .strict(),
+    /** Free space on the registry's volume against the owner's warning (#599); informational. */
+    disk: z
+      .object({
+        freeDiskGb: z.number().finite().nonnegative(),
+        totalDiskGb: z.number().finite().positive(),
+        warning: z.boolean(),
+      })
+      .strict()
+      .optional(),
+    /** Machine pressure from servers before #599, which gated admission on it; absent since. */
     pressure: z
       .object({
         sampledAtMs: timestamp,
@@ -97,8 +108,9 @@ export const FleetResourceSnapshotSchema = z
         healthy: z.boolean(),
         reason: z.enum(["load", "memory", "disk", "probe-unavailable"]).optional(),
       })
-      .strict(),
-    /** Under pressure only; absent from older servers (#332). */
+      .strict()
+      .optional(),
+    /** Under pressure, from servers before #599 (#332). */
     consumers: z.array(FleetResourceConsumerSchema).max(64).optional(),
     /** Under load pressure, how long the load average takes to reach the limit once the load stops. */
     loadRetryAfterMs: z.number().int().positive().optional(),
@@ -467,9 +479,10 @@ export function resolveFleetResourcePolicy(
   const gib = host.memoryBytes / 1024 ** 3;
   return {
     ...policy,
+    // Worst-case sizing, as the governor uses (#599): four cores and 24 GiB per job.
     heavySlots:
       policy.heavySlots ??
-      Math.min(64, Math.max(1, Math.min(Math.floor(host.cores / 2), Math.floor(gib / 12)))),
+      Math.min(64, Math.max(1, Math.min(Math.floor(host.cores / 4), Math.floor(gib / 24)))),
     simulatorSlots:
       host.platform === "darwin"
         ? (policy.simulatorSlots ??

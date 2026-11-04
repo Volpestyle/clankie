@@ -311,9 +311,9 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
         if ((!current.length && !questionNotice) || shutdown.signal.aborted) continue;
         // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); unreadable deploy holds mean none to report.
         const holds = (await deps.deployHolds?.().catch(() => undefined)) ?? [];
-        const disk = options.fleetResources?.status()?.pressure;
-        const diskNotice = disk?.diskWarning
-          ? `Low disk: ${disk.freeDiskGb?.toFixed(1)} GiB free. Inspect clankie doctor before starting more work.\n`
+        const disk = options.fleetResources?.status()?.disk;
+        const diskNotice = disk?.warning
+          ? `Low disk: ${disk.freeDiskGb.toFixed(1)} GiB free. Inspect clankie doctor before starting more work.\n`
           : "";
         const held = autoTidyHeldReview(ctx.autoTidy.held(owner.conversationId));
         const evidence = fleetRoundEvidence(current, holds);

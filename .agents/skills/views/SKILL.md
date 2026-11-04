@@ -65,7 +65,7 @@ a repo that isn't registered. Then tell the owner the id and how to open it:
 ```
 
 - `fleet_resources` holds what `clankie fleet resources` reads: heavy and simulator
-  capacity, leases, queue and machine pressure. Its panels show `capacity`,
+  capacity, leases, queue and free disk. Its panels show `capacity`,
   `queue` or `leases`. Add `resource: "heavy"` or `"simulator"` to narrow a queue
   or lease panel.
 - `tracker_issues` is a `clankie work list` filter through the repo's own tracker:

@@ -1099,8 +1099,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
   /** Why Clankie chose this hire's harness, when no layer named one (VUH-1974). */
   private readonly workHires = new WeakSet<SpawnOperatorSeat>();
   private readonly hireHarnessReasons = new WeakMap<SpawnOperatorSeat, string>();
-  /** The latest local admission's notice that this hire's heavy work will queue on load. */
-  private readonly hireResourceNotices = new WeakMap<SpawnOperatorSeat, string>();
   private readonly projectAllocations = new WeakMap<SpawnOperatorSeat, string>();
   private readonly activeProjectHires = new Set<string>();
   private readonly projectRecoveryOnly = new WeakMap<SpawnOperatorSeat, string>();
@@ -3095,16 +3093,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
 
   private async admitResourceMutation(input: SpawnOperatorSeat, authority?: HireAuthority): Promise<void> {
     if (!this.fleetResources) return;
-    this.noteResourceAdmission(input, await this.fleetResources.admitHire(input));
-    // The new sensor wait cannot carry an old conversation/project grant
+    await this.fleetResources.admitHire(input);
+    // The new admission wait cannot carry an old conversation/project grant
     // into the native mutation after that grant was revoked.
     if (authority !== undefined) await assertConversationAuthority(authority);
     await this.admitProjectLaunch(input);
-  }
-
-  private noteResourceAdmission(input: SpawnOperatorSeat, notice: string | undefined): void {
-    if (notice === undefined) this.hireResourceNotices.delete(input);
-    else this.hireResourceNotices.set(input, notice);
   }
 
   private async expectedHireTools(input: SpawnOperatorSeat): Promise<readonly string[]> {
@@ -3263,7 +3256,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         phase: "request",
         resumed: resume !== undefined,
       });
-      if (this.fleetResources) this.noteResourceAdmission(input, await this.fleetResources.admitHire(input));
+      if (this.fleetResources) await this.fleetResources.admitHire(input);
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     }
@@ -5163,8 +5156,6 @@ export class HerdrWatchStore implements HerdrWatchPort {
   ): Promise<HerdrSeatSpawnResult> {
     const chosen: { account?: string; reason?: string } = {};
     let result = await this.launchSeat(input, chosen, subjectOverride, brief, resume, receiptKey, authority);
-    const resourceNotice = this.hireResourceNotices.get(input);
-    if (result.outcome === "spawned" && resourceNotice !== undefined) result = { ...result, resourceNotice };
     const harnessReason = this.hireHarnessReasons.get(input);
     if (
       result.outcome !== "spawned" ||
@@ -6058,8 +6049,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
               await recheckPlan(false, true);
               await this.admitProjectLaunch(input, false, restartAuthority);
               await checkExpectedTools();
-              if (this.fleetResources)
-                this.noteResourceAdmission(input, await this.fleetResources.admitHire(input));
+              if (this.fleetResources) await this.fleetResources.admitHire(input);
               await restartFreshness();
               await restartRevocation();
             };

@@ -32,7 +32,6 @@ it.skipIf(process.platform !== "darwin")(
     await once(root, "spawn");
     const governor = createResourceGovernor({
       directory: join(directory, "registry"),
-      probe: async () => ({ loadRatio: 0, availableMemoryMb: 65536 }),
     });
     try {
       await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });

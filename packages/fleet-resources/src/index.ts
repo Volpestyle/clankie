@@ -1,9 +1,8 @@
 export * from "./model.ts";
 export type { RestartResourceGuard } from "./restart-guard.ts";
 export { createResourceGovernor } from "./governor.ts";
-export { describeConsumers, retryLater } from "./consumers.ts";
-export type { ProcessGroupUsage, ResourceConsumer } from "./consumers.ts";
 export {
+  nativeBoundaryAvailable,
   observeSimulatorReferents,
   processIdentity,
   processSnapshot,
@@ -12,13 +11,11 @@ export {
 } from "./process.ts";
 export type { SimulatorReferents } from "./process.ts";
 export {
-  automaticHeavySlots,
   automaticSimulatorSlots,
   baseHeavySlots,
   resourceCapacity,
-  heavyAdmission,
   type ResourceHostSpecs,
-} from "./pressure.ts";
+} from "./sizing.ts";
 export type { FleetResourcePolicy as ResourcePolicy } from "./model.ts";
 export { createSimulatorManager, unprovenSeatDetail } from "./simulators.ts";
 export type {

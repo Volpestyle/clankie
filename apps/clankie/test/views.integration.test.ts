@@ -39,7 +39,6 @@ async function fixture() {
   const governorDirectory = join(root, "governor");
   const governor = createResourceGovernor({
     directory: governorDirectory,
-    probe: async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 }),
   });
   const resources = await createFleetResourceRuntime({
     governor,

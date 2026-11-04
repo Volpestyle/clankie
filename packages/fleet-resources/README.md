@@ -44,43 +44,17 @@ Turbo CLI flags can override its environment: avoid higher `--concurrency` or
 `--parallel`. Arbitrary tools and subprocesses need their own limits; this is
 not an OS CPU quota.
 
-`heavySlots` is a ceiling, not a fixed pool (VUH-2054). The base slots,
-`min(heavySlots, max(1, min(floor(cores/4), floor(RAM_GiB/24))))`, give each job a full
-four-worker budget and run on the load and memory guards. When no full lease is
-held, a valid load-only refusal may admit the FIFO head if available memory
-meets the owner floor and load stays below twice `maxLoadRatio`. At or above that
-cap, real thrash still refuses. Between the normal guard and the cap, external
-load then admits at most one full job at a time; starting, running and cleanup
-full leases all count as held. Light and server jobs have separate budgets and
-do not count. Unknown observations and low memory still refuse. Simulator boot
-guards are unchanged.
-Ordinary admission counts a full four-core
-share charged against the load guard for every job admitted in the last minute,
-which load1 cannot see yet (at load 1.48, four waiters once started within a
-second); the
-[alternating benchmark](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-heavy-parallelism/README.md)
-supports four capped jobs for throughput on the 18-core, 128 GiB Mac. Above the
-base, the next queued job starts only while the measured machine stays under 70%
-of its cores, with 8 GiB per unsettled job above the memory floor. "Measured" is
-the busier of the load average and the kernel's per-core CPU ticks, plus a full
-four-core share for every job admitted in the last minute, which neither
-reading has seen ramp up yet. A summed per-process `ps` census is not used:
-it misses short-lived compilers and test workers, and on 2026-10-10 read 6–10
-busy cores while the kernel counted 13–14. Automatic `heavySlots` is
-`max(1, min(floor(cores/2), floor(RAM_GiB/12)))`: nine on the 18-core, 128 GiB Mac.
-
-Admission is judged once, by the service (VUH-2080). Its runtime calls
-`arbitrate()` every second: under its one pressure sample it grants queue heads
-in FIFO order, carrying each waiter's own identity and token, and refreshes
-`arbiter.json`. While that heartbeat is under five seconds old, waiters only
-watch for their grant, so a waiter that misreads the machine (on 2026-10-10 a
-shimmed process counted 3 of 18 cores and held the queue for 20 minutes) cannot
-hold the FIFO, and one that misreads it as calm cannot jump it. A waiter marks
-its ticket in `grants/` before queueing; an unmarked ticket, from a client older
-than this, is never granted and judges for itself. Without a fresh heartbeat,
-or when the arbiter's own probe is unavailable, every waiter judges for itself
-as before. A grant its waiter never took up is returned with the ticket, and
-one whose waiter died is reaped like any starting lease.
+Heavy admission is a slot queue and nothing else (#599). A job waits in FIFO
+order until fewer than `heavySlots` full leases are held, then starts. No load,
+memory or disk reading admits, delays or refuses it. The tool-native caps above
+are what keep each job's fan-out bounded, so the slot count is the whole budget.
+Automatic `heavySlots` is the worst-case size,
+`max(1, min(floor(cores/4), floor(RAM_GiB/24)))`: four on the 18-core, 128 GiB
+Mac, each job holding a full four-worker share. An owner value replaces it.
+Before #599 a pressure gate sat on top of the slots; on the night of 2026-11-03 it held 8 to
+14 jobs queued behind two of three slots while unmanaged compilers kept load
+high, and full-lane waits reached a 20-minute p95. `node scripts/heavy-waits.mjs`
+reads `leases.jsonl` and prints median and p95 waits per lane for a window.
 
 Native observations go through one long-lived helper per process (VUH-2082):
 `native.py serve` answers identity, observe, group, memory, snapshot and
@@ -96,7 +70,7 @@ The governor shares one OS-account registry in `~/.clankie/fleet-resources` acro
 Clankie worktrees and native worker environments. Owner-authenticated control
 calls `configure`; command callers read that policy. `HOME`, `CLANKIE_STATE`,
 settings-path overrides and `HEAVY_SLOTS` do not select a separate registry or
-increase capacity. Directory and pressure-probe injection exist for isolated tests.
+increase capacity. Directory injection exists for isolated tests.
 
 Service fixtures marked `VITEST=true` or `NODE_ENV=test` use a private temporary
 registry by default and cannot access native simulators. The service-only
@@ -116,29 +90,28 @@ measured cost of one simulator under test (see
 [the simulator run](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-09-lean-simulators/README.md)).
 Owner settings may say `auto`; the service resolves it to that count before
 configuring the shared registry, which always holds an exact integer every
-installed CLI can read. A new simulator is refused with `pressure` for three minutes after the previous
-admission, because a cold boot's burst outruns the one-minute load average.
+installed CLI can read. A new simulator waits three minutes after the previous
+boot (reason `pressure`, kept for older clients), because two cold boots at
+once thrash the machine.
 Heavy
 commands wait in a FIFO queue; tickets are removed on cancellation or a proven
 requester exit. A waiting command reads the journal without the lock and
 locks only when it is the head with a free slot, or on a jittered full pass
 about every five seconds that reconciles dead holders. Process and group
-censuses and pressure samples run before a transaction, never while the OS
+censuses run before a transaction, never while the OS
 lock is held; an exit is permanent for an exact PID and start time, so a fact
 read just before the lock can only retain a lease longer (VUH-2053). A queue
 of waiters therefore no longer starves the service's own transactions. Simulator requests never queue: they take a free slot when they
-ask or are told what holds the slots. High pressure delays heavy admission
-and refuses simulator admission with that reason. Hire admission
-(`admitBuilder`) refuses only below the memory floor; unavailable native
-observations fail closed.
+ask or are told what holds the slots. Hire admission checks only that the
+native host authority is available; it fails closed when it is not.
 
 `runHeavy` sizes each command with `heavyJobLane`. Focused checks (Vitest
 naming up to eight test files, `tsc` without `--build`, one package's
 `pnpm --filter … typecheck`, or Oxfmt/Oxlint naming up to 64 existing files) take the light lane: a second journal in
 `light/` with the same schema and native runner, so installs that predate it
-never read it. Its capacity is the base heavy slots (one per four cores), its jobs are capped at two
-cores, and only the memory floor (not load) holds it, because the full gates
-it runs beside already answer to load. Status adds `capacity.lightSlots`,
+never read it. It is the same slot queue with its own count: the worst-case
+heavy slots (one per four cores, capped by the owner's `heavySlots`), its jobs
+capped at two cores, and no machine reading holds it. Status adds `capacity.lightSlots`,
 `capacity.lightUsed`, `lightLeases` and `lightQueue`.
 Explicit formatter/linter files work directly, through `pnpm exec`, and through
 the repository's file-aware `fmt`, `fmt:check` and `lint` scripts. Their native
@@ -149,8 +122,8 @@ Vox checks only for whole-repository invocations. A zero simulator limit refuses
 simulator admission without disturbing the heavy queue.
 Python 3 and the shipped native helper are required for OS locking and
 process observations on macOS or Linux. Availability probes the helper
-process itself, so a hosted captain running as PID 1 can perform pressure
-admission without granting PID 1 lease or signal authority. The hosted Linux
+process itself, so a hosted captain running as PID 1 can use it without
+granting PID 1 lease or signal authority. The hosted Linux
 image installs Python 3; self-hosted hosts must provide it.
 
 Long-lived dev servers have an independent `server/` journal, queue and up to
@@ -174,11 +147,10 @@ permit and restoring progress. Its atomic sidecar is bound to the exact runner
 birth and supplies display metadata only, never admission or signal authority.
 Verified nested servers reuse a server parent's permit; bounded parents give
 servers their own separately governed permit. It governs same-user children remaining in the owned group,
-not detached or privileged processes. The lane answers to the existing load and
-memory guard but never occupies full/light slots. Native registration, signals,
-exit status and leftover cleanup are shared with the existing runner.
-Arbiter heartbeats advertise lane support: a new server waiter falls back to
-its own admission while an installed older service handles only full/light.
+not detached or privileged processes. The lane is a plain slot queue, held by
+its CPU limiter rather than any machine reading, and never occupies full/light
+slots. Native registration, signals, exit status and leftover cleanup are shared
+with the existing runner.
 
 Status adds server capacity, holders, queue and per-holder CPU budgets through
 the API, CLI and TUI. `holderAlerts` names servers immediately and full/light jobs
@@ -201,19 +173,6 @@ paths; an acquired transaction deadline reports its own cause. The helper writes
 the journal only after reading its request, so a fault at any earlier stage
 (through `request-read`) committed nothing: the store reruns that transaction on
 a fresh helper, up to three attempts, instead of failing a queued job (VUH-2027).
-
-On macOS, available memory is the smaller of the kernel's
-`kern.memorystatus_level` percentage of RAM and free plus file-backed resident
-pages (excluding speculative pages already counted as free). This bounds the
-percentage by headroom that does not require more compression or swap of
-anonymous pages. File-backed pages may still need disk I/O to reclaim; it is an
-estimate, not a reservation. The Python native boundary reads `sysctlbyname`
-and `HOST_VM_INFO64` directly, without launching `vm_stat` or `memory_pressure`. One shared
-one-second cache and an in-flight read coalesce repeated sampler calls in each
-process. An expired value never supplies a fallback when the native read fails;
-invalid or unavailable observations refuse new work. This pressure cache grants
-no process, lease or signaling authority. Linux retains `/proc/meminfo`'s
-`MemAvailable`; other platforms retain their existing free-memory source.
 
 The heavy runner registers its process birth under the journal's kernel file lock
 before receiving execution permission. A dead claim owner cannot authorize a late
@@ -285,8 +244,8 @@ queued/held heavy request whose recorded process descends from that native owner
 Pane and terminal labels may differ; the exact task holder and live ancestry,
 not the seat label, establish the association. Native prompt idle starts the timeout;
 repeated idle observations do not extend it. Unknown evidence expires from the
-last proven activity. Explicit touch remains independent, as do reservation and
-runaway cleanup. The manager does not persist activity as authority across its
+last proven activity. Explicit touch remains independent, as does reservation
+cleanup. The manager does not persist activity as authority across its
 restart: Codex activity is re-read from the observed dedicated native socket,
 including surviving local seats after a service restart, without resuming a thread.
 Finite Claude root hook events instead advance the exact holder's durable
@@ -316,13 +275,8 @@ simulator manager can settle native receipts and release them after confirmed
 shutdown of the exact device. It appends each settlement's reason to
 `simulator-settled.jsonl` beside the journal (VUH-2353). The reasons are
 `released`, `idle`, `owner_exited`, `reservation_stale`, `acquire_aborted`,
-`device_missing` and `runaway`. `runaway` ends a booted lease early only after
-its boot window (`simulatorBootSettleMs`) has passed and all of these have held
-for two minutes: its census showed at least four cores, nobody touched it, and
-the host was refused for load or memory. Any break restarts the window. Both
-measured iOS 27 boot bursts, including the second poster render about 150
-seconds in, stay inside the boot window
-([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)). Every device is kept for later reuse, including
+and `device_missing`; records from before #599 may also say `runaway`. Every
+device is kept for later reuse, including
 ones created by Clankie; deletion requires an explicit owner tidy by exact
 stopped UDID. A historical `Clankie-<uuid>` name grants no ownership. Active
 journal claims (including a name with an uncertain create receipt) exclude
@@ -333,7 +287,7 @@ Planning grants no slot or authority; acquire rechecks both before effects. Simu
 contains the proven native owner, task holder, original device/model/runtime and
 exact flag, resolved existing device, creation time and five-minute stale deadline.
 The manager blocks on that ticket; notifications wake local waits, with bounded
-journal checks for pressure and other processes. A restart preserves live tickets.
+journal checks for other processes. A restart preserves live tickets.
 An atomic grant consumes only the front ticket for its device and pins that device
 in the reservation before preparation. A freed slot goes to the oldest ticket
 waiting for a slot, whatever device it names: a holder that releases one device
@@ -347,7 +301,7 @@ The holder can cancel its own ticket; changing selection requires cancellation.
 Active waiters renew expiry; dead process births and stale tickets are pruned,
 while unknown process observations stay unknown. Queue position is per target;
 the wait estimate uses remaining idle time and one idle budget per preceding
-ticket, so renewals can extend it. Pressure/unknown occupancy can make it null.
+ticket, so renewals can extend it. Unknown occupancy can make it null.
 Cancel a queued ticket on a client wait abort; an admitted boot remains owned by
 the manager, so a caller that disconnects never strands a lease (ADR 0249). The native helper's
 `simulator-referents` mode reports which of this user's processes name a device
@@ -364,7 +318,7 @@ Missing or malformed metadata is unknown, never proof of a previous boot.
 
 Admission is checked once, when a job starts, and the journal holds only the
 present. So that a load spike can be explained afterwards, the registry keeps
-three histories beside it (VUH-2933). Each rotates to a single `.1` file, and
+two histories beside it (VUH-2933). Each rotates to a single `.1` file, and
 writing one never fails the work it describes:
 
 - `leases.jsonl`: every heavy permit's `admitted` and `released` events from the
@@ -373,18 +327,14 @@ writing one never fails the work it describes:
   command line shows as `***` the values of `KEY=VALUE` arguments, of `-H`,
   `-u`/`--user` and token/key/secret/password/auth/header/cookie flags, the
   script after `-c`/`-e`/`--eval`, and URL userinfo.
-- `samples.jsonl`: every 30 s from the service: load 1/5/15, the share of all
-  cores busy since the previous sample, free disk, and the five busiest
-  processes.
 - `bulk-ops.jsonl`: one line per service prune or cache reclaim, with its start,
   duration, outcome and counts. Integration reclaim writes the same line to its
   own directory.
 
 The service's own prune and cache-reclaim batches hold a light permit
-(`holdLight`), so they wait behind the memory floor, count against light slots and
-show in fleet status as `service:prune_worktree` or `service:reclaim_caches`. Low
-disk never holds them, since they free it, and a batch not admitted within five
-minutes reports the fleet busy and removes nothing. The
+(`holdLight`), so they wait for a light slot, count against light slots and
+show in fleet status as `service:prune_worktree` or `service:reclaim_caches`. A
+batch not admitted within five minutes reports the fleet busy and removes nothing. The
 permit has no child command: its lease stays `starting` with the service as claim
 owner, and reconciliation reaps it as `claim_owner_exited` if the service dies
 holding it. Their directory removals, and integration reclaim's, run at background
@@ -395,32 +345,6 @@ The subprocess integration suite exercises actual OS locks, processes, filesyste
 receipts, cancellation and native runner registration. It never hires agents or
 boots simulators. Run manually through the fleet heavy limiter; production native
 device behavior requires a separately authorized simulator check.
-
-### Fast Linux fixture check
-
-Push/PR CI runs `pnpm check:fleet-test-pressure`: a fixture-policy scan, seven
-filesystem-based regression checks, and two real-process full-lane refusal cases.
-The scan covers this package's tests, `.mjs` drivers and inline child scripts.
-Every governor must have an explicit pressure probe in inline or locally declared
-options. Ambient memory/load readers are refused outside the named native-observer
-cases; the probe's local dependencies are inspected too. Opaque options are
-refused rather than assumed controlled. This is a fixture convention, not a
-general JavaScript dataflow or security analyzer.
-
-The negative controls remove the real full-progress fixture's probe, introduce
-aliased `freemem`/`loadavg` reads, and regress standalone/inline subprocess drivers.
-Real native runners then prove low memory and load at the thrash cap retain one
-queued ticket, zero permits and no started child, using explicit observations.
-The disk-admission fixture controls unrelated memory/load while retaining real
-filesystem samples. Production limits and existing assertions are unchanged.
-
-Measured on Linux arm64 with two CPUs and a 4 GiB container limit, the exact script
-body took 2.71–2.79 seconds across three samples (9 passing checks; two longer progress cases omitted by the
-fast selector). This is local Linux evidence, not a GitHub-runner measurement.
-It does not verify Linux `MemAvailable`, Darwin native memory, or release timing
-under load. `darwin-pressure.integration.test.ts`, the native sampler/helper
-observer cases, the full real-process progress/cleanup tests and release load
-checks remain in manual macOS verification.
 
 `simulator verify` is an authenticated read-only preflight for device users: it
 checks the proven seat occupant, task holder, lease ID, exact UDID and booted
@@ -442,10 +366,8 @@ interval observation with 100% equal to one core, not lifetime average CPU.
 Processes that exit between samples can be missed, so interval CPU is a lower
 bound. A partial read names its unavailable process count; failed or unmapped
 observations are `unavailable`, never a zero charge. These diagnostic samples
-have a five-second cache and grant no device/process authority. Admission uses
-whole-machine load and available memory, which already include the simulator;
-subtracting its footprint again would double-count it. The device ceiling and
-explicit owner overrides still bind.
+have a five-second cache and grant no device/process authority. Admission
+counts slots, not usage; the device ceiling and explicit owner overrides bind.
 
 ## Machine-scoped control
 
@@ -460,21 +382,20 @@ uses those specs, not the observing Mac's hardware. Windows provisioning and
 native/WSL admission belong to VUH-2091.
 
 The package exports `ResourceHostSpecs` (`cores`, `memoryBytes`) and the shared
-heavy policy functions `automaticHeavySlots`, `resourceCapacity`,
-`baseHeavySlots` and `heavyAdmission`. A separate host runtime passes its own
-validated native observations to these functions; omitted specs retain local OS
-sizing. Admission uses the same host facts for the ceiling, base and unsettled
-core charge. Invalid facts throw rather than falling back to the observing Mac.
+sizing functions `resourceCapacity`, `baseHeavySlots` and
+`automaticSimulatorSlots`. A separate host runtime passes its own validated
+native specs to these functions; omitted specs retain local OS sizing. Invalid
+facts throw rather than falling back to the observing Mac.
 These are runtime inputs, never client flags or registry-selection authority.
 The existing POSIX governor continues to observe its local hardware. This seam
 alone supplies neither a Windows runtime nor native/WSL containment.
 
-Free disk is sampled on the working-directory and OS-account home volumes.
-Doctor and the lead's fleet round warn below either 200 GiB or 10% free.
-All new heavy jobs (full, light and server lanes) wait below 20 GiB free;
-existing jobs keep running. An unavailable disk observation refuses admission.
-Set `minFreeDiskGb`, `warnFreeDiskGb` and `warnFreeDiskPercent` through the
-revision-guarded fleet settings API, `/fleet resources`, or
-`clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`.
-Values are in GiB despite the CLI's `-gb` spelling. These guards also apply to
-simulator admission, but do not stop existing leases or deny low-load social turns.
+Free disk is read on the registry volume when status is read. Doctor, status
+and the lead's fleet round warn below either 200 GiB or 10% free
+(`warnFreeDiskGb`, `warnFreeDiskPercent`, set through the revision-guarded fleet
+settings API, `/fleet resources`, or
+`clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N`; values are
+in GiB). The warning is informational: no lane or simulator waits on disk.
+`minFreeDiskGb`, `maxLoadRatio` and `minAvailableMemoryMb` stay readable in saved
+policy so older installs keep parsing it, but nothing reads them, and the CLI
+refuses to set them.

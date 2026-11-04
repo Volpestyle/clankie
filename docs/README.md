@@ -15,7 +15,7 @@ This directory and the module READMEs hold the technical references.
 | [Deploy holds](deploy-holds.md)                          | Timed holds that keep runtime updates off the running service               |
 | [Console](../apps/tui/README.md)                         | Terminal interaction, workspaces, and launcher behavior                     |
 | [Distribution](distribution.md)                          | Installed layout, runtime ownership, release build and verification         |
-| [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, pressure admission and simulator ownership            |
+| [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, slot queues and simulator ownership                   |
 | [Credentials](credentials.md)                            | Secret identities, setup, rotation, and authority                           |
 | [Settings inventory](settings-inventory.md)              | Every owner setting, its API and which surfaces set it (VUH-1813)           |
 | [Always on](always-on.md)                                | Host sleep, the keep-awake default, and moving to another machine           |

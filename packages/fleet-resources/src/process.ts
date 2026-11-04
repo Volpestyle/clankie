@@ -125,31 +125,6 @@ function observe(op: string, payload: Record<string, unknown>, timeoutMs: number
 export async function nativeBoundaryAvailable(): Promise<boolean> {
   return (await observe("available", {}, helperTimeoutMs)) === true;
 }
-let pendingMemory: Promise<number> | undefined;
-let memoryCache: { at: number; availableMemoryMb: number } | undefined;
-/** Shared one-second pressure cache, bounded by free/file-backed pages, never lease authority. */
-export async function darwinAvailableMemoryMb(): Promise<number> {
-  if (memoryCache && performance.now() - memoryCache.at < 1_000) return memoryCache.availableMemoryMb;
-  pendingMemory ??= observe("memory", {}, 1_500)
-    .then((reply) => {
-      if (
-        !record(reply) ||
-        !keys(reply, ["schemaVersion", "availablePercent", "totalMemoryBytes", "availableMemoryBytes"]) ||
-        reply.schemaVersion !== 1 ||
-        !integer(reply.availablePercent, 0, 100) ||
-        !integer(reply.totalMemoryBytes, 1, Number.MAX_SAFE_INTEGER) ||
-        !integer(reply.availableMemoryBytes, 0, reply.totalMemoryBytes as number)
-      )
-        throw new Error("Darwin memory observation unavailable");
-      const availableMemoryMb = reply.availableMemoryBytes / 1024 ** 2;
-      memoryCache = { at: performance.now(), availableMemoryMb };
-      return availableMemoryMb;
-    })
-    .finally(() => {
-      pendingMemory = undefined;
-    });
-  return pendingMemory;
-}
 /** Undefined means proved absence; uncertain native reads reject and retain leases. */
 export async function processIdentity(pid = process.pid): Promise<ProcessIdentity | undefined> {
   return ((await observe("identity", { pid }, helperTimeoutMs)) as ProcessIdentity | null) ?? undefined;

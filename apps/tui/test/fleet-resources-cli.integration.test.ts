@@ -33,7 +33,6 @@ import { longHeldJobMs } from "../../../packages/fleet-resources/src/parallelism
 import { resourceNativeHelperPath, resourcePython } from "../../../packages/fleet-resources/src/process.ts";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
-const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
 async function exists(path: string) {
   try {
     await access(path);
@@ -74,8 +73,7 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(directory, "credentials.json"));
   const token = mintOperatorToken();
   await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
-  // CLI and doctor boundaries, not machine pressure: a busy host must not queue them (VUH-1981).
-  let governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
+  let governor = createResourceGovernor({ directory: join(directory, "registry") });
   let resources = await createFleetResourceRuntime({
     governor,
     holderNoticeDirectory: join(directory, "holder-notices"),
@@ -158,7 +156,7 @@ async function fixture() {
       `import {createResourceGovernor} from ${JSON.stringify(pathToFileURL(join(repoRoot, "packages/fleet-resources/src/governor.ts")).href)};
 import {runHeadlessCaptainCommand} from ${JSON.stringify(pathToFileURL(join(repoRoot, "apps/tui/bin/headless-captain.ts")).href)};
 import {parseDirectConversation} from ${JSON.stringify(pathToFileURL(join(repoRoot, "apps/tui/src/session/operator-conversations.ts")).href)};
-const governor=createResourceGovernor({directory:${JSON.stringify(join(directory, "registry"))},probe:async()=>({loadRatio:0,availableMemoryMb:1e6})});
+const governor=createResourceGovernor({directory:${JSON.stringify(join(directory, "registry"))}});
 try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(process.argv.slice(2)).remaining,{repoRoot:${JSON.stringify(repoRoot)},env:process.env,resourceGovernor:governor});} finally {await governor.close();}
 `,
     );
@@ -191,7 +189,7 @@ try {process.exitCode=await runHeadlessCaptainCommand(parseDirectConversation(pr
     },
     async restartResources() {
       await resources.close();
-      governor = createResourceGovernor({ directory: join(directory, "registry"), probe: calmPressure });
+      governor = createResourceGovernor({ directory: join(directory, "registry") });
       resources = await createFleetResourceRuntime({
         governor,
         holderNoticeDirectory: join(directory, "holder-notices"),
@@ -385,10 +383,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
   it("runs actual headless heavy locally in hosted mode, preserves child --chat args and nonzero exit", async () => {
     const f = await fixture();
     try {
-      await runFleetCommand(
-        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
-        f.options,
-      );
+      await runFleetCommand(["set", "--heavy-slots", "1"], f.options);
       f.calls.length = 0;
       await f.settings.update((settings) => ({
         ...settings,
@@ -431,10 +426,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
     const release = join(f.directory, "release-holder");
     let holder: Promise<number> | undefined;
     try {
-      await runFleetCommand(
-        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
-        f.options,
-      );
+      await runFleetCommand(["set", "--heavy-slots", "1"], f.options);
       // Hold the only full slot: a CLI that asked for one would wait here.
       holder = f.governor.runHeavy(process.execPath, [
         "-e",
@@ -471,10 +463,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
   it("the native runner reports a command it cannot start as that, frees the slot, and keeps the boundary message for real faults (#380)", async () => {
     const f = await fixture();
     try {
-      await runFleetCommand(
-        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
-        f.options,
-      );
+      await runFleetCommand(["set", "--heavy-slots", "1"], f.options);
       // Past the CLI's check (a command removed after it, or another caller): the runner itself.
       const missing = join(f.directory, "gone");
       const stderr = new PassThrough();
@@ -513,10 +502,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
   it("passes Ctrl-C through the actual heavy CLI to the owned native command", async () => {
     const f = await fixture();
     try {
-      await runFleetCommand(
-        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
-        f.options,
-      );
+      await runFleetCommand(["set", "--heavy-slots", "1"], f.options);
       // Hold an empty pending file for 500 ms to exercise the readiness race (VUH-2952).
       // Publish only complete JSON; file existence must mean the child is ready.
       const receipt = join(f.directory, "signal-ready.json");
@@ -563,12 +549,6 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
           "2",
           "--simulator-idle-seconds",
           "90",
-          "--max-load-ratio",
-          "2",
-          "--minimum-free-memory-mb",
-          "512",
-          "--minimum-free-disk-gb",
-          "30",
           "--warn-free-disk-gb",
           "250",
           "--warn-free-disk-percent",
@@ -580,15 +560,14 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
         heavySlots: 3,
         simulatorSlots: 2,
         simulatorIdleMs: 90_000,
-        maxLoadRatio: 2,
-        minAvailableMemoryMb: 512,
-        minFreeDiskGb: 30,
+        maxLoadRatio: 1.5,
+        minAvailableMemoryMb: 4096,
+        minFreeDiskGb: 20,
         warnFreeDiskGb: 250,
         warnFreeDiskPercent: 12,
       });
       const independent = createResourceGovernor({
         directory: join(f.directory, "registry"),
-        probe: calmPressure,
       });
       try {
         expect((await independent.snapshot()).policy).toEqual(saved.fleet.resources);
@@ -600,6 +579,8 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       );
       const bytes = await readFile(f.settings.path, "utf8");
       await expect(runFleetCommand(["set", "--heavy-slots", "0"], f.options)).rejects.toThrow();
+      for (const flag of ["--max-load-ratio", "--minimum-free-memory-mb", "--minimum-free-disk-gb"])
+        await expect(runFleetCommand(["set", flag, "1"], f.options)).rejects.toThrow("retired (#599)");
       await expect(
         runFleetCommand(["set", "--heavy-slots", "2", "--heavy-slots", "3"], f.options),
       ).rejects.toThrow("Usage");
@@ -651,10 +632,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       jobs.push(job);
     };
     try {
-      await runFleetCommand(
-        ["set", "--heavy-slots", "1", "--max-load-ratio", "16", "--minimum-free-memory-mb", "0"],
-        f.options,
-      );
+      await runFleetCommand(["set", "--heavy-slots", "1"], f.options);
       const receipt = join(f.directory, "doctor-ready.json");
       release = join(f.directory, "doctor-release");
       track(
@@ -695,7 +673,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       const rendered = formatDoctorReport(report);
       expect(rendered).toContain("Low disk");
       expect(
-        report.resources && "pressure" in report.resources && report.resources.pressure.freeDiskGb,
+        report.resources && "disk" in report.resources && report.resources.disk?.freeDiskGb,
       ).toBeGreaterThan(0);
       expect(rendered).toContain(`PID ${status.leases[0]!.pid}`);
       expect(rendered).toContain(`Queued Bex · heavy ${basename(process.execPath)}`);
@@ -805,14 +783,12 @@ it("a heavy CLI behind another waiter says it is queued; the head of the queue n
     const behind = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"]);
     await eventually(
       async () => behind.output.join(""),
-      (text) => text.includes("waiting for machine capacity"),
+      (text) => text.includes("waiting for a heavy slot (1/1 held, 2 queued)"),
     );
     await eventually(
       async () => head.output.join(""),
-      (text) => text.includes("waiting for machine capacity"),
+      (text) => text.includes("waiting for a heavy slot (1/1 held"),
     );
-    expect(head.output.join("")).toContain("(slots; 1/1 held");
-    expect(behind.output.join("")).toContain("(queued; 1/1 held, 2 queued)");
     await writeFile(release, "done");
     expect(await holder.done).toBe(0);
     expect(await head.done).toBe(0);
@@ -821,33 +797,6 @@ it("a heavy CLI behind another waiter says it is queued; the head of the queue n
     await f.close();
   }
 });
-
-it("a heavy CLI waiting on the service's admission says so, not busy", async () => {
-  const f = await fixture();
-  // The service's arbiter judges the machine busy (VUH-2080), so it grants nothing.
-  const arbiter = createResourceGovernor({
-    directory: join(f.directory, "registry"),
-    probe: async () => ({ loadRatio: 99, cpuRatio: 1, availableMemoryMb: 1_000_000 }),
-  });
-  const passes = setInterval(() => void arbiter.arbitrate().catch(() => {}), 200);
-  try {
-    await f.governor.configure({ ...defaultResourcePolicy(), heavySlots: 1, minAvailableMemoryMb: 0 });
-    await arbiter.arbitrate();
-    const run = await f.headless(["heavy", "--", process.execPath, "-e", "process.exit(0)"]);
-    await eventually(
-      async () => run.output.join(""),
-      (text) => text.includes("waiting for machine capacity"),
-    );
-    expect(run.output.join("")).toContain("(service; 0/1 held, 1 queued)");
-    clearInterval(passes);
-    // Without the arbiter's heartbeat the waiter judges for itself and starts.
-    expect(await run.done).toBe(0);
-  } finally {
-    clearInterval(passes);
-    await arbiter.close();
-    await f.close();
-  }
-}, 20_000);
 
 it("native child heavy CLIs under the same pane keep separate holder labels and permits", async () => {
   const f = await fixture();

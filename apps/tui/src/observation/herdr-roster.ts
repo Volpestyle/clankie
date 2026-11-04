@@ -169,15 +169,14 @@ export class HerdrRoster {
   }
 }
 
-/** Pressure values are sampled independently; repaint for admission or holder changes. */
+/** Repaint for admission, holder or low-disk changes. */
 function resourceDisplay(resources: FleetResourceSnapshot | undefined) {
   return resources === undefined
     ? undefined
     : {
         policy: resources.policy,
         capacity: resources.capacity,
-        healthy: resources.pressure.healthy,
-        reason: resources.pressure.reason,
+        lowDisk: resources.disk?.warning === true,
         leases: resources.leases,
         queue: resources.queue,
       };

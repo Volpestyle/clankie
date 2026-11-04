@@ -2,8 +2,8 @@ import {
   automaticSimulatorSlots,
   createResourceGovernor,
   createSimulatorManager,
-  describeConsumers,
   longHeldJobMs,
+  nativeBoundaryAvailable,
   observeSimulatorReferents,
   unprovenSeatDetail,
   probeProcess,
@@ -29,7 +29,6 @@ import {
   nativeProofLocation,
   splitFleetQualified,
 } from "./herdr-fleet.ts";
-import type { FleetProgressObservation } from "./fleet-progress.ts";
 import { notifyResourceHolderOnce } from "./resource-holder-notices.ts";
 
 /** A simulator request's first proof: three observations about two seconds apart (VUH-2055). */
@@ -49,11 +48,9 @@ const RESOURCE_BRIEF = [
 ].join("\n");
 
 export class ResourceAdmissionError extends Error {
-  public readonly reason: "pressure" | "probe-unavailable";
-  public constructor(message: string, reason: "pressure" | "probe-unavailable" = "probe-unavailable") {
+  public constructor(message: string) {
     super(message);
     this.name = "ResourceAdmissionError";
-    this.reason = reason;
   }
 }
 
@@ -89,15 +86,13 @@ export interface FleetResourceRuntime {
   /** Cached metadata only. Neither health nor a roster read probes the host. */
   status(): ResourceSnapshot | undefined;
   restartGuard(agent: HerdrAgentSnapshot): Promise<import("@clankie/fleet-resources").RestartResourceGuard>;
-  /** Cached real arbiter verdicts; unavailable observations never mean recovery. */
-  progress(): readonly FleetProgressObservation[];
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   refresh(): Promise<void>;
   /**
    * Refuses a local hire only on low memory or an unverifiable probe. Returns a
    * receipt notice when the seat's heavy work will queue on current load.
    */
-  admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<string | undefined>;
+  admitHire(input: Pick<SpawnOperatorSeat, "fleet">): Promise<void>;
   hireBrief(input: Pick<SpawnOperatorSeat, "fleet">, brief?: string): Promise<string | undefined>;
   /** `retryUnproven` retries a failed observation briefly; a simulator request's first proof uses it. */
   proveSimulatorSeat(
@@ -127,7 +122,6 @@ export async function createFleetResourceRuntime(input: {
   referents?: (needles: readonly string[]) => Promise<SimulatorReferents>;
   refreshMs?: number;
   /** How often the service admits queued heavy work on its waiters' behalf. */
-  arbitrateMs?: number;
   /** How often the refresh loop checks for simulators booted outside leases. */
   externalNoticeMs?: number;
   /** Pause between a simulator request's first-proof attempts. */
@@ -144,13 +138,7 @@ export async function createFleetResourceRuntime(input: {
   let policyFingerprint: string | undefined;
   let refreshing: Promise<void> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
-  let arbiter: ReturnType<typeof setInterval> | undefined;
-  let sampler: ReturnType<typeof setInterval> | undefined;
-  let arbitrating: Promise<unknown> | undefined;
   let closed = false;
-  let progressAt = 0;
-  let progress: FleetProgressObservation[] | undefined;
-  let priorHeads = new Set<string>();
   /** `${udid}:${seatId}` pairs already told; forgotten once the device is no longer external. */
   const noticed = new Set<string>();
   const holderNoticeDirectory =
@@ -164,17 +152,12 @@ export async function createFleetResourceRuntime(input: {
     const next = JSON.stringify({
       policy: snapshot.policy,
       capacity: snapshot.capacity,
-      pressure: {
-        healthy: snapshot.pressure.healthy,
-        reason: snapshot.pressure.reason,
-        diskWarning: snapshot.pressure.diskWarning,
-      },
-      // Usage readings move every sample; like load, they never wake the fleet (#332).
-      leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, processUsage: _usage, ...lease }) => lease),
+      // A lease activity heartbeat never wakes the fleet (#332).
+      leases: snapshot.leases.map(({ lastUsedAtMs: _lastUsedAtMs, ...lease }) => lease),
       queue: snapshot.queue,
-      lightLeases: snapshot.lightLeases.map(({ processUsage: _usage, ...lease }) => lease),
+      lightLeases: snapshot.lightLeases,
       lightQueue: snapshot.lightQueue,
-      serverLeases: snapshot.serverLeases?.map(({ processUsage: _usage, ...lease }) => lease),
+      serverLeases: snapshot.serverLeases,
       serverQueue: snapshot.serverQueue,
       holderAlerts: snapshot.holderAlerts,
     });
@@ -467,36 +450,16 @@ export async function createFleetResourceRuntime(input: {
         return { clear: false, reason: "restart_resource_proof_unknown", detail: String(error) };
       }
     },
-    progress() {
-      if (!progress || Date.now() - progressAt > 5_000)
-        throw Error("Heavy arbiter admission observation unavailable");
-      return progress;
-    },
     configure,
     refresh,
+    /** Local hires sync the owner's policy; no machine reading refuses or delays one (#599). */
     async admitHire(request) {
       try {
-        if (!(await local(request.fleet))) return undefined;
+        if (!(await local(request.fleet))) return;
+        // A local worker's heavy commands need the native runner; without it, refuse rather than hire.
+        if (!(await nativeBoundaryAvailable().catch(() => false)))
+          throw new ResourceAdmissionError("Local hire refused: the native process helper is unavailable.");
         await ownerPolicy();
-        const admission = await governor.admitBuilder();
-        const pressure = admission.pressure;
-        if (cached) publish({ ...cached, pressure });
-        // Who is using the machine, named only when it matters (#332).
-        const consumers =
-          (!admission.allowed && admission.reason !== "probe-unavailable") || admission.heavyQueued
-            ? describeConsumers((await governor.snapshot().catch(() => undefined))?.consumers ?? [], "caller")
-            : undefined;
-        const naming = consumers ? ` ${consumers}` : "";
-        if (!admission.allowed)
-          throw new ResourceAdmissionError(
-            admission.reason === "probe-unavailable"
-              ? "Local hire refused: machine pressure could not be verified. Recheck clankie doctor."
-              : `Local hire refused: available memory ${Math.round(pressure.availableMemoryMb)} MiB is below the ${String(admission.minAvailableMemoryMb)} MiB floor.${naming} Wait for memory to free up or review the owner's fleet resource policy.`,
-            admission.reason ?? "probe-unavailable",
-          );
-        return admission.heavyQueued
-          ? `Machine load is high (load/core ${pressure.loadRatio.toFixed(2)}, heavy limit ${admission.heavyQueued.maxLoadRatio.toFixed(2)}): this seat's \`clankie heavy\` builds, tests and simulator leases will queue until load drops.${naming}`
-          : undefined;
       } catch (error) {
         if (error instanceof ResourceAdmissionError) throw error;
         throw new ResourceAdmissionError("Local hire refused: machine resource admission is unavailable.");
@@ -705,61 +668,11 @@ export async function createFleetResourceRuntime(input: {
         void runtime.noticeExternalSimulators().catch(() => {});
       }, input.refreshMs ?? 5_000);
       timer.unref();
-      // The service judges heavy admission once for every waiter, so one
-      // waiter's wrong view of the machine cannot hold the FIFO (VUH-2080).
-      arbiter = setInterval(() => {
-        if (arbitrating) return;
-        arbitrating = governor
-          .arbitrate()
-          .then(() => {
-            const verdict = governor.arbitration();
-            if (!verdict) {
-              progress = undefined;
-              priorHeads.clear();
-              return;
-            }
-            progressAt = verdict.atMs;
-            progress = verdict.heads.map((head) => {
-              const id = `heavy:${head.lane}:${head.ticketId}`;
-              return {
-                id,
-                stalled: head.admits && priorHeads.has(id) && verdict.atMs - head.queuedAtMs > 60_000,
-                // A marked admitted head is granted in the same transaction. The
-                // remaining eligible head has no marker (older client or wedge).
-                message: `Heavy ${head.lane} lane head stalled: ticket ${head.ticketId}, owner seat ${head.seatId ?? "unknown"}, holder ${head.holderId ?? "unknown"}, PID ${head.pid}, queued since ${new Date(head.queuedAtMs).toISOString()}. Consecutive sampled verdicts permit admission, but the grant marker is absent (older client or missing marker). Inspect clankie fleet resources; no automatic repair.`,
-              };
-            });
-            priorHeads = new Set(
-              verdict.heads
-                .filter((head) => head.admits)
-                .map((head) => `heavy:${head.lane}:${head.ticketId}`),
-            );
-          })
-          .catch((error) => {
-            progress = undefined;
-            priorHeads.clear();
-            input.onError?.(error);
-          })
-          .finally(() => {
-            arbitrating = undefined;
-          });
-      }, input.arbitrateMs ?? 1_000);
-      arbiter.unref();
-      // History for explaining load afterwards: admission keeps none (VUH-2933).
-      sampler = setInterval(() => {
-        void governor.recordMachineSample?.().catch(input.onError ?? (() => {}));
-      }, 30_000);
-      sampler.unref();
     },
     async close() {
       closed = true;
       if (timer) clearInterval(timer);
       timer = undefined;
-      if (arbiter) clearInterval(arbiter);
-      arbiter = undefined;
-      if (sampler) clearInterval(sampler);
-      sampler = undefined;
-      await arbitrating;
       simulators.close();
       await refreshing?.catch(() => {});
       listeners.clear();

@@ -1,16 +1,13 @@
 import { observeSimulatorUsage, simulatorUsageFor, type SimulatorUsage } from "./simulator-usage.ts";
-import { describeConsumers, retryLater } from "./consumers.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { SimulatorsDisabledError } from "./governor.ts";
 import type {
   FleetResourceGovernor,
-  ResourcePressure,
   ResourceSnapshot,
   SimulatorReservation,
   SimulatorSettleReason,
 } from "./model.ts";
-import { simulatorBootSettleMs } from "./pressure.ts";
 import { probeProcess } from "./process.ts";
 import {
   createSimctlAdapter,
@@ -106,11 +103,6 @@ export interface SimulatorBlockers {
   readonly heavy: readonly { seatId?: string; executable?: string; pid?: number }[];
   /** Tickets ahead of this waiter in its device queue, oldest first (VUH-2083). */
   readonly ahead?: readonly { id: string; seatId?: string; holderId?: string; position: number }[];
-  readonly pressure?: {
-    reason?: "load" | "memory" | "disk" | "probe-unavailable";
-    loadRatio: number;
-    availableMemoryMb: number;
-  };
 }
 export type SimulatorRejection =
   | "owner_unavailable"
@@ -248,19 +240,8 @@ const RESERVED_LIMIT_MS = 300_000;
  * timeouts (#386).
  */
 const PREPARE_STAGE_LIMIT_MS = 120_000;
-/**
- * A cold iOS 27 boot burns about fifteen cores, re-renders its wallpaper posters
- * at ten or more about 150 seconds in, and then idles under one percent
- * (VUH-2353). Once its boot has settled, a device nobody has
- * touched that holds four cores for two minutes while the host is under load or
- * memory pressure is a runaway, and it is shut down before its idle deadline.
- */
-const RUNAWAY_CPU_PERCENT = 400;
-const RUNAWAY_SUSTAIN_MS = 120_000;
 const SETTLED_DETAIL: Partial<Record<SimulatorSettleReason, string>> = {
   idle: "The lease expired after its idle timeout and its device was shut down; acquire again.",
-  runaway:
-    "Clankie shut this device down: after its boot settled it held over four cores for two minutes, untouched, while the machine was under pressure. Acquire again, and touch the lease while you use it.",
   owner_exited: "The lease ended when its seat's process exited.",
 };
 const BOOTING_PHASES = new Set([
@@ -299,8 +280,6 @@ export function createSimulatorManager(input: {
   respondWithinMs?: number;
   /** How long one preparation stage may take before the acquire fails and settles its reservation. */
   prepareStageLimitMs?: number;
-  /** A booted device's runaway check starts this long after its lease. */
-  bootSettleMs?: number;
   observeUsage?: () => Promise<ReadonlyMap<string, SimulatorUsage>>;
 }) {
   const adapter = input.adapter ?? createSimctlAdapter();
@@ -308,7 +287,6 @@ export function createSimulatorManager(input: {
   const probe = input.processProbe ?? probeProcess;
   const respondWithinMs = input.respondWithinMs ?? 20_000;
   const prepareStageLimitMs = input.prepareStageLimitMs ?? PREPARE_STAGE_LIMIT_MS;
-  const bootSettleMs = input.bootSettleMs ?? simulatorBootSettleMs;
   const observeUsage = input.observeUsage ?? observeSimulatorUsage;
   const authorized = async (authority?: SimulatorRequestOptions): Promise<boolean> => {
     if (authority?.signal?.aborted) return false;
@@ -398,8 +376,6 @@ export function createSimulatorManager(input: {
     changed();
     return next;
   };
-  /** Lease id to the first consecutive runaway-level CPU sample, by this manager's clock. */
-  const hot = new Map<string, number>();
   // Activity is re-proven every tick, never restored from cached pane status.
   // Losing the observer loses this grace, not the explicit touch deadline.
   const activity = new Map<string, { active: boolean; at: number }>();
@@ -413,7 +389,6 @@ export function createSimulatorManager(input: {
   ): Promise<SimulatorResult> => {
     await input.governor.releaseSimulator(lease.id, lease.token);
     reason = shuttingDown.get(lease.id) ?? reason;
-    hot.delete(lease.id);
     activity.delete(lease.id);
     shuttingDown.delete(lease.id);
     if (reason) {
@@ -576,35 +551,6 @@ export function createSimulatorManager(input: {
     return reconcile(lease, false, authority);
   };
   const find = async (id: string) => (await reservations()).find((lease) => lease.id === id);
-  /**
-   * How long this booted device has held runaway CPU on an exhausted host since
-   * its boot settled and its holder last touched it. A touch, a calm or unknown
-   * sample, or a healthy host restarts it; an unavailable probe never counts.
-   */
-  const runawayFor = (
-    lease: SimulatorReservation,
-    usage: ReadonlyMap<string, SimulatorUsage>,
-    pressure: ResourcePressure,
-  ) => {
-    const at = now();
-    const from = Math.max(lease.createdAtMs + bootSettleMs, lease.lastUsedAtMs);
-    const cpu = lease.deviceId ? usage.get(lease.deviceId.toUpperCase())?.cpuPercent : undefined;
-    const exhausted = !pressure.healthy && (pressure.reason === "load" || pressure.reason === "memory");
-    if (
-      !exhausted ||
-      lease.phase !== "booted" ||
-      cpu === undefined ||
-      cpu < RUNAWAY_CPU_PERCENT ||
-      at < from
-    ) {
-      hot.delete(lease.id);
-      return 0;
-    }
-    const since = Math.max(hot.get(lease.id) ?? at, from);
-    hot.set(lease.id, since);
-    return at - since;
-  };
-
   /** Prefer booted-before idle family matches, then cold matches, then create. */
   const choose = async (
     request: SimulatorAcquireRequest,
@@ -728,22 +674,13 @@ export function createSimulatorManager(input: {
           ...(lease.executable === undefined ? {} : { executable: lease.executable }),
           ...(lease.pid === undefined ? {} : { pid: lease.pid }),
         })),
-      ...(reason === "pressure"
-        ? {
-            pressure: {
-              ...(snapshot.pressure.reason === undefined ? {} : { reason: snapshot.pressure.reason }),
-              loadRatio: snapshot.pressure.loadRatio,
-              availableMemoryMb: snapshot.pressure.availableMemoryMb,
-            },
-          }
-        : {}),
     };
     return {
       outcome: "waiting",
       reason,
       blockers,
       retryAfterMs: RETRY_MS,
-      hint: hint ?? hintFor(reason, blockers, snapshot),
+      hint: hint ?? hintFor(reason, blockers),
     };
   };
 
@@ -1571,9 +1508,6 @@ export function createSimulatorManager(input: {
       if (ticking) return ticking;
       const pending = (async () => {
         const observedLeases = await reservations();
-        const usage = observedLeases.some((lease) => lease.phase === "booted")
-          ? await observeUsage().catch(() => new Map<string, SimulatorUsage>())
-          : new Map<string, SimulatorUsage>();
         const outcomes = await Promise.allSettled(
           observedLeases.map(async (candidate) => {
             // Native RPC and census reads are observations, never serialized
@@ -1593,14 +1527,13 @@ export function createSimulatorManager(input: {
               const lease = await find(candidate.id);
               // A release may have completed while the native read was pending.
               if (!lease) return;
-              const { policy, pressure } = await input.governor.snapshot();
+              const { policy } = await input.governor.snapshot();
               try {
                 const processes = lease.ownerProcesses ?? [];
                 const states = await Promise.all(processes.map(probe));
                 const exited = processes.length > 0 && states.every((state) => state === "exited");
                 const live = processes.length > 0 && states.every((state) => state === "live");
                 const stale = lease.phase === "reserved" && now() - lease.createdAtMs >= RESERVED_LIMIT_MS;
-                const hotFor = runawayFor(lease, usage, pressure);
                 let activeAt: number | undefined;
                 let promptAt: number | undefined;
                 if (live && !stale) {
@@ -1646,9 +1579,7 @@ export function createSimulatorManager(input: {
                       ? "reservation_stale"
                       : !active && now() - idleFrom >= policy.simulatorIdleMs
                         ? "idle"
-                        : hotFor >= RUNAWAY_SUSTAIN_MS
-                          ? "runaway"
-                          : false,
+                        : false,
                 );
               } catch {
                 /* Unknown inventory or command outcome never frees a slot. */
@@ -1712,20 +1643,15 @@ const externalHint = (external: readonly ExternalSimulatorView[]) =>
 function hintFor(
   reason: "simulator_capacity" | "shared_capacity" | "pressure",
   blockers: SimulatorBlockers,
-  snapshot?: Pick<ResourceSnapshot, "consumers" | "loadRetryAfterMs">,
 ): string {
   const leases = blockers.leases.map(
     (lease) =>
       `seat ${lease.seatId}${lease.holderId ? ` holder ${lease.holderId}` : ""} (${lease.deviceName ?? "device pending"}, ${lease.phase})`,
   );
+  // The only `pressure` wait left (#599): one cold boot at a time, so two
+  // bursts never stack (VUH-1988).
   if (reason === "pressure")
-    return [
-      `Machine pressure is high (${blockers.pressure?.reason ?? "unknown"}; load/core ${blockers.pressure?.loadRatio.toFixed(2)}, ${Math.round(blockers.pressure?.availableMemoryMb ?? 0)} MiB available).`,
-      describeConsumers(snapshot?.consumers ?? [], "caller"),
-      retryLater(snapshot?.loadRetryAfterMs),
-    ]
-      .filter(Boolean)
-      .join(" ");
+    return "A simulator booted in the last three minutes is still settling; the next boot waits for it. Retry shortly.";
   if (reason === "shared_capacity") {
     const heavy = blockers.heavy.map((entry) =>
       `${entry.seatId ?? (entry.pid ? `PID ${entry.pid}` : "unattributed")} ${entry.executable ?? ""}`.trim(),

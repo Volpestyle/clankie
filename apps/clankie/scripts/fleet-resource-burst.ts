@@ -34,7 +34,7 @@ const sourcePaths = [
   "packages/fleet-resources/src/governor.ts",
   "packages/fleet-resources/src/native.py",
   "packages/fleet-resources/src/process.ts",
-  "packages/fleet-resources/src/pressure.ts",
+  "packages/fleet-resources/src/sizing.ts",
 ];
 const sourceDigests = async () =>
   Object.fromEntries(
@@ -122,8 +122,6 @@ async function burst() {
     ...defaultResourcePolicy(),
     heavySlots: 2,
     simulatorSlots: 0,
-    maxLoadRatio: 16,
-    minAvailableMemoryMb: 0,
   };
   const governor = createResourceGovernor({ directory });
   const children: ChildProcess[] = [];

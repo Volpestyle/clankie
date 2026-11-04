@@ -126,9 +126,7 @@ async function fixture(context?: TestContext, detachedCodex = false) {
   }
   const governor = createResourceGovernor({
     directory,
-    probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 32768 }),
     simulatorBootSettleMs: 0,
-    heavyJobSettleMs: 0,
     nativeSimulatorOwner: async (owner, chain) => {
       const barrier = privateProofBarrier;
       privateProofBarrier = undefined;

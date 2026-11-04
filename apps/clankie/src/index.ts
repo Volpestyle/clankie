@@ -2161,10 +2161,7 @@ operatorCredentialStore.observeHealth?.((health) => {
 bindLinearBudgetWarning((text) => captain.notifyRuntimeHealthAlert(text));
 const fleetProgress = new FleetProgressObserver({
   path: join(stateRoot, "fleet-progress-incidents.json"),
-  sources: [
-    { prefix: "heavy", read: async () => fleetResources.progress() },
-    { prefix: "lead", read: () => captain.leadProgress() },
-  ],
+  sources: [{ prefix: "lead", read: () => captain.leadProgress() }],
   notify: (text) => captain.notifyRuntimeHealthAlert(text),
   onError: (error) =>
     logger.warn(

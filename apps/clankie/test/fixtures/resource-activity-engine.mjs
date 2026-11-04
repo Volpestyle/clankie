@@ -102,9 +102,7 @@ process.on("message", (message) => {
       if (message.heavy === "start") {
         heavyGovernor = createResourceGovernor({
           directory: message.directory,
-          probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 32768 }),
           simulatorBootSettleMs: 0,
-          heavyJobSettleMs: 0,
         });
         heavyAbort = new AbortController();
         heavyRelease = message.release;

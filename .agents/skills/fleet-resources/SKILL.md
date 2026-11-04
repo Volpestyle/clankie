@@ -83,18 +83,12 @@ anyway: a leftover is killed, not drained.
 ## Waits and status
 
 `clankie fleet resources` and `clankie doctor --json` show capacity, actual
-holders, queue and pressure; `--machine ID` selects a registered host. A wait
-can mean a full pool, high load, low available memory or unavailable native
-observations. The reason names which: `busy` (load or memory guard), `slots`
-(ceiling), `queued` (FIFO turn), or `service` (the service is deciding for you).
-Under pressure, `consumers` names the heaviest processes, each charged to its
-permit or marked unleased with the agent that started it, and each heavy permit
-carries `processUsage` (its process group's CPU and memory). A busy wait names
-the same consumers. A refused or queued hire and a simulator wait name only
-permits and agent-started work, and sum the rest as "N other processes": when it is your
-own unleased run, finish it or move it into `clankie heavy`. Keep the request
-open; repair an unavailable installation through the existing setup route rather
-than selecting another registry.
+holders and queue; `--machine ID` selects a registered host. Each lane is a
+FIFO with a fixed number of slots: a wait means every slot is held or another
+job is ahead of yours, never machine load. A waiting `clankie heavy` names the
+lane and its held and queued counts, and any permit held over 15 minutes. Keep
+the request open; repair an unavailable installation through the existing
+setup route rather than selecting another registry.
 
 Before stopping a queued job, verify its exact command, working directory and
 your own launch record. A matching seat or holder alone does not identify the job.
@@ -193,5 +187,5 @@ Details and source-proof limits are in the simulator reference.
 Release, idle expiry or a verified seat exit shuts the device down and keeps it
 for reuse; nothing deletes devices except an explicit owner tidy naming exact
 stopped UDIDs. Never run global shutdown, erase, delete-all or unavailable-device
-cleanup for fleet work. Queues, holder identity, device choice, usage readings,
-runaway shutdown and create receipts: [simulators](reference/simulators.md).
+cleanup for fleet work. Queues, holder identity, device choice, usage readings
+and create receipts: [simulators](reference/simulators.md).

@@ -10,7 +10,6 @@ const publish = async (path, text) => {
 };
 const governor = createResourceGovernor({
   directory,
-  probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
 });
 try {
   await writeFile(`${receipt}.ready`, "ready");

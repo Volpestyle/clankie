@@ -44,7 +44,7 @@ Only that live seat/occupant/holder can cancel. Cancel before changing the
 ticket's selection. Dead native owners and expired tickets leave the queue;
 unknown native observations do not prove an exit. A queued device is not a lease
 and grants no driving authority. `fleet resources` shows the holder, resolved
-target, per-device queue position and an estimated wait; pressure or missing
+target, per-device queue position and an estimated wait; missing
 information reports a null estimate, never a promised deadline. The queue
 persists across service restarts.
 
@@ -76,19 +76,17 @@ separately issued raw command.
 
 Automatic simulator capacity gives simulators half the machine at the measured
 cost of one simulator under test (34 GiB footprint, two cores); memory, not CPU,
-usually binds. Load and available-memory guards gate both heavy and simulator
-leases, which have independent budgets. A cold boot burns about ten cores for two
-minutes, ahead of the one-minute load average, so the governor admits no new
-simulator within three minutes of the last one and answers `waiting` with reason
-`pressure` ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-09-lean-simulators/README.md)).
+usually binds. Heavy and simulator leases have independent slot budgets, and no
+load or memory reading gates either (#599). A cold boot burns about ten cores for
+two minutes, so the governor admits no new simulator within three minutes of the
+last one and answers `waiting` with reason `pressure` ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-09-lean-simulators/README.md)).
 
 Read `usage` beside `holderId` in `clankie fleet resources` or
 `clankie simulator status`. Kernel footprint includes private compressed memory;
 summed RSS includes shared pages and must not be described as physical RAM used.
 Interval CPU uses 100% for one core and can undercount processes that exit
 between observations. Partial or unavailable samples do not mean zero, and
-samples never grant device authority. Whole-machine admission already includes
-these costs, so do not subtract a device's charge a second time.
+samples never grant device authority or affect admission.
 
 ## Native activity and idle expiry
 
@@ -162,7 +160,7 @@ harness background; never run model sleep/touch loops. Release when finished.
 
 Activity observations are deliberately not durable authority: an observer restart
 must re-prove activity and otherwise falls back to the lease's explicit-use
-clock. Reservation stale caps, runaway checks, explicit ownership checks and exact
+clock. Reservation stale caps, explicit ownership checks and exact
 device shutdown/cleanup remain independent of activity.
 
 ## Release and lease end
@@ -175,12 +173,10 @@ its slot by itself.
 
 Each iOS 27 boot burns about 15 cores in its first minute, then re-renders its
 wallpaper posters at 10-12 cores about two and a half minutes in; that is
-expected. After the three-minute boot window, an untouched device holding four
-cores for two minutes while the machine is refused for load or memory is shut
-down early as a `runaway`. Each lease end is recorded with its reason
-(`released`, `idle`, `runaway`, `owner_exited`, ...) in `simulator-settled.jsonl`,
-and your next touch, verify or release names an `idle`, `runaway` or
-`owner_exited` end ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)).
+expected, and no lease is shut down for its CPU use. Each lease end is recorded
+with its reason (`released`, `idle`, `owner_exited`, ...) in
+`simulator-settled.jsonl`, and your next touch, verify or release names an
+`idle` or `owner_exited` end ([measurements](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-19-simulator-runaway/README.md)).
 
 Clankie never shuts down a device it did not lease; it names such devices in
 status and doctor and tells the lead of the seat using one. A missing or

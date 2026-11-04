@@ -52,7 +52,7 @@ import type { machineSetupContext } from "./machine-setup.ts";
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH] [--json]]",
   `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
-  "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--max-load-ratio N] [--minimum-free-memory-mb N] [--minimum-free-disk-gb N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
+  "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
   "       clankie fleet leads [--json]",
@@ -289,7 +289,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
   const resources = FleetResourcePolicySchema.parse(fleet.machineResources?.local ?? fleet.resources ?? {});
   return [
     `heavy capacity: ${resources.heavySlots ?? "automatic"} shared slots; simulators: ${resources.simulatorSlots ?? "automatic"}`,
-    `simulator idle: ${resources.simulatorIdleMs / 1000}s; load limit: ${resources.maxLoadRatio} per core; minimum available memory: ${resources.minAvailableMemoryMb} MiB; disk floor: ${resources.minFreeDiskGb} GiB; disk warning: ${resources.warnFreeDiskGb} GiB or ${resources.warnFreeDiskPercent}%`,
+    `simulator idle: ${resources.simulatorIdleMs / 1000}s; disk warning: ${resources.warnFreeDiskGb} GiB or ${resources.warnFreeDiskPercent}%`,
     ...formatFleetAutonomyGuidance(FleetAutonomySchema.parse(fleetAutonomyFields(fleet))),
     `tools: ${fleet.tools} — ${fleet.tools === "off" ? "fleet tool access disabled" : "every verified connected server through clankie_tools and clankie_call"}`,
     `peer messages: ${fleet.peerMessages} — ${fleet.peerMessages === "off" ? "new messages between fleet workers disabled" : "proven native workers may message their own fleet"}`,
@@ -545,14 +545,15 @@ async function parseSet(
       throw new Error(
         `${flag} is retired. Saved values remain read-only; use concrete project work policy and per-hire effort.`,
       );
+    if (["--max-load-ratio", "--minimum-free-memory-mb", "--minimum-free-disk-gb"].includes(flag ?? ""))
+      throw new Error(
+        `${flag} is retired (#599): heavy work queues on slots alone. Set --heavy-slots to change how much runs at once.`,
+      );
     if (
       [
         "--heavy-slots",
         "--simulator-slots",
         "--simulator-idle-seconds",
-        "--max-load-ratio",
-        "--minimum-free-memory-mb",
-        "--minimum-free-disk-gb",
         "--warn-free-disk-gb",
         "--warn-free-disk-percent",
       ].includes(flag ?? "")
@@ -563,11 +564,8 @@ async function parseSet(
       if (flag === "--heavy-slots") resources.heavySlots = value === "auto" ? null : number;
       else if (flag === "--simulator-slots") resources.simulatorSlots = value === "auto" ? null : number;
       else if (flag === "--simulator-idle-seconds") resources.simulatorIdleMs = number * 1000;
-      else if (flag === "--max-load-ratio") resources.maxLoadRatio = number;
-      else if (flag === "--minimum-free-disk-gb") resources.minFreeDiskGb = number;
       else if (flag === "--warn-free-disk-gb") resources.warnFreeDiskGb = number;
-      else if (flag === "--warn-free-disk-percent") resources.warnFreeDiskPercent = number;
-      else resources.minAvailableMemoryMb = number;
+      else resources.warnFreeDiskPercent = number;
       change.resources = FleetResourcePolicySchema.parse(resources);
     } else if (flag === "--hire-profile" && change.hire === undefined) {
       const text = await readFile(value, "utf8");

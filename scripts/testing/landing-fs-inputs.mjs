@@ -56,8 +56,8 @@ export const landingFsInputs = Object.fromEntries([
     "apps/clankie/test/linux-native-fleet.integration.test.ts",
     ["integrations/fleet-proof/linux-process-proof.py", "integrations/fleet-proof/test/linux-proof.py"],
   ],
-  // process.ts launches native.py for these real pressure, process and lock proofs.
-  ...["probe-failure", "darwin-pressure", "host-specs", "store-lock"].map((suite) => [
+  // process.ts launches native.py for these real process and lock proofs.
+  ...["probe-failure", "store-lock"].map((suite) => [
     `packages/fleet-resources/test/${suite}.integration.test.ts`,
     ["packages/fleet-resources/src/native.py"],
   ]),

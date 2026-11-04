@@ -1,11 +1,8 @@
 import {
   createResourceGovernor,
-  describeConsumers,
   heavyJobLane,
   resourceHolderIdentity,
-  retryLater,
   type FleetResourceGovernor,
-  type ResourceSnapshot,
 } from "@clankie/fleet-resources";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
@@ -48,7 +45,6 @@ export async function runHeavyCommand(
   }
   const governor = options.governor ?? createResourceGovernor();
   let waiting = false;
-  let namedConsumers = false;
   const shownAlerts = new Set<string>();
   const lane = server ? "server" : heavyJobLane(command, args.slice(separator + 2));
   try {
@@ -56,7 +52,7 @@ export async function runHeavyCommand(
       ...(seatId === undefined ? {} : { seatId }),
       ...(holderId === undefined ? {} : { holderId }),
       ...(server ? { server: true } : {}),
-      onWait: (snapshot, detail) => {
+      onWait: (snapshot) => {
         if (!waiting) {
           waiting = true;
           (options.stderr ?? process.stderr).write(
@@ -64,15 +60,7 @@ export async function runHeavyCommand(
               ? `clankie heavy: server lane waiting (${snapshot.capacity.serverUsed}/${snapshot.capacity.serverSlots} held, ${snapshot.serverQueue?.length ?? 0} queued, ${snapshot.capacity.serverCpuCores} CPU cores shared)\n`
               : lane === "light"
                 ? `clankie heavy: light lane waiting (${snapshot.capacity.lightUsed}/${snapshot.capacity.lightSlots} held, ${snapshot.lightQueue.length} queued)\n`
-                : `clankie heavy: waiting for machine capacity (${waitReason(snapshot, detail?.arbiter === true)}; ${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
-          );
-        }
-        // Who is using the machine, once, when pressure is what holds this job (#332).
-        const consumers = describeConsumers(snapshot.consumers ?? []);
-        if (!namedConsumers && consumers && !snapshot.pressure.healthy) {
-          namedConsumers = true;
-          (options.stderr ?? process.stderr).write(
-            `  ${consumers} ${retryLater(snapshot.loadRetryAfterMs)}\n`,
+                : `clankie heavy: waiting for a heavy slot (${snapshot.capacity.used}/${snapshot.capacity.heavySlots} held, ${snapshot.queue.length} queued)\n`,
           );
         }
         for (const alert of snapshot.holderAlerts ?? []) {
@@ -94,16 +82,6 @@ export async function runHeavyCommand(
   } finally {
     if (options.governor === undefined) await governor.close();
   }
-}
-
-/** Behind another waiter is a FIFO turn, not machine pressure (VUH-2054). */
-function waitReason(snapshot: ResourceSnapshot, arbiter: boolean): string {
-  const heavy = snapshot.queue.filter((entry) => entry.kind === "heavy");
-  if (heavy.findIndex((entry) => entry.pid === process.pid) > 0) return "queued";
-  const full = snapshot.capacity.used >= snapshot.capacity.heavySlots;
-  // The service decides; this process's own pressure reading is not the verdict.
-  if (arbiter) return full ? "slots" : "service";
-  return snapshot.pressure.reason ?? (full ? "slots" : "busy");
 }
 
 /**

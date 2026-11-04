@@ -5,53 +5,20 @@ The daily rules are in [the skill](../SKILL.md).
 
 ## Capacity
 
-`heavySlots` is a ceiling (automatic: one per two cores and per 12 GiB; for
-example nine on an 18-core, 128 GiB machine). One job per four cores runs on the
-load and memory guards, each job admitted in the last minute counting four cores
-of load, as the
-[alternating benchmark](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-08-heavy-parallelism/README.md)
-supports. Each job above that starts only while the measured machine (the busier
-of load and kernel CPU, plus a full four-core share for every job admitted in
-the last minute) stays under 70% of the cores, with memory to spare.
+Each lane is a FIFO slot queue (#599): a job starts when it is at the head and
+a slot is free, and nothing else admits, delays or refuses it. No load, memory
+or disk reading is consulted. Automatic `heavySlots` is one per four cores and
+per 24 GiB (four on an 18-core, 128 GiB machine), each job holding a full
+four-worker share; an owner value replaces it. The light lane is the same queue
+with the worst-case count, capped by `heavySlots`. Before #599 a pressure gate sat
+on top of the slots and held queues behind load that unmanaged processes caused.
 
-When no full job is held, a valid load-only refusal admits the FIFO head if
-memory meets the owner floor and load stays below twice `maxLoadRatio`. At or
-above that cap, true overload still waits. Between the normal guard and the cap
-it runs at most one full job at a time, counting starting/running and cleanup
-leases; light and server jobs use separate budgets and do not count. Unknown
-observations and low memory still refuse. Simulator boot guards do not use this
-exception.
-
-The service judges admission for every waiter from one view of the machine, so
-don't run `clankie heavy` itself under a shim that changes what Node reports
-about the machine (cores, memory); put such shims on the child command. The
-registry belongs to the OS account and is shared across worktrees. Worker
-`HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity.
-
-macOS available memory matches `memory_pressure -Q` through the kernel's
-compressor-aware percentage; Linux uses `MemAvailable`. macOS pressure reads
-share a one-second cache. Failed observations refuse new local hires without
-terminating existing agents. A local hire is refused only when available memory
-is below its floor or the observation fails; high load admits it, and its
-receipt's `resourceNotice` says its heavy work and simulator leases will queue
-until load drops. Python 3 and the shipped native helper must be available.
-
-Pressure notices say who is using the machine (#332). While a heavy permit is
-held or pressure is unhealthy, the governor takes one `ps` census of every
-process (about 65 ms for 1,050 processes on the owner's Mac, cached five
-seconds). Each permit's `processUsage` sums its runner's process group: CPU
-where 100 is one core (the kernel's decaying average on macOS, the lifetime
-average on Linux), resident memory and process count. Under pressure,
-`consumers` lists the five heaviest processes at 5% CPU or more, each with its
-permit's lane and seat, or unleased with the nearest agent harness above it
-(`claude`, `codex`, …). Under load pressure, `loadRetryAfterMs` estimates how
-long the one-minute load average takes to fall to the limit once that work
-stops. The census is diagnostic only; it never admits, charges or stops anything.
-Local surfaces (`clankie heavy`'s wait, doctor, the snapshot) name every consumer.
-Hire refusals, queued-hire notices and simulator pressure hints reach callers that
-may be off the Mac (a connected app reads `start_agent`'s detail verbatim), so they
-name only permits and harness-started work and sum every other process as
-"N other processes, X% CPU, Y GiB".
+The registry belongs to the OS account and is shared across worktrees. Worker
+`HOME`, state-path or `HEAVY_SLOTS` overrides cannot increase capacity. A local
+hire is refused only when the native host authority is unavailable (Python 3 and
+the shipped native helper must be present); existing agents are never stopped.
+`node scripts/heavy-waits.mjs` in a checkout prints median and p95 waits per
+lane from `leases.jsonl` for a window.
 
 `clankie fleet resources --machine ID` selects a registered host, with its own
 specs, capacity, holders and queue. `local` and `default` select this service's
@@ -100,23 +67,19 @@ journal-lock contention waits internally and keeps the queue ticket.
 queue separately. The owning lead hears a holder alert only after a governed
 server or build/check permit has been held for 15 minutes, at most once per lease
 across refreshes and service restarts. `holderAlerts` identifies its lane, seat,
-holder, executable and start time without arguments. An eligible heavy lane head
-still queued after 60 seconds on consecutive arbiter passes also alerts the lead,
-naming its ticket, owner seat, holder and PID. Pressure or capacity waits stay
+holder, executable and start time without arguments. Capacity waits stay
 quiet. Read `clankie fleet resources` and coordinate with the named owner; the
 observer never requeues work or edits the registry.
 
 ## Disk
 
-Free disk is sampled on the working-directory and OS-account home volumes.
-Doctor and the lead's fleet round warn below either 200 GiB or 10% free. All new
-heavy jobs (full, light and server lanes) wait below 20 GiB free; existing jobs
-keep running. An unavailable disk observation refuses admission. Set
-`minFreeDiskGb`, `warnFreeDiskGb` and `warnFreeDiskPercent` through the fleet
-settings API, `/fleet resources`, or
-`clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`
-(values are GiB despite the `-gb` spelling). These guards also apply to
-simulator admission but do not stop existing leases or deny low-load social turns.
+Free disk is read on the registry volume. Doctor, status and the lead's fleet
+round warn below either 200 GiB or 10% free; set `warnFreeDiskGb` and
+`warnFreeDiskPercent` through the fleet settings API, `/fleet resources`, or
+`clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N` (values are
+GiB). The warning is informational: no lane or simulator waits on disk. The
+retired `--minimum-free-disk-gb`, `--max-load-ratio` and
+`--minimum-free-memory-mb` flags are refused.
 
 An unbounded `find`, `bfs` or recursive listing over all worktrees,
 `node_modules` or `~/.clankie/integration` once held tens of thousands of open
@@ -133,7 +96,7 @@ governors. Run resource stress checks only manually or in the release gate.
 
 ## Platform notes
 
-The shared admission functions accept host-measured `ResourceHostSpecs` for a
+The shared sizing functions accept host-measured `ResourceHostSpecs` for a
 later native runtime; these are not worker flags or a second registry. The
 staged Linux PID-namespace helper is a containment primitive, not a second
 capacity allocator or a WSL heavy-command route: native Windows and WSL share one

@@ -98,7 +98,6 @@ it("follows handoff status and results without manufacturing seats or panes", as
     schemaVersion: 1,
     policy: {},
     capacity: { heavySlots: 2, simulatorSlots: 1, used: 1 },
-    pressure: { sampledAtMs: 1, loadRatio: 0.1, availableMemoryMb: 10000, healthy: true },
     leases: [
       {
         id: "owned-lease",

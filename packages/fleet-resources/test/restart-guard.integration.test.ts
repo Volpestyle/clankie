@@ -15,7 +15,6 @@ import type { SimulatorOwner } from "../src/simulators.ts";
 
 // Admission preconditions are explicit: unrelated host memory/load cannot
 // decide the restart boundary. Native births, ancestry and journals stay real.
-const probe = async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 65_536 });
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "restart-guard-"));
@@ -66,7 +65,7 @@ async function fixture() {
     processes: [native],
   };
   const stores = [root, join(root, "light"), join(root, "server")].map((path) => new ResourceStore(path));
-  const governor = createResourceGovernor({ directory: root, probe });
+  const governor = createResourceGovernor({ directory: root });
   return {
     root,
     owner,

@@ -58,8 +58,6 @@ it.each([true, false])(
     const real = await vi.importActual<typeof Process>("../src/process.ts");
     const governor = createResourceGovernor({
       directory: join(root, "governor"),
-      probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 1_000_000 }),
-      heavyJobSettleMs: 0,
       // A detached Codex app-server is not below its foreground holder; only the
       // host's native registration can join the observed chain to the seat.
       nativeSimulatorOwner: async (_owner, chain) =>
