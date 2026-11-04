@@ -4848,6 +4848,8 @@ paths:
         transport state, never a mood. Paired hosted devices may read it.
         includeQuiet true opts in to quiet (the owner's quiet hours are in effect)
         and, while quiet, quietUntil; both change the cursor (legacy reads omit them).
+        Only the operator or a Take Control device receives them; any other
+        reader gets presence without them and no error.
         includeFace true opts in to an optional face (legacy reads omit it).
         It drives the desktop screen separately from mood/body:
         needs_you, error, new_message, working or voice, in that precedence.

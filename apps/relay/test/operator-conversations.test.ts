@@ -147,6 +147,37 @@ describe("authenticated operator conversation relay", () => {
     expect((await post(support.url, "/operator/v1/dispatch", body)).status).toBe(403);
     expect(deviceDispatch).toHaveBeenCalledTimes(1);
   });
+  it("sends only the owner's own device down its own identity for quiet hours, and errors for nobody", async () => {
+    const snapshot = {
+      schemaVersion: 1 as const,
+      cursor: "quiet",
+      mood: "idle" as const,
+      detail: "Taking a break",
+      since: null,
+      activeSeats: 0,
+    };
+    const served = { op: "presence" as const, schemaVersion: 1 as const, snapshot };
+    const body = { op: "presence", schemaVersion: 1, includeQuiet: true };
+    const takeControl = { ...activeDevice, grants: { ...activeDevice.grants, terminalControl: true } };
+    const read = async (device: typeof activeDevice & Record<string, unknown>) => {
+      const dispatch = vi.fn(async () => served);
+      const deviceDispatch = vi.fn(async () => served);
+      const relay = await startRelay({
+        dispatch,
+        deviceDispatch,
+        authorizeDevice: { authorize: async () => ({ authorized: true, device }) },
+      });
+      const response = await post(relay.url, "/operator/v1/dispatch", body);
+      expect(response.status).toBe(200);
+      return { own: deviceDispatch.mock.calls.length, relayed: dispatch.mock.calls.length };
+    };
+    expect(await read(takeControl)).toEqual({ own: 1, relayed: 0 });
+    expect(await read(activeDevice)).toEqual({ own: 0, relayed: 1 });
+    expect(await read({ ...takeControl, controlScope: "hosted" })).toEqual({ own: 0, relayed: 1 });
+    expect(
+      await read({ ...takeControl, supportGrantId: "support", supportScope: "read-state" as const }),
+    ).toEqual({ own: 0, relayed: 1 });
+  });
   it("passes a paired hosted device's presence read and rechecks authorization", async () => {
     const snapshot = {
       schemaVersion: 1,

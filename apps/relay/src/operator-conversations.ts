@@ -1041,9 +1041,20 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (request.aborted || response.destroyed) abort.abort();
     // Recorded evidence bytes are owner-device reads: the service checks the
     // device's own signed identity, so a captain bearer can never fetch them.
+    // Only the device's own identity can prove it is the owner's. Anyone else stays
+    // on the relay's route, where the service leaves quiet hours out without an error.
+    const ownerQuietRead =
+      serviceRequest.op === "presence" &&
+      serviceRequest.includeQuiet === true &&
+      options.deviceDispatch !== undefined &&
+      currentAuthorization.device.grants.terminalControl &&
+      currentAuthorization.device.scope !== "connector" &&
+      currentAuthorization.device.controlScope !== "hosted" &&
+      currentAuthorization.device.supportGrantId === undefined;
     const ownerRoute =
       nativeMessageOp ||
       currentActivityOp ||
+      ownerQuietRead ||
       questionOp ||
       workWriteOp ||
       autoOnOp ||
@@ -1076,7 +1087,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
           serviceRequest.op === "evidence_fetch" ||
           serviceRequest.op === "fleet_room" ||
           (serviceRequest.op === "app_notes" && ownerNoteRead) ||
-          (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
+          (serviceRequest.op === "presence" &&
+            (serviceRequest.includeCurrentActivity === true || ownerQuietRead)) ||
           serviceRequest.op === "project_proposal_get" ||
           serviceRequest.op === "project_proposal_confirm" ||
           serviceRequest.op === "project_proposal_tweak" ||

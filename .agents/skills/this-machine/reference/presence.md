@@ -8,9 +8,10 @@ What he is doing, his desktop expressions and pet face, who holds each body reso
 health. Source-derived presence and a desktop expression are separate: the
 `desktop` tool can emote, move with normalized display coordinates or show a
 short bubble. It publishes an expiring expression, not keyboard or mouse input.
-Desktop clients honor quiet hours and macOS Focus; a presence read with
-`includeQuiet: true` reports `quiet` and `quietUntil`, and so does
-`clankie desktop status`. Publication is not proof a client displayed it. For app input, use `desktop-control` or a computer-use seat.
+Desktop clients honor quiet hours and macOS Focus. A presence read with
+`includeQuiet: true` reports `quiet` and `quietUntil` to the operator or a Take
+Control device only; other readers get neither field and no error.
+`clankie desktop status` reports both locally. Publication is not proof a client displayed it. For app input, use `desktop-control` or a computer-use seat.
 
 The `presence` read with `includeFace: true` also carries a source-derived `face` for the desktop
 pet: working, new message, needs you, error or voice. Message and error faces
