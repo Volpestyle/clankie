@@ -12,6 +12,12 @@ import { seedCodex, startLinearFixture } from "./fleet-load-fixtures.ts";
 import { startFleetLoadService, type FleetLoadServiceConfig } from "./fleet-load-service.ts";
 import { installHerdrRelease } from "../src/herdr-release.ts";
 import herdrPin from "../../../scripts/release/herdr.json" with { type: "json" };
+import { GIT_REPOSITORY_ENVIRONMENT } from "@clankie/settings";
+
+// Run from `git bisect run`, a hook or `rebase --exec` in a linked worktree, this driver
+// inherits that worktree's GIT_DIR; its workspace `git init` would then mark the owner's
+// checkout bare (#846). Nothing it starts works in the caller's repository.
+for (const name of GIT_REPOSITORY_ENVIRONMENT) delete process.env[name];
 
 const execute = promisify(execFile);
 const script = fileURLToPath(import.meta.url);

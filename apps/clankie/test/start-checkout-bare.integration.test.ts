@@ -156,3 +156,59 @@ it("a start checkout marked bare refuses the hire with the cause and the repair"
     outcome: "refused",
   });
 });
+
+it.skipIf(process.platform !== "darwin")(
+  "the fleet load driver and the land helper's tests, run from `git bisect run`, leave the start checkout non-bare",
+  async () => {
+    const f = await fixture();
+    const tree = join(f.owner, ".local", "wt-bisect");
+    await git(f.owner, ["worktree", "add", "-q", "--detach", tree, "HEAD"]);
+    for (const step of ["first", "second"]) await git(tree, ["commit", "-q", "--allow-empty", "-m", step]);
+    // What `git bisect run` hands its step in a linked worktree (#846).
+    const seen = join(f.root, "step-git-dir");
+    await git(tree, ["bisect", "start", "HEAD", "HEAD~2"]);
+    await git(tree, ["bisect", "run", "sh", "-c", `printf %s "$GIT_DIR" > '${seen}'`]);
+    await git(tree, ["bisect", "reset"]);
+    const gitDir = await readFile(seen, "utf8");
+    expect(gitDir).toBe(join(f.owner, ".git", "worktrees", "wt-bisect"));
+    const before = await readFile(f.config, "utf8");
+    const env = { ...process.env, GIT_DIR: gitDir };
+    const repo = join(import.meta.dirname, "../../..");
+
+    // The load driver inits its own workspace, then stops at a Herdr that will not start.
+    const herdr = join(f.root, "herdr");
+    await writeFile(herdr, "#!/bin/sh\nexit 1\n");
+    await chmod(herdr, 0o755);
+    const load = await exec(
+      process.execPath,
+      [
+        "--import",
+        import.meta.resolve("tsx"),
+        join(repo, "apps/clankie/scripts/fleet-load.ts"),
+        "--herdr-binary",
+        herdr,
+        "--workers",
+        "1",
+        "--large-session-mb",
+        "1",
+        "--output",
+        join(f.root, "load.json"),
+      ],
+      { cwd: tree, env, timeout: 120_000 },
+    ).catch((error: { stdout?: string; stderr?: string }) => error);
+    expect(JSON.stringify(load)).toContain("Owned Herdr startup failed");
+    expect(await readFile(f.config, "utf8")).toBe(before);
+
+    await exec(
+      process.execPath,
+      ["--test", join(repo, ".agents/skills/shared-checkout/scripts/land.test.mjs")],
+      {
+        cwd: tree,
+        env,
+        timeout: 120_000,
+      },
+    );
+    expect(await readFile(f.config, "utf8")).toBe(before);
+    expect(await git(f.owner, ["rev-parse", "--is-bare-repository"])).toBe("false");
+  },
+);
