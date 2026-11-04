@@ -182,7 +182,7 @@ it("owner API status, TUI help and CLI help describe supported overrides without
     expect(
       commandHelp()
         .split("\n")
-        .filter((line, index, lines) => lines[index - 1]?.includes("maximum-trust-mode [status|on|off]")),
+        .filter((_line, index, lines) => lines[index - 1]?.includes("maximum-trust-mode [status|on|off]")),
     ).toEqual([
       "                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)",
     ]);
