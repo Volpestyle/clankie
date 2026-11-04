@@ -766,6 +766,12 @@ or doing dependent work; an unknown status is not proof that nothing was sent.
 `clankie agents message-status DELIVERY_ID` provides the same read in your native
 pane.
 
+Binding lookup failures return `unavailable` before dispatch, so they leave no
+unresolved original. An `uncertain` report includes its stable `deliveryId`;
+a later `message_clankie` call only reconciles it, without sending a different
+follow-up. Receipt reads still require current native admission. Preserve an
+unreadable local journal and ask the lead to inspect it; never delete its claim.
+
 ### Connected app inbox
 
 Workers label each `message_clankie` report with `kind`: `done`, `blocked` or

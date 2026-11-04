@@ -66,14 +66,23 @@ export function createInboundSender({ directory, scope, request, onObservation, 
   const storedDirectory = join(directory, `${hash(scope)}.stored`);
   const storedPath = join(storedDirectory, "reconcile.json");
   const RECONCILE_WINDOW_MS = 5 * 60_000;
-  const uncertain = (record, detail = "The original receipt is unresolved; no replacement was sent.") => ({
-    received: false,
-    deliveryStage: "uncertain",
-    detail,
-    ...(record
-      ? { deliveryId: record.deliveryId, binding: record.binding, fingerprint: record.fingerprint }
-      : {}),
-  });
+  const uncertain = (record, detail = "The original receipt is unresolved; no replacement was sent.") =>
+    record
+      ? {
+          received: false,
+          deliveryStage: "uncertain",
+          deliveryId: record.deliveryId,
+          binding: record.binding,
+          fingerprint: record.fingerprint,
+          detail,
+        }
+      : {
+          received: false,
+          deliveryStage: "unavailable",
+          retryable: false,
+          detail:
+            "The local receipt journal could not be read or locked. No new message was sent. Ask the lead to inspect this bridge's receipt journal; do not remove or replace an unresolved claim.",
+        };
   const stored = (value, record) =>
     value?.schemaVersion === 1 &&
     value.received === true &&
@@ -358,7 +367,15 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       // A later invocation only reads the exact original receipt.
       const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
       return observed(
-        uncertain(record),
+        phase === "binding"
+          ? {
+              received: false,
+              deliveryStage: "unavailable",
+              retryable: true,
+              detail:
+                "The native binding lookup failed before dispatch; nothing was sent. Retry message_clankie when admission is available.",
+            }
+          : uncertain(phase === "local" ? undefined : record),
         phase === "binding"
           ? timeout
             ? "binding_timeout"
