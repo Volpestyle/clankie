@@ -22,7 +22,6 @@ import {
   type SpawnOperatorSeat,
 } from "@clankie/protocol";
 import { projectRolePolicy, type ProjectsSettings } from "@clankie/protocol/projects";
-import { checkoutGit, reconcileWorktree } from "@clankie/settings";
 
 const ProcessSchema = z.object({ pid: z.number().int().positive(), startTime: z.string().min(1) }).strict();
 export const ProjectHireProcessProofSchema = z
@@ -308,27 +307,58 @@ export class ProjectHires {
         };
   }
   /**
-   * The attempt whose allocation and occupant were captured before its close landed its
-   * work (#602): record that exact allocation as the winner, even though the close has
-   * since released it, and mark every other live attempt at the same deliverable
-   * superseded. Advisory: the lead closes the superseded ones. Returns their panes;
-   * nothing when the record no longer matches or another attempt already won.
+   * Every attempt at the deliverable of the attempt captured before its close (#602),
+   * gone or live, while none has won and the captured record still matches its
+   * allocation. The settlement reads each one's hire branch.
    */
-  public settleAttempt(allocation: string, occupantId: string): string[] {
+  public attemptCandidates(
+    allocation: string,
+    occupantId: string,
+  ): { readonly deliverable: string; readonly candidates: AttemptCandidate[] } | undefined {
+    const allocations = this.read().allocations;
+    const captured = allocations.find(
+      (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
+    );
+    const deliverable = captured?.request.deliverable;
+    if (captured === undefined || deliverable === undefined || captured.supersededBy !== undefined)
+      return undefined;
+    const attempts = allocations.filter(
+      (a) => a.request.attempt && a.projectId === captured.projectId && a.request.deliverable === deliverable,
+    );
+    if (attempts.some((a) => a.attemptWon !== undefined)) return undefined;
+    return {
+      deliverable,
+      candidates: attempts.map((a) => ({
+        allocation: a.id,
+        occupantId: a.occupantId,
+        pane: a.pane,
+        harness: a.request.harness,
+        model: a.selection?.model ?? a.request.model,
+      })),
+    };
+  }
+  /**
+   * Record one attempt as the winner its merged hire branch proved (#602), even after
+   * its close released it, and mark every other live attempt at the same deliverable
+   * superseded. Advisory: the lead closes the superseded ones. Returns their panes;
+   * undefined when the record no longer matches or an attempt already won.
+   */
+  public settleAttempt(allocation: string, occupantId: string): string[] | undefined {
     return this.change((state) => {
       const winner = state.allocations.find(
         (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
       );
-      if (winner === undefined || winner.supersededBy !== undefined || winner.attemptWon) return [];
-      winner.attemptWon = new Date().toISOString();
-      const siblings = state.allocations.filter(
+      if (winner === undefined || winner.supersededBy !== undefined) return undefined;
+      const attempts = state.allocations.filter(
         (a) =>
           a.id !== winner.id &&
-          !a.gone &&
           a.request.attempt &&
           a.projectId === winner.projectId &&
           a.request.deliverable === winner.request.deliverable,
       );
+      if (winner.attemptWon || attempts.some((a) => a.attemptWon)) return undefined;
+      winner.attemptWon = new Date().toISOString();
+      const siblings = attempts.filter((a) => !a.gone);
       for (const sibling of siblings) sibling.supersededBy = winner.id;
       return siblings.map((sibling) => sibling.pane ?? sibling.id);
     });
@@ -843,26 +873,86 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/** Reflog actions that create a commit in this worktree, as opposed to bringing one in. */
-const OWN_COMMIT =
-  /^[a-f0-9]+ (?:commit(?: \((?:amend|initial)\))?|rebase(?: -i)? \((?:pick|reword|edit|squash|fixup)\)|cherry-pick):/u;
+/** One attempt at a deliverable, as the hire ledger recorded it (#602). */
+export type AttemptCandidate = {
+  readonly allocation: string;
+  readonly occupantId: string | undefined;
+  readonly pane: string | undefined;
+  readonly harness: string | undefined;
+  readonly model: string | undefined;
+};
+/** The pull request that merged an attempt's hire branch, as GitHub records it. */
+export type AttemptMerge = { readonly number: number; readonly url: string; readonly mergedAt: string };
+export type AttemptSettlement =
+  | {
+      readonly outcome: "won";
+      readonly allocation: string;
+      readonly superseded: string[];
+      readonly detail: string;
+    }
+  | { readonly outcome: "unsettled"; readonly detail: string };
+
 /**
- * Whether a worktree made its own commits since `startHead` and every commit in it is
- * on main, with nothing left uncommitted: the test an attempt passes to win (#602).
- * Its own commits are the ones its HEAD reflog records it creating (commit, amend,
- * rebase pick, cherry-pick) that HEAD still contains. Commits it only fetched, pulled,
- * merged or reset onto, such as another attempt's landed work, are not its own.
+ * Settle a closed attempt's deliverable from evidence the host keeps (#602): the branch
+ * recorded for each attempt at its hire, and the pull request GitHub merged from that
+ * branch into the repository's default branch. Nothing the worktree writes (commits,
+ * reflog, remotes) counts. The attempt whose branch merged first wins and its live
+ * siblings are superseded; without that evidence for every attempt, no winner is set and
+ * the lead gets the candidates.
  */
-export async function landedSince(worktreeRoot: string, startHead: string): Promise<boolean> {
-  if ((await reconcileWorktree(worktreeRoot))?.state !== "reconciled") return false;
-  const reflog = await checkoutGit(worktreeRoot, ["reflog", "show", "--format=%H %gs", "HEAD"]);
-  const made = new Set(
-    reflog
-      .split("\n")
-      .filter((line) => OWN_COMMIT.test(line))
-      .map((line) => line.slice(0, line.indexOf(" "))),
-  );
-  if (made.size === 0) return false;
-  const contained = await checkoutGit(worktreeRoot, ["rev-list", `${startHead}..HEAD`]);
-  return contained.split("\n").some((sha) => made.has(sha.trim()));
+export async function settleAttemptByMerge(
+  hires: Pick<ProjectHires, "attemptCandidates" | "settleAttempt">,
+  record: { readonly allocation: string; readonly occupantId: string },
+  branchOf: (candidate: AttemptCandidate) => string | undefined,
+  mergedPull: (repository: string, branch: string) => Promise<AttemptMerge | undefined>,
+): Promise<AttemptSettlement | undefined> {
+  const found = hires.attemptCandidates(record.allocation, record.occupantId);
+  if (found === undefined) return undefined;
+  const { deliverable, candidates } = found;
+  const name = (candidate: AttemptCandidate, branch?: string) =>
+    `${[candidate.harness, candidate.model].filter(Boolean).join(" ") || "an attempt"} (${
+      candidate.pane === undefined ? `allocation ${candidate.allocation}` : `pane ${candidate.pane}`
+    }${branch === undefined ? "" : `, branch ${branch}`})`;
+  const unsettled = (reason: string, branches: readonly (string | undefined)[] = []) => ({
+    outcome: "unsettled" as const,
+    detail: `No automatic winner for ${deliverable}: ${reason}. Candidates: ${candidates
+      .map((candidate, index) => name(candidate, branches[index]))
+      .join("; ")}. Decide which attempt's work to keep and close the others.`,
+  });
+  const repository = /^([\w.-]+\/[\w.-]+)#\d+$/u.exec(deliverable)?.[1];
+  if (repository === undefined) return unsettled("the deliverable names no GitHub issue");
+  const branches = candidates.map(branchOf);
+  const missing = candidates.find((_, index) => branches[index] === undefined);
+  if (missing !== undefined) return unsettled(`no hire branch is recorded for ${name(missing)}`, branches);
+  if (new Set(branches).size !== branches.length)
+    return unsettled("two attempts share a hire branch", branches);
+  let merges: (AttemptMerge | undefined)[];
+  try {
+    merges = await Promise.all(branches.map((branch) => mergedPull(repository, branch!)));
+  } catch (error) {
+    return unsettled(
+      `GitHub could not be read (${error instanceof Error ? error.message : String(error)})`,
+      branches,
+    );
+  }
+  const merged = candidates
+    .map((candidate, index) => ({ candidate, merge: merges[index], branch: branches[index]! }))
+    .filter((entry): entry is typeof entry & { merge: AttemptMerge } => entry.merge !== undefined)
+    .sort((a, b) => Date.parse(a.merge.mergedAt) - Date.parse(b.merge.mergedAt));
+  const first = merged[0];
+  if (first === undefined) return unsettled("no attempt's hire branch has a merged pull request", branches);
+  if (merged[1] !== undefined && merged[1].merge.mergedAt === first.merge.mergedAt)
+    return unsettled("two attempts' pull requests merged at the same instant", branches);
+  if (first.candidate.occupantId === undefined)
+    return unsettled("the first merge's attempt has no recorded occupant", branches);
+  const superseded = hires.settleAttempt(first.candidate.allocation, first.candidate.occupantId);
+  if (superseded === undefined) return undefined;
+  return {
+    outcome: "won",
+    allocation: first.candidate.allocation,
+    superseded,
+    detail: `${name(first.candidate, first.branch)} won ${deliverable}: its hire branch merged first as ${first.merge.url}.${
+      superseded.length ? ` Superseded: ${superseded.join(", ")}; close them when their reports are in.` : ""
+    }`,
+  };
 }

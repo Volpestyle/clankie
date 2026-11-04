@@ -91,10 +91,16 @@ Message the holder, or close its pane with `close_worker_pane` to reassign the
 work; the claim is also released when a census finds the pane gone. To race
 different harnesses or models on purpose, hire each one with `attempt: true`:
 attempts coexist only with other attempts, and each needs its own harness or
-model and its own worktree. When a local attempt closes with its own commits on
-main, it is recorded as the winner, with its harness and model. Its live
-siblings show the `superseded` flag in `fleet_efficiency`; close them, since
-only one attempt should merge. Every attempt shows the `attempt` flag.
+model and its own worktree. When an attempt's pane closes, the winner comes
+only from what the host recorded: the attempt whose hire branch GitHub merged
+first as a pull request into the default branch wins, with its harness and
+model, whichever pane is closing. Its live siblings show the `superseded` flag
+in `fleet_efficiency`; close them, since only one attempt should merge.
+Commits, reflogs or a cherry-picked copy in a worktree never count. Without that
+evidence for every attempt (no merged pull request yet, a deliverable that is
+not `owner/repo#N`, or a remote attempt with no recorded branch), nothing is
+set: the close result's `entry.attempt` names the candidates for you to decide.
+Every attempt shows the `attempt` flag.
 
 Never rearrange existing panes or substitute the lead's or focused pane.
 Sub-leads without `hire_agent` use the exact

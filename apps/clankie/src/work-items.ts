@@ -883,6 +883,39 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       return checkpointUnknown("Worker repository or GitHub checkpoint unavailable");
     }
   };
+  /**
+   * The first pull request GitHub merged from `branch` of `repository` into its default
+   * branch (#602), or undefined when none has. Throws when GitHub cannot be read.
+   */
+  const mergedPull = async (
+    repository: string,
+    branch: string,
+  ): Promise<{ number: number; url: string; mergedAt: string } | undefined> => {
+    const { api } = checkpointAccess((await githubSnapshot())?.token);
+    const repo = (await api.request("GET", `repos/${repository}`)) as { default_branch?: string };
+    const owner = repository.split("/")[0]!;
+    const pulls = (await api.list(
+      `repos/${repository}/pulls?state=closed&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
+    )) as {
+      number?: number;
+      html_url?: string;
+      merged_at?: string | null;
+      head?: { ref?: string; repo?: { full_name?: string } | null };
+      base?: { ref?: string };
+    }[];
+    return pulls
+      .filter(
+        (pull) =>
+          typeof pull.merged_at === "string" &&
+          typeof pull.number === "number" &&
+          typeof pull.html_url === "string" &&
+          pull.head?.ref === branch &&
+          pull.head.repo?.full_name?.toLowerCase() === repository.toLowerCase() &&
+          pull.base?.ref === repo.default_branch,
+      )
+      .map((pull) => ({ number: pull.number!, url: pull.html_url!, mergedAt: pull.merged_at! }))
+      .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt))[0];
+  };
   const checkIssueCheckpoint = async (issue: Readonly<Record<string, unknown>>) => {
     const links = issue.links as { url: string }[] | undefined;
     const references = (links ?? []).flatMap((link) => {
@@ -1827,6 +1860,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
 
   return {
     mainCheckpoint: checkpointForCheckout,
+    mergedPull,
     checkIssueCheckpoint,
     handleOwnerWrite,
     /**

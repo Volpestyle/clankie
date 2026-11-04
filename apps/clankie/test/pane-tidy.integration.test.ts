@@ -959,7 +959,7 @@ it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s
   expect(f.tidy.leadHistory()[0]).toMatchObject({ paneId: pane });
   f.watch.close();
 });
-it("a closed attempt that landed settles its own retained allocation as the winner after the real close (#602)", async () => {
+it("a closed attempt whose hire branch merged first settles its own retained allocation as the winner after the real close (#602)", async () => {
   const f = await fixture({ remote: true, socket: true, projectHire: true, attempt: true });
   try {
     const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
@@ -982,18 +982,33 @@ it("a closed attempt that landed settles its own retained allocation as the winn
     f.ledger.pane(sibling.id, "pc/w1:p8");
     const winner = f.ledger.retirementCandidate("pc", "pc/w1:p1")!;
     expect(winner.request.attempt).toBe(true);
-    // The real store captures the record and settles it; only the Git verdict is given.
+    // The real store captures the record and settles it. Only the hire branches and what
+    // GitHub merged are given: the winner's branch merged as a pull request, the rival's didn't.
     const captured: unknown[] = [];
+    const branches = new Map([
+      [winner.occupantId, "clankie/winner"],
+      [sibling.id, "clankie/rival"],
+    ]);
     const tidy = new PaneTidy(f.path, {
       ...f.ports,
-      landedAttempt: async (agent) => {
+      attemptRecord: (agent) => {
         const record = f.watch.hireAttemptRecord(agent);
         captured.push(record);
         return record;
       },
-      attemptSettled: (record) => {
-        f.watch.settleHireAttempt(record);
-      },
+      settleAttempt: (record) =>
+        f.watch.settleHireAttempt(
+          record,
+          (candidate) => branches.get(candidate.occupantId ?? candidate.allocation),
+          async (repository, branch) =>
+            repository === "Volpestyle/clankie" && branch === "clankie/winner"
+              ? {
+                  number: 7,
+                  url: "https://github.com/Volpestyle/clankie/pull/7",
+                  mergedAt: "2026-11-03T10:00:00Z",
+                }
+              : undefined,
+        ),
     });
     const close = () =>
       tidy.close(
@@ -1013,6 +1028,11 @@ it("a closed attempt that landed settles its own retained allocation as the winn
     const closed = await close();
     expect(closed, JSON.stringify(closed)).toMatchObject({ outcome: "closed" });
     expect(captured.at(-1)).toEqual({ allocation: winner.id, occupantId: winner.occupantId });
+    // The lead's close result says who won and what it superseded.
+    expect(closed).toMatchObject({ entry: { attempt: { outcome: "won" } } });
+    const detail = (closed as { entry: { attempt: { detail: string } } }).entry.attempt.detail;
+    expect(detail).toContain("pull/7");
+    expect(detail).toContain("Superseded: pc/w1:p8");
     // The close released the winner's allocation, and it still records the win.
     expect(f.ledger.retirementCandidate("pc", "pc/w1:p1")).toBeUndefined();
     expect(f.ledger.allocation(winner.id)).toMatchObject({ gone: true, attemptWon: expect.any(String) });

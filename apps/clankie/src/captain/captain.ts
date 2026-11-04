@@ -36,7 +36,6 @@ import {
 import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { checkoutGit, hireWorktreeStart, projectPathContains } from "@clankie/settings";
-import { landedSince } from "./project-hires.ts";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
 import { FleetAutonomySchema } from "@clankie/protocol";
 import { fleetDeliveryStage, type DeliveryStage, type FleetRoomParty } from "@clankie/protocol";
@@ -1380,6 +1379,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const stances = createStanceStore();
   const agentWork = createAgentWorkStore(options.stateDir);
   const seatEfficiency = new SeatEfficiencyStore(join(options.stateDir, "seat-efficiency.json"));
+  /** The lead that owned each attempt captured before its close; reads its siblings' hire branches (#602). */
+  const attemptOwners = new WeakMap<object, ConversationOwner>();
   const workHistory = new PersonaWorkHistory(join(options.stateDir, "persona-work-history.json"));
   const seatLeadOwners = new WeakMap<
     OperatorFleetSeat,
@@ -2901,20 +2902,34 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         original.restoredHire ? { restoredHire: original.restoredHire } : {},
       );
     },
-    // #602: an attempt wins when it made its own commits since its hire and every one is on
-    // main. Only a local hire records the commit it started from, so a remote attempt never
-    // settles here.
-    landedAttempt: async (agent) => {
+    // #602: closing an attempt settles its deliverable from what the host recorded at each
+    // attempt's hire (its branch) and the pull request GitHub merged from that branch;
+    // nothing the worktree writes counts. Only a local hire records its branch, so a remote
+    // attempt leaves the deliverable to the lead.
+    attemptRecord: (agent) => {
       const record = herdrWatches.hireAttemptRecord(agent);
-      if (record === undefined) return undefined;
       const owner = herdrWatches.tidyProvenance(agent);
-      if (typeof owner !== "object") return undefined;
-      const baseline = seatEfficiency.readCommitBaseline(record.occupantId, owner);
-      if (baseline === undefined) return undefined;
-      return (await landedSince(baseline.worktreeRoot, baseline.head)) ? record : undefined;
+      if (record === undefined || typeof owner !== "object") return undefined;
+      attemptOwners.set(record, owner);
+      return record;
     },
-    attemptSettled: (record) => {
-      herdrWatches.settleHireAttempt(record);
+    settleAttempt: async (record) => {
+      const owner = attemptOwners.get(record);
+      const mergedPull = deps.workItems?.mergedPull;
+      if (owner === undefined) return undefined;
+      return herdrWatches.settleHireAttempt(
+        record,
+        (candidate) =>
+          candidate.occupantId === undefined
+            ? undefined
+            : seatEfficiency
+                .readCommitBaseline(candidate.occupantId, owner)
+                ?.branchRef.slice("refs/heads/".length),
+        mergedPull ??
+          (async () => {
+            throw new Error("GitHub reader unavailable");
+          }),
+      );
     },
     mainCheckpoint: async (agent) => {
       const qualified = splitFleetQualified(agent.paneId);
