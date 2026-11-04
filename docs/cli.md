@@ -796,6 +796,10 @@ For transport failures, inspect `clankie doctor --machine pc` on Clankie's machi
 and its fleet-link logs. A queued observation timeout fails that caller and
 retains its exact pending ID for at most 30 further seconds; late replies are
 discarded, and a truly stalled observer closes with an explicit log reason.
+Identical observations coalesce only onto a fresh next run. If every caller
+waiting for that run expires, the unstarted run is dropped instead of adding
+abandoned work to the serial queue. Remaining callers keep their own arrival
+deadlines; proof results and native authority are never cached (#348).
 When that timeout refuses a seat route's pane proof, the service answers with the
 retryable `fleet_admission_unavailable` (the observer code in `observation`), so
 a worker's `message_clankie` retries its binding lookup instead of failing with

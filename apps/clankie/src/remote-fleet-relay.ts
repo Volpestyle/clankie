@@ -26,13 +26,13 @@ interface Deferred {
   readonly promise: Promise<string>;
   resolve(value: string): void;
   reject(error: unknown): void;
-  timeoutMs: number;
+  readonly deadlines: Map<symbol, number>;
 }
 interface Run {
   current?: Promise<string>;
   next: Deferred | undefined;
 }
-function deferred(timeoutMs: number): Deferred {
+function deferred(): Deferred {
   let resolve!: (value: string) => void;
   let reject!: (error: unknown) => void;
   const promise = new Promise<string>((ok, fail) => {
@@ -41,7 +41,7 @@ function deferred(timeoutMs: number): Deferred {
   });
   // A queued run nobody awaits after its callers timed out must not surface as unhandled.
   promise.catch(() => undefined);
-  return { promise, resolve, reject, timeoutMs };
+  return { promise, resolve, reject, deadlines: new Map() };
 }
 function emptyStats() {
   return { dispatched: 0, census: 0, joined: 0, timedOut: 0 };
@@ -195,20 +195,24 @@ export class RemoteFleetRelay {
       return entry.current!;
     }
     this.stats.joined++;
-    const next = (run.next ??= deferred(timeoutMs));
-    next.timeoutMs = Math.max(next.timeoutMs, timeoutMs);
+    const next = (run.next ??= deferred());
+    const caller = Symbol();
+    next.deadlines.set(caller, performance.now() + timeoutMs);
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
+        next.deadlines.delete(caller);
         this.stats.timedOut++;
         reject(new RemoteObservationError("remote_observation_timeout"));
       }, timeoutMs);
       next.promise.then(
         (value) => {
           clearTimeout(timer);
+          next.deadlines.delete(caller);
           resolve(value);
         },
         (error: unknown) => {
           clearTimeout(timer);
+          next.deadlines.delete(caller);
           reject(error instanceof Error ? error : new Error(String(error)));
         },
       );
@@ -220,12 +224,18 @@ export class RemoteFleetRelay {
     const advance = () => {
       if (this.runs.get(command) !== entry) return;
       const next = entry.next;
-      if (next === undefined) {
+      entry.next = undefined;
+      // Only work still requested can enter Windows' serial queue. A timeout
+      // removes its caller even while the preceding observation keeps running.
+      // Use monotonic deadlines in case the event loop delayed a caller's timer.
+      const now = performance.now();
+      let remaining = 0;
+      for (const deadline of next?.deadlines.values() ?? []) remaining = Math.max(remaining, deadline - now);
+      if (next === undefined || remaining === 0) {
         this.runs.delete(command);
         return;
       }
-      entry.next = undefined;
-      const started = this.dispatch(command, next.timeoutMs);
+      const started = this.dispatch(command, remaining);
       started.then(next.resolve, next.reject);
       this.track(command, entry, started);
     };
