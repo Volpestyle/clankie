@@ -29,6 +29,11 @@ it("shared Codex startup reaches the remote executable with host holder identiti
       `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(program)} "$@"\n`,
       { mode: 0o700 },
     );
+    // This host stands in for the remote one, so the remote's nohup is stood in too: it ignores
+    // hangups and runs the command. macOS nohup also detaches from the caller's console session,
+    // and on a CI runner with no such session it refuses ("can't detach from console: No such
+    // process") without starting the command (#562). A real remote is reached over ssh.
+    await writeFile(join(bin, "nohup"), `#!/bin/sh\ntrap '' HUP\nexec "$@"\n`, { mode: 0o700 });
     const inherited = Object.fromEntries(
       Object.keys(RESOURCE_HOLDER_RESET_ENV).map((key) => [key, "host-operator"]),
     );
