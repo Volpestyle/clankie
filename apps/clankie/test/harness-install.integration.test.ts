@@ -4,8 +4,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { setTimeout as realDelay } from "node:timers/promises";
 import { join, resolve } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HARNESS_LOGINS_PATH,
   HARNESS_LOGIN_INSTALL_PATH,
@@ -22,11 +23,17 @@ import { HarnessSignIns } from "../src/harness-logins.ts";
 
 const installerScript = resolve(import.meta.dirname, "fixtures", "harness-installer.mjs");
 const cleanups: (() => void)[] = [];
-afterEach(() => cleanups.splice(0).forEach((step) => step()));
+afterEach(() => {
+  vi.useRealTimers();
+  cleanups.splice(0).forEach((step) => step());
+});
 
-async function fixture(
+async function createFixture(
   options: {
     mode?: string;
+    platform?: NodeJS.Platform;
+    installerArgs?: readonly string[];
+    missingCommand?: boolean;
     realInstaller?: boolean;
     timeoutMs?: number;
     serviceEnv?: NodeJS.ProcessEnv;
@@ -43,6 +50,7 @@ async function fixture(
   const installs = new HarnessInstalls({
     env: { ...env, ...options.serviceEnv },
     logins,
+    ...(options.platform === undefined ? {} : { platform: options.platform }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     ...(options.realInstaller
       ? {
@@ -57,8 +65,8 @@ async function fixture(
       : {
           installer: async (harness): Promise<VendorInstaller> => ({
             line: `stub ${harness} installer`,
-            command: process.execPath,
-            args: [installerScript, bin, harness, mode],
+            command: options.missingCommand ? join(bin, "missing-installer") : process.execPath,
+            args: [installerScript, bin, harness, mode, ...(options.installerArgs ?? [])],
           }),
         }),
   });
@@ -149,7 +157,7 @@ async function fixture(
     for (let attempt = 0; attempt < 400; attempt += 1) {
       const { body } = await call(HARNESS_LOGIN_INSTALL_PATH, bearer);
       if (body.ok && body.install.state !== "running") return body.install;
-      await new Promise((done) => setTimeout(done, 25));
+      await realDelay(25);
     }
     throw new Error("The install never finished");
   };
@@ -171,232 +179,330 @@ async function fixture(
   };
 }
 
-it("installs Claude Code for a Take Control device, with progress, one install at a time, and a fresh sign-in list", async () => {
-  const f = await fixture({ mode: "hold" });
-  expect(await f.installed("claude")).toBe(false);
+// The Windows launch policy runs its actual Node supervisor on this Mac; the vendor
+// and sign-in commands remain owned stand-ins. No PowerShell, npm or PC is driven.
+describe.each(["linux", "win32"] as const)("installer launch policy %s", (platform) => {
+  const fixture = (options: Parameters<typeof createFixture>[0] = {}) =>
+    createFixture({ ...options, platform });
 
-  // A Supervise device, a connector app's device and an unknown bearer are refused, and nothing starts.
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.read, { harness: "claude" })).status).toBe(403);
-  expect([401, 403]).toContain(
-    (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector, { harness: "claude" })).status,
-  );
-  expect([401, 403]).toContain((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector)).status);
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, "nobody", { harness: "claude" })).status).toBe(401);
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
+  it("installs Claude Code for a Take Control device, with progress, one install at a time, and a fresh sign-in list", async () => {
+    const f = await fixture({ mode: "hold" });
+    expect(await f.installed("claude")).toBe(false);
 
-  const started = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" });
-  expect(started.status).toBe(202);
-  expect(started.body).toMatchObject({
-    ok: true,
-    install: {
-      harness: "claude",
-      state: "running",
-      installer: "stub claude installer",
-      ownerApproval: "not_claimed",
-    },
-  });
+    // A Supervise device, a connector app's device and an unknown bearer are refused, and nothing starts.
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.read, { harness: "claude" })).status).toBe(403);
+    expect([401, 403]).toContain(
+      (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector, { harness: "claude" })).status,
+    );
+    expect([401, 403]).toContain((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector)).status);
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, "nobody", { harness: "claude" })).status).toBe(401);
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
 
-  // While it runs, another install is refused and shown the running one.
-  let running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
-  for (let attempt = 0; attempt < 200 && running.ok && running.install.progress.length < 2; attempt += 1) {
-    await new Promise((done) => setTimeout(done, 25));
-    running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
-  }
-  // Colour codes and carriage returns never reach the app.
-  expect(running.ok && running.install.progress).toEqual(["Downloading the installer…", "Installing 9.9.9"]);
-  const second = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
-  expect(second.status).toBe(409);
-  expect(second.body).toMatchObject({
-    ok: false,
-    error: "busy",
-    install: { harness: "claude", state: "running" },
-  });
-
-  writeFileSync(join(f.bin, "release"), "");
-  const done = await f.settled();
-  expect(done).toMatchObject({
-    state: "succeeded",
-    exitCode: 0,
-    progress: expect.arrayContaining(["claude installed"]),
-  });
-  // The outcome carries the sign-in list read after the install, and the route agrees.
-  expect(done.logins?.harnesses).toContainEqual({ harness: "claude", installed: true, signedIn: false });
-  expect(await f.installed("claude")).toBe(true);
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).body).toEqual({
-    ok: false,
-    error: "already_installed",
-  });
-});
-
-it("holds an install for the owner's approval while they keep machine setup", async () => {
-  const f = await fixture();
-  await f.settings.update((current) => ({
-    ...current,
-    autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "owner" } },
-  }));
-  const refused = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
-  expect(refused).toEqual({
-    status: 403,
-    body: { ok: false, error: "machine_setup_owner_approval_required" },
-  });
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
-
-  const approved = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, {
-    harness: "codex",
-    ownerApproved: true,
-  });
-  expect(approved.status).toBe(202);
-  expect(await f.settled()).toMatchObject({ harness: "codex", state: "succeeded", ownerApproval: "claimed" });
-  expect(await f.installed("codex")).toBe(true);
-});
-
-it("reports a failing installer, one that leaves no command, and a machine with no installer", async () => {
-  const f = await fixture({ mode: "fail" });
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
-    202,
-  );
-  expect(await f.settled()).toMatchObject({
-    state: "failed",
-    error: "installer_failed",
-    exitCode: 3,
-    progress: expect.arrayContaining(["Checksum mismatch"]),
-  });
-  f.mode("noop");
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
-    202,
-  );
-  expect(await f.settled()).toMatchObject({ state: "failed", error: "not_found_after_install", exitCode: 0 });
-  expect(await f.installed("claude")).toBe(false);
-
-  // The real vendor installer lookup, on a PATH with no curl, Homebrew or npm: nothing runs.
-  // Checked before the route, so a lookup that did find one fails here without running it.
-  const bare = await fixture({ realInstaller: true });
-  for (const harness of ["claude", "codex"] as const)
-    expect(await vendorInstaller(harness, { PATH: bare.bin }, "darwin")).toBeUndefined();
-  // With the tools present, the lookup names the vendors' own lines. These are empty
-  // files that are only found, never run.
-  const tools = join(bare.bin, "tools");
-  mkdirSync(tools);
-  for (const tool of ["curl", "brew", "npm"]) writeFileSync(join(tools, tool), "", { mode: 0o755 });
-  expect((await vendorInstaller("claude", { PATH: tools }, "darwin"))?.line).toBe(
-    "curl -fsSL https://claude.ai/install.sh | bash",
-  );
-  expect((await vendorInstaller("codex", { PATH: tools }, "darwin"))?.line).toBe("brew install --cask codex");
-  expect((await vendorInstaller("codex", { PATH: tools }, "linux"))?.line).toBe(
-    "npm install -g @openai/codex",
-  );
-  for (const harness of ["claude", "codex"])
-    expect(await bare.call(HARNESS_LOGIN_INSTALL_PATH, bare.tokens.control, { harness })).toEqual({
-      status: 409,
-      body: { ok: false, error: "installer_unavailable" },
+    const started = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" });
+    expect(started.status).toBe(202);
+    expect(started.body).toMatchObject({
+      ok: true,
+      install: {
+        harness: "claude",
+        state: "running",
+        installer: "stub claude installer",
+        ownerApproval: "not_claimed",
+      },
     });
 
-  // Under the test runner the service itself refuses the vendor's installer, even where
-  // the lookup finds one. Its only curl here is an empty file, so a regression stays offline.
-  const unguarded = new HarnessInstalls({
-    env: { PATH: tools, HOME: bare.bin },
-    logins: {
-      list: async () => ({
-        harnesses: [
-          { harness: "claude", installed: false, signedIn: false },
-          { harness: "codex", installed: false, signedIn: false },
-        ],
-      }),
-    },
+    // While it runs, another install is refused and shown the running one.
+    let running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+    for (let attempt = 0; attempt < 200 && running.ok && running.install.progress.length < 2; attempt += 1) {
+      await realDelay(25);
+      running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+    }
+    // Colour codes and carriage returns never reach the app.
+    expect(running.ok && running.install.progress).toEqual([
+      "Downloading the installer…",
+      "Installing 9.9.9",
+    ]);
+    const second = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
+    expect(second.status).toBe(409);
+    expect(second.body).toMatchObject({
+      ok: false,
+      error: "busy",
+      install: { harness: "claude", state: "running" },
+    });
+
+    writeFileSync(join(f.bin, "release"), "");
+    const done = await f.settled();
+    expect(done).toMatchObject({
+      state: "succeeded",
+      exitCode: 0,
+      progress: expect.arrayContaining(["claude installed"]),
+    });
+    // The outcome carries the sign-in list read after the install, and the route agrees.
+    expect(done.logins?.harnesses).toContainEqual({ harness: "claude", installed: true, signedIn: false });
+    expect(await f.installed("claude")).toBe(true);
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).body).toEqual({
+      ok: false,
+      error: "already_installed",
+    });
   });
-  await expect(unguarded.start("claude", "claimed")).rejects.toThrow(/stand-in installer/u);
-  expect(unguarded.current()).toEqual({ ok: false, error: "install_not_found" });
-});
 
-it("runs the installer with an allowlisted environment, so no service secret reaches it", async () => {
-  const f = await fixture({
-    mode: "env",
-    serviceEnv: {
-      OPENAI_API_KEY: "sk-fixture-secret-openai",
-      ANTHROPIC_API_KEY: "sk-ant-fixture-secret",
-      GITHUB_TOKEN: "ghp_fixture-secret",
-      CLANKIE_OPERATOR_TOKEN: "fixture-operator-secret",
-      LANG: "en_US.UTF-8",
-      LC_ALL: "C",
-      HTTPS_PROXY: "http://proxy.invalid:3128",
-    },
+  it("holds an install for the owner's approval while they keep machine setup", async () => {
+    const f = await fixture();
+    await f.settings.update((current) => ({
+      ...current,
+      autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "owner" } },
+    }));
+    const refused = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
+    expect(refused).toEqual({
+      status: 403,
+      body: { ok: false, error: "machine_setup_owner_approval_required" },
+    });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
+
+    const approved = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, {
+      harness: "codex",
+      ownerApproved: true,
+    });
+    expect(approved.status).toBe(202);
+    expect(await f.settled()).toMatchObject({
+      harness: "codex",
+      state: "succeeded",
+      ownerApproval: "claimed",
+    });
+    expect(await f.installed("codex")).toBe(true);
   });
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" })).status).toBe(202);
-  const done = await f.settled();
-  const seen = done.progress
-    .find((line) => line.startsWith("env "))!
-    .slice(4)
-    .split(",");
-  expect(seen).toEqual(
-    expect.arrayContaining(["PATH", "HOME", "LANG", "LC_ALL", "HTTPS_PROXY", "NONINTERACTIVE", "NO_COLOR"]),
-  );
-  for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "CLANKIE_OPERATOR_TOKEN"])
-    expect(seen).not.toContain(secret);
-  expect(JSON.stringify(done)).not.toContain("secret");
-});
 
-it("ends an installer that ignores its timeout, so the next install is not held busy", async () => {
-  const f = await fixture({ mode: "stuck", timeoutMs: 300 });
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
-    202,
-  );
-  expect(await f.settled()).toMatchObject({ state: "failed", error: "timed_out" });
-  f.mode("ok");
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
-    202,
-  );
-  expect(await f.settled()).toMatchObject({ state: "succeeded" });
-}, 30_000);
+  it("reports a failing installer, one that leaves no command, and a machine with no installer", async () => {
+    const f = await fixture({ mode: "fail" });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
+      202,
+    );
+    expect(await f.settled()).toMatchObject({
+      state: "failed",
+      error: "installer_failed",
+      exitCode: 3,
+      progress: expect.arrayContaining(["Checksum mismatch"]),
+    });
+    f.mode("noop");
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
+      202,
+    );
+    expect(await f.settled()).toMatchObject({
+      state: "failed",
+      error: "not_found_after_install",
+      exitCode: 0,
+    });
+    expect(await f.installed("claude")).toBe(false);
 
-it("the CLI installs with the operator credential, asking the owner to approve, and shows progress as it runs", async () => {
-  const f = await fixture();
-  await f.settings.update((current) => ({
-    ...current,
-    autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "owner" } },
-  }));
-  const options = {
-    env: { CLANKIE_OPERATOR_TOKEN: f.tokens.operator },
-    fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) =>
-      f.service.app.request(String(input), init)) as typeof fetch,
-    pollMs: 10,
-  };
-  // A headless --approve is a flag, not the owner's consent: refused before any request.
-  await expect(runHarnessLoginCommand(["login", "install", "codex", "--approve"], options)).rejects.toThrow(
-    /headless --approve is refused/u,
-  );
-  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
+    // The real vendor installer lookup, on a PATH with no curl, Homebrew or npm: nothing runs.
+    // Checked before the route, so a lookup that did find one fails here without running it.
+    const bare = await fixture({ realInstaller: true });
+    for (const harness of ["claude", "codex"] as const)
+      expect(await vendorInstaller(harness, { PATH: bare.bin }, "darwin")).toBeUndefined();
+    // With the tools present, the lookup names the vendors' own lines. These are empty
+    // files that are only found, never run.
+    const tools = join(bare.bin, "tools");
+    mkdirSync(tools);
+    for (const tool of ["curl", "brew", "npm"]) writeFileSync(join(tools, tool), "", { mode: 0o755 });
+    expect((await vendorInstaller("claude", { PATH: tools }, "darwin"))?.line).toBe(
+      "curl -fsSL https://claude.ai/install.sh | bash",
+    );
+    expect((await vendorInstaller("codex", { PATH: tools }, "darwin"))?.line).toBe(
+      "brew install --cask codex",
+    );
+    expect((await vendorInstaller("codex", { PATH: tools }, "linux"))?.line).toBe(
+      "npm install -g @openai/codex",
+    );
+    for (const harness of ["claude", "codex"])
+      expect(await bare.call(HARNESS_LOGIN_INSTALL_PATH, bare.tokens.control, { harness })).toEqual({
+        status: 409,
+        body: { ok: false, error: "installer_unavailable" },
+      });
 
-  const told: string[] = [];
-  const asked: string[] = [];
-  const result = (await runHarnessLoginCommand(["login", "install", "codex", "--approve"], {
-    ...options,
-    tell: (text) => told.push(text),
-    confirmApproval: async (detail) => void asked.push(detail),
-  })) as HarnessInstallResult;
-  expect(asked).toEqual(["Install Codex on the service's machine with its vendor's own installer."]);
-  expect(result).toMatchObject({
-    ok: true,
-    install: { harness: "codex", state: "succeeded", ownerApproval: "claimed" },
+    // Under the test runner the service itself refuses the vendor's installer, even where
+    // the lookup finds one. Its only curl here is an empty file, so a regression stays offline.
+    const unguarded = new HarnessInstalls({
+      env: { PATH: tools, HOME: bare.bin },
+      logins: {
+        list: async () => ({
+          harnesses: [
+            { harness: "claude", installed: false, signedIn: false },
+            { harness: "codex", installed: false, signedIn: false },
+          ],
+        }),
+      },
+    });
+    await expect(unguarded.start("claude", "claimed")).rejects.toThrow(/stand-in installer/u);
+    expect(unguarded.current()).toEqual({ ok: false, error: "install_not_found" });
   });
-  expect(told).toEqual(["Downloading the installer…", "Installing 9.9.9", "codex installed"]);
-});
 
-it("keeps the installer's output in the order it wrote it, even when the service is busy", async () => {
-  const f = await fixture();
-  const started = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
-  expect(started.status).toBe(202);
-  // Busy here, the service reads nothing while the installer writes to stdout and
-  // stderr. The first read then finds everything already written.
-  const until = Date.now() + 1_500;
-  while (Date.now() < until);
-  let read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
-  for (let attempt = 0; attempt < 200 && read.ok && read.install.state === "running"; attempt += 1) {
-    await new Promise((done) => setTimeout(done, 25));
-    read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
-  }
-  expect(read.ok && read.install.progress).toEqual([
-    "Downloading the installer…",
-    "Installing 9.9.9",
-    "codex installed",
-  ]);
+  it("runs the installer with an allowlisted environment, so no service secret reaches it", async () => {
+    const f = await fixture({
+      mode: "env",
+      serviceEnv: {
+        OPENAI_API_KEY: "sk-fixture-secret-openai",
+        ANTHROPIC_API_KEY: "sk-ant-fixture-secret",
+        GITHUB_TOKEN: "ghp_fixture-secret",
+        CLANKIE_OPERATOR_TOKEN: "fixture-operator-secret",
+        LANG: "en_US.UTF-8",
+        LC_ALL: "C",
+        HTTPS_PROXY: "http://proxy.invalid:3128",
+      },
+    });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" })).status).toBe(
+      202,
+    );
+    const done = await f.settled();
+    const seen = done.progress
+      .find((line) => line.startsWith("env "))!
+      .slice(4)
+      .split(",");
+    expect(seen).toEqual(
+      expect.arrayContaining(["PATH", "HOME", "LANG", "LC_ALL", "HTTPS_PROXY", "NONINTERACTIVE", "NO_COLOR"]),
+    );
+    for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "CLANKIE_OPERATOR_TOKEN"])
+      expect(seen).not.toContain(secret);
+    expect(JSON.stringify(done)).not.toContain("secret");
+  });
+
+  it("ends an installer that ignores its timeout, so the next install is not held busy", async () => {
+    // Keep native process I/O real. Advance only the deadline clock, after the
+    // stand-in has installed its SIGTERM handler and reported its own PID.
+    const f = await fixture({ mode: "stuck", timeoutMs: 300 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
+      202,
+    );
+    const progress = async (prefix: string) => {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const { body } = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control);
+        if (body.ok) {
+          const line = body.install.progress.find((entry) => entry.startsWith(prefix));
+          if (line) return line;
+        }
+        await realDelay(25);
+      }
+      throw new Error(`No owned installer progress: ${prefix}`);
+    };
+    const pid = Number((await progress("stuck process ")).split(" ").at(-1));
+    expect(pid).toBeGreaterThan(1);
+    let ownedPid: number | undefined = pid;
+    cleanups.push(() => {
+      if (ownedPid === undefined) return;
+      try {
+        process.kill(ownedPid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    });
+    await vi.advanceTimersByTimeAsync(299);
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body).toMatchObject({
+      ok: true,
+      install: { state: "running" },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    await progress("ignoring SIGTERM");
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
+    const timedOut = await f.settled();
+    expect(timedOut).toMatchObject({ state: "failed", error: "timed_out" });
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+      else throw error;
+    }
+    // Always clean up this exact owned stand-in before failing a broken timeout implementation.
+    if (alive) process.kill(pid, "SIGKILL");
+    ownedPid = undefined;
+    expect(alive).toBe(false);
+    f.mode("ok");
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
+      202,
+    );
+    expect(await f.settled()).toMatchObject({ state: "succeeded" });
+  }, 30_000);
+
+  it("the CLI installs with the operator credential, asking the owner to approve, and shows progress as it runs", async () => {
+    const f = await fixture();
+    await f.settings.update((current) => ({
+      ...current,
+      autonomy: { ...current.autonomy, fleet: { ...current.autonomy.fleet, machineSetup: "owner" } },
+    }));
+    const options = {
+      env: { CLANKIE_OPERATOR_TOKEN: f.tokens.operator },
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) =>
+        f.service.app.request(String(input), init)) as typeof fetch,
+      pollMs: 10,
+    };
+    // A headless --approve is a flag, not the owner's consent: refused before any request.
+    await expect(runHarnessLoginCommand(["login", "install", "codex", "--approve"], options)).rejects.toThrow(
+      /headless --approve is refused/u,
+    );
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
+
+    const told: string[] = [];
+    const asked: string[] = [];
+    const result = (await runHarnessLoginCommand(["login", "install", "codex", "--approve"], {
+      ...options,
+      tell: (text) => told.push(text),
+      confirmApproval: async (detail) => void asked.push(detail),
+    })) as HarnessInstallResult;
+    expect(asked).toEqual(["Install Codex on the service's machine with its vendor's own installer."]);
+    expect(result).toMatchObject({
+      ok: true,
+      install: { harness: "codex", state: "succeeded", ownerApproval: "claimed" },
+    });
+    expect(told).toEqual(["Downloading the installer…", "Installing 9.9.9", "codex installed"]);
+  });
+
+  it("keeps the installer's output in write order while busy", async () => {
+    const f = await fixture();
+    const started = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
+    expect(started.status).toBe(202);
+    // Busy here, the service reads nothing while the installer writes to stdout and
+    // stderr. The first read then finds everything already written.
+    const until = Date.now() + 1_500;
+    while (Date.now() < until);
+    let read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+    for (let attempt = 0; attempt < 200 && read.ok && read.install.state === "running"; attempt += 1) {
+      await realDelay(25);
+      read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+    }
+    expect(read.ok && read.install.progress).toEqual([
+      "Downloading the installer…",
+      "Installing 9.9.9",
+      "codex installed",
+    ]);
+  });
+
+  it("preserves literal installer arguments across output capture", async () => {
+    const args = ["space and 'single' and \"double\"", "& | ^ %PATH% ! $HOME ; \\ tail"];
+    const f = await fixture({ mode: "argv", installerArgs: args });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" })).status).toBe(
+      202,
+    );
+    const done = await f.settled();
+    expect(done).toMatchObject({ state: "succeeded", exitCode: 0 });
+    expect(done.progress).toContain(`argv ${JSON.stringify(args)}`);
+  });
+  it("reports an installer launch failure in progress", async () => {
+    const f = await fixture({ missingCommand: true });
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" })).status).toBe(
+      202,
+    );
+    const done = await f.settled();
+    expect(done).toMatchObject({
+      state: "failed",
+      error: "installer_failed",
+      exitCode: platform === "win32" ? 1 : process.platform === "darwin" ? 126 : 127,
+    });
+    expect(done.progress).toHaveLength(platform === "win32" ? 1 : process.platform === "darwin" ? 2 : 1);
+    expect(done.progress[0]).toContain(join(f.bin, "missing-installer"));
+    if (platform === "win32")
+      expect(done.progress[0]).toBe(
+        `Could not start the installer: spawn ${join(f.bin, "missing-installer")} ENOENT`,
+      );
+  });
 });

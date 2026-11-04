@@ -38,6 +38,11 @@ said, receipts, play journals) live under the user's Clankie homes — load
 Shared skill files and workspace instructions refresh before the next service
 turn. Newly added skills need no conversation reset; selected exclusions remain.
 
+For a missing worker harness, `clankie harness login install claude|codex` uses its
+vendor's installer under the resolved machine-setup policy. CLI progress combines
+stdout and stderr in write order on every supported platform; the returned state
+and fresh sign-in list establish the outcome. See [harness sign-in](../../../docs/harness-logins.md).
+
 ## Every turn
 
 - **Configure through the CLI.** Do not write Keychain entries,

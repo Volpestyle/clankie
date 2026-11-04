@@ -8,10 +8,12 @@ const [bin, harness, mode] = process.argv.slice(2);
 process.stdout.write("Downloading the installer…\n");
 process.stderr.write("\u001b[32mInstalling\u001b[0m 9.9.9\r\n");
 // Shows the names it was given, so a test can see what reached the vendor's code.
+if (mode === "argv") process.stdout.write(`argv ${JSON.stringify(process.argv.slice(5))}\n`);
 if (mode === "env") process.stdout.write(`env ${Object.keys(process.env).sort().join(",")}\n`);
 if (mode === "stuck") {
   // Ignores the timeout's SIGTERM, as a wedged installer would; only SIGKILL ends it.
   process.on("SIGTERM", () => process.stdout.write("ignoring SIGTERM\n"));
+  process.stdout.write(`stuck process ${process.pid}\n`);
   for (;;) await new Promise((done) => setTimeout(done, 1_000));
 }
 if (mode === "hold")
