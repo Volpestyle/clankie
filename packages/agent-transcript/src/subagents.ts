@@ -3,7 +3,6 @@ import {
   constants,
   fstatSync,
   globSync,
-  lstatSync,
   openSync,
   readSync,
   realpathSync,
@@ -1113,17 +1112,35 @@ async function codexChildrenAsync(
       .slice(0, MAX_CALLS),
   ].sort();
   const knownDirectories = index.directories;
+  const probes = new Map<string, Promise<Stats | undefined>>();
+  const probe = (path: string): Promise<Stats | undefined> => {
+    const existing = probes.get(path);
+    if (existing !== undefined) return existing;
+    const pending = (async () => {
+      if (!freshDiscovery && path !== root) {
+        const parentPath = dirname(path);
+        const parent = await probe(parentPath);
+        if (parent === undefined) return undefined;
+        // A cached listing proves an entry absent only while the containing
+        // directory's identity and timestamps still match. New date trees or
+        // replaced directories invalidate that proof on this very read.
+        const listing = knownDirectories.get(parentPath);
+        if (
+          listing?.fingerprint === fingerprint(parent) &&
+          !listing.directories.includes(path) &&
+          !listing.files.includes(path)
+        )
+          return undefined;
+      }
+      // allow-swallowed-rejection -- absent or unreadable paths retain discovery's missing stamp
+      return lstat(path).catch(() => undefined);
+    })();
+    probes.set(path, pending);
+    return pending;
+  };
   const stamps = await Promise.all(
     relevant.map(async (path) => {
-      // Adjacent date directories usually do not exist. Probe those without
-      // constructing an async ENOENT per parent; keep known directories async
-      // and lstat's symlink identity for every entry that does exist.
-      let stats: Stats | undefined;
-      try {
-        stats = knownDirectories.has(path) ? await lstat(path) : lstatSync(path, { throwIfNoEntry: false });
-      } catch {
-        // Unreadable or concurrently removed entries retain the missing stamp.
-      }
+      const stats = await probe(path);
       return `${path}:${stats === undefined ? "missing" : fingerprint(stats)}`;
     }),
   );
