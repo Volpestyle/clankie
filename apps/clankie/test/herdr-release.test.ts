@@ -128,3 +128,30 @@ it("starts on the last verified release when herdr.dev doesn't answer in time (#
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+it("retries a download whose body breaks off part way (#628)", async () => {
+  const root = await temporary();
+  let requests = 0;
+  // The first response sends its headers and a few bytes, then the connection drops, as a
+  // stalled CDN transfer does; the second is whole.
+  const server = createServer((request, response) => {
+    requests += 1;
+    if (requests === 1) {
+      response.writeHead(200, { "content-length": String(bytes.length) });
+      response.write(bytes.subarray(0, 4));
+      setTimeout(() => request.socket.destroy(), 50);
+      return;
+    }
+    response.writeHead(200).end(bytes);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const local = vi.fn<typeof fetch>((_url, init) => fetch(`http://127.0.0.1:${port}/herdr`, init));
+  try {
+    await installHerdrRelease(join(root, "herdr"), manifest, local, 3, 10);
+    expect(await readFile(join(root, "herdr"))).toEqual(bytes);
+    expect(requests).toBe(2);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
