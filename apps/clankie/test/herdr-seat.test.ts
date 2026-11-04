@@ -265,10 +265,11 @@ describe("herdr session census", () => {
         agent: "codex",
       },
       // A shell keeps no harness, however Herdr spells it, so a surface can
-      // tell an agent pane from an ordinary one.
+      // tell an agent pane from an ordinary one. With no name, title or folder,
+      // its label is what runs there, never empty (#674).
       {
         terminalId: "term-shell",
-        label: "",
+        label: "shell",
         workspace: { id: "w15", label: "clankie", number: 2 },
         tab: { id: "w15:t3", label: "app", number: 3 },
         pane: { id: "w15:p9" },
