@@ -1664,7 +1664,7 @@ function publicRequestHeaders(request: IncomingMessage): PublicGatewayHttpHeader
   return headers;
 }
 
-/** A sign-in also says who opened it, hashed per host so the Mac never learns an address. */
+/** A sign-in also says who opened it, as a per-host identifier rather than the address itself. */
 function frameHeaders(
   request: IncomingMessage,
   hostId: string,

@@ -11,6 +11,7 @@ import {
 import { z } from "zod";
 import { OPERATOR_SEAT_BINDINGS_PATH, OperatorSeatBindingStatusSchema } from "@clankie/protocol";
 import { MachineAccessRefusalSchema } from "@clankie/protocol";
+import { connectorShowableText } from "@clankie/protocol/connector";
 import { JoinedShellAuditSchema } from "@clankie/protocol/machine-join";
 import { runMachinesCommand } from "./machines.ts";
 import {
@@ -83,7 +84,7 @@ export function formatDoctorSummary(report: InstallDoctorReport): string {
     connectorRevocations && "devices" in connectorRevocations
       ? connectorRevocations.devices.map(
           (device) =>
-            `Connector app ${JSON.stringify(device.name)} (${device.deviceId}) disconnected at ${device.revokedAt}: a rotated refresh token was reused. Sign in again to reconnect.`,
+            `Connector app ${JSON.stringify(connectorShowableText(device.name))} (${device.deviceId}) disconnected at ${device.revokedAt}: a rotated refresh token was reused. Sign in again to reconnect.`,
         )
       : [];
   const detail = [summary, ...connectorNotices, ...seats, ...migrations].join("\n");

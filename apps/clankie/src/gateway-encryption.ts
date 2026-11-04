@@ -17,6 +17,7 @@ import {
   type GatewayPlainRequest,
   type GatewayPlainResponse,
 } from "@clankie/protocol/gateway-encryption";
+import { CONNECTOR_AUTHORIZE_PATH, CONNECTOR_PEER_HEADER } from "@clankie/protocol/connector";
 import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
 import { openGatewayBytes, openGatewayValue, sealGatewayBytes, sealGatewayValue } from "./sealed-values.ts";
 import type { StoredPairingOffer } from "./pairing.ts";
@@ -150,7 +151,12 @@ export class GatewayEncryptionHost {
       envelope.sealed,
       gatewayRequestAad(this.hostId, envelope),
     );
-    const request = GatewayPlainRequestSchema.parse(JSON.parse(plaintext));
+    const opened = GatewayPlainRequestSchema.parse(JSON.parse(plaintext));
+    // Only the doorway names a requester, on a plaintext frame. What a sender sealed isn't that.
+    const request = {
+      ...opened,
+      headers: opened.headers.filter(({ name }) => name.toLowerCase() !== CONNECTOR_PEER_HEADER),
+    };
     const expires = this.challenges.get(envelope.challenge);
     // Synchronous consume before any await: duplicate concurrent requests cannot dispatch twice.
     this.challenges.delete(envelope.challenge);
@@ -230,7 +236,9 @@ export class GatewayEncryptionHost {
       if (
         target === undefined ||
         request.path.startsWith("/v1/gateway/") ||
-        request.path === "/v1/hooks/linear"
+        request.path === "/v1/hooks/linear" ||
+        // A sign-in opens in plaintext through the doorway (ADR 0301), counted by its requester.
+        request.path.split("?", 1)[0] === CONNECTOR_AUTHORIZE_PATH
       )
         throw new Error("Invalid encrypted route");
       const headers = new Headers(request.headers.map(({ name, value }): [string, string] => [name, value]));

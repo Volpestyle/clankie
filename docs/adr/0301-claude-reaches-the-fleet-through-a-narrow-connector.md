@@ -118,8 +118,10 @@ own `/mcp` on a trusted network.
   wherever a name from an earlier client id is shown. Through the doorway, one
   requester holds at most four waiting sign-ins of the 32 the Mac keeps: its next
   sign-in replaces its oldest waiting one. The gateway names the requester with a
-  hash of its address (an IPv6 address's /64) and the host id, so the Mac never
-  sees the address. A sign-in that names no requester counts only toward the 32.
+  per-host hash of its address (an IPv6 address's /64), an identifier and not
+  anonymity. A sign-in opens only in plaintext: an encrypted request can't open one
+  or name a requester. The service doesn't authenticate that identifier, so local
+  access can leave it out or vary it, and answers only to the 32.
 - **Narrow by the scope, not the grants.** The service answers a connector
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it

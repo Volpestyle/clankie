@@ -53,10 +53,12 @@ export const CONNECTOR_SIGN_IN_DENY_PATH = "/v1/connector/sign-ins/deny";
 export const CONNECTOR_PUBLIC_BASE_HEADER = "x-clankie-public-base";
 
 /**
- * Who opened a sign-in, as an opaque per-host hash the doorway computes from the
- * address it saw. It is never read from the caller's own request at the doorway.
- * Only the doorway's sign-in route carries it; a sign-in without one isn't counted
- * per requester, and a direct caller who sets it only moves between those counts.
+ * Who opened a sign-in, as a per-host hash the gateway computes from the address it
+ * saw: an identifier for counting, not anonymity, since an address is guessable input.
+ * The doorway never takes it from a caller, and the Mac drops it from every decrypted
+ * request. The service doesn't authenticate it, so a direct caller can leave it out or
+ * vary it: the per-requester share holds for the doorway, and local access answers only
+ * to the shared cap.
  */
 export const CONNECTOR_PEER_HEADER = "x-clankie-connector-peer";
 export const ConnectorPeerSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);

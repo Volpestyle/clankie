@@ -613,7 +613,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
           void ctx.dependencies.captain
             .notifyRuntimeHealthAlert(
               `Disconnected connector app ${JSON.stringify(registered.name)} on device ` +
-                `${JSON.stringify(record.name)} (${record.deviceId}): a previously rotated refresh token ` +
+                `${JSON.stringify(connectorShowableText(record.name))} (${record.deviceId}): a previously rotated refresh token ` +
                 "was used again. All tokens for this device have ended. Sign in again to reconnect.",
             )
             .catch((error: unknown) =>
