@@ -69,6 +69,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
   const address = provider.address();
   if (!address || typeof address === "string") throw new Error("claim fixture listen failed");
   let installs = 0;
+  let installation: Promise<string> | undefined;
   let closeTunnel: (() => Promise<unknown>) | undefined;
   try {
     await mkdir(join(dataDir, "src"));
@@ -91,23 +92,26 @@ test("claim preparation survives returned requests and reuses one real delayed C
           await writeFile(join(dataDir, "broker-secret"), value, { mode: 0o600 });
         },
       },
-      install: async () => {
-        installs++;
-        await run("cargo", ["build", "--release", "--offline"], {
-          cwd: dataDir,
-          env: {
-            ...process.env,
-            // Vitest isolates HOME; use the installed toolchain with a fixture-owned Cargo cache.
-            RUSTUP_HOME: join((await import("node:os")).userInfo().homedir, ".rustup"),
-            CARGO_HOME: join(dataDir, "cargo-home"),
-          },
-        });
-        const binary = join(dataDir, "target/release/claim-preparation-fixture");
-        const hash = createHash("sha256")
-          .update(await readFile(binary))
-          .digest("hex");
-        await writeFile(join(dataDir, "binary.sha256"), hash);
-        return binary;
+      install: () => {
+        installation = (async () => {
+          installs++;
+          await run("cargo", ["build", "--release", "--offline"], {
+            cwd: dataDir,
+            env: {
+              ...process.env,
+              // Vitest isolates HOME; use the installed toolchain with a fixture-owned Cargo cache.
+              RUSTUP_HOME: join((await import("node:os")).userInfo().homedir, ".rustup"),
+              CARGO_HOME: join(dataDir, "cargo-home"),
+            },
+          });
+          const binary = join(dataDir, "target/release/claim-preparation-fixture");
+          const hash = createHash("sha256")
+            .update(await readFile(binary))
+            .digest("hex");
+          await writeFile(join(dataDir, "binary.sha256"), hash);
+          return binary;
+        })();
+        return installation;
       },
       api: async (path, input) => {
         const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
@@ -127,7 +131,11 @@ test("claim preparation survives returned requests and reuses one real delayed C
     expect(await tunnel.completeClaim()).toEqual({ phase: "preparing", claimed: false });
     expect(tunnel.claimStatus().phase).toBe("preparing");
     expect(installs).toBe(1);
-    // The caller has completed. Cargo continues, then claim preparation publishes its URL.
+    // The caller has completed while the same real Cargo build continues. Its
+    // completion is the fixture boundary; the publication deadline starts there,
+    // so compiler startup or host contention cannot consume the claim's budget.
+    expect(installation).toBeDefined();
+    await installation;
     await expect.poll(() => tunnel.claimStatus().phase, { timeout: 10_000 }).toBe("pending");
     const ready = tunnel.claimStatus();
     expect(ready.claimUrl).toMatch(/^https:\/\/playit.gg\/claim\/[a-f0-9]{10}$/);
