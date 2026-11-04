@@ -437,6 +437,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const fleetRevisions = new Map<string, number>();
   // Every account read is a usage sample for the burn rate a lead reads (ADR 0324).
   const usageHistory = new UsageHistory(join(options.stateDir, "usage-history.json"));
+  const piEnabled = async () =>
+    options.piNative !== undefined &&
+    ((await settings()).piNativeEnabled ?? process.env.CLANKIE_PI_NATIVE_ENABLED?.trim() === "1");
   const readWorkerAccountsUnrecorded = createWorkerAccountsReader({
     identityPath: harnessAccountIdentityPath(options.stateDir),
     notifyIdentityChange: (text) =>
@@ -444,7 +447,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     settings: () => settings(),
     localFleet: (id) => namedLocal.some((entry) => entry.id === id),
     piStatus: createPiWorkerStatusReader({
-      enabled: () => options.piNative !== undefined,
+      enabled: piEnabled,
       cwd: workingDirectory,
       seatModel: deps.piSeatModel,
     }),
@@ -1109,6 +1112,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               repoRoot: options.repoRoot,
               stateDir: options.stateDir,
               native: options.piNative,
+              enabled: piEnabled,
             }),
           ]),
     ],

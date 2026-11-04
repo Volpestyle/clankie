@@ -84,6 +84,7 @@ import {
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
   WORKER_ACCOUNTS_PATH,
+  PI_SETTINGS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
 } from "./worker-accounts.ts";
 import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
@@ -241,6 +242,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "GET", path: OPERATOR_PERSONA_PATH, target: "relay" },
   { method: "POST", path: OPERATOR_PERSONA_PATH, target: "relay" },
   { method: "GET", path: WORKER_ACCOUNTS_PATH, target: "relay" },
+  { method: "GET", path: PI_SETTINGS_PATH, target: "relay" },
+  { method: "POST", path: PI_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH, target: "relay" },
   { method: "GET", path: USAGE_PATH, target: "relay" },

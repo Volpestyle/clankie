@@ -87,8 +87,11 @@ import {
   PersonaAttentionUpdateSchema,
 } from "../../../packages/protocol/src/discord-attention.ts";
 import {
+  PiSettingsSnapshotSchema,
+  UpdatePiSettingsSchema,
   MachineWorkerAccountsSchema,
   WORKER_ACCOUNTS_PATH,
+  PI_SETTINGS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
   WorkerAccountHoldRequestSchema,
   WorkerAccountHoldsSchema,
@@ -230,6 +233,8 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "GET", path: OPERATOR_PERSONA_PATH },
   { method: "POST", path: OPERATOR_PERSONA_PATH },
   { method: "GET", path: WORKER_ACCOUNTS_PATH },
+  { method: "GET", path: PI_SETTINGS_PATH },
+  { method: "POST", path: PI_SETTINGS_PATH },
   { method: "GET", path: WORKER_ACCOUNT_HOLDS_PATH },
   { method: "POST", path: WORKER_ACCOUNT_HOLDS_PATH },
   { method: "GET", path: USAGE_PATH },
@@ -345,6 +350,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     snapshot: PersonaAttentionSnapshotSchema,
   },
   [WORKER_ACCOUNTS_PATH]: { methods: ["GET"], snapshot: MachineWorkerAccountsSchema },
+  [PI_SETTINGS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdatePiSettingsSchema,
+    snapshot: PiSettingsSnapshotSchema,
+  },
   [WORKER_ACCOUNT_HOLDS_PATH]: {
     methods: ["GET", "POST"],
     update: WorkerAccountHoldRequestSchema,

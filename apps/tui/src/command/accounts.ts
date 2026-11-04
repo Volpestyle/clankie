@@ -1,5 +1,7 @@
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
 import {
+  PI_SETTINGS_PATH,
+  PiSettingsSnapshotSchema,
   WORKER_ACCOUNT_BUDGETS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
   WorkerAccountBudgetsSchema,
@@ -146,6 +148,22 @@ export async function runAccountsCommand(
     readonly request?: (path: string, body?: unknown) => Promise<Record<string, unknown>>;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "pi") {
+    if (args.length > 2 || !["show", "enable", "disable"].includes(args[1] ?? "show"))
+      throw new Error("Usage: clankie accounts pi [show|enable|disable]");
+    const api = await ownerSettingsApi(options);
+    const current = await api.get(PI_SETTINGS_PATH, PiSettingsSnapshotSchema);
+    return !args[1] || args[1] === "show"
+      ? current
+      : api.write(
+          PI_SETTINGS_PATH,
+          {
+            expectedRevision: current.revision,
+            enabled: args[1] === "enable",
+          },
+          PiSettingsSnapshotSchema,
+        );
+  }
   if (args[0] === "claude") {
     if (options.request) throw new Error("Claude homes are managed on the local machine");
     return runClaudeAccountsCommand(args.slice(1), options);

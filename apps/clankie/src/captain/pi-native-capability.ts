@@ -24,6 +24,24 @@ const probes = new Map<string, { readonly at: number; readonly result: Promise<v
 
 /** A refusal the owner can act on: it names the installed release and why, never a credential. */
 export class PiNativeRefusal extends Error {}
+export class PiNotInstalled extends PiNativeRefusal {}
+export class PiTooOld extends PiNativeRefusal {}
+
+/** Read installation metadata without running Pi or accessing a model. */
+export async function inspectPiInstallation(env: Readonly<Record<string, string | undefined>>) {
+  const cli = await executableOnPath("pi", env).catch(() => {
+    throw new PiNotInstalled("Install Pi to use your API key or local model for coding workers.");
+  });
+  const packageRoot = dirname(dirname(dirname(cli)));
+  if (cli !== join(packageRoot, "dist/bundle/cli.js"))
+    throw new PiNativeRefusal("Reinstall Pi so Clankie can use it for coding workers.");
+  const { version } = z
+    .object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.string().max(100) })
+    .parse(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")));
+  if (!atLeastFloor(version))
+    throw new PiTooOld(`Update Pi: you have ${version}; Clankie needs ${VALIDATED_FLOOR} or newer.`);
+  return { cli, packageRoot, version };
+}
 export interface PiNativeCapability {
   readonly executable: string;
   readonly cli: string;
@@ -178,16 +196,7 @@ export async function supportedPiOnPath(env: Readonly<Record<string, string | un
   version: string;
   files: Readonly<Record<string, string>>;
 }> {
-  const cli = await executableOnPath("pi", env);
-  const packageRoot = dirname(dirname(dirname(cli)));
-  if (cli !== join(packageRoot, "dist/bundle/cli.js")) throw new Error("Unsupported Pi executable layout");
-  const { version } = z
-    .object({ name: z.literal("@earendil-works/pi-coding-agent"), version: z.string().max(100) })
-    .parse(JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8")));
-  if (!atLeastFloor(version))
-    throw new PiNativeRefusal(
-      `Native Pi ${version} is older than ${VALIDATED_FLOOR}, the oldest release proven with a live hire; update Pi`,
-    );
+  const { cli, packageRoot, version } = await inspectPiInstallation(env);
   const executable = await executableOnPath("node", env);
   const nodeFile = await open(executable, "r");
   try {

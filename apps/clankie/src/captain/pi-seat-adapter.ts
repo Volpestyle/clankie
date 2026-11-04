@@ -60,6 +60,7 @@ export function createPiSeatAdapter(deps: {
   readonly repoRoot: string;
   readonly stateDir: string;
   readonly native: ReturnType<typeof createPreparedNativeHost>;
+  readonly enabled?: () => Promise<boolean>;
   readonly discover?: typeof discoverPiNativeCapability;
   readonly controller?: typeof createPiWorkerController;
   readonly timeoutMs?: number;
@@ -82,6 +83,8 @@ export function createPiSeatAdapter(deps: {
     },
     async prepare(launch: SeatLaunch, signal): Promise<PreparedSeatLaunch> {
       signal?.throwIfAborted();
+      if (deps.enabled && !(await deps.enabled()))
+        throw new Error("Turn on Pi before hiring a coding worker.");
       if (launch.harness !== "pi") throw new Error("Native Pi launch required");
       if (launch.model !== undefined && !/^[^/\s]+\/[^\s]+$/u.test(launch.model))
         throw new Error("Pi model must be an exact native provider/model");
@@ -185,6 +188,7 @@ export function createPiSeatAdapter(deps: {
           try {
             signal?.throwIfAborted();
             startSignal?.throwIfAborted();
+            if (deps.enabled && !(await deps.enabled())) throw new Error("Pi is turned off for new hires.");
             await capability.verify();
             await view.guard?.();
             root = await deps.native.capture(view.paneId, capability.executable, cwd);

@@ -849,6 +849,8 @@ export const ClankieSettingsSchema = z
       )
       .max(30)
       .default([]),
+    /** Owner opt-in for new native Pi hires; absent retains the legacy environment default. */
+    piNativeEnabled: z.boolean().optional(),
     agentHosts: z
       .object({ connections: z.array(AgentHostConnectionSchema).max(60).default([]) })
       .strict()
