@@ -365,7 +365,25 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
     expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
       202,
     );
-    expect(await f.settled()).toMatchObject({ state: "failed", error: "timed_out" });
+    const timedOut = await f.settled();
+    expect(timedOut).toMatchObject({ state: "failed", error: "timed_out" });
+    const pid = Number(
+      timedOut.progress
+        .find((line) => line.startsWith("stuck process "))
+        ?.split(" ")
+        .at(-1),
+    );
+    expect(pid).toBeGreaterThan(1);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false;
+      else throw error;
+    }
+    // Always clean up this exact owned stand-in before failing a broken timeout implementation.
+    if (alive) process.kill(pid, "SIGKILL");
+    expect(alive).toBe(false);
     f.mode("ok");
     expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
       202,
@@ -445,9 +463,9 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
     expect(done).toMatchObject({
       state: "failed",
       error: "installer_failed",
-      exitCode: platform === "win32" ? 1 : 127,
+      exitCode: platform === "win32" ? 1 : process.platform === "darwin" ? 126 : 127,
     });
-    expect(done.progress).toHaveLength(1);
+    expect(done.progress).toHaveLength(platform === "win32" ? 1 : process.platform === "darwin" ? 2 : 1);
     expect(done.progress[0]).toContain(join(f.bin, "missing-installer"));
     if (platform === "win32")
       expect(done.progress[0]).toBe(

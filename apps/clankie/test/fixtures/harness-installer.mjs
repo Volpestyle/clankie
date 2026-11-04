@@ -11,6 +11,7 @@ process.stderr.write("\u001b[32mInstalling\u001b[0m 9.9.9\r\n");
 if (mode === "argv") process.stdout.write(`argv ${JSON.stringify(process.argv.slice(5))}\n`);
 if (mode === "env") process.stdout.write(`env ${Object.keys(process.env).sort().join(",")}\n`);
 if (mode === "stuck") {
+  process.stdout.write(`stuck process ${process.pid}\n`);
   // Ignores the timeout's SIGTERM, as a wedged installer would; only SIGKILL ends it.
   process.on("SIGTERM", () => process.stdout.write("ignoring SIGTERM\n"));
   for (;;) await new Promise((done) => setTimeout(done, 1_000));
