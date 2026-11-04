@@ -350,6 +350,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/operator/computer",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Read a registered machine's owner desktop choice, per-lead overrides, revision and named actor permission report; unavailable reports remain unknown. Optional machine and lead queries select the policy.",
+      },
+    ],
+    [
+      "POST /v1/operator/computer",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Save an owner's desktop choice with revision fencing and existing machine access limits. Never raises a ceiling, grants OS permissions or provisions a VM. Actor report publication is local operator-only and not forwarded here.",
+      },
+    ],
+    [
       "GET /v1/operator/host-settings",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

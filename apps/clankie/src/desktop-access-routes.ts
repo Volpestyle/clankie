@@ -1,3 +1,4 @@
+import { readJson } from "./app/http-auth.ts";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
@@ -54,7 +55,7 @@ export function createDesktopAccessRoutes(options: {
     return context.json(state);
   });
   app.post(DESKTOP_ACCESS_PATH, bodyLimit({ maxSize: 2048 }), async (context) => {
-    const input = UpdateDesktopModeSchema.safeParse(await context.req.json().catch(() => null));
+    const input = UpdateDesktopModeSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     const id = input.data.machineId;
     if (!(await machine(id))) return context.json({ error: "unknown_machine" }, 404);
@@ -79,7 +80,7 @@ export function createDesktopAccessRoutes(options: {
   });
   app.post(`${DESKTOP_ACCESS_PATH}/permissions`, bodyLimit({ maxSize: 2048 }), async (context) => {
     const id = "local";
-    const input = PublishDesktopPermissionsSchema.safeParse(await context.req.json().catch(() => null));
+    const input = PublishDesktopPermissionsSchema.safeParse(await readJson(context.req.raw));
     if (!input.success) return context.json({ error: "malformed" }, 400);
 
     const allowed = await options.publish(context.req.raw);
