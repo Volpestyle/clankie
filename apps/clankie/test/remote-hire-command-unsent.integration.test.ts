@@ -87,12 +87,40 @@ async function fixture(pcCreateMs: number) {
     remoteWorkspace: async () => true,
     remoteHireReceipts: receipts,
     nativeLaunchPolicy: { admit: async () => {} },
+    // A briefed hire needs the PC's harness adapter. This PC never answers its workspace create,
+    // so nothing past the create, the adapter included, may run.
+    // A briefed work hire also reads the PC's plan usage first.
+    workerAccountsReport: async () => ({
+      machine: "pc",
+      shell: "posix",
+      observedAt: new Date().toISOString(),
+      accounts: [
+        {
+          harness: "claude",
+          label: "fixture",
+          home,
+          signedIn: true,
+          usable: true,
+          plan: "pro",
+          headroom: 0.8,
+          usage: {
+            source: "claude-usage",
+            observedAt: new Date().toISOString(),
+            windows: [{ id: "week", label: "Week", usedPercent: 20 }],
+          },
+        },
+      ],
+    }),
+    remoteSeatAdapters: () => [
+      { harness: "claude", start: async () => denied("adapter start"), attach: async () => undefined },
+    ],
     runner: {
       get: async () => denied("get"),
       resolveTerminal: async () => denied("resolveTerminal"),
       wait: async () => denied("wait"),
       createTab: (options) => layout(options),
       startAgent: async () => denied("startAgent"),
+      runInPane: async () => denied("runInPane"),
     },
   });
   const authority = {
@@ -100,12 +128,29 @@ async function fixture(pcCreateMs: number) {
     current: () => true,
     authorize: async () => true,
   };
-  const hire = async (directory: string) => {
+  const hire = async (
+    directory: string,
+    freshIntent?: { readonly id: string; readonly afterReceiptId: string },
+    brief?: string,
+  ) => {
     await mkdir(directory, { recursive: true });
     return await store.spawnSeat(
-      { schemaVersion: 1, title: "PC worker", harness: "claude", fleet: "pc", workingDirectory: directory },
+      {
+        schemaVersion: 1,
+        title: "PC worker",
+        harness: "claude",
+        fleet: "pc",
+        workingDirectory: directory,
+        ...(freshIntent === undefined
+          ? {}
+          : {
+              freshIntent,
+              effort: "low" as const,
+              effortReason: "A fixture hire only needs to reach the PC's workspace create.",
+            }),
+      },
       undefined,
-      undefined,
+      brief,
       undefined,
       authority,
     );
@@ -167,12 +212,24 @@ nativeIt(
       const detail = again.outcome === "failed" ? (again.detail ?? "") : "";
       expect(detail).toContain(`Original hire ${original.messageId} is settled`);
       const next = /freshIntent (\{.*?\})/u.exec(detail)?.[1];
-      expect(JSON.parse(next!)).toMatchObject({ afterReceiptId: original.messageId, id: expect.any(String) });
+      const intent = JSON.parse(next!) as { id: string; afterReceiptId: string };
+      expect(intent).toMatchObject({ afterReceiptId: original.messageId, id: expect.any(String) });
       expect(
         new DeliveryFence(join(f.home, "watches.json.hire-receipts.json")).settlement(original.messageId),
       ).toMatchObject({ journal: "launch-committed-command-unsent" });
       // Only the first hire's create ran; the settling hire launched nothing.
       expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+
+      // The place is free: a hire with the named fresh intent goes ahead there, on its own new
+      // receipt, and reaches the PC's workspace create again (this PC still never answers it).
+      const fresh = await f.hire(directory, intent, "Pick up the work at this place.");
+      expect(fresh).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(fresh.outcome === "failed" ? fresh.detail : "").toContain("workspace create timed out");
+      const [, latest] = f.receipt();
+      expect(latest.messageId).not.toBe(original.messageId);
+      expect(fresh.outcome === "failed" ? fresh.receiptId : undefined).toBe(latest.messageId);
+      expect(f.creates).toHaveLength(2);
       expect(f.effects).toEqual([]);
     } finally {
       f.store.close();
