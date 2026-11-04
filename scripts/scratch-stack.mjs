@@ -16,6 +16,14 @@ if (process.argv[2] === "run") {
   const child = spawn(
     process.execPath,
     [
+      // A caller tracing a stuck boot asks for a diagnostic report on SIGUSR2 (#712).
+      ...(service !== "cli" && process.env.CLANKIE_SCRATCH_REPORTS
+        ? [
+            "--report-on-signal",
+            "--report-signal=SIGUSR2",
+            `--report-directory=${process.env.CLANKIE_SCRATCH_REPORTS}`,
+          ]
+        : []),
       ...(service === "cli" ? [] : ["--import", join(root, "scripts/dependency-types.mjs")]),
       join(root, service === "cli" ? "apps/tui/bin/clankie.ts" : `apps/${service}/src/index.ts`),
       ...(service === "cli" ? process.argv.slice(5) : []),

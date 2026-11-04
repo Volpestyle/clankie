@@ -155,3 +155,50 @@ it("retries a download whose body breaks off part way (#628)", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+it("lets a slow download that keeps delivering finish, and retries one that stalls (#712)", async () => {
+  const root = await temporary();
+  let requests = 0;
+  // The first transfer drips a byte every 60 ms, well past the 300 ms stall
+  // limit in all, but never silent that long. The second sends its headers and
+  // goes quiet, as a stalled CDN edge does; the third is whole.
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(200, { "content-length": String(bytes.length) });
+    if (requests === 2) return void response.write(bytes.subarray(0, 1));
+    if (requests === 3) return void response.end(bytes);
+    let sent = 0;
+    const drip = setInterval(() => {
+      response.write(bytes.subarray(sent, sent + 1));
+      sent += 1;
+      if (sent >= bytes.length) {
+        clearInterval(drip);
+        response.end();
+      }
+    }, 60);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const local = vi.fn<typeof fetch>((_url, init) => fetch(`http://127.0.0.1:${port}/herdr`, init));
+  try {
+    const timing = { stallMs: 300, totalMs: 30_000 };
+    const started = Date.now();
+    await installHerdrRelease(join(root, "slow"), manifest, local, 1, 10, undefined, timing);
+    expect(await readFile(join(root, "slow"))).toEqual(bytes);
+    expect(Date.now() - started).toBeGreaterThan(timing.stallMs);
+    expect(requests).toBe(1);
+
+    await installHerdrRelease(join(root, "stalled"), manifest, local, 2, 10, undefined, timing);
+    expect(await readFile(join(root, "stalled"))).toEqual(bytes);
+    expect(requests).toBe(3);
+
+    // Spent attempts name the stall, not a bare abort.
+    requests = 1;
+    await expect(
+      installHerdrRelease(join(root, "gone"), manifest, local, 1, 10, undefined, timing),
+    ).rejects.toThrow("failed: no data for 300 ms");
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

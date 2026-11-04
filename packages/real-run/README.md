@@ -29,6 +29,7 @@ The output directory (default `.local/real-run/TIME`) holds:
 - `run.jsonl`: the run's Effect log, one JSON line per event, CLI calls included,
   with the flow and span timings;
 - `service.log` and `relay.log`: the processes' own logs, copied once they stopped.
+- `diagnostics/`, only when the service never answered `/health`: `boot-N-trace.json` (alive or exit status, its process group, active sockets and child processes from a Node diagnostic report, the log's last lines), the full `report.*.json`, and on macOS a native `sample-PID.txt`. No report within 5 s means its event loop was blocked (#712).
 
 A passing run removes the scratch home unless `--keep` is given; a failing run
 keeps it and prints where, except under CI, which keeps only the logs. Ctrl-C

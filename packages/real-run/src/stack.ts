@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { createWriteStream, existsSync, readFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { Data, Effect } from "effect";
@@ -93,6 +93,8 @@ export const makeStack = (directory: string) =>
     const relayUrl = env.CLANKIE_RELAY_URL!;
     const serviceLogPath = join(directory, "service.log");
     const relayLogPath = join(directory, "relay.log");
+    /** Node diagnostic reports and native samples of a stuck boot (#712). */
+    const diagnostics = join(directory, "diagnostics");
     let service: ChildProcess | undefined;
     let relay: ChildProcess | undefined;
     let boots = 0;
@@ -104,6 +106,7 @@ export const makeStack = (directory: string) =>
         cwd: repoRoot,
         stdio: ["ignore", "pipe", "pipe"],
         detached: true,
+        env: { ...process.env, CLANKIE_SCRATCH_REPORTS: diagnostics },
       });
       const log = createWriteStream(logPath, { flags: "a" });
       child.stdout?.pipe(log, { end: false });
@@ -171,10 +174,114 @@ export const makeStack = (directory: string) =>
         response.ok ? ((await response.json()) as Record<string, unknown>) : undefined,
       );
 
+    /**
+     * What a service that never answered /health was doing: whether it is alive,
+     * its process group, a Node report (JS stack and pending handles; none means
+     * its event loop is blocked), a native sample, and its log's last lines.
+     */
+    const bootTrace = async (child: ChildProcess) => {
+      mkdirSync(diagnostics, { recursive: true });
+      const alive = child.exitCode === null && child.signalCode === null;
+      const members = (await run("ps", ["-axo", "pid=,ppid=,pgid=,etime=,stat=,%cpu=,command="]))
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.split(/\s+/u)[2] === String(child.pid));
+      const servicePids = members
+        .filter((line) => line.includes("apps/clankie/src/index.ts"))
+        .map((line) => Number(line.split(/\s+/u)[0]));
+      // Long commands keep their head and their tail (the script being run).
+      const group = members.map((line) =>
+        line.length > 300 ? `${line.slice(0, 150)} … ${line.slice(-140)}` : line,
+      );
+      const before = new Set(existsSync(diagnostics) ? readdirSync(diagnostics) : []);
+      for (const pid of servicePids) {
+        try {
+          process.kill(pid, "SIGUSR2");
+        } catch {
+          // Exited meanwhile; the group listing already says so.
+        }
+      }
+      let report: Record<string, any> | undefined;
+      for (let waited = 0; waited < 5_000 && servicePids.length > 0 && !report; waited += 250) {
+        await new Promise((done) => setTimeout(done, 250));
+        const created = readdirSync(diagnostics).find((name) => name.endsWith(".json") && !before.has(name));
+        if (created) {
+          try {
+            report = JSON.parse(readFileSync(join(diagnostics, created), "utf8")) as Record<string, any>;
+          } catch {
+            // Still being written; read it on the next pass.
+          }
+        }
+      }
+      // Sockets, child processes and files say what it waits on; bare handle
+      // types (signal, async, check…) only count.
+      const handles: string[] = [];
+      const counts = new Map<string, number>();
+      for (const handle of (report?.libuv as Record<string, any>[] | undefined) ?? []) {
+        if (!handle.is_active) continue;
+        const detail = [
+          handle.pid === undefined ? "" : `pid ${handle.pid}`,
+          handle.remoteEndpoint ? `to ${handle.remoteEndpoint.host}:${handle.remoteEndpoint.port}` : "",
+          handle.localEndpoint && !handle.remoteEndpoint ? `on ${handle.localEndpoint.port ?? ""}` : "",
+          handle.filename ?? "",
+        ].filter(Boolean);
+        if (detail.length) handles.push(`${handle.type} ${detail.join(" ")}`);
+        else counts.set(handle.type, (counts.get(handle.type) ?? 0) + 1);
+      }
+      handles.push(...[...counts].map(([type, count]) => `${count}× ${type}`));
+      if (process.platform === "darwin")
+        for (const pid of servicePids)
+          writeFileSync(
+            join(diagnostics, `sample-${pid}.txt`),
+            await run("/usr/bin/sample", [String(pid), "2"]),
+          );
+      const log = existsSync(serviceLogPath)
+        ? readFileSync(serviceLogPath, "utf8").trimEnd().split("\n")
+        : [];
+      const trace = {
+        alive,
+        ...(alive ? {} : { exitCode: child.exitCode, signal: child.signalCode }),
+        processGroup: group,
+        report: report
+          ? {
+              stack: String(
+                report.javascriptStack?.stack?.slice?.(0, 12)?.join?.("\n") ??
+                  report.javascriptStack?.message ??
+                  "",
+              ),
+              activeHandles: handles.slice(0, 40),
+            }
+          : servicePids.length
+            ? "no report within 5 s: the event loop is blocked (see the native sample)"
+            : "no service process to report on",
+        logTail: log.slice(-30).map((line) => line.slice(0, 400)),
+      };
+      writeFileSync(join(diagnostics, `boot-${boots}-trace.json`), `${JSON.stringify(trace, null, 2)}\n`);
+      return trace;
+    };
+
     const startService = Effect.gen(function* () {
       boots++;
       service = launch("clankie", serviceLogPath);
-      const health = yield* until("the service answers /health", healthy(serviceUrl), { timeoutMs: 90_000 });
+      const child = service;
+      const health = yield* until("the service answers /health", healthy(serviceUrl), {
+        timeoutMs: 90_000,
+      }).pipe(
+        Effect.catchTag("CheckFailed", (failure) =>
+          Effect.promise(() => bootTrace(child)).pipe(
+            Effect.flatMap((trace) =>
+              Effect.logError("service boot trace").pipe(
+                Effect.annotateLogs({ boot: boots, trace: JSON.stringify(trace) }),
+                Effect.andThen(
+                  Effect.fail(
+                    new CheckFailed({ check: failure.check, detail: { last: failure.detail, trace } }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
       yield* Effect.logInfo("service healthy").pipe(Effect.annotateLogs({ boot: boots, pid: service.pid }));
       return health;
     }).pipe(Effect.withSpan("service.start"));

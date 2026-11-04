@@ -27,21 +27,69 @@ function releaseAsset(manifest: unknown): { version: string; url: string; sha256
 /** A failure another attempt may not repeat: a timeout, a dropped connection, 429 or 5xx. */
 class TransientDownloadError extends Error {}
 
+/**
+ * How long one attempt may go without receiving a byte, and how long it may
+ * take in all. A slow link that keeps delivering finishes; a stalled one is
+ * abandoned and retried. One 60-second cap on the whole transfer failed every
+ * attempt of a 22 MB asset below ~370 KB/s (#712).
+ */
+export interface DownloadTiming {
+  stallMs?: number;
+  totalMs?: number;
+}
+const STALL_MS = 60_000;
+const TOTAL_MS = 15 * 60_000;
+
 async function downloadOnce(
   url: string,
   limit: number,
   fetchImpl: typeof fetch,
   deadline?: AbortSignal,
+  timing: DownloadTiming = {},
+): Promise<Buffer> {
+  const stallMs = timing.stallMs ?? STALL_MS;
+  const stalled = new AbortController();
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    clearTimeout(stallTimer);
+    stallTimer = setTimeout(
+      () =>
+        stalled.abort(
+          new DOMException(
+            `no data for ${stallMs >= 1_000 ? `${Math.round(stallMs / 1_000)} s` : `${stallMs} ms`}`,
+            "TimeoutError",
+          ),
+        ),
+      stallMs,
+    );
+  };
+  const signal = AbortSignal.any([
+    stalled.signal,
+    AbortSignal.timeout(timing.totalMs ?? TOTAL_MS),
+    ...(deadline === undefined ? [] : [deadline]),
+  ]);
+  arm();
+  try {
+    return await receive(url, limit, fetchImpl, signal, arm);
+  } finally {
+    clearTimeout(stallTimer);
+  }
+}
+
+async function receive(
+  url: string,
+  limit: number,
+  fetchImpl: typeof fetch,
+  signal: AbortSignal,
+  progressed: () => void,
 ): Promise<Buffer> {
   let response: Response;
-  const timeout = AbortSignal.timeout(60_000);
   try {
-    response = await fetchImpl(url, {
-      signal: deadline === undefined ? timeout : AbortSignal.any([timeout, deadline]),
-    });
+    response = await fetchImpl(url, { signal });
   } catch (error) {
     throw new TransientDownloadError(error instanceof Error ? error.message : String(error));
   }
+  progressed();
   if (!response.ok || response.body === null) {
     const message = `HTTP ${response.status}`;
     throw response.status === 429 || response.status >= 500
@@ -57,6 +105,7 @@ async function downloadOnce(
         throw new TransientDownloadError(error instanceof Error ? error.message : String(error));
       });
       if (done) break;
+      progressed();
       bytes += value.length;
       if (bytes > limit) throw new Error("Herdr download exceeded its size limit");
       chunks.push(value);
@@ -83,10 +132,11 @@ export async function download(
   backoffMs = 2_000,
   /** The caller's own deadline across every attempt; once it passes, nothing is retried. */
   deadline?: AbortSignal,
+  timing?: DownloadTiming,
 ): Promise<Buffer> {
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await downloadOnce(url, limit, fetchImpl, deadline);
+      return await downloadOnce(url, limit, fetchImpl, deadline, timing);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (!(error instanceof TransientDownloadError) || attempt >= attempts || deadline?.aborted === true)
@@ -122,11 +172,12 @@ export async function installHerdrRelease(
   attempts = 1,
   backoffMs?: number,
   deadline?: AbortSignal,
+  timing?: DownloadTiming,
 ): Promise<string> {
   const asset = releaseAsset(manifest);
   const current = await readFile(destination).catch(() => undefined);
   if (current !== undefined && digest(current) === asset.sha256) return asset.version;
-  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl, attempts, backoffMs, deadline);
+  const data = await download(asset.url, MAX_BINARY_BYTES, fetchImpl, attempts, backoffMs, deadline, timing);
   if (digest(data) !== asset.sha256) throw new Error("Official Herdr checksum mismatch");
   await atomicWrite(destination, data, 0o700);
   return asset.version;
