@@ -6,7 +6,7 @@ import {
   projectRoleForPersona,
   projectsRevision,
   resolveProjectMembership,
-  setDefaultProjectRole,
+  setProjectRole,
 } from "../src/projects.ts";
 import { emptySettings } from "../src/schema.ts";
 const source = "a".repeat(64);
@@ -51,7 +51,7 @@ describe("owner projects", () => {
   });
 
   it("assigns a default built-in role without disabling the other inherited roles", () => {
-    const settings = setDefaultProjectRole(empty(), "alice", "builder");
+    const settings = setProjectRole(empty(), "alice", "builder");
     expect(settings.projects[0]!.roles).toEqual([]);
     expect(projectRoleForPersona(settings, "alice")).toBe("builder");
     expect(
@@ -63,11 +63,7 @@ describe("owner projects", () => {
   });
 
   it("keeps inherited assignments valid when a default custom role is added", () => {
-    const settings = setDefaultProjectRole(
-      setDefaultProjectRole(empty(), "alice", "builder"),
-      "bob",
-      "Sound Designer",
-    );
+    const settings = setProjectRole(setProjectRole(empty(), "alice", "builder"), "bob", "Sound Designer");
     expect(projectRoleForPersona(settings, "alice")).toBe("builder");
     expect(projectRoleForPersona(settings, "bob")).toBe("Sound Designer");
     expect(
@@ -112,7 +108,7 @@ describe("owner projects", () => {
   });
   it("does not resurrect a migrated role after operator edits and restart", () => {
     const migrated = migratePersonaRoles(empty(), source, legacy);
-    const edited = setDefaultProjectRole(migrated, "alice", null);
+    const edited = setProjectRole(migrated, "alice", null);
     expect(projectRoleForPersona(migratePersonaRoles(edited, source, legacy), "alice")).toBeUndefined();
     expect(projectsRevision(edited)).not.toBe(projectsRevision(migrated));
   });

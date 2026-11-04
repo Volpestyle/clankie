@@ -16,7 +16,6 @@ import { dirname, join } from "node:path";
 import {
   SettingsStore,
   migratePersonaRoles,
-  setDefaultProjectRole,
   setProjectRole,
   projectRoleForPersona,
   projectsRevision,
@@ -400,7 +399,12 @@ export class PersonaStore {
       throw new Error("Project role journal is not ready");
     if (this.pending.length >= 10_000) throw new Error("Project role journal is full");
     // Check current schema/role limits before a native side effect, without writing a phantom identity.
-    setDefaultProjectRole((await this.projectStore.load()).projects, `prospective-${randomUUID()}`, role);
+    setProjectRole(
+      (await this.projectStore.load()).projects,
+      `prospective-${randomUUID()}`,
+      role,
+      DEFAULT_PROJECT_ID,
+    );
   }
 
   public roleWritePending(operationId: string): boolean {
