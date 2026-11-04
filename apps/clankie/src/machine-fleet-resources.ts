@@ -18,7 +18,18 @@ export interface RemoteFleetResourceHost {
     machine: string,
     signal?: AbortSignal,
   ): Promise<
-    { machine: string; specs: FleetResourceMachineSpecs; snapshot: FleetResourceSnapshot } | undefined
+    | {
+        machine: string;
+        specs: FleetResourceMachineSpecs;
+        snapshot: FleetResourceSnapshot;
+        observedAt?: string;
+      }
+    | {
+        machine: string;
+        unavailable: Extract<FleetMachineResourceSnapshot, { status: "unavailable" }>["reason"];
+        observedAt?: string;
+      }
+    | undefined
   >;
   configure(machine: string, policy: FleetResourcePolicy, signal?: AbortSignal): Promise<void>;
 }
@@ -40,9 +51,13 @@ async function remoteCall<T>(work: (signal: AbortSignal) => Promise<T>): Promise
     clearTimeout(timer!);
   }
 }
-export function resourceMachine(settings: ClankieSettings, selector: string): string {
+export function resourceMachine(
+  settings: ClankieSettings,
+  selector: string,
+  joined?: { has(id: string): boolean },
+): string {
   const id = selector === "default" ? "local" : FleetResourceMachineIdSchema.parse(selector);
-  if (id !== "local" && !settings.machines.some((machine) => machine.id === id))
+  if (id !== "local" && !settings.machines.some((machine) => machine.id === id) && !joined?.has(id))
     throw new Error("Unknown resource machine");
   return id;
 }
@@ -56,20 +71,23 @@ export function createMachineFleetResources(input: {
   settings(): Promise<ClankieSettings>;
   local?: FleetResourceRuntime | undefined;
   remote?: RemoteFleetResourceHost | undefined;
+  joined?: { has(id: string): boolean } | undefined;
 }) {
   return {
     async status(selector: string): Promise<FleetMachineResourceSnapshot> {
       const settings = await input.settings();
-      const machine = resourceMachine(settings, selector);
+      const machine = resourceMachine(settings, selector, input.joined);
       const policy = machineResourcePolicy(settings, machine);
       const unavailable = (
-        reason: "governor-unavailable" | "probe-unavailable",
+        reason: Extract<FleetMachineResourceSnapshot, { status: "unavailable" }>["reason"],
+        observedAt?: string,
       ): FleetMachineResourceSnapshot => ({
         schemaVersion: 1,
         machine,
         policy,
         status: "unavailable",
         reason,
+        ...(observedAt === undefined ? {} : { observedAt }),
       });
       if (machine === "local") {
         const snapshot = input.local?.status();
@@ -92,6 +110,7 @@ export function createMachineFleetResources(input: {
           : undefined;
         if (!host) return unavailable("governor-unavailable");
         if (host.machine !== machine) return unavailable("probe-unavailable");
+        if ("unavailable" in host) return unavailable(host.unavailable, host.observedAt);
         return FleetMachineResourceSnapshotSchema.parse({
           schemaVersion: 1,
           machine,
@@ -99,6 +118,7 @@ export function createMachineFleetResources(input: {
           status: "available",
           specs: host.specs,
           snapshot: host.snapshot,
+          ...(host.observedAt === undefined ? {} : { observedAt: host.observedAt }),
         });
       } catch {
         return unavailable("probe-unavailable");
@@ -106,7 +126,7 @@ export function createMachineFleetResources(input: {
     },
     async configure(selector: string): Promise<void> {
       const settings = await input.settings();
-      const machine = resourceMachine(settings, selector);
+      const machine = resourceMachine(settings, selector, input.joined);
       const policy = machineResourcePolicy(settings, machine);
       if (machine === "local") {
         await input.local?.configure(policy);

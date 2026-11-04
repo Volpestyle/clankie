@@ -5563,6 +5563,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         seats: () => refreshFleet(),
         leadSeatId: () => headSeat?.seatId,
         heavy: () => options.fleetResources?.status(),
+        machineResources: options.machineResources,
         tracker: () => options.trackerRequestBudget?.(),
         history: usageHistory,
       }),

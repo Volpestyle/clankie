@@ -1,6 +1,16 @@
 import { z } from "zod";
 
 export const FLEET_RESOURCES_PATH = "/v1/operator/fleet-resources";
+/** Advisory host readings expire quickly; admission remains local to the host. */
+const FLEET_RESOURCE_OBSERVATION_MAX_AGE_MS = 5_000;
+export function fleetResourceObservationIsFresh(observedAtMs: number, now = Date.now()): boolean {
+  return (
+    Number.isSafeInteger(observedAtMs) &&
+    observedAtMs > 0 &&
+    observedAtMs <= now + 1_000 &&
+    now - observedAtMs <= FLEET_RESOURCE_OBSERVATION_MAX_AGE_MS
+  );
+}
 export const FLEET_SIMULATORS_PATH = `${FLEET_RESOURCES_PATH}/simulators`;
 
 /** Owner policy; the command wrapper reads the shared policy, never worker overrides. */
@@ -450,6 +460,8 @@ const machineResourceFields = {
   schemaVersion: z.literal(1),
   machine: FleetResourceMachineIdSchema,
   policy: FleetResourcePolicySchema,
+  /** The reporting host's measurement time, never the observer's receipt time. */
+  observedAt: z.iso.datetime().optional(),
 };
 export const FleetMachineResourceSnapshotSchema = z.discriminatedUnion("status", [
   z.strictObject({
@@ -461,7 +473,13 @@ export const FleetMachineResourceSnapshotSchema = z.discriminatedUnion("status",
   z.strictObject({
     ...machineResourceFields,
     status: z.literal("unavailable"),
-    reason: z.enum(["governor-unavailable", "probe-unavailable"]),
+    reason: z.enum([
+      "governor-unavailable",
+      "probe-unavailable",
+      "unsupported-platform",
+      "stale-observation",
+      "uncorrelated-observation",
+    ]),
   }),
 ]);
 export type FleetMachineResourceSnapshot = z.infer<typeof FleetMachineResourceSnapshotSchema>;
@@ -470,7 +488,7 @@ export type FleetMachineResourceSnapshot = z.infer<typeof FleetMachineResourceSn
 export function resolveFleetResourcePolicy(
   policy: FleetResourcePolicy,
   specs: FleetResourceMachineSpecs,
-): FleetResourcePolicy {
+): FleetResourcePolicy & { heavySlots: number; simulatorSlots: number } {
   const host = FleetResourceMachineSpecsSchema.parse(specs);
   const gib = host.memoryBytes / 1024 ** 3;
   return {

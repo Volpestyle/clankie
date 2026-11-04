@@ -775,6 +775,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         settings: () => settingsSource.load(),
         local: dependencies.fleetResources,
         remote: dependencies.remoteFleetResources,
+        joined: dependencies.machineJoins,
       }),
     ),
   );
@@ -892,11 +893,13 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     createFleetSettingsRoutes(authorizeOwnerSecrets, settingsSource, {
       runtimes: dependencies.runtimes,
       herdrBinding: dependencies.herdrBinding,
+      joinedResources: dependencies.machineJoins,
       configureResources: (_policy, machine) =>
         createMachineFleetResources({
           settings: () => settingsSource.load(),
           local: dependencies.fleetResources,
           remote: dependencies.remoteFleetResources,
+          joined: dependencies.machineJoins,
         }).configure(machine ?? "local"),
     }),
   );

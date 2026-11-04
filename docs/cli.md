@@ -2285,7 +2285,20 @@ what is left by reset, the percent projected at reset and when it runs out if
 sooner, and the tokens each Claude session on this Mac spent in the last hour,
 named by agent id when it is a known agent. A number Clankie does not have is
 `"unknown"`. It does not include homes, emails, session ids or credentials, and
-it hires nothing. `message_agent` can carry
+it hires nothing. Opt in with `includeMachineResources: true` on the
+`fleet_capacity` request to add a `machineResources` map keyed by canonical
+machine IDs, including joined hosts. Each entry says `source: "host-reported"`
+and `advisory: true`. Available entries carry the host's own `observedAt`
+measurement time and full, light and server slots, used, queued and remaining
+counts. Home receipt time never replaces a host measurement. Joined replies
+must echo the current request nonce. Missing or mismatched correlation, missing
+time, age over five seconds or a clock over one second ahead makes the reading
+unavailable, with no free capacity counted; missing time remains `"unknown"`.
+The host supplies these advisory numbers and may misreport them; its own local
+governor decides admission. Missing lane readings are `"unknown"`; offline or
+unsupported hosts are unavailable, never free capacity. This summary omits holders and command paths; the owner
+resource route retains those details. Without the opt-in, the response and its
+local `heavy` field keep their existing shape. `message_agent` can carry
 up to four images (by public https address or as base64), which the agent finds
 in its workspace under `.clankie/inbox/`, and `read_image` returns an image an
 agent saved in its working directory, such as a screenshot
@@ -5493,7 +5506,18 @@ selector preserves the existing snapshot shape. Machine policy updates use
 `POST /v1/operator/fleet-settings`, its existing revision guard, and
 `changes.machineResources`. `resourceMachines` in the settings snapshot lists the
 supported IDs. A linked governor supplies its own specs, status and configuration
-through the service's host adapter; native Windows provisioning is VUH-2091.
+through the authenticated, encrypted join channel while `clankie join` runs.
+On macOS and native Linux, that receiver observes the same host-local registry
+used by `clankie heavy`; jobs never queue on the home Mac or depend on the join
+connection remaining online. Resource status and policy need at least Workers
+access; Portal, Watch, revocation or stale channel policy refuse them. Policy
+writes recheck that authority under the registry lock.
+
+Windows and WSL resource status is explicitly unavailable (`unsupported-platform`)
+until the later authorized Windows rollout (#325). The join receiver never creates a separate
+Linux budget for WSL alongside Windows. This does not install or restart anything on PCs,
+or replace project build locks. A saved policy for an offline host remains desired
+policy; set it again once the host is online to apply it.
 No shell or Herdr connection is opened by these resource API/UI paths.
 
 `--seat-restarts on` (the default) enables fresh-session restarts for idle

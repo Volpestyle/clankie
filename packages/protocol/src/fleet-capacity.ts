@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { FleetResourceMachineIdSchema } from "./fleet-resources.ts";
 import { FLEET_REVIEW_BUDGET } from "./worker-accounts.ts";
 
 /**
@@ -191,9 +192,44 @@ export const FleetCapacityBurnSchema = z
   .strict();
 export type FleetCapacityBurn = z.infer<typeof FleetCapacityBurnSchema>;
 
+const resourceLane = () =>
+  z.union([
+    z.strictObject({ slots: knownCount, used: knownCount, queued: knownCount, remaining: knownNumber }),
+    unknown,
+  ]);
 export const FleetCapacitySchema = z
   .object({
     observedAt: z.iso.datetime(),
+    /** Returned only when includeMachineResources is true; legacy strict clients see no new field. */
+    machineResources: z
+      .record(
+        FleetResourceMachineIdSchema,
+        z.discriminatedUnion("status", [
+          z.strictObject({
+            source: z.literal("host-reported"),
+            advisory: z.literal(true),
+            status: z.literal("unavailable"),
+            observedAt: knownInstant,
+            reason: z.enum([
+              "governor-unavailable",
+              "probe-unavailable",
+              "unsupported-platform",
+              "stale-observation",
+              "uncorrelated-observation",
+            ]),
+          }),
+          z.strictObject({
+            source: z.literal("host-reported"),
+            advisory: z.literal(true),
+            status: z.literal("available"),
+            observedAt: z.iso.datetime(),
+            full: resourceLane(),
+            light: resourceLane(),
+            server: resourceLane(),
+          }),
+        ]),
+      )
+      .optional(),
     reviewBudgets: z
       .object({
         leadTokens: z.literal(FLEET_REVIEW_BUDGET.lead),

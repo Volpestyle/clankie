@@ -789,7 +789,13 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     })
     .strict(),
   /** What the fleet can afford before a hire (ADR 0313). Read only. */
-  z.object({ op: z.literal("fleet_capacity"), schemaVersion: z.literal(1) }).strict(),
+  z
+    .object({
+      op: z.literal("fleet_capacity"),
+      schemaVersion: z.literal(1),
+      includeMachineResources: z.boolean().optional(),
+    })
+    .strict(),
   z
     .object({
       op: z.literal("composer_catalog"),

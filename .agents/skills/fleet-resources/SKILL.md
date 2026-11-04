@@ -111,6 +111,34 @@ budgets still bind, and a source or default change does not authorize raising
 live capacity. Admission rules, holder alerts, disk guards and platform notes
 are in [admission](reference/admission.md).
 
+## Joined hosts
+
+`clankie heavy` always governs the machine where it runs. On macOS and native
+Linux, a running `clankie join` exposes that same local registry over its encrypted
+channel: `clankie fleet resources --machine ID` reads it and the owner can set
+its policy with `clankie fleet set --machine ID --heavy-slots auto|N`. At least
+Workers access and a fresh join policy are required. Heavy jobs continue locally
+if the home or join connection disappears. An offline saved policy is desired;
+set it again online to apply it. Do not create another registry for a join,
+worktree, profile or WSL distribution.
+
+Windows and WSL governors remain unavailable pending an authorized PC rollout
+(#325); these commands do not establish Windows process ownership or recover
+project locks. Keep those locks until real Windows acceptance proves the shared
+budget and crash/cancel recovery. Simulator capacity is zero without macOS.
+
+Connected leads may opt in to `fleet_capacity` with
+`includeMachineResources: true` for canonical per-machine full/light/server
+counts and availability. Each entry is labelled `source: "host-reported"` and
+`advisory: true`; admission stays with that host's local governor. `observedAt`
+is the host's measurement time and is never replaced with home receipt time.
+Joined reports echo a fresh request nonce. A mismatched/missing nonce, missing
+measurement, age over five seconds, or clock more than one second ahead makes
+the reading unavailable and contributes no free capacity. Missing time stays
+`"unknown"`. An authenticated host can misreport its own numbers, so these are
+advisory readings. Holder identities and command paths stay in the owner's
+resource route.
+
 ## Pairings created by automation
 
 Use `clankie pair --run UNIQUE_ID --purpose simulator --ttl 900 -- COMMAND ARGS`
