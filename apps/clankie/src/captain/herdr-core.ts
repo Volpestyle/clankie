@@ -6,15 +6,11 @@ import { promisify } from "node:util";
 import { OPERATOR_TERMINAL_READ_MAX, type HerdrCoreAgent } from "@clankie/protocol";
 import { logger } from "../app/log.ts";
 import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
+import { observeNativeBirth } from "../local-fleet-process.ts";
 import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
 import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-scope.ts";
-import {
-  TRANSCRIPT_READ_DETAIL,
-  TRANSCRIPT_READ_REFUSED,
-  transcriptReadText,
-  transcriptWaiting,
-} from "./agent-transcript-read.ts";
-import { nativeSessionForProcess, type NativeSessionLookup } from "./native-session-by-pid.ts";
+import { TRANSCRIPT_READ_REFUSED, transcriptReadText, transcriptWaiting } from "./agent-transcript-read.ts";
+import { nativeSessionForProcess, sameLifetime, type NativeSessionLookup } from "./native-session-by-pid.ts";
 
 // herdr-core (`hc`) is the terminal server behind the Herdr desktop app: a
 // second home for agents, beside the terminal Herdr Clankie seats in. Clankie
@@ -24,6 +20,14 @@ import { nativeSessionForProcess, type NativeSessionLookup } from "./native-sess
 // asks the desktop app to show one. It never sends: `terminal.send` pastes into
 // the terminal, which ADR 0207 rules out, and it never starts a core that isn't
 // running. JSON-RPC 2.0, one message per line, protocol generation 1.
+
+/**
+ * An agent the owner started names its own session only through files its harness wrote in the
+ * owner's account; for Claude Code nothing binds that claim to the process (ADR 0307). The note
+ * claims no more than that.
+ */
+const OWNER_AGENT_READ_DETAIL =
+  "Read from the session transcript this agent's own harness files name for its process, not its screen.";
 
 const GENERATION = 1;
 
@@ -141,8 +145,9 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
         // process writes (#530). No certain session, or no transcript, is a refusal.
         const harness = transcriptHarness(text(record.status?.app));
         if (harness !== undefined) {
-          const session = await nativeSessionForProcess(harness, occupant.pid, options.nativeSession);
-          const transcript = session === undefined ? undefined : readHerdrSeatTranscript(harness, session);
+          const found = await nativeSessionForProcess(harness, occupant.pid, options.nativeSession);
+          const transcript =
+            found === undefined ? undefined : readHerdrSeatTranscript(harness, found.session);
           const now = (await call(socket(), "terminal.get", { terminal })) as HcTerminal;
           if (liveAgentOccupant(now, occupant.pid)?.key !== occupant.key) {
             scope.forget(terminal);
@@ -151,7 +156,13 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
               detail: "The agent in that terminal changed while it was read; read it again.",
             };
           }
-          if (transcript === undefined) return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
+          if (found === undefined || transcript === undefined)
+            return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
+          // The process the session was proved against still lives after the read: a pid that is
+          // now another process's, or whose lifetime can't be observed, is a refusal.
+          const birthOf = options.nativeSession?.birth ?? observeNativeBirth;
+          if (!sameLifetime(await birthOf(occupant.pid), found.birth))
+            return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
           const said = transcriptReadText(transcript.entries);
           // Its screen is never read, so a menu it waits on is named from its session alone.
           const waiting =
@@ -163,7 +174,7 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
             status: "read",
             text:
               whole.length > OPERATOR_TERMINAL_READ_MAX ? whole.slice(-OPERATOR_TERMINAL_READ_MAX) : whole,
-            detail: TRANSCRIPT_READ_DETAIL,
+            detail: OWNER_AGENT_READ_DETAIL,
           };
         }
         const history = await readText(socket(), terminal, HISTORY_LINES);

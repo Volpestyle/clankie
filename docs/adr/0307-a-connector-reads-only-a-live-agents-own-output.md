@@ -119,12 +119,22 @@ agent showed.
   read Claude Code and Codex from their transcript too
   ([#530](https://github.com/Volpestyle/clankie/issues/530)). An agent the
   owner started there carries no session Clankie named, so its session is the
-  one the harness's own files tie to that exact process:
-  - Claude Code's `sessions/<pid>.json` in its config home, only when its
-    recorded start (`procStart`) is that pid's kernel birth to the second, so a
-    file left on a reused pid names nothing.
-  - For Codex, the one rollout the process holds open, and only if Codex's own
-    lookup by that id finds the same file.
+  one the harness's own files name for that exact process lifetime:
+  - The process's kernel identity and birth are taken before anything is looked
+    up and checked again after the transcript is read and the terminal is seen
+    once more. A process that died, a pid that became another process's, or a
+    lifetime that can't be observed is refused.
+  - Claude Code's `sessions/<pid>.json` in its config home counts only when its
+    recorded start (`procStart`, `ps -o lstart` in UTC) is exactly that birth's
+    second, printed the same way, and its `startedAt` (ms) is at or after the
+    birth itself. An earlier process on the pid, even one born in the same
+    printed second, started before this one and fails the second test.
+  - For Codex, the one rollout the process holds open for writing, and only if
+    Codex's own lookup by that id finds the same file. A descriptor opened only
+    to read names nothing.
+  - Either way the transcript must be a regular file the owner owns, at its
+    canonical path, with no symlink anywhere along it, its config home
+    included.
 
   Anything short of exactly one such session, or no transcript, is refused. Its
   screen is never read, so a menu it waits on is named from its session alone.
@@ -165,18 +175,25 @@ agent showed.
   input a read shows only what it wrote to its session, not its live screen.
   The gaps below remain for other harnesses.
 - An owner-started Claude Code or Codex agent in the desktop app's terminals
-  is read from the session its harness's own files tie to its process (#530).
-  Those files are only as trustworthy as the owner's account that writes them:
-  - Anything running as the owner could write a Claude Code
-    `sessions/<pid>.json` for a live Claude process, with a matching
-    `procStart` and a session id of its choosing. For Codex it could open a
-    rollout in that process's place only by being that process.
-  - A forged record can only point the read at another transcript that the
-    harness's own lookup finds in the owner's Claude homes. It can't point the
-    read at the owner's shell or screen, or at a file outside those homes.
-  - This is the same trust Herdr panes place in a session their hook reports.
-    It is accepted because a writer with the owner's account can already read
-    those transcripts directly.
+  is read from the session its harness's own files name for its process
+  (#530), and the read's note says only that.
+  - Codex's claim is bound to the process: the process itself holds that
+    rollout open for writing.
+  - Claude Code's is not. Claude Code holds no file open that would tie a
+    session to its process (checked on 2.1.316), and a resumed session's
+    first entries predate the process, so no entry time can either. The
+    lifetime checks above stop a record left by an earlier process on the pid,
+    but anything running as the owner can write a `sessions/<pid>.json` for a
+    live Claude process, with the right `procStart` and `startedAt` and a
+    session id of its choosing.
+  - **Accepted exception (lead, on review of #744):** such a forged record can
+    point the read at another of the owner's own Claude Code transcripts, one
+    the harness's lookup finds as a regular, owner-owned file at its canonical
+    path in the owner's Claude homes, and only that. It can't point the read at
+    the owner's shell or screen, a symlink, or a file outside those homes. It is
+    accepted because a writer with the owner's account can already read those
+    transcripts directly. It is the same trust Herdr panes place in a session
+    their hook reports.
 - One case still shows the owner's own shell work. An agent suspended
   (Ctrl-Z), with shell commands run and then brought back with `fg`, keeps its
   process and session, so its anchor holds and the shell work in between is
