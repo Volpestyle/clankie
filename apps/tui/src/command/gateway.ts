@@ -6,7 +6,6 @@ import {
   PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
-  generatePublicGatewayInstallationId,
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
@@ -26,6 +25,7 @@ import { DeviceDirectRouteSchema, type DeviceDirectRoute } from "@clankie/protoc
 import { RuntimeHealthObservationSchema, type RuntimeHealthObservation } from "@clankie/protocol";
 import { ExtensionStatesSchema, type ExtensionStateReport } from "@clankie/protocol/extensions";
 import { commandHost } from "./io.ts";
+import { storeClankieAccountSignIn } from "../../../clankie/src/clankie-account-signin.ts";
 
 const DOORWAY_PROBE_TIMEOUT_MS = 5_000;
 const HealthSchema = z.object({ doorway: PublicGatewayDoorwayStateSchema.optional() }).passthrough();
@@ -197,14 +197,8 @@ export async function gatewayEnableWithAccount(
   options: GatewayCommandOptions = {},
 ): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
-  const current = (await settings.load()).publicGateway;
-  const publicGateway = PublicGatewaySettingsSchema.parse({
-    url: input.gatewayUrl,
-    installationId: current.installationId ?? generatePublicGatewayInstallationId(),
-  });
-  await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, input.credential);
-  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
-  return await gatewayConfigure(publicGateway, options);
+  await storeClankieAccountSignIn({ ...input, settings, credentials });
+  return await result(options);
 }
 
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {

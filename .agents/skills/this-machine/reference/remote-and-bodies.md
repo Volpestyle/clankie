@@ -12,6 +12,11 @@ off` takes the Mac off remote access. `/remote-access` (`/gateway` alias) is the
 same flow in the console. There is no hosted Clankie to connect to: `clankie
 connect` says so and changes nothing.
 
+The owner's Mac app uses `GET /v1/clankie-account` and `POST
+/v1/clankie-account/start` / `complete` for the same sign-in (operator, or a Take
+Control device on this Mac's loopback only). `restartRequired: true` means the
+doorway opens after `clankie restart`.
+
 ## Model keys and connected accounts
 
 Provider-key management uses the owner model-key API

@@ -271,6 +271,8 @@ import {
   switchedOn,
 } from "./extension-host.ts";
 import { relayExtension } from "./relay-extension.ts";
+import { createClankieAccountSignIn } from "./clankie-account-signin.ts";
+import type { PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway";
 import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
@@ -2394,6 +2396,15 @@ extensions.add(personaExtension({ receipts: discordTurnReceipts, appearance: per
 });
 extensions.add(minecraftSwitch, { enabled: minecraftOn, settings: undefined });
 await extensions.start();
+const publicGatewayDoorway = (): PublicGatewayDoorwayState => {
+  if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
+  if (publicGatewaySignInRequiredSince !== undefined) {
+    return { state: "sign_in_required", since: publicGatewaySignInRequiredSince };
+  }
+  // Configured but connectorless: the credential failed to load at startup and
+  // nothing retries it, which no phone can tell apart from "he is asleep".
+  return startupSettings.publicGateway.url === undefined ? { state: "disabled" } : { state: "unavailable" };
+};
 const clankie = await createClankieApp({
   ...(worldOn
     ? {
@@ -2667,15 +2678,12 @@ const clankie = await createClankieApp({
   autoUpdateManaged: false,
   applyKeepAwake: () => applySavedKeepAwake({ repoRoot, settings: settingsStore }),
   keepAwakeStatus: () => savedKeepAwakeStatus({ repoRoot, settings: settingsStore }),
-  publicGatewayDoorway: () => {
-    if (publicGatewayConnector !== undefined) return publicGatewayConnector.doorway;
-    if (publicGatewaySignInRequiredSince !== undefined) {
-      return { state: "sign_in_required", since: publicGatewaySignInRequiredSince };
-    }
-    // Configured but connectorless: the credential failed to load at startup and
-    // nothing retries it, which no phone can tell apart from "he is asleep".
-    return startupSettings.publicGateway.url === undefined ? { state: "disabled" } : { state: "unavailable" };
-  },
+  publicGatewayDoorway,
+  clankieAccountSignIn: createClankieAccountSignIn({
+    credentials: operatorCredentialStore,
+    settings: settingsStore,
+    doorway: publicGatewayDoorway,
+  }),
   ...(publicGatewayConnector === undefined
     ? {}
     : {

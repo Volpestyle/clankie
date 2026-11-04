@@ -685,3 +685,62 @@ function isCanonicalBase64(value: string): boolean {
     return false;
   }
 }
+
+/**
+ * Signing this Mac in to its clankie.bot account from the owner's own app on
+ * this Mac (#722, ADR 0153). Owner-only and same-Mac only, with the pairing
+ * offer's admission. The app sends only an email and the emailed code; the
+ * account tokens and the account service's sign-in session never leave the
+ * service.
+ */
+export const CLANKIE_ACCOUNT_PATH = "/v1/clankie-account";
+export const CLANKIE_ACCOUNT_START_PATH = "/v1/clankie-account/start";
+export const CLANKIE_ACCOUNT_COMPLETE_PATH = "/v1/clankie-account/complete";
+
+/**
+ * `never_set_up`: this Mac has never been signed in. `signed_out`: it was, and
+ * holds no usable account now (signed out, or the account rejected it).
+ * `signed_in`: an account credential is stored; `doorway` says whether the
+ * running doorway carries it yet.
+ */
+export const ClankieAccountStatusSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("never_set_up") }).strict(),
+  z.object({ state: z.literal("signed_out") }).strict(),
+  z
+    .object({
+      state: z.literal("signed_in"),
+      /** The address the emailed code proved; absent for a Mac signed in before #722. */
+      email: z.string().min(1).max(320).optional(),
+      doorway: PublicGatewayDoorwayStateSchema,
+      /** The running doorway predates this sign-in; restarting Clankie opens it. */
+      restartRequired: z.boolean(),
+    })
+    .strict(),
+]);
+export type ClankieAccountStatus = z.infer<typeof ClankieAccountStatusSchema>;
+
+export const ClankieAccountStartRequestSchema = z.object({ email: z.string().min(3).max(320) }).strict();
+export const ClankieAccountStartResultSchema = z
+  .object({
+    /** Opaque and single-use; it names the pending sign-in, never the account service's session. */
+    challengeId: z.string().uuid(),
+    expiresAt: z.string().min(1),
+  })
+  .strict();
+export type ClankieAccountStartResult = z.infer<typeof ClankieAccountStartResultSchema>;
+
+export const ClankieAccountCompleteRequestSchema = z
+  .object({ challengeId: z.string().uuid(), code: z.string().min(1).max(16) })
+  .strict();
+
+export const ClankieAccountErrorCodeSchema = z.enum([
+  "email_invalid",
+  "account_not_invited",
+  "code_invalid",
+  "code_expired",
+  "challenge_unknown",
+  "rate_limited",
+  "service_unavailable",
+  "unexpected_response",
+]);
+export type ClankieAccountErrorCode = z.infer<typeof ClankieAccountErrorCodeSchema>;
