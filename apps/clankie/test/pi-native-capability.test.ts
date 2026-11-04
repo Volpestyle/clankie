@@ -106,9 +106,7 @@ test("refuses an older, unrecognized or probe-failing Pi release by version", as
     expect(error).toBeInstanceOf(PiNativeRefusal);
     return (error as Error).message;
   };
-  expect(await refusal("0.86.2")).toBe(
-    "Native Pi 0.86.2 is older than 0.87.1, the oldest release proven with a live hire; update Pi",
-  );
+  expect(await refusal("0.86.2")).toBe("Update Pi: you have 0.86.2; Clankie needs 0.87.1 or newer.");
   expect(await refusal("9.0.0", false)).toBe("Native Pi 9.0.0 has an unrecognized CLI bundle layout");
   expect(await refusal("9.1.0")).toMatch(
     /^Native Pi 9\.1\.0 failed Clankie's capability probe: load the worker extension: /u,

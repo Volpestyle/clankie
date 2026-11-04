@@ -37,7 +37,7 @@ const ACCOUNTS_USAGE =
   "Usage: clankie accounts [list] | connect github|linear|google-gmail|google-calendar|google-drive | start github|google-PROVIDER | poll github --flow-id ID | complete linear|google-PROVIDER --json-stdin | check google-PROVIDER | connect linear-app --client-id ID --secret-stdin | disconnect PROVIDER | apps [set|clear] [--github-client-id ID] [--linear-client-id ID] [--linear-redirect-uri URL] [--google-client-id ID] [--google-redirect-uri URL] | apps github-secret|google-secret --client-id ID --secret-stdin";
 
 const WORKER_ACCOUNTS_USAGE =
-  "Usage: clankie accounts workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID] | budget [claude|codex LABEL PERCENT|off [--machine ID]]";
+  "Usage: clankie accounts pi [show|enable|disable] | workers [--machine ID] | hold claude|codex|pi LABEL [--machine ID] [--reason TEXT] | release claude|codex|pi LABEL [--machine ID] | budget [claude|codex LABEL PERCENT|off [--machine ID]]";
 
 /**
  * The owner's per-account usage budget (#603): new hires on the account stop

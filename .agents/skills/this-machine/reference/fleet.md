@@ -121,9 +121,14 @@ log; do not assume the newest matching transcript belongs to the failed hire.
 Each harness's prerequisites, probes and limits are in
 `{repoRoot}/packages/agent-hosts/README.md` and `docs/cli.md`. What to act on:
 
-- **Pi** is off by default on owner-run bodies; only `CLANKIE_PI_NATIVE_ENABLED=1`
-  in the service environment enables it, and changing it is the owner's action.
-  Check `clankie accounts workers` before hiring; the owner refreshes Pi's own
+- **Pi** is off by default. The owner or a Take Control device can use
+  `clankie accounts pi show|enable|disable` (`/v1/worker-accounts/pi`). The saved
+  preference applies to new hires immediately, survives restarts and overrides
+  the legacy environment default. Existing workers keep their sessions.
+  Check `clankie accounts workers`: `pi.state` names `not_installed`, `too_old`,
+  `not_enabled` or `ready`; missing/old installs include `pi.installCommand`.
+  `ready` describes native runtime readiness; `usable` also checks the model and
+  account policy. The owner refreshes Pi's own
   sign-in in Pi. A refused release (`Native Pi VERSION ...`) is reported, never
   fixed by downgrading. Loss of its MCP consumer is final: no reconnect, retry or
   replacement hire.

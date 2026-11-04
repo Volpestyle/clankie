@@ -13,7 +13,6 @@ import {
   inspectPiInstallation,
   PiNotInstalled,
   PiTooOld,
-  PiNativeRefusal,
 } from "./pi-native-capability.ts";
 
 /** Inspect the same default profile native Pi opens; no login, refresh or credential mutation. */
@@ -83,7 +82,7 @@ export function piSeatModelRefs(selected: PiSeatModel | undefined): readonly str
 
 /** Owner-facing action; no process or environment knowledge required. */
 export const PI_NOT_ENABLED = "Turn on Pi to use your API key or local model for coding workers.";
-export const PI_INSTALL_COMMAND = "npm install -g @earendil-works/pi-coding-agent";
+const PI_INSTALL_COMMAND = "npm install -g @earendil-works/pi-coding-agent";
 
 /** Native runtime and model authority are independently verified before Pi enters the shared account view. */
 export function createPiWorkerStatusReader(options: {
@@ -133,7 +132,7 @@ export function createPiWorkerStatusReader(options: {
         signedIn: null,
         usable: false,
         reason:
-          error instanceof PiNativeRefusal
+          error instanceof PiNotInstalled || error instanceof PiTooOld
             ? error.message
             : "Pi could not be checked. Check its installation and model sign-in, then try again.",
       };

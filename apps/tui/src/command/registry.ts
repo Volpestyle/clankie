@@ -402,6 +402,7 @@ const HEADLESS_COMMAND_HELP = [
       "  accounts connect linear-app --client-id ID --secret-stdin   Connect a workspace-owned Clankie app",
       "  accounts codex [list | add HOME --label LABEL | remove LABEL]   Local Codex homes and headroom",
       "  accounts claude [list | add HOME --label LABEL | remove LABEL]   Register existing local Claude profiles",
+      "  accounts pi [show|enable|disable]   Turn Pi coding workers on or off (owner / Take Control)",
       "  accounts workers [--machine ID]   Worker Claude/Codex accounts on this or a linked machine: sign-in, plan, usage (JSON)",
       "  accounts hold|release claude|codex|pi LABEL [--machine ID] [--reason TEXT]   Keep an account out of automatic choice",
       "  accounts budget [claude|codex LABEL PERCENT|off [--machine ID]]   Stop new hires at PERCENT of the account's plan; leads hear when to pause its work",

@@ -1,4 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { TAKE_CONTROL_GRANTS, SUPERVISE_GRANTS } from "@clankie/protocol";
+import { startFixtureServer } from "./owner-settings-surface-fixture.ts";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -19,8 +22,11 @@ import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 
 let root: string;
 let previous: string | undefined;
+let previousPath: string | undefined;
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "clankie-pi-worker-account-"));
+  root = await realpath(await mkdtemp(join(tmpdir(), "clankie-pi-worker-account-")));
+  previousPath = process.env.PATH;
+  await installPiFixture("1.0.0");
   previous = process.env.PI_CODING_AGENT_DIR;
   process.env.PI_CODING_AGENT_DIR = join(root, "pi");
   await mkdir(join(root, "pi"));
@@ -36,6 +42,7 @@ beforeEach(async () => {
 afterEach(async () => {
   if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previous;
+  process.env.PATH = previousPath;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -92,10 +99,10 @@ it("exposes the same disabled Pi status and revision-fenced owner hold through A
         headroom: null,
         usable: false,
         reason: PI_NOT_ENABLED,
+        pi: { state: "not_enabled" },
       },
     ]);
-    // The real opt-in, so neither Clankie nor the owner invents a `clankie pi enable` (VUH-2625).
-    expect(PI_NOT_ENABLED).toContain("CLANKIE_PI_NATIVE_ENABLED=1 clankie restart");
+    expect(initial.accounts[0]?.pi?.state).toBe("not_enabled");
     expect(chooseWorkerHarness("local", await reader(undefined, ["pi"]))).toHaveProperty("refused");
     const token = mintOperatorToken();
     const routes = createWorkerAccountHoldsRoutes(
@@ -139,7 +146,7 @@ it("only makes verified native Pi eligible and excludes held/model/account scope
     piStatus: createPiWorkerStatusReader({ enabled: () => true, cwd: root }),
   });
   const report = await reader(undefined, ["pi"]);
-  expect(MachineWorkerAccountsSchema.parse(report)).toEqual(report);
+  expect(MachineWorkerAccountsSchema.parse(report).accounts).toEqual(report.accounts);
   expect(report.accounts).toEqual([
     {
       harness: "pi",
@@ -149,6 +156,7 @@ it("only makes verified native Pi eligible and excludes held/model/account scope
       usable: true,
       headroom: null,
       models: ["openai/gpt-4o"],
+      pi: { state: "ready" },
     },
   ]);
   expect(chooseWorkerHarness("local", report)).toMatchObject({ harness: "pi" });
@@ -258,3 +266,127 @@ it("exposes expired native OAuth through the owner API and CLI without refresh o
     await app.close();
   }
 });
+
+/** Stub installation on PATH; its SDK is the real pinned dependency, probed offline. */
+async function installPiFixture(version: string) {
+  const packageRoot = join(root, "installed", version);
+  const bundle = join(packageRoot, "dist/bundle");
+  const bin = join(packageRoot, "bin");
+  await mkdir(join(bundle, "chunks"), { recursive: true });
+  await mkdir(bin);
+  await writeFile(
+    join(packageRoot, "package.json"),
+    JSON.stringify({
+      type: "module",
+      name: "@earendil-works/pi-coding-agent",
+      version,
+    }),
+  );
+  await writeFile(join(bundle, "cli.js"), 'import "./cli-runtime.js";');
+  await chmod(join(bundle, "cli.js"), 0o755);
+  await writeFile(join(bundle, "cli-runtime.js"), 'import "./chunks/core.js";');
+  await writeFile(join(bundle, "chunks/core.js"), "export {};");
+  await symlink(
+    fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+    join(packageRoot, "dist/index.js"),
+  );
+  await symlink(join(bundle, "cli.js"), join(bin, "pi"));
+  await symlink(process.execPath, join(bin, "node"));
+  process.env.PATH = bin;
+}
+
+it("serves all four Pi states over real HTTP and persists owner/Take Control enablement through the CLI", async () => {
+  const settings = new SettingsStore(join(root, "settings.json"));
+  const reader = createWorkerAccountsReader({
+    settings: () => settings.load(),
+    fleet: async () => undefined,
+    piStatus: createPiWorkerStatusReader({
+      cwd: root,
+      enabled: async () => (await settings.load()).piNativeEnabled ?? false,
+    }),
+  });
+  const token = mintOperatorToken();
+  const app = await createClankieApp({
+    captain: createStubCaptain(),
+    settings,
+    deviceSessionKey: new Uint8Array(32).fill(7),
+    workerAccounts: () => reader(undefined, ["pi"]),
+    authenticateOperator: async (request) =>
+      request.headers.get("authorization") === `Bearer ${token}` ? { operatorId: "owner" } : undefined,
+  });
+  const server = await startFixtureServer(app.app.fetch);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const request = (path: string, body?: unknown, auth = headers) =>
+    fetch(`${server.host}${path}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: auth,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  const readPi = async () =>
+    MachineWorkerAccountsSchema.parse(await (await request("/v1/worker-accounts")).json()).accounts[0]!;
+  const path = "/v1/worker-accounts/pi";
+  try {
+    process.env.PATH = join(root, "empty-path");
+    expect(await readPi()).toMatchObject({
+      usable: false,
+      pi: { state: "not_installed", installCommand: "npm install -g @earendil-works/pi-coding-agent" },
+    });
+    await installPiFixture("0.86.2");
+    expect(await readPi()).toMatchObject({
+      usable: false,
+      pi: { state: "too_old", installCommand: "npm install -g @earendil-works/pi-coding-agent" },
+    });
+    process.env.PATH = join(root, "installed/1.0.0/bin");
+    expect(await readPi()).toMatchObject({ usable: false, pi: { state: "not_enabled" } });
+    const initial = await (await request(path)).json();
+    expect(
+      (
+        await request(
+          path,
+          { enabled: true, expectedRevision: initial.revision },
+          { "content-type": "application/json" },
+        )
+      ).status,
+    ).toBe(401);
+    expect((await request(path, { enabled: "yes", expectedRevision: initial.revision })).status).toBe(400);
+    const client = { env: { CLANKIE_OPERATOR_TOKEN: token }, host: server.host };
+    await runAccountsCommand(["pi", "enable"], client);
+    expect((await new SettingsStore(settings.path).load()).piNativeEnabled).toBe(true);
+    expect(await readPi()).toMatchObject({ usable: true, pi: { state: "ready" }, models: ["openai/gpt-4o"] });
+    expect((await request(path, { enabled: false, expectedRevision: initial.revision })).status).toBe(409);
+    await runAccountsCommand(["pi", "disable"], client);
+    expect(await readPi()).toMatchObject({ usable: false, pi: { state: "not_enabled" } });
+
+    const pair = async (grants: typeof TAKE_CONTROL_GRANTS) => {
+      const offer = await (await request("/v1/pairing/offer", {})).json();
+      const redeemed = await (
+        await request("/v1/pairing/redeem", {
+          offerSecret: new URL(offer.deepLink).searchParams.get("offer"),
+          device: { name: "Fixture phone", platform: "ios" },
+        })
+      ).json();
+      const completed = await (
+        await request("/v1/pairing/complete", {
+          completionToken: redeemed.completionToken,
+          acceptedGrants: grants,
+        })
+      ).json();
+      return { authorization: `Bearer ${completed.deviceToken}`, "content-type": "application/json" };
+    };
+    const supervise = await pair(SUPERVISE_GRANTS);
+    const current = await (await request(path)).json();
+    expect(
+      (await request(path, { enabled: true, expectedRevision: current.revision }, supervise)).status,
+    ).toBe(403);
+    const control = await pair(TAKE_CONTROL_GRANTS);
+    expect((await request(path, { enabled: true, expectedRevision: current.revision }, control)).status).toBe(
+      200,
+    );
+    expect(await readPi()).toMatchObject({ usable: true, pi: { state: "ready" } });
+    await writeFile(join(root, "pi", "auth.json"), "{}");
+    expect(await readPi()).toMatchObject({ usable: false, signedIn: false, pi: { state: "ready" } });
+  } finally {
+    await server.close();
+    await app.close();
+  }
+}, 60_000);
