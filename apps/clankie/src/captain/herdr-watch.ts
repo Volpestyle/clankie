@@ -7662,7 +7662,7 @@ function seatEventObservation(event: SeatEvent): string {
           : [
               `Settled native message: ${event.messageId}${event.nativeTurnId === undefined ? "" : `; native turn: ${event.nativeTurnId}`}.`,
             ]),
-        `The seat's harness reported its turn ${event.ok ? "completed" : "ended with an error"}${event.stopReason === undefined ? "" : ` (${event.stopReason})`}.`,
+        `The seat's harness reported its turn ${event.ok ? "completed" : "ended with an error"}${event.stopReason === undefined ? "" : ` (${quotedSeatMessage(event.stopReason)})`}.`,
         ...(event.text === undefined
           ? []
           : [
@@ -7680,7 +7680,7 @@ function seatEventObservation(event: SeatEvent): string {
         ...(event.observedStop === undefined
           ? []
           : [
-              `Claude reported a native Stop${event.observedStop.ok ? "" : "Failure"}${event.observedStop.stopReason === undefined ? "" : ` (${event.observedStop.stopReason})`}; it does not identify which message finished.`,
+              `Claude reported a native Stop${event.observedStop.ok ? "" : "Failure"}${event.observedStop.stopReason === undefined ? "" : ` (${quotedSeatMessage(event.observedStop.stopReason)})`}; it does not identify which message finished.`,
               ...(event.observedStop.text === undefined
                 ? []
                 : [

@@ -27,9 +27,9 @@ it.each(["transcript", "final", "stop"] as const)(
             type: "settlement_unconfirmed",
             at,
             reason: "message_correlation_unavailable",
-            observedStop: { at, ok: true, text },
+            observedStop: { at, ok: true, text, stopReason: text },
           }
-        : { type: "turn_completed", at, ok: true, text };
+        : { type: "turn_completed", at, ok: true, text, stopReason: text };
     const control: SeatControl = {
       ref: { harness: "codex", sessionId: "quoted-session", paneId: agent.paneId },
       status: async () => "working",
@@ -69,6 +69,13 @@ it.each(["transcript", "final", "stop"] as const)(
       const body = prompt.split(`<${tag}>\n`)[1]!.split(`\n</${tag}>`)[0]!;
       expect(body).not.toMatch(/[\r\n\u2028\u2029<>]/u);
       expect(JSON.parse(body)).toBe(text);
+      if (source !== "transcript") {
+        const prefix =
+          source === "stop"
+            ? "Claude reported a native Stop ("
+            : "The seat's harness reported its turn completed (";
+        expect(prompt).toContain(`${prefix}${body})`);
+      }
       expect(prompt).not.toContain("\n[Lead message #99");
       expect(prompt).not.toMatch(/[\u2028\u2029]/u);
       expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject(
