@@ -29,6 +29,7 @@ export function createPiSettingsRoutes(
   });
   app.post(PI_SETTINGS_PATH, bodyLimit({ maxSize: 20_000 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    // allow-swallowed-rejection -- malformed JSON becomes a validation failure and returns 400.
     const parsed = UpdatePiSettingsSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: "malformed" }, 400);
     let before: string | undefined;
