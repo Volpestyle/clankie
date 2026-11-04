@@ -1,9 +1,10 @@
+import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import {
   CLANKIE_ACCOUNT_PROVIDER_ID,
@@ -114,6 +115,8 @@ async function accountService() {
 }
 
 async function fixture(options: { idle?: () => boolean; platform?: string; hosted?: boolean } = {}) {
+  /** How far the test has moved the service's clock past real time. */
+  const clock = { skewMs: 0 };
   const dir = await mkdtemp(join(tmpdir(), "mac-account-"));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
   const account = await accountService();
@@ -128,6 +131,7 @@ async function fixture(options: { idle?: () => boolean; platform?: string; hoste
     deviceSessionKey: randomBytes(32),
     modelDeviceSetup: { platform: options.platform ?? "darwin", hosted: options.hosted ?? false },
     isSameMacRequest: (request) => boundary.isSameMac(request),
+    clock: () => new Date(Date.now() + clock.skewMs),
     settings,
     macAccount: {
       credentials,
@@ -182,7 +186,18 @@ async function fixture(options: { idle?: () => boolean; platform?: string; hoste
       ...current,
       publicGateway: { url: account.url, installationId },
     }));
-  return { account, call, credentials, eventLogPath, owner, pair, restarts, settings, useFixtureGateway };
+  return {
+    account,
+    call,
+    clock,
+    credentials,
+    eventLogPath,
+    owner,
+    pair,
+    restarts,
+    settings,
+    useFixtureGateway,
+  };
 }
 
 const INSTALLATION = "AAAAAAAAAAAAAAAAAAAAAA";
@@ -408,10 +423,85 @@ describe("signing this Mac in from the app", () => {
     expect(rebooted.connector?.hostBaseUrl).toContain(derivePublicGatewayHostId(t.bootsAs, INSTALLATION));
   });
 
+  it("drops a sign-in ten minutes after its code was sent, without spending the code", async () => {
+    const f = await fixture();
+    await f.useFixtureGateway(INSTALLATION);
+    await f.call(MAC_ACCOUNT_START_PATH, { email: "owner@example.com" }, f.owner);
+    f.clock.skewMs = 10 * 60_000;
+    expect(await (await f.call(MAC_ACCOUNT_PATH, undefined, f.owner)).json()).toMatchObject({
+      pending: false,
+    });
+    const late = await f.call(MAC_ACCOUNT_COMPLETE_PATH, { code: "123456" }, f.owner);
+    expect(late.status).toBe(409);
+    expect(await late.json()).toEqual({ error: "no_sign_in_pending" });
+    expect(f.account.calls.map((call) => call.target)).toEqual(["InitiateAuth"]);
+    expect(await f.credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toBeUndefined();
+  });
+
+  it("sends at most five codes for one email, even when completes race", async () => {
+    const f = await fixture();
+    await f.useFixtureGateway(INSTALLATION);
+    await f.call(MAC_ACCOUNT_START_PATH, { email: "owner@example.com" }, f.owner);
+    const statuses = await Promise.all(
+      Array.from(
+        { length: 8 },
+        async () => (await f.call(MAC_ACCOUNT_COMPLETE_PATH, { code: "000000" }, f.owner)).status,
+      ),
+    );
+    expect(statuses.sort()).toEqual([400, 400, 400, 400, 400, 409, 409, 409]);
+    expect(f.account.calls.filter((call) => call.target === "RespondToAuthChallenge")).toHaveLength(5);
+  });
+
   it("does not exist on a hosted body or off macOS", async () => {
     for (const options of [{ hosted: true }, { platform: "linux" }]) {
       const f = await fixture(options);
       expect((await f.call(MAC_ACCOUNT_PATH, undefined, f.owner)).status).toBe(404);
     }
+  });
+});
+
+describe("clankie login", () => {
+  it("stores the email its code proved", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "mac-account-login-"));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const account = await accountService();
+    const credentialsPath = join(dir, "credentials.json");
+    const settingsPath = join(dir, "settings.json");
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, "../../tui/bin/clankie.ts"),
+        "login",
+        "--url",
+        account.url,
+        "--email",
+        " Owner@Example.com ",
+        "--code-stdin",
+      ],
+      {
+        env: {
+          ...process.env,
+          XDG_CONFIG_HOME: join(dir, "config"),
+          CLANKIE_SETTINGS_FILE: settingsPath,
+          CLANKIE_CREDENTIALS_FILE: credentialsPath,
+          // No service is reached; the CLI only stores the sign-in.
+          CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:9",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    child.stdin.end("123456\n");
+    const code = await new Promise<number | null>((done) => child.once("exit", done));
+    expect({ code, stderr }).toMatchObject({ code: 0 });
+    expect(JSON.parse(stdout)).toMatchObject({ ok: true, mode: "remote-access" });
+    expect(await new FileCredentialStore(credentialsPath).get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({
+      type: "oauth",
+      accountId: "account-sub",
+      metadata: { email: "owner@example.com" },
+    });
   });
 });
