@@ -30,6 +30,8 @@ export function resourceNativeHelperPath(): string {
     for (let depth = 0; depth < 8; depth++) {
       const path = join(ancestor, "packages/fleet-resources/src/native.py");
       if (existsSync(path)) return path;
+      // A checkout's root ends the walk: a nested worktree must not borrow its parent checkout's helper.
+      if (existsSync(join(ancestor, "pnpm-workspace.yaml"))) break;
       const next = dirname(ancestor);
       if (next === ancestor) break;
       ancestor = next;

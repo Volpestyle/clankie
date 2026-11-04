@@ -55,11 +55,19 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     await readFile(new URL("./helpers/native-process-transport/fixture.mjs", import.meta.url)),
   );
   let prepareAction = async () => {};
+  let admissionAction = async () => {};
   const policy = { ...defaultResourcePolicy(), heavySlots: 1 };
   const governor = createResourceGovernor({
     directory: join(root, "governor"),
   });
-  const resources = await createFleetResourceRuntime({ policy: async () => policy, governor });
+  // The owner policy read is native resource admission's last step before launch.
+  const resources = await createFleetResourceRuntime({
+    policy: async () => {
+      await admissionAction();
+      return policy;
+    },
+    governor,
+  });
   let child: ChildProcessWithoutNullStreams | undefined;
   let launches = 0;
   let disposed = 0;
@@ -211,6 +219,9 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     journal,
     onPrepare: (action: () => Promise<void>) => {
       prepareAction = action;
+    },
+    onAdmission: (action: () => Promise<void>) => {
+      admissionAction = action;
     },
     launches: () => launches,
     disposed: () => disposed,
@@ -653,6 +664,31 @@ it("delivers resource instructions once without a user brief and retains the acc
   f.store.close();
   await f.resources.close();
   expect(f.current()).toBeDefined();
+});
+
+it("a grant revoked during native resource admission cannot launch a native process", async () => {
+  const f = await fixture();
+  let admitted = true;
+  let admissions = 0;
+  f.onPrepare(async () => {
+    f.onAdmission(async () => {
+      admissions++;
+      admitted = false;
+    });
+  });
+  const result = await f.hire("Owned fixture task", {
+    owner: { conversationId: "global-default" },
+    current: () => admitted,
+    authorize: async () => admitted,
+  });
+  expect(admissions).toBeGreaterThan(0);
+  expect(result).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("authority is unavailable"),
+  });
+  expect(f.launches()).toBe(0);
+  expect(f.disposed()).toBe(1);
+  expect(await f.journal()).toEqual([]);
 });
 
 it("an installed façade missing its real native helper remains constructible and refuses local admission", async () => {

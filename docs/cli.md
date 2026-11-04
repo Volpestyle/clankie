@@ -4744,7 +4744,8 @@ through the revision-guarded fleet settings API, `/fleet resources`, or
 `clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N` (GiB
 despite the `-gb` spelling). The retired load, memory and disk floors
 (`--max-load-ratio`, `--minimum-free-memory-mb`, `--minimum-free-disk-gb`) are
-refused; saved values still parse and gate nothing.
+refused, and the API answers `retired_setting` (400) to a new value for one;
+saved values still parse and gate nothing.
 
 CLI edits update the journal immediately; API edits are reconciled by the body
 within its five-second refresh. A new local hire is never refused or delayed by

@@ -20,7 +20,7 @@ import {
   defaultResourcePolicy,
   processIdentity,
 } from "@clankie/fleet-resources";
-import { FLEET_RESOURCES_PATH, FleetResourcePolicySchema } from "@clankie/protocol";
+import { FLEET_RESOURCES_PATH, FLEET_SETTINGS_PATH, FleetResourcePolicySchema } from "@clankie/protocol";
 import { createFleetResourceRuntime } from "../../clankie/src/fleet-resource-runtime.ts";
 import { createFleetResourceRoutes } from "../../clankie/src/fleet-resource-routes.ts";
 import { createFleetSettingsRoutes } from "../../clankie/src/fleet-settings-routes.ts";
@@ -577,6 +577,27 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       expect((await new SettingsStore(f.settings.path).load()).fleet.resources).toEqual(
         saved.fleet.resources,
       );
+      // The HTTP write refuses a new value for a retired floor (#599); a client
+      // echoing the saved policy back, or resetting it to the default, still writes.
+      const post = async (resources: Record<string, unknown>) => {
+        const response = await fetch(`${f.host}${FLEET_SETTINGS_PATH}`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${f.token}`, "content-type": "application/json" },
+          body: JSON.stringify({
+            schemaVersion: 1,
+            expectedRevision: (await runFleetCommand(["status"], f.options)).revision,
+            changes: { resources },
+          }),
+        });
+        return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+      };
+      for (const retired of [{ maxLoadRatio: 3 }, { minAvailableMemoryMb: 0 }, { minFreeDiskGb: 1 }])
+        expect(await post({ ...saved.fleet.resources, ...retired })).toEqual({
+          status: 400,
+          body: { error: "retired_setting" },
+        });
+      expect((await post({ ...saved.fleet.resources })).status).toBe(200);
+      expect((await post({ ...saved.fleet.resources, maxLoadRatio: 1.5 })).status).toBe(200);
       const bytes = await readFile(f.settings.path, "utf8");
       await expect(runFleetCommand(["set", "--heavy-slots", "0"], f.options)).rejects.toThrow();
       for (const flag of ["--max-load-ratio", "--minimum-free-memory-mb", "--minimum-free-disk-gb"])
