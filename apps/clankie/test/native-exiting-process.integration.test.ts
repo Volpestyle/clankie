@@ -52,15 +52,26 @@ native(
       session: "owned-fixture",
       socketPath: join(root, "unused.sock"),
     };
+    const proof = localFleetAdmissionProof({
+      binding: async () => binding,
+      herdrBinary: "herdr",
+      processHelper: helper,
+      diagnostics: diagnostic,
+    });
+    const rawProofs: { stdoutEmpty: boolean }[] = [];
     const link = new LocalFleetLink({
       directory: join(root, "links"),
       binding: async () => binding,
-      prove: localFleetAdmissionProof({
-        binding: async () => binding,
-        herdrBinary: "herdr",
-        processHelper: helper,
-        diagnostics: diagnostic,
-      }),
+      prove: async (socket, pane, signal, context, reportRefusal) => {
+        const raw = await nativeProcessRequest(helper, [
+          String(socket.remotePort),
+          String(socket.localPort),
+          "--diagnostics",
+        ]);
+        expect(raw?.stdout).toBe("");
+        rawProofs.push({ stdoutEmpty: raw?.stdout === "" });
+        return proof(socket, pane, signal, context, reportRefusal);
+      },
     });
     let forwarded = 0;
     const server = serve({
@@ -92,6 +103,7 @@ native(
         replies.push(value);
       }
       expect(forwarded).toBe(0);
+      expect(rawProofs).toEqual([{ stdoutEmpty: true }, { stdoutEmpty: true }]);
       const nativeEvents = logs
         .filter((row) => row.source === "native")
         .map((row) =>
@@ -161,7 +173,7 @@ native(
       });
       await writeFile(
         resolve(".local/native-exiting-evidence.json"),
-        JSON.stringify({ replies, forwarded, nativeEvents, contexts, cwdEvents }, null, 2) + "\n",
+        JSON.stringify({ replies, forwarded, rawProofs, nativeEvents, contexts, cwdEvents }, null, 2) + "\n",
       );
     } finally {
       await closeNativeProcessObservers();
