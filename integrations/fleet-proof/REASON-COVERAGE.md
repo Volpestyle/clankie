@@ -75,7 +75,13 @@ also observed `socket_unavailable`, `process_unavailable` and
 `process_census_changed`. The captures prove these OS branches occurred; a
 golden replay does not claim to force their occurrence on every machine.
 
-`process-working-directories.integration.test.ts` runs 150 real cwd censuses
+`process-working-directories.integration.test.ts` also runs 20 cwd censuses
+while eight loops start short-lived account processes, each with a long-lived
+process started in a fresh directory as the census runs. Before #650 most of
+those censuses refused as `process_census_changed` then `attempts_exhausted`;
+each must now settle and name the newborn's directory.
+
+The same file runs 150 real cwd censuses
 while four loops exec the setuid `/bin/ps`. A listed account process that becomes
 root's mid-census is `process_census_changed` with its EPERM, and the census
 retries; before VUH-2937 it refused as `process_census_unavailable`. The case

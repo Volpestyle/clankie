@@ -85,3 +85,49 @@ it.runIf(process.platform === "darwin")(
   },
   60_000,
 );
+
+// A busy account (a build, a parallel test run) starts processes faster than one census
+// attempt could finish without one of them being born mid-scan; tidy and cache reclaim then
+// answered "unavailable" on a loaded Mac (#650). A newborn is read in the next listing, and
+// one that outlives the census is in its answer, wherever in the scan it was born.
+it.runIf(process.platform === "darwin")(
+  "settles under sustained account process births and keeps every newborn that outlives it",
+  async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cwd-census-births-")));
+    let spawning = true;
+    const loops = Array.from(
+      { length: 8 },
+      () =>
+        new Promise<void>((resolve) => {
+          const next = () => {
+            if (!spawning) return resolve();
+            spawn("/usr/bin/true", [], { stdio: "ignore" }).on("exit", next);
+          };
+          next();
+        }),
+    );
+    const newborns: ReturnType<typeof spawn>[] = [];
+    try {
+      for (let round = 0; round < 20; round++) {
+        const cwd = join(root, `newborn-${round}`);
+        await mkdir(cwd);
+        const census = processWorkingDirectories();
+        newborns.push(spawn("/bin/sleep", ["30"], { cwd, stdio: "ignore" }));
+        expect(await census).toContain(cwd);
+      }
+    } finally {
+      spawning = false;
+      await Promise.all(loops);
+      await Promise.all(
+        newborns.map(async (child) => {
+          if (child.exitCode !== null || child.signalCode !== null) return;
+          const stopped = once(child, "exit");
+          child.kill();
+          await stopped;
+        }),
+      );
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+  60_000,
+);

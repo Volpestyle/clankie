@@ -290,9 +290,13 @@ native-process-proof --cwds [--diagnostics]
 Cleanup reads a fresh bounded kernel process inventory and vnode cwd paths,
 returning `{schemaVersion:1,uid,cwds}`. Every live process in the effective-user
 inventory must be observed; readable other-user paths are included too. Each
-path is bracketed by matching process lifetimes, and a second account inventory
-detects new or unobserved live processes. Churn retries within the existing
-200ms attempt / 600ms total budget. An account process that execs a setuid
+path is bracketed by matching process lifetimes. Account inventories then repeat:
+each reads only the live processes not yet read, and the census settles on the
+first inventory in which every live account process has been read. A process
+born mid-scan is read in the next inventory rather than discarding the attempt,
+so a busy account settles (#650; ADR 0348 does the same for the Linux socket
+census). Other churn retries within the existing 200ms attempt / 600ms total
+budget. An account process that execs a setuid
 program such as `/bin/ps` leaves the account after it was listed; when a fresh
 kernel read confirms another effective user, its refused read is churn and the
 retry re-lists without it (VUH-2937). Inaccessible account processes, incomplete
