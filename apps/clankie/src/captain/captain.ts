@@ -2886,6 +2886,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
   });
 
+  // The worktree the host recorded for a local hire, owned by its tidy provenance.
+  const recordedWorktree = (agent: HerdrAgentSnapshot) => {
+    const owner = herdrWatches.tidyProvenance(agent);
+    return agent.session && typeof owner === "object"
+      ? seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner)
+      : undefined;
+  };
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
     runtimeRoot: options.repoRoot,
@@ -2964,11 +2971,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       );
       if (!paths.size)
         return { reason: "main_unknown", failingJobs: [], detail: "Worker directory unavailable" };
-      const owner = herdrWatches.tidyProvenance(agent);
-      const baseline =
-        !fleet && agent.session && typeof owner === "object"
-          ? seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner)
-          : undefined;
+      const baseline = fleet ? undefined : recordedWorktree(agent);
       for (const path of paths) {
         const startHead =
           baseline &&
@@ -2991,17 +2994,27 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }
           return { reason: "main_unknown", failingJobs: [], detail: "GitHub checkpoint reader unavailable" };
         }
-        const held = await deps.workItems.mainCheckpoint(path, remoteGit, startHead);
+        const held = await deps.workItems.mainCheckpoint(
+          path,
+          remoteGit,
+          startHead,
+          baseline && startHead === baseline.head ? baseline : undefined,
+        );
         if (held) return held;
       }
       return undefined;
     },
     worktreeHold: async (agent, options) => {
       const qualified = splitFleetQualified(agent.paneId);
-      if (!qualified) return workerWorktreeHold(agent, options);
+      // This machine's worktree for the hire, as recorded, in case the worker removed it (#769).
+      const local = () => {
+        const recorded = recordedWorktree(agent);
+        return workerWorktreeHold(agent, recorded ? { ...options, recorded } : options);
+      };
+      if (!qualified) return local();
       await refreshFleets();
       const fleet = remoteFleets.find((entry) => entry.id === qualified.fleet);
-      if (!fleet || !deps.fleets?.shell) return workerWorktreeHold(agent, options);
+      if (!fleet || !deps.fleets?.shell) return local();
       const revision = fleetRevisions.get(fleet.id);
       const result = await remoteRetirementWork(
         fleet,

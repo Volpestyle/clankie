@@ -91,6 +91,11 @@ name, or the pane title when detached) at the worktree's HEAD, records its ref,
 HEAD and commit SHAs as a `parked` handoff in the close receipt, issue comment
 and lead notice, and closes. The worktree stays; the branch survives its removal.
 Parking never moves an existing ref: a taken name refuses `unlanded_work`.
+A worker that removed its own recorded worktree is judged by the branch the
+host recorded at hire, read from the shared repository. No commits past the
+hire's start, or all of them on `origin/main` by content, closes (main's
+checkpoint still applies). Unlanded commits refuse with each one named, and a
+deleted branch refuses as unknown.
 Recover with `git log keep/...`; delete the branch once its work has landed or
 is dropped. Dirty files always refuse, even with a decision or
 `unlandedReason`; pass `unlandedReason` only for clean commits that could not be
