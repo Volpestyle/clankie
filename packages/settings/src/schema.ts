@@ -1,6 +1,10 @@
 import { CaptainSeatSchema } from "@clankie/protocol/captain-seat";
 import { WorkTrackerSelectionSchema } from "@clankie/protocol";
-import { EvidenceSettingsSchema, HttpSettingsSchema } from "@clankie/protocol/owner-settings";
+import {
+  EvidenceSettingsSchema,
+  ForeignHeavyPermitsSettingsSchema,
+  HttpSettingsSchema,
+} from "@clankie/protocol/owner-settings";
 import { LinearWakeSettingsSchema } from "@clankie/protocol/linear-settings";
 import { MachineAccessSettingsSchema } from "@clankie/protocol/machine-access";
 import { TrustedCompanionAppSchema } from "@clankie/protocol/local-companion";
@@ -884,6 +888,12 @@ export const ClankieSettingsSchema = z
      * mode). Not the autonomy dial: neither implies the other.
      */
     maximumTrustMode: z.boolean().default(false),
+    /**
+     * Heavy-work permits lent to one other local user over a permit-only
+     * socket. Owner-only, absent (off) by default; set through
+     * `clankie fleet permits`, never through fleet settings.
+     */
+    foreignHeavyPermits: ForeignHeavyPermitsSettingsSchema.optional(),
     autonomy: AutonomySettingsSchema.default(() => AutonomySettingsSchema.parse({})),
     /** Empty marks migration complete too, so generated defaults never become owner choices. */
     retiredWorkingPreferences: RetiredWorkingPreferencesSchema.default(() => ({

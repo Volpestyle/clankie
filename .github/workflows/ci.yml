@@ -345,7 +345,14 @@ jobs:
       # store stays on the Mac between runs (~/Library/pnpm/store), so there
       # is no Actions cache.
       - name: Share the machine's heavy-work permits
-        run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
+        # A runner account other than the owner's asks the owner's Clankie
+        # through his permit socket once he has turned it on (#562).
+        run: |
+          if [ -S /Users/Shared/clankie-permits/heavy.sock ]; then
+            echo "HEAVY=node $GITHUB_WORKSPACE/scripts/ci-heavy.mjs --label ${GITHUB_RUN_ID}/${GITHUB_JOB} --" >> "$GITHUB_ENV"
+          elif command -v clankie >/dev/null; then
+            echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"
+          fi
       - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
       # Some tests build Rust fixtures (#652). Install the pinned toolchain in
       # this runner's own tool cache, once per runner, rather than relying on
@@ -437,7 +444,14 @@ jobs:
             echo "::warning::CLANKIE_MAC_TOOLS is set but is not a directory on this runner"
           fi
       - name: Share the machine's heavy-work permits
-        run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
+        # A runner account other than the owner's asks the owner's Clankie
+        # through his permit socket once he has turned it on (#562).
+        run: |
+          if [ -S /Users/Shared/clankie-permits/heavy.sock ]; then
+            echo "HEAVY=node $GITHUB_WORKSPACE/scripts/ci-heavy.mjs --label ${GITHUB_RUN_ID}/${GITHUB_JOB} --" >> "$GITHUB_ENV"
+          elif command -v clankie >/dev/null; then
+            echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"
+          fi
       - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
       # His bundled fleet starts from the pinned offline Herdr.
       - run: pnpm herdr:build

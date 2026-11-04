@@ -85,6 +85,7 @@ import { BodyLeaseRouter } from "./body-lease-router.ts";
 import { createPersonaImageSource, personaLook } from "./persona-images.ts";
 import { createHostPowerMonitor } from "./host-power.ts";
 import { createServiceFleetResourceRuntime } from "./service-fleet-resources.ts";
+import { createForeignHeavyPermits } from "./foreign-heavy-permits.ts";
 import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
 import { createCaptainSeatLauncher } from "./captain-seat-launcher.ts";
 import { createModelKeys } from "./model-keys.ts";
@@ -1806,6 +1807,20 @@ const captain = createCaptain(
   },
 );
 fleetResources.start();
+// The owner's switch for the CI account's permits (#562); never in a test service.
+const foreignHeavyPermits =
+  process.env.VITEST === "true" || process.env.NODE_ENV === "test"
+    ? undefined
+    : createForeignHeavyPermits({
+        governor: fleetResources.governor,
+        helper: fleetProcessHelper(repoRoot),
+      });
+void settingsStore
+  .load()
+  .then((current) => foreignHeavyPermits?.apply(current.foreignHeavyPermits))
+  .catch((error: unknown) =>
+    logger.warn({ event: "foreign_permits.start_failed", err: error }, "Foreign heavy permits did not start"),
+  );
 
 async function linearFollowing(): Promise<boolean> {
   const current = await settingsStore.load();
@@ -2389,6 +2404,7 @@ const clankie = await createClankieApp({
     captain,
   }),
   fleetResources,
+  ...(foreignHeavyPermits ? { foreignHeavyPermits } : {}),
   views: new ViewStore(join(stateRoot, "views")),
   credentialStoreHealth: () => operatorCredentialStore.health?.() ?? { state: "ready" },
   runtimeHealth: () => runtimeHealth.snapshot(),
@@ -2828,6 +2844,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   playAbort.abort(signal);
   hostPower.stop();
   stopDeployHoldExpiry();
+  void foreignHeavyPermits?.close().catch(() => undefined);
   void fleetResources
     .close()
     .catch(() =>

@@ -520,6 +520,8 @@ const HEADLESS_COMMAND_HELP = [
     lines: [
       "  fleet leads [--json]  Read active Clankie and connected app leads",
       "  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards",
+      "  fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]",
+      "                           Owner-only: let one other local account (a CI runner) queue for heavy slots",
 
       "  fleet status|set [--notes TEXT] [--size max|large|small|solo] [--models optimal|efficient]|clear",
       "          [--closure lead|owner] [--machine-setup lead|owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]",

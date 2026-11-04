@@ -131,6 +131,7 @@ and render original Clankie. This does not change World/chat lead art.
 | Seat host, `fleet.seatHost` (ADR 0319)                                                            | `auto`/`desktop`/`herdr` (auto)                              | fleet-settings                                                     | ✓ `fleet set --seat-host`      | —                    | —                                         | —    | Advanced |
 | Hired seat restarts, `fleet.seatRestarts` (VUH-2824)                                              | `on`/`off` (on)                                              | fleet-settings                                                     | ✓ `fleet set --seat-restarts`  | ✓ `/fleet`           | —                                         | —    | Advanced |
 | Shared resources (heavy and simulator slots, load, memory)                                        | `FleetResourcePolicySchema`                                  | fleet-settings                                                     | ✓                              | ✓ `/fleet resources` | —                                         | —    | Advanced |
+| Heavy permits for one other local account, `foreignHeavyPermits` (#562)                           | user, max leases (1), max hold minutes (60); off             | `GET`/`POST /v1/operator/foreign-heavy-permits` (owner only)       | ✓ `fleet permits`              | —                    | —                                         | —    | Advanced |
 
 ### 5. Projects
 

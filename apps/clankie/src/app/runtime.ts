@@ -87,6 +87,7 @@ import { createHostSettingsRoutes } from "../host-settings-routes.ts";
 import { createHttpSettingsRoutes } from "../http-settings-routes.ts";
 import { httpCors } from "@clankie/settings";
 import { createMaximumTrustModeRoutes } from "../maximum-trust-mode-routes.ts";
+import { createForeignHeavyPermitsRoutes } from "../foreign-heavy-permits-routes.ts";
 import { AutoReplayQuerySchema, AutoReplayInputError } from "../captain/auto-replay.ts";
 import { AUTO_ROUNDS_PATH, AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
 import { ProjectIdSchema } from "@clankie/protocol/projects";
@@ -721,6 +722,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       settingsSource,
       dependencies.captain.maximumTrustSeats ? () => dependencies.captain.maximumTrustSeats!() : undefined,
     ),
+  );
+  app.route(
+    "/",
+    createForeignHeavyPermitsRoutes(authorizeOwnerSecrets, settingsSource, dependencies.foreignHeavyPermits),
   );
   app.route("/", createMachineJoinRoutes(dependencies.machineJoins, authorizeOwnerSecrets));
   if (dependencies.bodyTransfer !== undefined)
