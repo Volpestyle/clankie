@@ -455,6 +455,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/fleet/asks",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "List the structured asks workers raised to their leads, optionally ?state=open|answering|answered|withdrawn. POST /v1/fleet/asks/:askId/answer with { value } or { text } answers one, only to the worker that raised it while it still holds its seat under the same lead; POST /v1/fleet/asks/:askId/withdraw with {} drops an unanswered one. The relay holds each request and answer to the worker-ask schemas.",
+      },
+    ],
+    [
       "POST /v1/operator/views",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

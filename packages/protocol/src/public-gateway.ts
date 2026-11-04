@@ -87,6 +87,7 @@ import {
 } from "./worker-accounts.ts";
 import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
 import { isViewRoute, VIEWS_PATH } from "./views.ts";
+import { isWorkerAskListRoute, workerAskActionRoute, WORKER_ASKS_PATH } from "./worker-asks.ts";
 import { FLEET_ROSTER_PATH, FLEET_ROSTER_RETIRE_PATH, FLEET_ROSTER_UNDO_PATH } from "./fleet-roster.ts";
 import { ROUTINES_PATH } from "./routines.ts";
 import { PROJECTS_PATH, PROJECT_UPDATE_SETTINGS_PATH } from "./projects.ts";
@@ -246,6 +247,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: HUDDLES_PATH, target: "relay" },
   { method: "POST", path: HUDDLE_CLOSE_PATH, target: "relay" },
   { method: "GET", path: VIEWS_PATH, target: "relay" },
+  // Workers' asks (#604); each ask's answer and withdraw routes match by UUID below.
+  { method: "GET", path: WORKER_ASKS_PATH, target: "relay" },
   { method: "POST", path: VIEWS_PATH, target: "relay" },
   { method: "GET", path: FLEET_ROSTER_PATH, target: "relay" },
   { method: "GET", path: FLEET_LEADS_PATH, target: "relay" },
@@ -475,6 +478,8 @@ export function publicGatewayTargetFor(
   if (method === "GET" && isWorkerAccountsRoute(path)) path = WORKER_ACCOUNTS_PATH;
   if (method === "GET" && isUsageReportRoute(path)) path = USAGE_PATH;
   if (method === "GET" && isViewRoute(path)) return "relay";
+  if (method === "GET" && isWorkerAskListRoute(path)) return "relay";
+  if (method === "POST" && workerAskActionRoute(path) !== undefined) return "relay";
   if (method === "POST" && path === `${PROJECT_UPDATE_SETTINGS_PATH}?includeAutonomy=true`)
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))

@@ -2705,8 +2705,9 @@ the send gets `unauthorized`, both with nothing sent. `asks withdraw` drops an
 unanswered one. Clankie
 answers with the `answer_worker_ask` tool. The API is `GET /v1/fleet/asks`
 (`?state=open|answering|answered|withdrawn`), `POST /v1/fleet/asks/:askId/answer`
-with `{ value }` or `{ text }`, and `POST /v1/fleet/asks/:askId/withdraw` (owner
-or Take Control authority). Results are `answered`, `withdrawn`, `uncertain` or
+with `{ value }` or `{ text }`, and `POST /v1/fleet/asks/:askId/withdraw` with `{}`
+(owner or Take Control authority, relayed for the app; the relay accepts only an
+ask's UUID and one known `state` filter). Results are `answered`, `withdrawn`, `uncertain` or
 `refused` with a reason. Records live in `~/.clankie/captain/worker-asks.json`
 (the latest 200, settled ones dropped first).
 

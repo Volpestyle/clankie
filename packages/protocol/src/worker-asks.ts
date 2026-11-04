@@ -157,6 +157,19 @@ export const workerAskWithdrawPath = (askId: string) =>
   `/v1/fleet/asks/${encodeURIComponent(askId)}/withdraw`;
 
 /**
+ * The ask list as a device may read it through the relay: bare, or filtered by
+ * exactly one known state. No other query, encoding or duplicate is accepted.
+ */
+export const isWorkerAskListRoute = (path: string) =>
+  /^\/v1\/fleet\/asks(?:\?state=(?:open|answering|answered|withdrawn))?$/u.test(path);
+
+/** One ask's answer or withdraw route, by its lowercase UUID; anything else is not one. */
+export const workerAskActionRoute = (path: string): "answer" | "withdraw" | undefined =>
+  /^\/v1\/fleet\/asks\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(answer|withdraw)$/u.exec(
+    path,
+  )?.[1] as "answer" | "withdraw" | undefined;
+
+/**
  * The ask inside a report's text, if it carries one: a fenced JSON block or
  * the whole text, `{"ask": {...}}`. Anything else is an ordinary report.
  */
