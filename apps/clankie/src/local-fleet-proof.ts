@@ -344,10 +344,13 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
         signal?.throwIfAborted();
         if (binding?.socketPath !== held.binding.socketPath || binding?.session !== held.binding.session)
           return false;
-        const [births, info] = await Promise.all([
-          Promise.all(held.lineage.map((process) => observeBirth(process.pid, signal))),
-          paneInfo(binding),
-        ]);
+        // The pane's shell first, then the lineage's births, never together (#369). Under
+        // fleet load, birth reads alongside it made Herdr's process info answer about three
+        // times slower, and a worker tool call rechecks its connection about four times.
+        const info = await paneInfo(binding);
+        signal?.throwIfAborted();
+        if (info?.pane_id !== pane || info?.shell_pid !== held.shell) return false;
+        const births = await Promise.all(held.lineage.map((process) => observeBirth(process.pid, signal)));
         signal?.throwIfAborted();
         const unbroken = births.findIndex(
           (birth, index) =>
