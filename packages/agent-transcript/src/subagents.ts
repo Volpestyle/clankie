@@ -237,7 +237,11 @@ const headers = new Map<
   string,
   { device: number; inode: number; size: number; mtimeMs: number; metadata: CodexMetadata }
 >();
-const codexReads = new Map<string, Promise<OperatorSeatSubagents | undefined>>();
+interface CodexRead {
+  running: Promise<OperatorSeatSubagents | undefined>;
+  next?: Promise<OperatorSeatSubagents | undefined>;
+}
+const codexReads = new Map<string, CodexRead>();
 interface CodexDirectory {
   readonly fingerprint: string;
   readonly directories: readonly string[];
@@ -274,13 +278,21 @@ export function readCodexSubagents(
   options: { freshDiscovery?: boolean } = {},
 ): Promise<OperatorSeatSubagents | undefined> {
   const key = `${session.kind}:${session.value}:${options.freshDiscovery === true}`;
-  const existing = codexReads.get(key);
-  if (existing !== undefined) return existing;
-  const pending = readCodexSubagentsAsync(session, options.freshDiscovery === true).finally(() => {
-    if (codexReads.get(key) === pending) codexReads.delete(key);
-  });
-  codexReads.set(key, pending);
-  return pending;
+  const start = (): Promise<OperatorSeatSubagents | undefined> => {
+    const read: CodexRead = {
+      running: readCodexSubagentsAsync(session, options.freshDiscovery === true).finally(() => {
+        if (codexReads.get(key) === read && read.next === undefined) codexReads.delete(key);
+      }),
+    };
+    codexReads.set(key, read);
+    return read.running;
+  };
+  const current = codexReads.get(key);
+  if (current === undefined) return start();
+  // The running read may already be past what changed, so everyone arriving
+  // now shares one read after it: never stale, and never two at once.
+  current.next ??= current.running.then(start, start);
+  return current.next;
 }
 
 async function readCodexSubagentsAsync(

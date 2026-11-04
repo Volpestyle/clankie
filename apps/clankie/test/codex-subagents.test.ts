@@ -9,6 +9,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -448,6 +449,20 @@ describe("Codex children on the existing seat subagents path", async () => {
     expect(await readCodexSubagents(session)).toEqual(running);
     vi.setSystemTime(new Date(now.getTime() + 2_000));
     expect((await readCodexSubagents(session))?.running).toBe(2);
+  });
+
+  it("a read that starts after a completion sees it while an earlier read is still running", async () => {
+    const { parent, session } = setup();
+    expect(await readCodexSubagents(session)).toEqual(running);
+    const earlier = readCodexSubagents(session);
+    // The earlier read has its file stats once this one returns.
+    await lstat(parent);
+    appendFileSync(parent, line(fixture.collected));
+    fresh(parent);
+    const later = readCodexSubagents(session);
+    expect(readCodexSubagents(session)).toBe(later);
+    expect(await earlier).toEqual(running);
+    expect(await later).toEqual(done);
   });
 
   it("a forced native census discovers a late child before the display cache expires", async () => {
