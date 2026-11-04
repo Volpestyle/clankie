@@ -14,6 +14,7 @@ import {
 } from "./testing/landing-validity.mjs";
 
 import { fsInputScope } from "./testing/landing-fs-inputs.mjs";
+import { landingNodeChecks, landingPnpmChecks } from "./testing/landing-static-checks.mjs";
 
 const args = process.argv.slice(2);
 const separator = args.indexOf("--");
@@ -156,16 +157,9 @@ const run = (name, command, environment = {}) => {
   save();
 };
 console.log(`[landing] root ${root}; HEAD ${head}; fixed base ${base}`);
-run("skills", ["pnpm", "herdr:skill:check"]);
-run("format", ["pnpm", "fmt:check"]);
-run("lint", ["pnpm", "lint"]);
-run("deadcode", ["pnpm", "deadcode"]);
-run("doc-links", ["node", "scripts/check-doc-links.mjs"]);
-run("retired-claims", ["node", "scripts/check-retired-claims.mjs"]);
-run("chromium-sandbox", ["node", "scripts/check-chromium-sandbox.mjs"]);
-run("swallowed-rejections", ["node", "scripts/check-swallowed-rejections.mjs", base]);
-run("extension-boundary", ["node", "scripts/check-extension-boundary.mjs"]);
-run("docs-hygiene", ["node", "scripts/check-docs-hygiene.mjs", base]);
+for (const [name, script] of landingPnpmChecks) run(name, ["pnpm", script]);
+for (const [name, script, argument] of landingNodeChecks)
+  run(name, ["node", script, ...(argument === "base" ? [base] : [])]);
 // Every route the public gateway forwards needs a public-docs row. The table is
 // built from protocol path constants, so any protocol, docs or OpenAPI change
 // checks it here rather than first in the release run (VUH-2059).

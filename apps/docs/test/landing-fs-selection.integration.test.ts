@@ -5,6 +5,7 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { fsInputScope, landingFsInputs } from "../../../scripts/testing/landing-fs-inputs.mjs";
+import { landingNodeChecks, landingPnpmChecks } from "../../../scripts/testing/landing-static-checks.mjs";
 
 const source = fileURLToPath(new URL("../../..", import.meta.url));
 const roots: string[] = [];
@@ -34,19 +35,10 @@ function fixture(kind: "manifest" | "bridge" = "manifest") {
     "package.json",
     JSON.stringify({
       private: true,
-      scripts: Object.fromEntries(
-        ["herdr:skill:check", "fmt:check", "lint", "deadcode"].map((name) => [name, "node scripts/noop.mjs"]),
-      ),
+      scripts: Object.fromEntries(landingPnpmChecks.map(([, script]) => [script, "node scripts/noop.mjs"])),
     }),
   );
-  for (const path of [
-    "scripts/check-doc-links.mjs",
-    "scripts/check-extension-boundary.mjs",
-    "scripts/check-retired-claims.mjs",
-    "scripts/check-swallowed-rejections.mjs",
-    "scripts/check-docs-hygiene.mjs",
-  ])
-    write(path, "// Static phase fixture.\n");
+  for (const [, path] of landingNodeChecks) write(path, "// Static phase fixture.\n");
   for (const path of ["scripts/testing/landing-graph-reporter.mjs", "scripts/testing/landing-fs-inputs.mjs"])
     write(path, readFileSync(join(source, path), "utf8"));
   write(
