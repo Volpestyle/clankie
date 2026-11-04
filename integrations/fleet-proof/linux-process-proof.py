@@ -9,6 +9,7 @@ import os
 import re
 import select
 import socket
+import stat
 import struct
 import sys
 import time
@@ -22,11 +23,27 @@ MAX_CHAIN = 64
 MAX_ROUNDS = 1024
 MAX_DENIALS = 3
 PREFIX = "Native process proof diagnostic: "
+NOTE = "Native process proof note: "
 # systemd hosts (Ubuntu among them) mount binfmt_misc on demand at this one
 # path: an autofs trigger with the binfmt_misc filesystem stacked on it. Neither
 # filesystem can hold a PID directory, FD table or namespace handle, and this
 # helper reads nothing under /proc/sys/fs, so they shadow nothing it proves.
 KERNEL_PROC_MOUNTS = {("/proc/sys/fs/binfmt_misc", "autofs"), ("/proc/sys/fs/binfmt_misc", "binfmt_misc")}
+# The user's own service manager (#648). Its FD table is unreadable to the same
+# uid, so the census would refuse every request on a host with a systemd user
+# session. It may be passed over only once PID 1 itself, over the system bus,
+# attests that it is user@U.service's running main process (ADR 0348 amendment).
+NS_GET_NSTYPE = 0xb703
+CLONE_NEWCGROUP, CLONE_NEWUSER = 0x02000000, 0x10000000
+PROC_CGROUP_INIT_INO, PROC_USER_INIT_INO = 0xEFFFFFFB, 0xEFFFFFFD
+SYSTEM_BUS = "/run/dbus/system_bus_socket"
+MAX_BUS_MESSAGE = 65536
+MAX_BUS_SIGNALS = 64
+VENDOR_UNIT_DIRECTORIES = ("/usr/lib/systemd/system/", "/lib/systemd/system/")
+# The fixed diagnostic codes naming why a denied table was not the attested manager.
+MANAGER_CODES = frozenset(("cgroup_namespace", "user_namespace", "cgroup_layout", "multiple_candidates",
+                           "bus_unavailable", "bus_not_root", "owner_not_pid1", "unit_not_running",
+                           "main_pid_mismatch", "notify_access", "unit_modified", "changed", "deadline"))
 
 
 class Refusal(Exception):
@@ -34,6 +51,213 @@ class Refusal(Exception):
         self.stage, self.reason, self.error = stage, reason, error
         # Diagnostics only: the same-user process whose FD table was denied.
         self.denied = denied
+        # Diagnostics only: why that process was not the attested service manager.
+        self.manager = None
+
+
+class Unattested(Exception):
+    """The denied process is not proven to be the user's service manager; a fixed code says why."""
+
+    def __init__(self, code, name=""):
+        super().__init__(code)
+        self.code = code
+        # The D-Bus error name of a `bus_error`; never shown, only mapped to a fixed code.
+        self.name = name
+
+
+class SystemBus:
+    """The system bus at its fixed path, spoken by a bounded, call-and-reply D-Bus client.
+
+    The broker is authenticated by its kernel peer credentials (uid 0, which is real
+    root once the initial user namespace is proven). Calls go one at a time on this one
+    connection; every reply must answer exactly the call just sent, from the expected
+    sender, with the expected signature. Any error, reconnect or surprise ends the
+    exemption: nothing is retried, and no other bus, address or tool is consulted.
+    """
+
+    def __init__(self, proof):
+        self.proof = proof
+        self.serial = 0
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM | socket.SOCK_CLOEXEC)
+        proof.resources.callback(self.sock.close)
+        try:
+            self.timeout()
+            self.sock.connect(SYSTEM_BUS)
+            _, uid, _ = struct.unpack("=iII", self.sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                                                   struct.calcsize("=iII")))
+        except OSError as error:
+            raise Unattested("bus_unavailable") from error
+        if uid != 0:
+            # A broker that created its socket after dropping to its own user
+            # (not socket-activated by PID 1) is refused too: safe, never trusted.
+            raise Unattested("bus_not_root")
+        self.authenticate()
+        self.name = self.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                              "Hello", "", [], "s")
+        if not re.fullmatch(r":[0-9]+\.[0-9]+", self.name):
+            raise Unattested("bus_unavailable")
+
+    def timeout(self):
+        self.proof.bound()
+        self.sock.settimeout(max(0.001, self.proof.deadline - time.monotonic()))
+
+    def recv(self, count):
+        data = bytearray()
+        while len(data) < count:
+            self.timeout()
+            try:
+                chunk = self.sock.recv(count - len(data))
+            except OSError as error:
+                raise Unattested("bus_unavailable") from error
+            if not chunk:
+                raise Unattested("bus_unavailable")
+            data.extend(chunk)
+        return bytes(data)
+
+    def send(self, data):
+        self.timeout()
+        try:
+            self.sock.sendall(data)
+        except OSError as error:
+            raise Unattested("bus_unavailable") from error
+
+    def authenticate(self):
+        # SASL EXTERNAL: the broker checks our kernel uid; we claim only that number.
+        self.send(b"\0AUTH EXTERNAL " + str(os.getuid()).encode().hex().encode() + b"\r\n")
+        line = bytearray()
+        while not line.endswith(b"\r\n"):
+            if len(line) > 256:
+                raise Unattested("bus_unavailable")
+            line.extend(self.recv(1))
+        if not re.fullmatch(rb"OK [0-9a-f]{32}\r\n", bytes(line)):
+            raise Unattested("bus_unavailable")
+        self.send(b"BEGIN\r\n")
+
+    @staticmethod
+    def pad(data, size):
+        data.extend(b"\0" * (-len(data) % size))
+
+    @classmethod
+    def string(cls, data, text, code="s"):
+        raw = text.encode("utf-8")
+        if code == "g":
+            data.append(len(raw))
+        else:
+            cls.pad(data, 4)
+            data.extend(struct.pack("<I", len(raw)))
+        data.extend(raw + b"\0")
+
+    def call(self, destination, path, interface, member, signature, args, reply, decode=None):
+        self.serial += 1
+        body = bytearray()
+        for value in args:
+            self.string(body, value)
+        message = bytearray(b"l\x01\x00\x01" + struct.pack("<II", len(body), self.serial) + b"\0\0\0\0")
+        fields = [(1, "o", path), (2, "s", interface), (3, "s", member), (6, "s", destination)]
+        if signature:
+            fields.append((8, "g", signature))
+        for code, kind, value in fields:
+            self.pad(message, 8)
+            message.append(code)
+            self.string(message, kind, "g")
+            self.string(message, value, kind)
+        struct.pack_into("<I", message, 12, len(message) - 16)
+        self.pad(message, 8)
+        self.send(bytes(message + body))
+        for _ in range(MAX_BUS_SIGNALS):
+            kind, headers, payload = self.receive()
+            if kind == 4:
+                continue  # A signal (NameAcquired) answers nothing; it is never read.
+            if kind not in (2, 3) or headers.get(5) != self.serial:
+                raise Unattested("bus_unavailable")
+            # Only the exact destination answers: the broker for its own calls, the
+            # pinned unique owner for systemd's. A well-known name is never a sender.
+            if headers.get(7) != destination:
+                raise Unattested("bus_unavailable")
+            if kind == 3:
+                raise Unattested("bus_error", str(headers.get(4, ""))[:128])
+            if headers.get(8, "") != reply:
+                raise Unattested("bus_unavailable")
+            value, end = self.value(payload, 0, decode or reply)
+            if end != len(payload):
+                raise Unattested("bus_unavailable")
+            return value
+        raise Unattested("bus_unavailable")
+
+    def receive(self):
+        fixed = self.recv(16)
+        if fixed[0:1] != b"l" or fixed[3] != 1:
+            raise Unattested("bus_unavailable")
+        length, serial, size = struct.unpack_from("<III", fixed, 4)
+        start = 16 + size + (-(16 + size) % 8)
+        if serial == 0 or size > 4096 or start + length > MAX_BUS_MESSAGE:
+            raise Unattested("bus_unavailable")
+        message = fixed + self.recv(start - 16 + length)
+        headers = {}
+        offset = 16
+        while offset < 16 + size:
+            offset += -offset % 8
+            code = message[offset]
+            kind, offset = self.value(message, offset + 1, "g")
+            if code in headers or kind not in ("s", "o", "g", "u"):
+                raise Unattested("bus_unavailable")
+            headers[code], offset = self.value(message, offset, kind)
+        if offset != 16 + size:
+            raise Unattested("bus_unavailable")
+        return fixed[1], headers, message[start:]
+
+    def value(self, data, offset, signature):
+        """Decode one complete value of a fixed, small set of types; anything else refuses."""
+        def need(count):
+            if offset + count > len(data):
+                raise Unattested("bus_unavailable")
+        if signature in ("s", "o"):
+            offset += -offset % 4
+            need(4)
+            (size,) = struct.unpack_from("<I", data, offset)
+            need(4 + size + 1)
+            raw = data[offset + 4:offset + 4 + size]
+            if data[offset + 4 + size] != 0 or b"\0" in raw:
+                raise Unattested("bus_unavailable")
+            return raw.decode("utf-8", "strict"), offset + 5 + size
+        if signature == "g":
+            need(1)
+            size = data[offset]
+            need(1 + size + 1)
+            raw = data[offset + 1:offset + 1 + size]
+            if data[offset + 1 + size] != 0 or not re.fullmatch(rb"[a-z()]*", raw):
+                raise Unattested("bus_unavailable")
+            return raw.decode("ascii"), offset + 2 + size
+        if signature in ("u", "b"):
+            offset += -offset % 4
+            need(4)
+            (number,) = struct.unpack_from("<I", data, offset)
+            if signature == "b" and number > 1:
+                raise Unattested("bus_unavailable")
+            return (bool(number) if signature == "b" else number), offset + 4
+        if signature == "as":
+            offset += -offset % 4
+            need(4)
+            (size,) = struct.unpack_from("<I", data, offset)
+            offset += 4
+            end = offset + size
+            if end > len(data):
+                raise Unattested("bus_unavailable")
+            items = []
+            while offset < end:
+                if len(items) >= 256:
+                    raise Unattested("bus_unavailable")
+                item, offset = self.value(data, offset, "s")
+                items.append(item)
+            if offset != end:
+                raise Unattested("bus_unavailable")
+            return items, offset
+        if signature.startswith("v:"):
+            kind, offset = self.value(data, offset, "g")
+            if kind != signature[2:]:
+                raise Unattested("bus_unavailable")
+            return self.value(data, offset, kind)
+        raise Unattested("bus_unavailable")
 
 
 def require(value, stage, reason):
@@ -61,6 +285,8 @@ class Proof:
         self.resources = contextlib.ExitStack()
         self.census_attempts = 0
         self.census_refusals = []
+        # Diagnostics only: the service manager the census passed over (#648).
+        self.manager = None
 
     def prepare(self):
         require(sys.platform == "linux" and hasattr(os, "pidfd_open"), "startup", "process_unavailable")
@@ -304,6 +530,10 @@ class Proof:
         seen = set()
         read = {}
         denials = {}
+        # Instances shaped like the user's service manager, and the one whose every FD
+        # table stayed denied: passed over only if PID 1 attests it at settlement.
+        shaped = {}
+        deferred = {}
         # Listed instances whose read did not complete. Each must be read, or
         # leave with a confirmed exit, before the census settles: absence from
         # a later listing alone proves nothing.
@@ -324,13 +554,15 @@ class Proof:
             pending = [pid for pid in sorted(listed) if read.get(pid) != listed[pid]]
             if not pending:
                 require(not unresolved, "census", "process_census_changed")
+                if deferred:
+                    self.pass_manager(deferred, shaped, listed)
                 require(len(owners) == 1, "socket_owner", "multiple_owners" if owners else "owner_not_found")
                 return next(iter(owners.values()))
             for pid in pending:
                 self.bound()
                 unresolved[pid] = listed[pid]
                 try:
-                    read[pid] = self.scan(pid, inode, seen, owners)
+                    read[pid] = self.scan(pid, inode, seen, owners, shaped)
                     del unresolved[pid]
                 except (FileNotFoundError, ProcessLookupError):
                     if pid in seen:
@@ -353,12 +585,30 @@ class Proof:
                         key = (pid, listed[pid])
                         denials[key] = denials.get(key, 0) + 1
                         if denials[key] >= MAX_DENIALS:
-                            raise
+                            if shaped.get(pid) != listed[pid]:
+                                raise
+                            # Possibly the user's own service manager (#648): read on,
+                            # and decide only once the whole census has been seen.
+                            deferred[pid] = (listed[pid], error)
+                            read[pid] = listed[pid]
+                            del unresolved[pid]
                     elif error.reason not in ("process_census_changed", "process_changed"):
                         raise
         raise Refusal("census", "attempts_exhausted")
 
-    def scan(self, pid, inode, seen, owners):
+    def pass_manager(self, deferred, shaped, listed):
+        """Pass over the one denied table only when it is PID 1's attested user manager."""
+        pid, (instance, refusal) = next(iter(deferred.items()))
+        try:
+            if len(deferred) != 1 or set(shaped) != {pid} or listed.get(pid) != instance:
+                raise Unattested("multiple_candidates")
+            self.attest_manager(pid)
+        except Unattested as error:
+            refusal.manager = error.code if error.code in MANAGER_CODES else "bus_unavailable"
+            raise refusal from None
+        self.manager = {"pid": pid, "exempted": True}
+
+    def scan(self, pid, inode, seen, owners, shaped):
         """Read one process's every thread FD table; return the inode of the instance read."""
         # Even a zombie leader can retain live threads with private FD
         # tables. Skip only a process whose pidfd proves whole-group exit.
@@ -367,6 +617,12 @@ class Proof:
         try:
             before = self.identity(directory, pid)
             instance = os.fstat(directory).st_ino
+            # Every instance shaped like the user's service manager is counted, readable
+            # or not: a second one makes the one exemption ambiguous, so it refuses.
+            if self.manager_shaped(directory, before[0], before[2]):
+                shaped[pid] = instance
+            else:
+                shaped.pop(pid, None)
             handle = self.pidfd(pid)
             try:
                 if not live(handle):
@@ -446,6 +702,158 @@ class Proof:
                 os.close(handle)
         finally:
             os.close(directory)
+
+    def manager_shaped(self, directory, identity, uids):
+        """Whether a process looks like the user's service manager. Shape is never proof."""
+        if identity["ppid"] != 1 or any(uid != self.uid for uid in uids):
+            return False
+        expected = f"0::/user.slice/user-{self.uid}.slice/user@{self.uid}.service/init.scope\n"
+        return self.read(directory, "cgroup", 4096) == expected.encode()
+
+    def initial_namespaces(self):
+        """The cgroup and user namespaces are the kernel's initial ones, proven through nsfs."""
+        for name, kind, inode, code in (("cgroup", CLONE_NEWCGROUP, PROC_CGROUP_INIT_INO, "cgroup_namespace"),
+                                        ("user", CLONE_NEWUSER, PROC_USER_INIT_INO, "user_namespace")):
+            try:
+                fd = os.open(f"self/ns/{name}", os.O_RDONLY | os.O_CLOEXEC, dir_fd=self.root)
+            except OSError as error:
+                raise Unattested(code) from error
+            try:
+                if fcntl.ioctl(fd, NS_GET_NSTYPE) != kind or os.fstat(fd).st_ino != inode:
+                    raise Unattested(code)
+            except OSError as error:
+                raise Unattested(code) from error
+            finally:
+                os.close(fd)
+        rows = self.read(self.root, "self/cgroup", 4096).decode("utf-8", "strict").splitlines()
+        if len(rows) != 1 or not rows[0].startswith("0::/"):
+            raise Unattested("cgroup_layout")
+
+    def every_thread_denied(self, directory):
+        """Every thread's FD table refuses this uid, as the census met it: at the listing
+        (a non-dumpable process) or at the links (one holding capabilities this uid lacks,
+        like newer systemd's CAP_WAKE_ALARM). One readable table is not this case."""
+        task = os.open("task", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW, dir_fd=directory)
+        try:
+            tids = self.entries(task, MAX_PIDS)
+            for tid in tids:
+                thread = os.open(str(tid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                 dir_fd=task)
+                try:
+                    fds = os.open("fd", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                                  dir_fd=thread)
+                    try:
+                        for name in os.listdir(fds)[:MAX_FDS]:
+                            try:
+                                os.readlink(name, dir_fd=fds)
+                            except FileNotFoundError:
+                                continue  # closed since the listing: says nothing either way
+                    finally:
+                        os.close(fds)
+                    return False
+                except PermissionError:
+                    continue
+                finally:
+                    os.close(thread)
+            return bool(tids) and tids == self.entries(task, MAX_PIDS)
+        finally:
+            os.close(task)
+
+    @staticmethod
+    def vendor_unit_file(path):
+        """A unit file the distribution ships: root's, in its unit directory, writable only by root."""
+        if not path.startswith(VENDOR_UNIT_DIRECTORIES) or "/." in path or "//" in path:
+            return False
+        real = os.path.realpath(path)
+        if not real.startswith(VENDOR_UNIT_DIRECTORIES):
+            return False
+        current = "/"
+        for part in ["", *real.strip("/").split("/")]:
+            current = os.path.join(current, part) if part else current
+            try:
+                info = os.lstat(current)
+            except OSError:
+                return False
+            if stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+                return False
+        return stat.S_ISREG(info.st_mode)
+
+    def systemd_owner(self, bus):
+        """The unique bus name owning org.freedesktop.systemd1, proven by the broker to be PID 1."""
+        try:
+            owner = bus.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                             "GetNameOwner", "s", ["org.freedesktop.systemd1"], "s")
+            if not re.fullmatch(r":[0-9]+\.[0-9]+", owner):
+                raise Unattested("owner_not_pid1")
+            pid = bus.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                           "GetConnectionUnixProcessID", "s", [owner], "u")
+        except Unattested as error:
+            raise Unattested("owner_not_pid1" if error.code == "bus_error" else error.code) from error
+        if pid != 1:
+            raise Unattested("owner_not_pid1")
+        return owner
+
+    def unit_state(self, bus, owner):
+        """user@U.service as PID 1 reports it, every call addressed to PID 1's own unique name."""
+        try:
+            path = bus.call(owner, "/org/freedesktop/systemd1", "org.freedesktop.systemd1.Manager",
+                            "GetUnit", "s", [f"user@{self.uid}.service"], "o")
+        except Unattested as error:
+            raise Unattested("unit_not_running" if error.code == "bus_error" else error.code) from error
+        if not path.startswith("/org/freedesktop/systemd1/unit/"):
+            raise Unattested("bus_unavailable")
+
+        def get(interface, name, kind):
+            return bus.call(owner, path, "org.freedesktop.DBus.Properties", "Get", "ss",
+                            [f"org.freedesktop.systemd1.{interface}", name], "v", "v:" + kind)
+
+        try:
+            return (path, get("Unit", "ActiveState", "s"), get("Unit", "SubState", "s"),
+                    get("Service", "MainPID", "u"), get("Service", "NotifyAccess", "s"),
+                    tuple(get("Unit", "DropInPaths", "as")), get("Unit", "NeedDaemonReload", "b"),
+                    get("Unit", "FragmentPath", "s"))
+        except Unattested as error:
+            raise Unattested("bus_unavailable" if error.code == "bus_error" else error.code) from error
+
+    def unit_runs(self, state, pid):
+        _, active, sub, main, notify, drop_ins, reload, fragment = state
+        if (active, sub) != ("active", "running"):
+            raise Unattested("unit_not_running")
+        if main != pid:
+            raise Unattested("main_pid_mismatch")
+        # Under NotifyAccess=all or exec another process in the unit could name itself
+        # main with MAINPID=; "main" (the vendor default) and "none" cannot.
+        if notify not in ("main", "none"):
+            raise Unattested("notify_access")
+        # The vendor definition, which may carry the distribution's own drop-ins (Debian 13
+        # ships user@.service.d/10-login-barrier.conf); a drop-in anywhere else is a change.
+        if reload or not all(map(self.vendor_unit_file, [fragment, *drop_ins])):
+            raise Unattested("unit_modified")
+
+    def attest_manager(self, pid):
+        """PID 1 attests, before and after this process is pinned and read again, that it is
+        user@U.service's running main process. Nothing is cached; any doubt raises a code."""
+        try:
+            self.initial_namespaces()
+            bus = SystemBus(self)
+            owner = self.systemd_owner(bus)
+            first = self.unit_state(bus, owner)
+            self.unit_runs(first, pid)
+            directory = self.keep(os.open(str(pid), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC |
+                                          os.O_NOFOLLOW, dir_fd=self.root))
+            identity, state, uids = self.identity(directory, pid)
+            handle = self.keep(self.pidfd(pid))
+            if (state != b"live" or not live(handle) or not self.manager_shaped(directory, identity, uids) or
+                    not self.every_thread_denied(directory)):
+                raise Unattested("changed")
+            if self.systemd_owner(bus) != owner or self.unit_state(bus, owner) != first:
+                raise Unattested("changed")
+            if not live(handle) or self.identity(directory, pid) != (identity, state, uids):
+                raise Unattested("changed")
+        except Refusal as error:
+            raise Unattested("deadline" if error.reason == "budget_exhausted" else "changed") from error
+        except (OSError, ValueError, UnicodeError) as error:
+            raise Unattested("changed") from error
 
     def denied(self, directory, pid, uids):
         """Name a denied table's process for diagnostics; never consulted by the proof."""
@@ -649,12 +1057,18 @@ def execute(args):
             proof.namespace()  # Recheck the procfs boundary before releasing facts.
             if proof.census_attempts:
                 result["census"] = {"attempts": proof.census_attempts, "refusals": proof.census_refusals}
+            if diagnostics and proof.manager:
+                # A note, not a diagnostic: the body's diagnostic schema is for refusals.
+                exempted = NOTE + json.dumps({"schemaVersion": 1, "serviceManager": "exempted",
+                                              "pid": proof.manager["pid"]}, separators=(",", ":")) + "\n"
+                return result, retries() + exempted
         return result, retries()
     except Exception as error:
         refusal = error if isinstance(error, Refusal) else Refusal("process", "process_unavailable", getattr(error, "errno", 0) or 0)
         detail = {"schemaVersion": 1, "stage": refusal.stage, "reason": refusal.reason,
                   "errno": max(0, refusal.error), "attempt": proof.census_attempts, "retry": False,
-                  **({"deniedProcess": refusal.denied} if refusal.denied else {})}
+                  **({"deniedProcess": refusal.denied} if refusal.denied else {}),
+                  **({"serviceManager": refusal.manager} if refusal.manager else {})}
         explanation = ("Linux native worker proof requires the initial PID namespace; containers are unsupported"
                        if refusal.reason == "unsupported_pid_namespace" else "Native process proof unavailable")
         return None, retries() + (PREFIX + json.dumps(detail, separators=(",", ":")) + "\n" if diagnostics else "") + explanation + "\n"

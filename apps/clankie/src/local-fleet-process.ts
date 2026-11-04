@@ -323,6 +323,24 @@ export const NativeProcessDiagnosticSchema = z
         uids: z.array(z.number().int().min(0).max(4_294_967_295)).length(4),
       })
       .optional(),
+    // Why that process wasn't PID 1's attested user service manager (#648, ADR 0348).
+    serviceManager: z
+      .enum([
+        "cgroup_namespace",
+        "user_namespace",
+        "cgroup_layout",
+        "multiple_candidates",
+        "bus_unavailable",
+        "bus_not_root",
+        "owner_not_pid1",
+        "unit_not_running",
+        "main_pid_mismatch",
+        "notify_access",
+        "unit_modified",
+        "changed",
+        "deadline",
+      ])
+      .optional(),
   })
   .strict();
 
