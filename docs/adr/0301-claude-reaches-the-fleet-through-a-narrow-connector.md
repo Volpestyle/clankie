@@ -114,8 +114,8 @@ own `/mcp` on a trusted network.
   later, revokes the device. An attacker who refreshes first is still caught
   when the real client next refreshes, normally much later than 60 seconds.
   Sign in again after revocation to reconnect.
-  Proposed amendment: [ADR 0356](0356-an-app-asks-to-connect-and-the-owner-taps-what-the-page-shows.md)
-  would add a matched one-tap Allow in the app and on the pet.
+  Proposed amendment: [ADR 0356](0356-an-app-asks-to-connect-and-the-owner-confirms-its-code.md)
+  would let the owner confirm a sign-in in the app and on the pet.
 - **Narrow by the scope, not the grants.** The service answers a connector
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it
