@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 836" width="520" height="836" role="img" aria-labelledby="title desc">
   <title id="title">How Clankie fits together</title>
-  <desc id="desc">You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and workers report back. The iPhone and iPad app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account.</desc>
+  <desc id="desc">You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and workers report back. The iPhone, iPad and desktop app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account.</desc>
   <style>
     .bg { fill: #fbf8f1; }
     .panel { fill: #ffffff; stroke: #d9d1c0; stroke-width: 2; }
@@ -89,9 +89,10 @@
 
   <g id="app">
     <rect class="app" x="268" y="640" width="236" height="180" rx="16"/>
-    <text class="h-small" x="386" y="680" text-anchor="middle">See the work</text>
-    <text class="body" x="386" y="714" text-anchor="middle">iPhone and iPad</text>
-    <text class="sub" x="386" y="752" text-anchor="middle">Sessions · Feed</text>
-    <text class="sub" x="386" y="782" text-anchor="middle">World · Terminal</text>
+    <text class="h-small" x="386" y="676" text-anchor="middle">See the work</text>
+    <text class="body" x="386" y="708" text-anchor="middle">iPhone, iPad</text>
+    <text class="body" x="386" y="736" text-anchor="middle">and desktop</text>
+    <text class="sub" x="386" y="770" text-anchor="middle">Sessions · Feed</text>
+    <text class="sub" x="386" y="798" text-anchor="middle">World · Terminal</text>
   </g>
 </svg>
