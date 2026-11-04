@@ -6,6 +6,7 @@ import type {
   AutoRound,
   ProjectVelocity,
 } from "@clankie/protocol/auto-rounds";
+import type { ClankieSettings } from "@clankie/settings";
 import type { Project } from "@clankie/protocol/projects";
 import type { OperatorFleetSeat } from "@clankie/protocol";
 import { usageWindowPace } from "@clankie/protocol/worker-accounts";
@@ -104,11 +105,14 @@ export function autoStaffingSeats(
   > &
     Partial<OperatorFleetSeat>)[],
   localFleets: readonly string[] = [],
+  machineId: (id: string) => string = (id) => id,
 ): StaffingSeat[] {
   const seen = new Set<string>();
   return seats.flatMap((seat) => {
     const machine =
-      !seat.fleet || seat.fleet === "default" || localFleets.includes(seat.fleet) ? "local" : seat.fleet;
+      !seat.fleet || seat.fleet === "default" || localFleets.includes(seat.fleet)
+        ? "local"
+        : machineId(seat.fleet);
     const key = JSON.stringify([machine, seat.occupantId ?? seat.seatId]);
     if (seen.has(key)) return [];
     seen.add(key);
@@ -117,6 +121,64 @@ export function autoStaffingSeats(
     const issue = held === undefined ? undefined : unambiguousIssueKey(held);
     return [{ machine, directory: seat.workingDirectory, status: seat.status, ...(issue ? { issue } : {}) }];
   });
+}
+/**
+ * Measurement only: use the owner's registered machine IDs, never display hostnames.
+ * One responding route covers a failed alias only for the very same remote Herdr session.
+ * A different failed session on that PC remains an incomplete census. Nothing rebinds settings.
+ */
+export function autoStaffingCensus(
+  seats: Parameters<typeof autoStaffingSeats>[0],
+  settings: Pick<ClankieSettings, "machines" | "execution">,
+  unavailableSources: ReadonlySet<string>,
+  localFleets: readonly string[] = [],
+) {
+  const ids = new Map(["local", "default", ...localFleets].map((id) => [id, "local"]));
+  const ambiguous = new Set<string>();
+  const unavailableMachines = new Set<string>();
+  const bind = (id: string, machine: string) => {
+    const previous = ids.get(id);
+    if (previous !== undefined && previous !== machine) {
+      ambiguous.add(id);
+      unavailableMachines.add(previous);
+      unavailableMachines.add(machine);
+    } else ids.set(id, machine);
+  };
+  for (const machine of settings.machines)
+    for (const id of [machine.id, ...machine.aliases]) bind(id, machine.id);
+  for (const connection of settings.execution.connections)
+    if (connection.machine !== undefined) bind(connection.id, connection.machine);
+  const machineId = (id: string) => ids.get(id) ?? id;
+  const failed = new Set(
+    [...unavailableSources].filter((s) => s.startsWith("herdr:")).map((s) => s.slice(6)),
+  );
+  const healthy = settings.execution.connections.filter(
+    (c) => c.enabled !== false && !failed.has(c.id) && !ambiguous.has(c.id),
+  );
+  for (const id of failed) {
+    const connection = settings.execution.connections.find((c) => c.id === id);
+    const covered =
+      connection?.ssh !== undefined &&
+      healthy.some(
+        (c) => c.ssh !== undefined && machineId(c.id) === machineId(id) && c.session === connection.session,
+      );
+    if (!covered) unavailableMachines.add(machineId(id));
+  }
+  return {
+    seats: autoStaffingSeats(
+      seats.filter((seat) => !failed.has(seat.fleet ?? "default") && !ambiguous.has(seat.fleet ?? "default")),
+      localFleets,
+      machineId,
+    ),
+    unavailableMachines,
+    machineId,
+    project: (project: Project): Project => ({
+      ...project,
+      workspaces: project.workspaces.map((root) => ({ ...root, machineId: machineId(root.machineId) })),
+      worktreeRoots: project.worktreeRoots.map((root) => ({ ...root, machineId: machineId(root.machineId) })),
+    }),
+    connection: (id: string) => healthy.find((c) => machineId(c.id) === machineId(id))?.id ?? id,
+  };
 }
 const inside = (root: string, directory: string, windows: boolean) => {
   const clean = (value: string) => {

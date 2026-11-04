@@ -7,11 +7,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
-import { ProjectSchema } from "@clankie/protocol/projects";
+import { SettingsStore } from "@clankie/settings";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { AutonomyStore } from "../src/captain/autonomy.ts";
+import { createAutoRounds } from "../src/captain/captain-auto-rounds.ts";
+import { createWatchGate } from "../src/watch.ts";
+import { OperatorFleetSeatSchema } from "@clankie/protocol";
+import { ProjectSchema, ProjectsSettingsSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER } from "@clankie/work-items";
 import {
   autoPlanCapacity,
   autoStaffingSeats,
+  autoStaffingCensus,
   projectIssueKeys,
   projectStaffing,
   staffingSection,
@@ -658,4 +665,252 @@ it("counts a seat holding the project's issue from another repo's worktree, by u
       issueKeys: new Map([[project.id, issueKeys]]),
     }),
   ).toMatchObject({ activeSeats: 1, idleSeats: 2 });
+});
+
+it("uses the registered PC identity for staffing, without hiding a different failed inventory (#356)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "staffing-machine-"));
+  roots.push(root);
+  const store = new SettingsStore(join(root, "settings.json"));
+  const saved = await store.update((current) => ({
+    ...current,
+    machines: [{ id: "builder", ssh: "fixture-pc", shell: "powershell", aliases: ["old-pc"] }],
+    execution: {
+      ...current.execution,
+      connections: [
+        {
+          id: "offline",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "online",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "other",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "other",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "unrelated",
+          machine: "another",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-other", shell: "powershell" },
+        },
+      ],
+    },
+    agentHosts: {
+      connections: [
+        { id: "builder", ssh: "fixture-pc", shell: "powershell" },
+        { id: "old-pc", ssh: "fixture-pc", shell: "powershell" },
+        { id: "another", ssh: "fixture-other", shell: "powershell" },
+      ],
+    },
+  }));
+  const project = ProjectSchema.parse({
+    id: "kh2",
+    name: "KH2",
+    auto: true,
+    workspaces: [{ id: "kh2-work", machineId: "offline", platform: "windows", path: "C:\\Repos\\KH2" }],
+    workerCap: 4,
+  });
+  const raw = [
+    {
+      seatId: "offline/t1",
+      occupantId: "one",
+      fleet: "offline",
+      workingDirectory: "C:/Repos/KH2/work",
+      status: "unknown",
+    },
+    {
+      seatId: "online/t1",
+      occupantId: "one",
+      fleet: "online",
+      machine: "arbitrary-display",
+      workingDirectory: "c:/repos/kh2/work",
+      status: "working",
+    },
+    {
+      seatId: "other/t1",
+      occupantId: "one",
+      fleet: "other",
+      machine: "different-display",
+      workingDirectory: "C:\\Repos\\KH2\\work",
+      status: "working",
+    },
+    {
+      seatId: "online/t2",
+      occupantId: "two",
+      fleet: "online",
+      workingDirectory: "C:/Repos/KH2/idle",
+      status: "idle",
+    },
+    {
+      seatId: "unrelated/t1",
+      occupantId: "one",
+      fleet: "unrelated",
+      workingDirectory: "C:/Repos/KH2/work",
+      status: "working",
+    },
+  ];
+  const read = (failures: string[]) => autoStaffingCensus(raw, saved, new Set(failures));
+  // The former raw-route join leaves this very same registered folder unknown.
+  expect(
+    projectStaffing({
+      project,
+      seats: autoStaffingSeats(raw),
+      unavailableMachines: new Set(["offline"]),
+      queue: { state: "known", ready: [], backlog: [], blocked: [] },
+      plans: [],
+      started: { state: "known", total: 0, byState: {}, cap: null },
+    }),
+  ).toMatchObject({ activeSeats: null, occupiedSeats: null, reason: "unknown" });
+  const census = read(["herdr:offline"]);
+  const staffing = projectStaffing({
+    project: census.project(project),
+    seats: census.seats,
+    unavailableMachines: census.unavailableMachines,
+    queue: { state: "known", ready: [], backlog: [], blocked: [] },
+    plans: [],
+    started: { state: "known", total: 0, byState: {}, cap: null },
+  });
+  expect(staffing).toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+  expect(census.unavailableMachines.has("builder")).toBe(false);
+  expect(census.connection("offline")).toBe("online");
+  expect(
+    census.project({ ...project, workspaces: project.workspaces.map((w) => ({ ...w, machineId: "old-pc" })) })
+      .workspaces[0]!.machineId,
+  ).toBe("builder");
+  expect(project.workspaces[0]!.machineId).toBe("offline"); // No settings/authority rebinding.
+  expect(read(["herdr:offline", "herdr:online"]).unavailableMachines.has("builder")).toBe(true);
+  expect(read(["herdr:other"]).unavailableMachines.has("builder")).toBe(true); // Same PC, different inventory.
+  expect(
+    read(["herdr:offline", "herdr:online", "herdr:other"]).seats.some((s) => s.machine === "builder"),
+  ).toBe(false);
+  const unknown = read(["herdr:other"]);
+  expect(
+    projectStaffing({
+      project: unknown.project(project),
+      seats: unknown.seats,
+      unavailableMachines: unknown.unavailableMachines,
+      queue: { state: "known", ready: [], backlog: [], blocked: [] },
+      plans: [],
+      started: { state: "known", total: 0, byState: {}, cap: null },
+    }),
+  ).toMatchObject({ activeSeats: null, idleSeats: null, occupiedSeats: null, reason: "unknown" });
+  expect(read(["herdr:offline", "herdr:online"]).unavailableMachines.has("builder")).toBe(true);
+  const disabled = autoStaffingCensus(
+    raw,
+    {
+      ...saved,
+      execution: {
+        ...saved.execution,
+        connections: saved.execution.connections.map((c) =>
+          c.id === "online" ? { ...c, enabled: false } : c,
+        ),
+      },
+    },
+    new Set(["herdr:offline"]),
+  );
+  expect(disabled.unavailableMachines.has("builder")).toBe(true);
+  const ambiguous = autoStaffingCensus(
+    raw,
+    {
+      ...saved,
+      execution: {
+        ...saved.execution,
+        connections: [
+          ...saved.execution.connections,
+          {
+            ...saved.execution.connections[0]!,
+            id: "old-pc",
+            machine: "another",
+            ssh: { host: "fixture-other", shell: "powershell" },
+          },
+        ],
+      },
+    },
+    new Set(),
+  );
+  expect(ambiguous.unavailableMachines.has("builder")).toBe(true);
+  expect(ambiguous.unavailableMachines.has("another")).toBe(true);
+  // Actual Auto cadence, account-route selection, persisted round and prompt preparation.
+  await store.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({ ...current.projects, projects: [project] }),
+  }));
+  const autonomy = new AutonomyStore(join(root, "autonomy.json"));
+  autonomy.command("global-default", { action: "set_enabled", enabled: true });
+  const shutdown = new AbortController();
+  const conversations = new ConversationStore(join(root, "conversations"), async () => {});
+  const routes: (string | undefined)[] = [];
+  const pending = new Set<string>();
+  const rounds = createAutoRounds({
+    options: { stateDir: root, autoRoundIntervalMs: 100 },
+    settings: () => store.load(),
+    shutdown,
+    autonomy,
+    watch: createWatchGate(store),
+    conversations,
+    namedLocal: [],
+    unansweredFleetSources: new Set(["herdr:offline"]),
+    pendingFleetSources: pending,
+    refreshFleet: async () =>
+      raw.map((s) =>
+        OperatorFleetSeatSchema.parse({
+          ...s,
+          personaId: "agent-fixture",
+          harness: "codex",
+          title: "Fixture",
+        }),
+      ),
+    autoRoutingLeads: async () => [],
+    readWorkerAccounts: async (machine) => {
+      routes.push(machine);
+      return { ...accounts, machine: machine ?? "local" };
+    },
+    wakeConversation: async (_request, _prompt, guard) => {
+      await guard?.();
+      return true;
+    },
+    noteFleetRoom: () => {},
+    leadParty: () => ({ kind: "clankie", label: "Clankie" }),
+  });
+  try {
+    const read = () => new AutoRoundRecord(join(root, "auto-rounds")).read();
+    await expect
+      .poll(() => read()[0]?.projects[0]?.staffing, { timeout: 10000 })
+      .toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+    expect(read()[0]!.staffing).toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+    expect(new Set(routes)).toEqual(new Set(["online"]));
+    expect(read()[0]!.staffing?.plans).toHaveLength(2);
+    expect(read()[0]!.staffing?.plans.every((plan) => plan.machine === "builder")).toBe(true);
+    expect((await store.load()).projects.projects[0]!.workspaces[0]!.machineId).toBe("offline");
+    pending.add("herdr:online");
+    await expect.poll(() => read()[0]?.projects[0]?.staffing?.activeSeats, { timeout: 10000 }).toBe(null);
+    expect(read()[0]!.staffing?.activeSeats).toBe(null);
+    pending.delete("herdr:online");
+    await expect.poll(() => read()[0]?.projects[0]?.staffing?.activeSeats, { timeout: 10000 }).toBe(1);
+  } finally {
+    shutdown.abort();
+    rounds.stopAutoRounds();
+    autonomy.close();
+    await conversations.close();
+  }
 });
