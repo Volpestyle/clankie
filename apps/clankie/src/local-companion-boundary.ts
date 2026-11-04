@@ -21,8 +21,11 @@ export class LocalCompanionBoundary {
 
   /**
    * A native client on this Mac reaching the primary listener over loopback,
-   * without the JSON body the companion routes demand. It only chooses which
-   * addresses a device is told to use; it confers no authority.
+   * without the JSON body the companion routes demand and with no origin or
+   * forwarding header. It chooses which addresses a device is told to use, and
+   * it is the same-Mac half of ownerMacAdmission (the pairing offer and this
+   * Mac's account sign-in), which still requires a Take Control device session.
+   * On its own it confers no authority.
    */
   isSameMac(request: Request): boolean {
     return this.sameMac.has(request);

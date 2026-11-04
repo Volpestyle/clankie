@@ -1,3 +1,4 @@
+import type { ClankieAccountSignIn } from "../clankie-account-signin.ts";
 import type { HarnessRefreshAuthority } from "../runtime-update-routes.ts";
 import type { InstalledGameExtensions } from "../game-extension-projection.ts";
 import type { HerdrFleet } from "../herdr-fleet.ts";
@@ -186,7 +187,7 @@ export interface ClankieAppDependencies {
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** Owner identity proven only by the private same-user Unix mint listener. */
   localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
-  /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
+  /** A native client on this Mac over loopback, not forwarded; picks addresses, and with a Take Control device session admits ownerMacAdmission. */
   isSameMacRequest?: (request: Request) => boolean;
   /**
    * Proves which app on this Mac sent a companion redeem and whether the owner
@@ -235,6 +236,8 @@ export interface ClankieAppDependencies {
   herdrBinding?: () => HerdrBinding | undefined;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
+  /** This Mac's clankie.bot sign-in for the owner's own app (#722); tokens stay in the broker. */
+  clankieAccountSignIn?: ClankieAccountSignIn;
   /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */
   hostPower?: () => HostPowerReport;
   autoUpdateManaged?: boolean;

@@ -110,6 +110,30 @@ function sameMacAddresses(request: Request): { controlPlaneUrl: string; relayUrl
   };
 }
 
+/**
+ * The owner, or the owner's own app on this Mac (ADR 0314): the operator, or a
+ * paired device with Take Control calling over this Mac's own loopback, never
+ * one the gateway forwarded. The pairing offer and this Mac's account sign-in
+ * (#722) admit exactly this.
+ */
+export function ownerMacAdmission(
+  ctx: Pick<RegisterPairingRoutesContext, "dependencies" | "authenticateDevice">,
+) {
+  return async (request: Request) => {
+    const operator = await authenticateOperator(request, ctx.dependencies);
+    if (operator === "unavailable")
+      return { error: "operator_authentication_unavailable", status: 503 } as const;
+    if (operator) return { mintedBy: operator.operatorId, device: false } as const;
+    if (!ctx.dependencies.isSameMacRequest?.(request))
+      return { error: "operator_authentication_required", status: 401 } as const;
+    const device = await ctx.authenticateDevice(request);
+    if (device === "unavailable") return { error: "device_authentication_unavailable", status: 503 } as const;
+    if ("denied" in device) return { error: "operator_authentication_required", status: 401 } as const;
+    if (!device.grants.terminalControl) return { error: "forbidden", status: 403 } as const;
+    return { mintedBy: `device:${device.deviceId}`, device: true } as const;
+  };
+}
+
 export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   // Expire before any HTTP route can use an automation credential, including after replay.
   ctx.app.use("*", async (_context, next) => {
@@ -340,19 +364,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
   // The owner's app on this Mac may also add a device (ADR 0314): a paired
   // device with Take Control, calling over this Mac's own loopback, can mint
   // an ordinary offer. Review and run offers stay the operator's.
-  const offerMinter = async (request: Request) => {
-    const operator = await authenticateOperator(request, ctx.dependencies);
-    if (operator === "unavailable")
-      return { error: "operator_authentication_unavailable", status: 503 } as const;
-    if (operator) return { mintedBy: operator.operatorId, device: false } as const;
-    if (!ctx.dependencies.isSameMacRequest?.(request))
-      return { error: "operator_authentication_required", status: 401 } as const;
-    const device = await ctx.authenticateDevice(request);
-    if (device === "unavailable") return { error: "device_authentication_unavailable", status: 503 } as const;
-    if ("denied" in device) return { error: "operator_authentication_required", status: 401 } as const;
-    if (!device.grants.terminalControl) return { error: "forbidden", status: 403 } as const;
-    return { mintedBy: `device:${device.deviceId}`, device: true } as const;
-  };
+  const offerMinter = ownerMacAdmission(ctx);
 
   ctx.app.post("/v1/pairing/offer", async (context) => {
     const minter = await offerMinter(context.req.raw);

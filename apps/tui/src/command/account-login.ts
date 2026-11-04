@@ -52,7 +52,9 @@ export async function loginThisMac(
         : (process.stderr.write("Enter the emailed code on stdin.\n"),
           (await pipedCode).value as string | undefined);
     if (!code) throw new Error("No email code supplied");
-    const credential = await completeClankieAccountLogin({ challenge, code });
+    const signedIn = await completeClankieAccountLogin({ challenge, code });
+    // The address the code proved, so status names the account (#722).
+    const credential = { ...signedIn, metadata: { ...signedIn.metadata, email: challenge.email } };
     const enabled = await gatewayEnableWithAccount(
       { gatewayUrl, credential },
       {

@@ -971,6 +971,114 @@ paths:
           description: Durable inbox is at capacity
         "503":
           description: Durable admission unavailable
+  /v1/clankie-account:
+    get:
+      tags: [Pairing]
+      operationId: getClankieAccountSignIn
+      summary: This Mac's clankie.bot sign-in, for the owner's own app
+      description: |
+        Admitted like the pairing offer: an operator bearer, or a same-Mac
+        loopback device session with terminal control. Origin, forwarded and
+        gateway requests are refused. never_set_up has no account record;
+        signed_out has an earlier one that no longer works. signed_in names the
+        email the code proved (absent for sign-ins before #722) and the running
+        doorway; restartRequired means the sign-in was stored after the doorway
+        started, so it opens after `clankie restart`. Never returns a token.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Sign-in status
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [state]
+                    properties: { state: { type: string, enum: [never_set_up, signed_out] } }
+                  - type: object
+                    additionalProperties: false
+                    required: [state, doorway, restartRequired]
+                    properties:
+                      state: { type: string, const: signed_in }
+                      email: { type: string }
+                      doorway: { type: object, description: PublicGatewayDoorwayState }
+                      restartRequired: { type: boolean }
+        "401": { description: operator_authentication_required }
+        "403": { description: forbidden (device without terminal control, or a browser origin) }
+        "503": { description: unavailable }
+  /v1/clankie-account/start:
+    post:
+      tags: [Pairing]
+      operationId: startClankieAccountSignIn
+      summary: Email this Mac's owner a clankie.bot sign-in code
+      description: |
+        Same admission as GET /v1/clankie-account. Asks the account service for
+        an EMAIL_OTP code. The provider session stays in the service; the reply
+        carries only an opaque, single-use challenge id. A new start replaces any
+        pending one. Pending sign-ins live ten minutes, in memory only.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties: { email: { type: string, minLength: 3, maxLength: 320 } }
+      responses:
+        "200":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [challengeId, expiresAt]
+                properties:
+                  challengeId: { type: string, format: uuid }
+                  expiresAt: { type: string, format: date-time }
+        "400": { description: malformed or email_invalid }
+        "401": { description: operator_authentication_required }
+        "403": { description: forbidden or account_not_invited }
+        "429": { description: rate_limited }
+        "502": { description: unexpected_response }
+        "503": { description: unavailable or service_unavailable }
+  /v1/clankie-account/complete:
+    post:
+      tags: [Pairing]
+      operationId: completeClankieAccountSignIn
+      summary: Finish this Mac's clankie.bot sign-in with the emailed code
+      description: |
+        Same admission as GET /v1/clankie-account. On success the service's
+        credential broker stores the account tokens, replaces any legacy gateway
+        credential and points settings at the gateway, keeping this Mac's
+        installation id, exactly as `clankie login` does. Replies with the new
+        status; tokens never leave the service. A wrong code may be retried up
+        to five times; any other refusal ends the pending sign-in.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeId, code]
+              properties:
+                challengeId: { type: string, format: uuid }
+                code: { type: string, minLength: 1, maxLength: 16 }
+      responses:
+        "200": { description: Signed in; same body as GET /v1/clankie-account }
+        "400": { description: malformed or code_invalid }
+        "401": { description: operator_authentication_required }
+        "403": { description: forbidden or account_not_invited }
+        "404": { description: challenge_unknown }
+        "410": { description: code_expired }
+        "429": { description: rate_limited }
+        "502": { description: unexpected_response }
+        "503": { description: unavailable or service_unavailable }
   /v1/composer/transcription/status:
     get:
       tags: [Devices]

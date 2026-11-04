@@ -271,10 +271,12 @@ export async function refreshClankieAccountCredential(
     const response = RefreshResponseSchema.parse(await recoverRefreshReply(credential, config, fetchImpl));
     const refresh = response.AuthenticationResult.RefreshToken ?? credential.refresh;
     if (refresh !== credential.refresh) await persistRotation?.({ ...credential, refresh });
-    return credentialFromAuthentication(
+    const renewed = credentialFromAuthentication(
       { ...response.AuthenticationResult, RefreshToken: refresh },
       config.account.clientId,
     );
+    // The sign-in's own record (the email its code proved, #722) outlives every refresh.
+    return credential.metadata === undefined ? renewed : { ...renewed, metadata: credential.metadata };
   } catch (error) {
     throw mapRefreshError(error);
   }

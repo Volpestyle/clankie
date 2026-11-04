@@ -113,6 +113,7 @@ import { authenticateCaptain, authenticateOperator, captainTransportKind, readJs
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
+import { registerClankieAccountRoutes } from "./clankie-account-routes.ts";
 import { ConnectorDetection } from "./connector-detection.ts";
 import { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
 import { registerConnectorRoutes } from "./connector-routes.ts";
@@ -2617,6 +2618,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return hostDisplayName;
     },
   });
+  registerClankieAccountRoutes({ app, dependencies, authenticateDevice });
   const promptAnswers = new ConnectorPromptAnswers(dependencies.connectorPromptAnswersPath);
   const detection = dependencies.connectorDetection ?? new ConnectorDetection();
   registerConnectorRoutes({
