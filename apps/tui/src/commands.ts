@@ -1323,9 +1323,10 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
           return;
         }
         if (words[0] === "pi") {
-          const result = await runAccountsCommand(words, {
-            ...(context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher }),
-          });
+          const result = await runAccountsCommand(
+            words,
+            context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher },
+          );
           shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
           return;
         }
