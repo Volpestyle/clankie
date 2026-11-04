@@ -86,7 +86,7 @@ async function setup() {
       localMachineId: "local",
     });
     /** A confirmed hire, plus the captain's refusal for a roster that saw another occupant. */
-    async function hire(title: string, key: string) {
+    async function hire(title: string, key: string, attempt = false) {
       const pane = `${id}-pane-${++panes}`;
       const occupant = `fixture-${pane}`;
       const allocation = ledger.reserve(settings, id, {
@@ -95,6 +95,8 @@ async function setup() {
         workingDirectory: join(path, pane),
         harness: "codex",
         deliverable: key,
+        // Deliberate same-issue peers must pass the real claim gate (#602).
+        ...(attempt ? { attempt: true, model: `fixture-${pane}` } : {}),
       });
       ledger.launch(allocation.id, settings);
       ledger.pane(allocation.id, pane);
@@ -200,8 +202,8 @@ it("settles past an unknown owner whose assignment provably names other work", a
 it("defers for a relevant or unprovable unknown owner, then hands off once it recovers", async () => {
   const { keeper, project, advance } = await setup();
   const a = await project("a");
-  const closing = await a.hire("Soren", "LOCAL-VUH-4");
-  const peer = await a.hire("Peer on the same issue", "LOCAL-VUH-4");
+  const closing = await a.hire("Soren", "LOCAL-VUH-4", true);
+  const peer = await a.hire("Peer on the same issue", "LOCAL-VUH-4", true);
   const unprovable = { seatId: "head", title: "Clankie", keys: [], ownedKeys: ["LOCAL-VUH-4"] };
   await keeper.observe([closing.live, peer.live]);
   // Unprovable: no attribution, and its key names the closing item in this scope.
