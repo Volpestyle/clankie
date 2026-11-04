@@ -489,6 +489,24 @@ export function createFleetCapacityReader(input: {
         }
       }),
     );
-    return FleetCapacitySchema.parse({ ...result, machineResources: Object.fromEntries(entries) });
+    // A sibling read can outlast an earlier host report. Expire it again at
+    // assembly, after all asynchronous reads, without replacing its host time.
+    const assembledAt = now();
+    const machineResources = Object.fromEntries(
+      entries.map(([machine, entry]) => [
+        machine,
+        entry.status === "available" &&
+        !fleetResourceObservationIsFresh(Date.parse(entry.observedAt), assembledAt)
+          ? {
+              source: entry.source,
+              advisory: entry.advisory,
+              observedAt: entry.observedAt,
+              status: "unavailable" as const,
+              reason: "stale-observation" as const,
+            }
+          : entry,
+      ]),
+    );
+    return FleetCapacitySchema.parse({ ...result, machineResources });
   };
 }

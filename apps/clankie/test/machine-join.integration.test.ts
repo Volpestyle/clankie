@@ -1726,3 +1726,100 @@ test.runIf(nativeResourcesSupported)(
     }
   },
 );
+
+test.runIf(nativeResourcesSupported)(
+  "a slow sibling read expires an initially fresh free slot before fleet capacity is returned",
+  async () => {
+    const f = await fixture();
+    const credential = await f.approve();
+    await saveJoinedMachineCredential(f.store, credential);
+    const directory = join(f.root, "slow-sibling-resources");
+    const native = joinedMachineResourcePorts({ directory, env: {} });
+    const runner = createResourceGovernor({ directory });
+    await runner.configure({ ...defaultResourcePolicy(), heavySlots: 1, simulatorSlots: 0 });
+    const abort = new AbortController();
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      ports: native,
+    });
+    const id = credential.lease.machineId;
+    const machines = createMachineFleetResources({
+      settings: () => f.settings.load(),
+      remote: joinedFleetResources(f.joins),
+      joined: f.joins,
+    });
+    let captured!: () => void;
+    const fastReading = new Promise<void>((resolve) => {
+      captured = resolve;
+    });
+    const release = join(f.root, "release-slow-sibling-heavy");
+    let job: Promise<number> | undefined;
+    let measuredAt = 0;
+    const readCapacity = createFleetCapacityReader({
+      settings: () => f.settings.load(),
+      accounts: async () => ({ machine: "local", unread: true }),
+      seats: async () => [],
+      leadSeatId: () => undefined,
+      heavy: () => undefined,
+      tracker: () => undefined,
+      history: new UsageHistory(join(f.root, "slow-sibling-history.json")),
+      machineResources: {
+        ids: async () => [id, "local"],
+        status: async (machine) => {
+          if (machine === id) {
+            const reading = await machines.status(id);
+            expect(reading).toMatchObject({ status: "available", snapshot: { capacity: { used: 0 } } });
+            if (reading.status !== "available") throw Error("fixture_snapshot_missing");
+            measuredAt = reading.snapshot.pressure!.sampledAtMs;
+            captured();
+            return reading;
+          }
+          await fastReading;
+          if (abort.signal.aborted) throw Error("fixture_aborted");
+          // The joined host was free when read, then its real governor admits a job
+          // while a sibling's status call holds the aggregate open. No fake clock.
+          job = runner.runHeavy(process.execPath, [
+            "-e",
+            `const fs=require('node:fs');const wait=()=>fs.existsSync(${JSON.stringify(release)})?process.exit(0):setTimeout(wait,20);wait();`,
+          ]);
+          await until(async () => (await runner.snapshot()).capacity.used === 1);
+          await new Promise((resolve) => setTimeout(resolve, Math.max(0, measuredAt + 6_100 - Date.now())));
+          return {
+            schemaVersion: 1 as const,
+            machine: "local",
+            policy: defaultResourcePolicy(),
+            status: "unavailable" as const,
+            reason: "probe-unavailable" as const,
+          };
+        },
+      },
+    });
+    try {
+      const result = await readCapacity(true);
+      expect(Date.now() - measuredAt).toBeGreaterThanOrEqual(6_000);
+      expect((await runner.snapshot()).capacity.used).toBe(1);
+      const entry = result.machineResources![id]!;
+      expect(entry).toMatchObject({
+        source: "host-reported",
+        advisory: true,
+        status: "unavailable",
+        reason: "stale-observation",
+        observedAt: new Date(measuredAt).toISOString(),
+      });
+      expect(entry).not.toHaveProperty("full");
+      expect(entry).not.toHaveProperty("light");
+      expect(entry).not.toHaveProperty("server");
+    } finally {
+      captured();
+      abort.abort();
+      await channel;
+      await writeFile(release, "");
+      await job;
+      await runner.close();
+      await f.close();
+    }
+  },
+  15_000,
+);
