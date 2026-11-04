@@ -62,7 +62,9 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       maxBuffer: 2 * 1024 * 1024,
     }).catch((error: unknown) => {
       if ((error as { killed?: boolean }).killed)
-        hang = new Error(`herdr ${args.join(" ")} hung past its ${timeoutMs / 1000} s timeout`, { cause: error });
+        hang = new Error(`herdr ${args.join(" ")} hung past its ${timeoutMs / 1000} s timeout`, {
+          cause: error,
+        });
       throw hang ?? error;
     });
     calls.push({
