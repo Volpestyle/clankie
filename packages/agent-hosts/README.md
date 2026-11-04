@@ -321,6 +321,16 @@ worker descriptor. Models are checked against Prime's own providers
 (`openai-codex/...` for a ChatGPT subscription, for example), not Clankie's
 registry, and a session that did not select the requested model is refused.
 
+Clankie clears the resource holder and native-session environment fields when
+it starts a Prime daemon. Those empty values also reach the daemon's workers.
+Reconnecting to that sanitized daemon preserves them. An already-running daemon
+keeps the environment it started with: Prime 0.10.0 accepts but ignores `launchEnv`
+overrides on session creation. This fix cannot repair its existing or future
+workers. Before relying on clean attribution from an older or externally started
+daemon, the owner must stop it and let Clankie start it again; Clankie never
+restarts the owner's daemon automatically. Heavy-work ownership still requires
+a live native process; a holder label grants no authority.
+
 Limits: Prime's daemon supervisor descends from whichever process first started
 it, and per-session MCP servers do not survive a worker respawn; a changed worker
 instance reports control unavailable. Control is in memory, so a service restart
