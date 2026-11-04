@@ -80,6 +80,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["computer"],
     lines: [
+      "  computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json  Read or change the owner’s desktop choice",
+      "  computer permissions [--machine ID] [--refresh] --json  Read permission status; refresh only in the acting terminal on its Mac",
       "  computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)",
     ],
   },

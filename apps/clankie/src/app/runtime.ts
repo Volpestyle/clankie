@@ -1,4 +1,7 @@
 import { workerReportDevice } from "../devices.ts";
+import { DesktopAccess } from "../desktop-access.ts";
+import { createDesktopAccessRoutes } from "../desktop-access-routes.ts";
+import { machineAccessLevel } from "../machine-access.ts";
 import { createPiSettingsRoutes } from "../pi-settings-routes.ts";
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
@@ -615,6 +618,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     }),
   );
+  const desktopMachines = dependencies.runtimes?.machines;
+  const desktopAccess = new DesktopAccess(
+    settingsSource,
+    (current, id) => desktopMachines?.desktopAccessLevel(current, id) ?? machineAccessLevel(current, id),
+  );
+  desktopMachines?.setDesktopAccess(desktopAccess);
+  const desktopOperator = async (request: Request): Promise<true | "authentication_required"> => {
+    const identity = await authenticateOperator(request, dependencies);
+    return identity && identity !== "unavailable" ? true : "authentication_required";
+  };
   /** Owner operator or an owner device with current Take Control authority. */
   const authorizeOwnerSecrets = async (
     request: Request,
@@ -627,6 +640,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? true
       : "forbidden";
   };
+  app.route(
+    "/",
+    createDesktopAccessRoutes({
+      desktop: desktopAccess,
+      read: authorizeOwnerSecrets,
+      write: authorizeOwnerSecrets,
+      publish: desktopOperator,
+      known: (id) => desktopMachines?.hasDesktopMachine(id) ?? Promise.resolve(id === "local"),
+    }),
+  );
   app.route(
     "/",
     createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),

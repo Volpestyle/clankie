@@ -8,6 +8,8 @@ export async function runComputerCommand(
   args: readonly string[],
   options: BrowserCommandOptions = {},
 ): Promise<unknown> {
+  if (args[0] === "mode" || args[0] === "permissions")
+    return (await import("./computer-settings.ts")).runComputerSettingsCommand(args, options);
   if (
     (args.length !== 2 && !(args.length === 4 && args[2] === "--image-path" && args[3])) ||
     args[0] !== "request"

@@ -1,3 +1,4 @@
+import { ComputerSettingsSchema } from "@clankie/protocol/desktop-access";
 import { CaptainSeatSchema } from "@clankie/protocol/captain-seat";
 import { WorkTrackerSelectionSchema } from "@clankie/protocol";
 import {
@@ -835,6 +836,7 @@ export const ClankieSettingsSchema = z
       .default([]),
     legacyMachineJoins: z.boolean().default(true),
     machineAccess: MachineAccessSettingsSchema,
+    computer: ComputerSettingsSchema.default(() => ComputerSettingsSchema.parse({})),
     machines: z
       .array(
         AgentHostConnectionSchema.extend({

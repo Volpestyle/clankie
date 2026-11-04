@@ -1,4 +1,5 @@
 import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
+import { DESKTOP_ACCESS_PATH, isDesktopAccessRoute } from "./desktop-access.ts";
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { BODY_TRANSFER_ROUTES, BODY_TRANSFER_PEER_PATH } from "./body-transfer.ts";
@@ -270,6 +271,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: ROUTINES_PATH, target: "relay" },
   { method: "GET", path: EVIDENCE_STORAGE_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: EVIDENCE_STORAGE_SETTINGS_PATH, target: "relay" },
+  { method: "GET", path: DESKTOP_ACCESS_PATH, target: "relay" },
+  { method: "POST", path: DESKTOP_ACCESS_PATH, target: "relay" },
   { method: "GET", path: HOST_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: HTTP_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: HTTP_SETTINGS_PATH, target: "relay" },
@@ -497,6 +500,7 @@ export function publicGatewayTargetFor(
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
     return "control";
+  if ((method === "GET" || method === "POST") && isDesktopAccessRoute(path)) return "relay";
   const connector = connectorRouteTarget(method, path);
   if (connector !== undefined) return connector;
   return (

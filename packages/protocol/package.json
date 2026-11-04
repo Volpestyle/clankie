@@ -64,6 +64,7 @@
     "./fleet-roster": "./src/fleet-roster.ts",
     "./fleet-resources": "./src/fleet-resources.ts",
     "./skin-drafts": "./src/skin-drafts.ts",
+    "./desktop-access": "./src/desktop-access.ts",
     "./machine-access": "./src/machine-access.ts",
     "./embodiment": "./src/embodiment.ts",
     "./hire-profile": "./src/hire-profile.ts",

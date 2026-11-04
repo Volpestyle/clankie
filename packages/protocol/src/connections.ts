@@ -1,3 +1,4 @@
+import { DesktopAccessSnapshotSchema } from "./desktop-access.ts";
 import { z } from "zod";
 import { MachineAccessLevelSchema } from "./machine-access.ts";
 
@@ -22,6 +23,7 @@ export const MachineSchema = z
     platform: z.enum(["darwin", "win32", "linux"]).optional(),
     transport: z.enum(["local", "ssh", "join"]),
     accessLevel: MachineAccessLevelSchema.optional(),
+    desktopAccess: DesktopAccessSnapshotSchema.optional(),
     accessEnforcement: z.enum(["service-preference", "joined-host", "os-sandbox"]).optional(),
     accessCeiling: MachineAccessLevelSchema.optional(),
     approvedDirectories: z.array(label).max(32).optional(),

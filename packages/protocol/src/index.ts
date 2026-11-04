@@ -887,3 +887,5 @@ export * from "./operator-seat-migration.ts";
 export * from "./setup-survey.ts";
 
 export * from "./fleet-leads.ts";
+
+export * from "./desktop-access.ts";
