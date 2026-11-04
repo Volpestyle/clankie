@@ -3,12 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  SettingsStore,
-  setDefaultProjectRole,
-  setProjectRole,
-  projectRoleForPersona,
-} from "@clankie/settings";
+import { SettingsStore, setProjectRole, projectRoleForPersona } from "@clankie/settings";
 import { ProjectSchema } from "@clankie/protocol/projects";
 import { PersonaStore } from "../src/captain/personas.ts";
 const roots: string[] = [];
@@ -72,7 +67,7 @@ it("restarts between settings commit and identity cleanup without restoring a su
   await store.ready(f.settings);
   await f.settings.update((s) => ({
     ...s,
-    projects: setDefaultProjectRole(s.projects, "alice", "reviewer"),
+    projects: setProjectRole(s.projects, "alice", "reviewer"),
   }));
   writeFileSync(f.path, original);
   await store.close();
@@ -274,7 +269,7 @@ it("drops the role tags of characters whose agent is gone, and only theirs (#181
   const store = new PersonaStore(root);
   await store.ready(settings);
   // A tag left by a character no longer on file.
-  await settings.update((s) => ({ ...s, projects: setDefaultProjectRole(s.projects, "orphan", "builder") }));
+  await settings.update((s) => ({ ...s, projects: setProjectRole(s.projects, "orphan", "builder") }));
   expect((await settings.load()).projects.assignments).toHaveLength(6);
   const live = [{ personaId: "live" }];
   const activity = (personaId: string) => (personaId === "talking" ? yesterday : undefined);

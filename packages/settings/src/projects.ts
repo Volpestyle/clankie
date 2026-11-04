@@ -163,15 +163,6 @@ export function migratePersonaRoles(
   });
 }
 
-/** Existing role setter compatibility. This associates a character; it does not admit a hire. */
-export function setDefaultProjectRole(
-  settings: ProjectsSettings,
-  personaId: string,
-  role: string | null,
-): ProjectsSettings {
-  return setProjectRole(settings, personaId, role, DEFAULT_PROJECT_ID);
-}
-
 /** Associate a character with a role in one project; native membership is validated by the host. */
 export function setProjectRole(
   settings: ProjectsSettings,
