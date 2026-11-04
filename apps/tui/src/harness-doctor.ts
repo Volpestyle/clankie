@@ -306,10 +306,17 @@ export async function inspectHarnessBridges(
     profiles.claude
       .filter((profile) => profile.installed)
       .map(async (profile) => {
-        const old = await oldClaudeWorker(profile.profile).catch(() => undefined);
         const update = `clankie update, or clankie harness install --refresh-linked`;
         const copy = `the old clankie-worker ${profile.version ?? "unknown"} copy`;
-        if (old === undefined) return [`Remove ${copy} from ${profile.profile}: ${update}`];
+        let old: Awaited<ReturnType<typeof oldClaudeWorker>>;
+        try {
+          old = await oldClaudeWorker(profile.profile);
+        } catch (error) {
+          // Unreadable setup state is named, never guessed into an update request.
+          return [
+            `Could not read what keeps ${copy} in ${profile.profile}: ${error instanceof Error ? error.message : String(error)}`,
+          ];
+        }
         const source = old.keptBy.find((entry) => entry.scope === "profile");
         if (source)
           return [

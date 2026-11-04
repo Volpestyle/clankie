@@ -2,7 +2,7 @@
  * ADR 0317: Claude hires load the worker from Clankie's own files, so setup and
  * the update refresh only remove what an older setup installed in a profile.
  */
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -314,4 +314,32 @@ it("removes project-scoped copies from inside each project and keeps the ones a 
   });
   expect(again.filter((entry) => entry.harness === "claude")).toEqual([]);
   expect(asked).toEqual([]);
+});
+
+it("names a project settings file it cannot read instead of passing it for one that enables nothing", async () => {
+  const root = await mkdtemp(join(tmpdir(), "clankie-claude-removal-unreadable-"));
+  homes.push(root);
+  const locked = join(root, "locked");
+  await mkdir(join(locked, ".claude"), { recursive: true });
+  const settings = join(locked, ".claude", "settings.json");
+  await writeFile(settings, JSON.stringify({ enabledPlugins: { "clankie-worker@clankie": true } }));
+  await chmod(settings, 0o000);
+  try {
+    const fixture = await legacyProfile({ settings: "{}", projects: [locked] });
+    const lines = await doctorLines(fixture.home, fixture.profile);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/^Could not read what keeps the old clankie-worker 0\.2\.0 copy in .*: EACCES/u);
+    // The cleanup refuses too, rather than uninstalling a copy that file may still enable.
+    await expect(
+      installHarnessBridges({
+        repoRoot: "/fixture/clankie",
+        env: { HOME: fixture.home },
+        execute: fixture.execute,
+        consent: async () => true,
+      }),
+    ).rejects.toThrow(/EACCES/u);
+    expect(fixture.calls.filter((call) => call.includes("uninstall"))).toEqual([]);
+  } finally {
+    await chmod(settings, 0o600);
+  }
 });

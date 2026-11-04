@@ -19,12 +19,20 @@ const exists = async (path) => {
 };
 
 const OLD_WORKER = "clankie-worker@clankie";
+/**
+ * A path that isn't there is the only expected miss; any other failure (a file
+ * it may not read, say) fails the reading instead of passing for an absence.
+ */
+const missing = (error) => {
+  if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return undefined;
+  throw error;
+};
 /** A settings file whose header says a generator or another source owns it. */
 const managedSettingsText = (text) =>
   /(?:generated|do not edit|managed by)/iu.test(text.split("\n").slice(0, 20).join("\n"));
 /** Whether a settings file still enables the old worker; only its owner may change that. */
 async function declaresOldWorker(path) {
-  const text = await readFile(path, "utf8").catch(() => undefined);
+  const text = await readFile(path, "utf8").catch(missing);
   if (text === undefined) return false;
   try {
     return JSON.parse(text).enabledPlugins?.[OLD_WORKER] !== undefined;
@@ -61,11 +69,6 @@ export async function oldClaudeWorker(profile) {
   const found = worker || marketplace || recorded.length > 0;
   if (!found) return { found, worker, projects: [], marketplace, keptBy: [], settings: undefined };
   const config = join(profile, "settings.json");
-  // A profile without settings is the only expected miss; anything else fails the reading.
-  const missing = (error) => {
-    if (error?.code === "ENOENT") return undefined;
-    throw error;
-  };
   const source = await realpath(config).catch(() => config);
   const text = await readFile(config, "utf8").catch(missing);
   const wasSymlink = (await lstat(config).catch(missing))?.isSymbolicLink() ?? false;
@@ -87,7 +90,7 @@ export async function oldClaudeWorker(profile) {
   }
   const projects = [];
   for (const project of recorded) {
-    if (!(await lstat(project).catch(() => undefined))?.isDirectory()) continue;
+    if (!(await lstat(project).catch(missing))?.isDirectory()) continue;
     const settings = [];
     for (const name of ["settings.json", "settings.local.json"])
       if (await declaresOldWorker(join(project, ".claude", name)))

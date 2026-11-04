@@ -57,6 +57,8 @@ change adds may not drop a rejection silently (`.catch(() => undefined)`,
 `// allow-swallowed-rejection -- REASON`. Tests, docs and evals are exempt, and
 existing sites are not flagged until a change rewrites them; on 2026-10-17 there
 were 604 outside tests, 398 of them in `apps/clankie/src` (VUH-2396).
+Every pull request's quick `check` job also runs it against the pull request's
+base, so a new one fails before the merge rather than on main's `landing` (#632).
 `scripts/check-extension-boundary.mjs` (also `pnpm extensions:check`) keeps the
 service's core from gaining an import of an extension (ADR 0328). The imports the
 core still has outside its composition roots, `index.ts` and `dormant-body.ts`,
