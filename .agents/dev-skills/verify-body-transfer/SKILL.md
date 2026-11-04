@@ -26,7 +26,7 @@ Re-check when a diff touches any of these, or anything they call that writes `se
 | `runTransferCommand` in `apps/tui/src/command/transfer.ts`                  | which steps go to the body named at freeze (`Bound`) |
 | `BodySelfSchema`, `BodyTransferRecordSchema`, abort/release request schemas | record fields the model keeps                        |
 
-**Sync commit:** `9a9a4a37997b12b2f4c7db65ca018c8abbff97d2`. The model was last confirmed against the code at this commit. Run `git diff 9a9a4a37997b12b2f4c7db65ca018c8abbff97d2 -- apps/clankie/src/body-transfer.ts packages/protocol/src/body-transfer.ts apps/tui/src/command/transfer.ts`. If that diff is not empty, re-read each changed function against its model action before you trust a pass. Move the sync commit forward only after you have confirmed that the model describes the code at the new commit.
+**Sync commit:** `3da6a6c2010421742d36c236b70711139171aaa3`. The model was last confirmed against the code at this commit. Run `git diff 3da6a6c2010421742d36c236b70711139171aaa3 -- apps/clankie/src/body-transfer.ts packages/protocol/src/body-transfer.ts apps/tui/src/command/transfer.ts`. If that diff is not empty, re-read each changed function against its model action before you trust a pass. Move the sync commit forward only after you have confirmed that the model describes the code at the new commit.
 
 ## Run it
 
@@ -91,7 +91,7 @@ When the model and a replay disagree, suspect the model first. Each model action
 
 - Bounds: three bodies (S, A, B), two transfer ids, epochs up to 3.
 - The model reads the destination's current authority on release. The CLI reads a status that can be stale.
-- Not checked: crashes inside `applyStaged` beyond what the record captures, `replace: true`, `rebind`, the bundle bytes and hashes, the HTTP routes and their auth, and `reclaim --force`, which by design may leave two histories.
+- Not checked by the finite-state model: crashes inside `applyStaged` beyond what the record captures, `replace: true`, `rebind`, the bundle bytes and hashes, the HTTP routes and their auth, and `reclaim --force`, which by design may leave two histories.
 - The replays stub only `@clankie/settings`'s `discordAttachmentRoot` and `memory.ts`'s `defaultMemoryDir` (directory lookups) and pass an in-memory settings store.
 
 ## Update it after an intended change

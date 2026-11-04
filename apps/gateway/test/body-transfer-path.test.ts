@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -176,6 +176,28 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
     expect((await owner.fetch("GET", "/v1/body-transfer/status", undefined, false)).status).toBe(401);
     // Transfer routes never travel outside the encryption gate.
     expect((await fetch(`${hostBaseUrl}/v1/body-transfer/status`)).status).not.toBe(200);
+
+    expect(
+      (await supervisor.fetch("POST", "/v1/body-transfer/prepare", { transferId: randomUUID() })).status,
+    ).toBe(403);
+    const rawPrepare = await fetch(`${hostBaseUrl}/v1/body-transfer/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ transferId: randomUUID() }),
+    });
+    expect(rawPrepare.status).not.toBe(200);
+    const rawClaim = await fetch(`${hostBaseUrl}/v1/body-transfer/peer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ bodyIdentity: {} }),
+    });
+    expect(rawClaim.status).toBe(400);
+    const unmintedPeer = await fetch(`${hostBaseUrl}/v1/body-transfer/peer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticketId: randomUUID(), requestId: randomUUID(), sealedRequest: "untrusted" }),
+    });
+    expect(unmintedPeer.status).toBe(403);
 
     // The Mac: real history on disk, including an attachment that spans many chunks.
     const macState = join(root, "mac/state");
