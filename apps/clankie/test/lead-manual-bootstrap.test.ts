@@ -14,6 +14,9 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const fake = vi.hoisted(() => ({
   events: [] as string[],
+  /** Resolves when the bootstrap sends its task, the event tests wait for. */
+  taskSent: Promise.resolve(),
+  markTaskSent: () => {},
   configs: [] as any[],
   observers: [] as any[],
   controllers: [] as any[],
@@ -320,6 +323,7 @@ vi.mock("../src/app.ts", () => ({
               conversation: { conversationId: "global-default", scope: { kind: "global" }, revision: 0 },
             });
           fake.events.push("task-send");
+          fake.markTaskSent();
           if (fake.sendMode === "uncertain") throw Error("private internal lost response");
           return Response.json({ op: "send", result: { status: fake.sendMode, runId: "fixture" } });
         },
@@ -352,6 +356,7 @@ beforeEach(() => {
     fake.services,
   ])
     list.length = 0;
+  fake.taskSent = new Promise<void>((resolve) => (fake.markTaskSent = resolve));
   Object.assign(fake, {
     sourceClean: true,
     sendMode: "accepted",
@@ -474,7 +479,7 @@ it("composes real entry seams in order, independently stages indexes/auth, sends
   const f = fixture(),
     invocation = bootstrap.readManualInvocation(f.path);
   const running = bootstrap.runManualBootstrap(invocation);
-  await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+  await fake.taskSent;
   expect(fake.events.indexOf("official-build:environment")).toBeLessThan(fake.events.indexOf("build"));
   expect(fake.events.indexOf("build")).toBeLessThan(fake.events.indexOf("probe"));
   expect(fake.events.indexOf("owner-proof")).toBeLessThan(fake.events.indexOf("observer-create"));
@@ -588,7 +593,7 @@ it("composes historical dependencies and earned calibration before native accoun
   vi.useFakeTimers();
   const f = historicalFixture();
   const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
-  await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+  await fake.taskSent;
   expect(fake.events.indexOf("historical-calibrate")).toBeLessThan(fake.events.indexOf("build"));
   expect(fake.events.filter((event) => event === "historical-materialize")).toHaveLength(3);
   expect(fake.events).not.toContain("official-stage");
@@ -620,7 +625,7 @@ it("owner interruption stops the exact fake container and does not start a verif
   vi.useFakeTimers();
   const f = fixture();
   const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
-  await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+  await fake.taskSent;
   process.emit("SIGINT");
   const result = await running;
   expect(result).toMatchObject({
@@ -638,7 +643,7 @@ it("composes the HTML native environment before its separate mediated verifier",
   f.config.task.id = "html-js-filter";
   f.write();
   const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
-  await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+  await fake.taskSent;
   expect(fake.events.indexOf("html-build")).toBeLessThan(fake.events.indexOf("html-probe"));
   expect(fake.events.indexOf("html-probe")).toBeLessThan(fake.events.indexOf("observer-create"));
   expect(fake.events.lastIndexOf("observer-register")).toBeLessThan(fake.events.indexOf("quota:account-a"));
@@ -665,7 +670,7 @@ it.each(["historical-stop-unconfirmed", "artifact-unavailable"])(
     const f = historicalFixture();
     fake.gradeFailure = code;
     const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
-    await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+    await fake.taskSent;
     await vi.advanceTimersByTimeAsync(1100);
     const result = await running;
     expect(result).toMatchObject({
@@ -691,7 +696,7 @@ it.each([
     const f = fixture();
     fake.neutralFailure = { code, verifierStopConfirmed, containerId: "d".repeat(64) };
     const running = bootstrap.runManualBootstrap(bootstrap.readManualInvocation(f.path));
-    await vi.waitFor(() => expect(fake.events).toContain("task-send"));
+    await fake.taskSent;
     await vi.advanceTimersByTimeAsync(1100);
     const result = await running;
     expect(result).toMatchObject({
