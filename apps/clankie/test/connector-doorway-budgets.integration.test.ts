@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo, type Socket } from "node:net";
 import { resolve } from "node:path";
 import type {
   OperatorConversationServiceRequest,
@@ -17,8 +17,8 @@ import { PublicGatewayConnector } from "../src/public-gateway-connector.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
 // The doorway's connector budgets over the real path: gateway, the Mac's tunnel,
-// the service's sign-in and the relay's MCP. The gateway's clock stands still, so
-// no budget refills while a test spends it. Each caller names its address the way
+// the service's sign-in and the relay's MCP. The gateway's clock stands still until
+// a test moves it, so no budget refills while a test spends it. Each caller names its address the way
 // Caddy does in front of the real gateway.
 
 const hostId = "mac_owner_12345678";
@@ -76,24 +76,33 @@ async function doorway() {
   relayUrl = await listen(relay);
   cleanup.push(() => void relay.close());
 
+  let now = 1_800_000_000_000;
   const gateway = createPublicGateway({
     hostTokens: new Map([[hostId, hostToken]]),
     trustedProxy: { trusts: () => true, refresh: async () => {} },
-    clock: () => 1_800_000_000_000,
+    clock: () => now,
     logger: quiet,
   });
   const origin = await listen(gateway.server);
   cleanup.push(() => gateway.close());
-  const connector = new PublicGatewayConnector({
-    gatewayUrl: origin,
-    hostId,
-    hostToken,
-    controlPlaneUrl: host.baseUrl,
-    relayUrl,
-    logger: quiet,
-  });
-  cleanup.push(() => connector.close());
-  connector.start();
+  const connectMac = () => {
+    const connector = new PublicGatewayConnector({
+      gatewayUrl: origin,
+      hostId,
+      hostToken,
+      controlPlaneUrl: host.baseUrl,
+      relayUrl,
+      logger: quiet,
+    });
+    cleanup.push(() => connector.close());
+    connector.start();
+    return connector;
+  };
+  let connector = connectMac();
+  const reconnectMac = () => {
+    connector.close();
+    connector = connectMac();
+  };
 
   const base = `${origin}/h/${hostId}`;
   const from = (address: string, headers: Record<string, string> = {}) => ({
@@ -141,22 +150,29 @@ async function doorway() {
     });
     expect(response.status).toBe(200);
   };
-  const token = (form: Record<string, string>) =>
-    fetch(`${base}/oauth/token`, {
+  const token = (form: Record<string, string>, encoding: Encoding = "form", address = CLAUDE_SERVER) => {
+    const fields = { client_id: clientId, ...form };
+    return fetch(`${base}/oauth/token`, {
       method: "POST",
-      headers: from(CLAUDE_SERVER, { "content-type": "application/x-www-form-urlencoded" }),
-      body: new URLSearchParams({ client_id: clientId, ...form }).toString(),
+      headers: from(address, {
+        "content-type": encoding === "json" ? "application/json" : "application/x-www-form-urlencoded",
+      }),
+      body: encoding === "json" ? JSON.stringify(fields) : new URLSearchParams(fields).toString(),
     });
+  };
   /** Waits for the owner's approval as the page does, then exchanges as Claude's server does. */
-  const finish = async (signIn: Awaited<ReturnType<typeof open>>) => {
+  const finish = async (signIn: Awaited<ReturnType<typeof open>>, encoding: Encoding = "form") => {
     await approve(signIn.code);
     const approved = (await (await poll(OWNER_BROWSER, signIn.request)).json()) as { redirect: string };
-    return token({
-      grant_type: "authorization_code",
-      redirect_uri: CALLBACK,
-      code: new URL(approved.redirect).searchParams.get("code")!,
-      code_verifier: signIn.verifier,
-    });
+    return token(
+      {
+        grant_type: "authorization_code",
+        redirect_uri: CALLBACK,
+        code: new URL(approved.redirect).searchParams.get("code")!,
+        code_verifier: signIn.verifier,
+      },
+      encoding,
+    );
   };
   const toolList = (bearer: string, address = CLAUDE_SERVER) =>
     fetch(`${base}/mcp`, {
@@ -171,7 +187,50 @@ async function doorway() {
     });
   const discovery = (address: string) =>
     fetch(`${base}/.well-known/oauth-authorization-server`, { headers: from(address) });
-  return { open, poll, finish, token, toolList, discovery };
+  /** Spends the anonymous lane from many sources, each inside its own budget. */
+  const drainAnonymous = async () => {
+    for (let index = 0; index < 130; index++) await discovery(`192.0.2.${index}`);
+    expect((await discovery("192.0.2.200")).status).toBe(429);
+  };
+  /** A token request whose body never finishes arriving; the socket stays open. */
+  const stalledToken = async (address: string, declaredBytes = 100) => {
+    const { hostname, port } = new URL(origin);
+    const socket = connect(Number(port), hostname);
+    cleanup.push(() => void socket.destroy());
+    await once(socket, "connect");
+    socket.write(
+      `POST /h/${hostId}/oauth/token HTTP/1.1\r\nhost: gateway\r\nx-forwarded-for: ${address}\r\n` +
+        `content-type: application/x-www-form-urlencoded\r\ncontent-length: ${declaredBytes}\r\n\r\npartial`,
+    );
+    return socket;
+  };
+  return {
+    open,
+    poll,
+    finish,
+    token,
+    toolList,
+    discovery,
+    drainAnonymous,
+    stalledToken,
+    reconnectMac,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+}
+
+type Encoding = "form" | "json";
+
+/** What the gateway said before closing, or nothing if it still holds the socket after `waitMs`. */
+async function refusal(socket: Socket, waitMs: number): Promise<string | undefined> {
+  let received = "";
+  socket.on("data", (data: Buffer) => {
+    received += data.toString("utf8");
+  });
+  const closed = once(socket, "close").then(() => true);
+  const held = new Promise<boolean>((done) => setTimeout(() => done(false), waitMs));
+  return (await Promise.race([closed, held])) ? received.split("\r\n", 1)[0] : undefined;
 }
 
 interface Tokens {
@@ -237,4 +296,92 @@ it("counts one IPv6 /64 as one source", async () => {
     statuses.push((await discovery(`2001:db8:1:2::${index.toString(16)}`)).status);
   expect(statuses.at(-1)).toBe(429);
   expect((await discovery("2001:db8:1:3::1")).status).toBe(200);
+});
+
+it("recognises a credential in a JSON token request as the Mac does", async () => {
+  const { open, finish, token, toolList, drainAnonymous } = await doorway();
+  const first = await open(OWNER_BROWSER);
+  const issued = (await (await finish(first)).json()) as Tokens;
+  const second = await open(OWNER_BROWSER);
+  await drainAnonymous();
+
+  const exchanged = await finish(second, "json");
+  expect(exchanged.status).toBe(200);
+  expect((await toolList(((await exchanged.json()) as Tokens).access_token)).status).toBe(200);
+  const refresh = { grant_type: "refresh_token", refresh_token: issued.refresh_token };
+  const refreshed = await token(refresh, "json");
+  expect(refreshed.status).toBe(200);
+  expect((await toolList(((await refreshed.json()) as Tokens).access_token)).status).toBe(200);
+
+  // A form that names nothing the Mac vouched for stays anonymous.
+  expect((await token({ grant_type: "refresh_token", refresh_token: "junk" }, "json")).status).toBe(429);
+});
+
+it("bounds token bodies that never finish, and keeps refreshes moving past them", async () => {
+  const { open, finish, token, toolList, stalledToken } = await doorway();
+  const issued = (await (await finish(await open(OWNER_BROWSER))).json()) as Tokens;
+
+  // One source holds a few reads; the rest are turned away at once.
+  const noisy = await Promise.all(Array.from({ length: 12 }, () => stalledToken("192.0.2.1")));
+  const answers = await Promise.all(noisy.map((socket) => refusal(socket, 300)));
+  expect(answers.filter((answer) => answer?.includes("429"))).toHaveLength(8);
+
+  // A declared size over the limit is refused without waiting for a byte of it.
+  expect(await refusal(await stalledToken("192.0.2.2", 9_000), 1_000)).toContain("413");
+
+  // Many sources fill the reads anyone may take.
+  const many = await Promise.all(Array.from({ length: 70 }, (_, index) => stalledToken(`198.18.0.${index}`)));
+  const crowded = await Promise.all(many.map((socket) => refusal(socket, 300)));
+  expect(crowded.some((answer) => answer?.includes("429"))).toBe(true);
+  expect(
+    (await token({ grant_type: "refresh_token", refresh_token: "junk" }, "form", "198.18.1.1")).status,
+  ).toBe(429);
+
+  // Signed-in work needs no read slot, and a known client's refresh has its own.
+  expect((await toolList(issued.access_token)).status).toBe(200);
+  const refreshed = await token({ grant_type: "refresh_token", refresh_token: issued.refresh_token });
+  expect(refreshed.status).toBe(200);
+
+  // The deadline ends every held read and gives its room back.
+  expect(await refusal(noisy.find((socket) => !socket.destroyed)!, 4_000)).toContain("408");
+  await expect
+    .poll(
+      async () =>
+        (await token({ grant_type: "refresh_token", refresh_token: "junk" }, "form", "198.18.1.1")).status,
+      {
+        timeout: 5_000,
+      },
+    )
+    .toBe(400);
+}, 20_000);
+
+it("gives a read back when its client hangs up", async () => {
+  const { token, stalledToken } = await doorway();
+  const held = await Promise.all(Array.from({ length: 4 }, () => stalledToken("192.0.2.1")));
+  await refusal(held[0]!, 200);
+  const junk = { grant_type: "refresh_token", refresh_token: "junk" };
+  expect((await token(junk, "form", "192.0.2.1")).status).toBe(429);
+  for (const socket of held) socket.destroy();
+  await expect.poll(async () => (await token(junk, "form", "192.0.2.1")).status).toBe(400);
+});
+
+it("forgets a client when its Mac's connection ends or its token ages out, leaving the Mac in charge", async () => {
+  const { open, finish, toolList, drainAnonymous, reconnectMac, advance } = await doorway();
+  const issued = (await (await finish(await open(OWNER_BROWSER))).json()) as Tokens;
+  await drainAnonymous();
+  expect((await toolList(issued.access_token)).status).toBe(200);
+
+  reconnectMac();
+  await expect.poll(async () => (await toolList(issued.access_token)).status).toBe(429);
+
+  // Once the budget refills, the Mac's answer teaches the gateway again.
+  advance(11 * 60_000);
+  expect((await toolList(issued.access_token)).status).toBe(200);
+  expect((await toolList("junk")).status).toBe(401);
+  await drainAnonymous();
+  expect((await toolList(issued.access_token)).status).toBe(200);
+
+  advance(3 * 60 * 60_000);
+  await drainAnonymous();
+  expect((await toolList(issued.access_token)).status).toBe(429);
 });

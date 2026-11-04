@@ -103,7 +103,10 @@ health route.
   and 60, 2 a second per client). A client is an address, or an IPv6 /64, per
   host. This is best-effort fairness, not flood resistance. The gateway reads
   the connector's token, status and sign-in replies to choose the budget, and
-  keeps only in-memory hashes. Refusals are
+  keeps only in-memory hashes, bounded and dropped when the host disconnects. The
+  token route's form is read before a budget can be chosen, under its own limits
+  on size, time and reads at once; the 128 in-flight cap counts dispatched
+  exchanges, not body reads. Refusals are
   `429 connector_rate_limited` with `Retry-After`. A sign-in also carries a per-host
   hash of its requester's address, an identifier the Mac uses to limit each requester's
   waiting sign-ins. This route lets the gateway

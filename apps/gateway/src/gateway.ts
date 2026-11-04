@@ -86,6 +86,7 @@ import { clientAddress, clientBlock, type TrustedProxy } from "./client-address.
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   CONNECTOR_TOKEN_BODY_BYTES_MAX,
+  CONNECTOR_TOKEN_READ_DEADLINE_MS,
   createConnectorAdmission,
   type ConnectorReplyObserver,
 } from "./connector-admission.ts";
@@ -722,6 +723,41 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     }
   }
 
+  /**
+   * The one body read ahead of admission, so it has limits of its own: the
+   * in-flight cap counts dispatched exchanges, not bodies still arriving.
+   */
+  async function readTokenBody(
+    request: IncomingMessage,
+    response: ServerResponse,
+    hostId: string,
+    source: string,
+  ): Promise<Buffer | null> {
+    if (Number(request.headers["content-length"] ?? 0) > CONNECTOR_TOKEN_BODY_BYTES_MAX) {
+      sendJson(response, 413, { error: "request_too_large" });
+      request.destroy();
+      return null;
+    }
+    const readEnded = connectorAdmission.beginTokenRead(hostId, source);
+    if (readEnded === null) {
+      response.setHeader("retry-after", "2");
+      sendJson(response, 429, { error: "connector_rate_limited" });
+      request.destroy();
+      return null;
+    }
+    const deadline = setTimeout(() => {
+      sendJson(response, 408, { error: "request_timeout" });
+      request.destroy();
+    }, CONNECTOR_TOKEN_READ_DEADLINE_MS);
+    deadline.unref();
+    try {
+      return await readBody(request, response, CONNECTOR_TOKEN_BODY_BYTES_MAX);
+    } finally {
+      clearTimeout(deadline);
+      readEnded();
+    }
+  }
+
   async function routePublicRequest(
     request: IncomingMessage,
     response: ServerResponse,
@@ -822,19 +858,20 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     let reply: ConnectorReplyObserver | undefined;
     let tokenBody: Buffer | undefined;
     if (connector) {
-      // The token route's credential is in its form, so this one read comes first,
-      // at the Mac's own size limit. Nothing shared is spent to read it.
+      const source = clientBlock(clientAddress(request, options.trustedProxy));
+      // The token route's credential is in its form, so its read comes before any lane.
       if (hostRoute.path === CONNECTOR_TOKEN_PATH) {
-        const read = await readBody(request, response, CONNECTOR_TOKEN_BODY_BYTES_MAX);
+        const read = await readTokenBody(request, response, hostRoute.hostId, source);
         if (read === null) return null;
         tokenBody = read;
       }
       const admitted = connectorAdmission.admit({
         hostId: hostRoute.hostId,
         path: hostRoute.path,
-        source: clientBlock(clientAddress(request, options.trustedProxy)),
+        source,
         authorization: request.headers.authorization,
         tokenBody,
+        contentType: request.headers["content-type"],
       });
       if (admitted === null) {
         response.setHeader("retry-after", "2");
@@ -1171,6 +1208,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   ): void {
     const prior = hosts.get(hostId);
     if (prior !== undefined) {
+      connectorAdmission.forgetHost(hostId);
       for (const requestId of prior.pendingRequestIds) {
         const exchange = pending.get(requestId);
         if (exchange !== undefined) finishExchange(exchange, 503, "host_unavailable");
@@ -1395,6 +1433,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   function detachHost(connection: HostConnection, closeCode?: number): void {
     if (hosts.get(connection.hostId) !== connection) return;
     hosts.delete(connection.hostId);
+    connectorAdmission.forgetHost(connection.hostId);
     if (connection.credentialDeadline !== undefined) clearTimeout(connection.credentialDeadline);
     if (connection.revocationDeadline !== undefined) clearTimeout(connection.revocationDeadline);
     for (const requestId of connection.pendingRequestIds) {

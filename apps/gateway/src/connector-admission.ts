@@ -7,8 +7,8 @@
  *
  * This is best-effort fairness, not flood resistance. Anonymous callers share one
  * lane, so enough of them can still hold up a new sign-in. Everything here is lost
- * on a gateway restart, so a client's next call starts anonymous again until the
- * Mac vouches for it.
+ * on a gateway restart or when a host's connection ends, so a client's next call
+ * starts anonymous again until the Mac vouches for it.
  */
 import { createHash } from "node:crypto";
 import {
@@ -37,10 +37,25 @@ const REPLY_BYTES_MAX = 16 * 1024;
 const SIGN_IN_SOURCE_TTL_MS = 11 * 60_000;
 /** Outlives an authorization code's sixty seconds. */
 const SIGN_IN_CODE_TTL_MS = 2 * 60_000;
+/** Outlives an access token's hour. */
+const ACCESS_TOKEN_TTL_MS = 2 * 60 * 60_000;
 /** A client idle longer than this starts anonymous, then the Mac vouches for it again. */
-const CREDENTIAL_TTL_MS = 7 * 24 * 60 * 60_000;
+const CLIENT_TTL_MS = 7 * 24 * 60 * 60_000;
 const SIGN_IN_ENTRIES_MAX = 64;
-const CREDENTIAL_ENTRIES_MAX = 256;
+const CREDENTIAL_ENTRIES_MAX = 128;
+const CLIENT_SOURCE_ENTRIES_MAX = 64;
+/** The least recently taught host is forgotten first, and its calls start anonymous. */
+const HOSTS_REMEMBERED_MAX = 512;
+
+/** Well past the time a token form of a few hundred bytes takes to arrive. */
+export const CONNECTOR_TOKEN_READ_DEADLINE_MS = 3_000;
+/** Token forms being read at once, across every host. */
+const TOKEN_READS_MAX = 64;
+/** More reads, only for sources the Mac vouched for: their refreshes come this way. */
+const TOKEN_READS_RESERVED = 16;
+const TOKEN_READS_PER_SOURCE = 4;
+/** Starting a read, for a source the Mac has not vouched for. */
+const TOKEN_READ_SOURCE_BUDGET = { capacity: 20, perSecond: 1 } as const;
 
 interface Budget {
   readonly capacity: number;
@@ -59,11 +74,19 @@ interface ConnectorCall {
   readonly authorization: string | undefined;
   /** The token request's form, read first because the credential is inside it. */
   readonly tokenBody: Buffer | undefined;
+  readonly contentType: string | undefined;
 }
 
 interface ConnectorAdmission {
   /** Null when refused; otherwise reads the Mac's reply to this call. */
   admit(call: ConnectorCall): ConnectorReplyObserver | null;
+  /**
+   * Room to read a token form before any lane can be chosen, or null. The caller
+   * calls the returned function once the read ends, however it ends.
+   */
+  beginTokenRead(hostId: string, source: string): (() => void) | null;
+  /** The host's connection ended. Its clients start anonymous; the Mac is unaffected. */
+  forgetHost(hostId: string): void;
   /** Drops what has expired. */
   sweep(): void;
 }
@@ -81,6 +104,8 @@ interface HostMemory {
   readonly signInCodes: Map<string, number>;
   /** Access and refresh tokens the Mac issued or accepted, by hash. */
   readonly credentials: Map<string, number>;
+  /** Sources that presented or received those, by address. */
+  readonly clientSources: Map<string, number>;
 }
 
 export function createConnectorAdmission(
@@ -89,14 +114,25 @@ export function createConnectorAdmission(
   clock: () => number,
 ): ConnectorAdmission {
   const hosts = new Map<string, HostMemory>();
+  const readsBySource = new Map<string, number>();
+  let tokenReads = 0;
 
+  /** For learning only, so a call the Mac vouched for nothing about adds no host. */
   function memoryFor(hostId: string): HostMemory {
-    let memory = hosts.get(hostId);
-    if (memory === undefined) {
-      memory = { signInSources: new Map(), signInCodes: new Map(), credentials: new Map() };
-      hosts.set(hostId, memory);
-    }
+    const memory = hosts.get(hostId) ?? {
+      signInSources: new Map(),
+      signInCodes: new Map(),
+      credentials: new Map(),
+      clientSources: new Map(),
+    };
+    hosts.delete(hostId);
+    hosts.set(hostId, memory);
+    if (hosts.size > HOSTS_REMEMBERED_MAX) hosts.delete(hosts.keys().next().value!);
     return memory;
+  }
+
+  function rememberClient(hostId: string, source: string): void {
+    remember(memoryFor(hostId).clientSources, source, CLIENT_TTL_MS, CLIENT_SOURCE_ENTRIES_MAX);
   }
 
   function known(entries: Map<string, number> | undefined, key: string | undefined): boolean {
@@ -135,25 +171,30 @@ export function createConnectorAdmission(
       ? takeLane(call.hostId, "established", ESTABLISHED_HOST_BUDGET)
       : takeAnonymous(call);
     if (!admitted) return null;
-    return bearer === undefined ? silentObserver : mcpObserver(call.hostId, bearer);
+    return bearer === undefined ? silentObserver : mcpObserver(call, bearer);
   }
 
-  /** Only a success proves a token: anything else may come before the Mac checked it. */
-  function mcpObserver(hostId: string, bearer: string): ConnectorReplyObserver {
+  /**
+   * A contract with the relay: `/mcp` answers 2xx only after authenticating the
+   * bearer. Anything else may come before the Mac checked it, so it proves nothing.
+   */
+  function mcpObserver({ hostId, source }: ConnectorCall, bearer: string): ConnectorReplyObserver {
     return {
       ...silentObserver,
       start(status) {
         if (status === 401 || status === 403) hosts.get(hostId)?.credentials.delete(bearer);
-        else if (status >= 200 && status < 300)
-          remember(memoryFor(hostId).credentials, bearer, CREDENTIAL_TTL_MS, CREDENTIAL_ENTRIES_MAX);
+        else if (status >= 200 && status < 300) {
+          remember(memoryFor(hostId).credentials, bearer, ACCESS_TOKEN_TTL_MS, CREDENTIAL_ENTRIES_MAX);
+          rememberClient(hostId, source);
+        }
       },
     };
   }
 
   function admitToken(call: ConnectorCall, memory: HostMemory | undefined): ConnectorReplyObserver | null {
-    const form = new URLSearchParams((call.tokenBody ?? Buffer.alloc(0)).toString("utf8"));
-    const code = secretHash(form.get("code"));
-    const refresh = secretHash(form.get("refresh_token"));
+    const form = tokenForm(call.tokenBody, call.contentType);
+    const code = secretHash(form?.get("code"));
+    const refresh = secretHash(form?.get("refresh_token"));
     const admitted = known(memory?.signInCodes, code)
       ? takeLane(call.hostId, "sign-in", SIGN_IN_HOST_BUDGET)
       : known(memory?.credentials, refresh)
@@ -170,10 +211,11 @@ export function createConnectorAdmission(
       if (status !== 200) return;
       const tokens = jsonObject(reply);
       const credentials = memoryFor(call.hostId).credentials;
-      for (const field of ["access_token", "refresh_token"]) {
-        const hash = secretHash(tokens?.[field]);
-        if (hash !== undefined) remember(credentials, hash, CREDENTIAL_TTL_MS, CREDENTIAL_ENTRIES_MAX);
-      }
+      const access = secretHash(tokens?.access_token);
+      const next = secretHash(tokens?.refresh_token);
+      if (access !== undefined) remember(credentials, access, ACCESS_TOKEN_TTL_MS, CREDENTIAL_ENTRIES_MAX);
+      if (next !== undefined) remember(credentials, next, CLIENT_TTL_MS, CREDENTIAL_ENTRIES_MAX);
+      if (access !== undefined || next !== undefined) rememberClient(call.hostId, call.source);
     });
   }
 
@@ -213,14 +255,37 @@ export function createConnectorAdmission(
       if (call.path === CONNECTOR_AUTHORIZE_PATH) return admitAuthorize(call);
       return takeAnonymous(call) ? silentObserver : null;
     },
+    beginTokenRead(hostId, source) {
+      const key = `${hostId}:${source}`;
+      const vouched = known(hosts.get(hostId)?.clientSources, source);
+      const reading = readsBySource.get(key) ?? 0;
+      if (reading >= TOKEN_READS_PER_SOURCE) return null;
+      if (tokenReads >= TOKEN_READS_MAX + (vouched ? TOKEN_READS_RESERVED : 0)) return null;
+      const { capacity, perSecond } = TOKEN_READ_SOURCE_BUDGET;
+      if (!vouched && !takeSourceBudget(`read:${key}`, capacity, perSecond)) return null;
+      tokenReads += 1;
+      readsBySource.set(key, reading + 1);
+      let ended = false;
+      return () => {
+        if (ended) return;
+        ended = true;
+        tokenReads -= 1;
+        const left = (readsBySource.get(key) ?? 1) - 1;
+        if (left === 0) readsBySource.delete(key);
+        else readsBySource.set(key, left);
+      };
+    },
+    forgetHost(hostId) {
+      hosts.delete(hostId);
+    },
     sweep() {
       const now = clock();
       for (const [hostId, memory] of hosts) {
-        for (const entries of [memory.signInSources, memory.signInCodes, memory.credentials]) {
+        const tables = [memory.signInSources, memory.signInCodes, memory.credentials, memory.clientSources];
+        for (const entries of tables) {
           for (const [key, expiresAtMs] of entries) if (expiresAtMs <= now) entries.delete(key);
         }
-        if (memory.signInSources.size + memory.signInCodes.size + memory.credentials.size === 0)
-          hosts.delete(hostId);
+        if (tables.every((entries) => entries.size === 0)) hosts.delete(hostId);
       }
     },
   };
@@ -258,6 +323,18 @@ function jsonObject(body: Buffer): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** As the Mac reads it: an unknown type or a malformed form names no credential. */
+function tokenForm(body: Buffer | undefined, type = ""): URLSearchParams | undefined {
+  const text = (body ?? Buffer.alloc(0)).toString("utf8");
+  if (type.startsWith("application/x-www-form-urlencoded")) return new URLSearchParams(text);
+  if (!type.startsWith("application/json")) return undefined;
+  const fields = jsonObject(Buffer.from(text));
+  if (fields === undefined) return undefined;
+  return new URLSearchParams(
+    Object.entries(fields).flatMap(([name, value]) => (typeof value === "string" ? [[name, value]] : [])),
+  );
 }
 
 function redirectCode(redirect: string): string | null {

@@ -26,6 +26,20 @@ memory, never the credentials, and a 401 or 403 forgets a bearer. Source budgets
 live apart from host lanes, so many sources can't crowd a host's lanes out of the
 budget table.
 
+The relay's `/mcp` answers 2xx only after authenticating the bearer. That is a
+contract: a success there is what teaches the gateway a bearer, so a route change
+that answered 2xx first would let a caller into the established lane.
+
+What the gateway remembers is bounded per host and across hosts, and goes when a
+host's connection ends. Losing it only returns calls to the anonymous lane.
+
+The token route's credential is in its form, so that form is read before a lane can
+be chosen. That read has its own limits, because the gateway's in-flight cap counts
+dispatched exchanges, not bodies still arriving: a size limit checked against the
+declared length first, a deadline, a cap on reads at once and per source, and a
+source budget for starting one. A small reserve of reads is kept for sources the
+Mac has vouched for, so refreshes keep moving when anonymous reads fill the rest.
+
 A lane decides who waits, never what anyone may do. The Mac still authenticates
 every call, and being remembered here grants nothing.
 
@@ -33,8 +47,9 @@ every call, and being remembered here grants nothing.
 
 This is best-effort fairness, not flood resistance. Anonymous callers share a lane,
 so a new sign-in or a client the gateway doesn't yet remember can still wait behind
-others. A gateway restart forgets everything, and each client's next call starts
-anonymous. A sign-in lane needs its polling to come from the source that opened the
+others. A gateway restart or a host reconnecting forgets everything, and each
+client's next call starts anonymous. A code exchange from a source the Mac hasn't
+vouched for can wait behind anonymous reads. A sign-in lane needs its polling to come from the source that opened the
 page. Volumetric protection belongs in front of the gateway.
 
 A host can now take more connector calls in total than the single budget allowed,
