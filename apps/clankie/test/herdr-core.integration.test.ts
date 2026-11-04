@@ -15,7 +15,7 @@ import {
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { SessionRefusal, SessionSources, createHerdrCoreSessionSource } from "@clankie/agent-hosts/sessions";
 import {
   createOperatorService,
@@ -34,6 +34,28 @@ import { observeNativeBirth } from "../src/local-fleet-process.ts";
 // connector's session source, Clankie's operator ops, and the core's own
 // socket. The test runs its own core session, so the owner's app and its
 // agents are never touched.
+
+// One-shot hooks run just before the next path check by that name, to swap a folder in step
+// with the lookup (#530 review). Unset, the checks run as they are.
+const pathChecks = vi.hoisted(
+  () => ({}) as { realpath?: (() => Promise<void>) | undefined; lstat?: (() => Promise<void>) | undefined },
+);
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const hooked =
+    <A extends unknown[], R>(name: "realpath" | "lstat", check: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const hook = pathChecks[name];
+      pathChecks[name] = undefined;
+      await hook?.();
+      return check(...args);
+    };
+  return {
+    ...actual,
+    realpath: hooked("realpath", actual.realpath as (path: string) => Promise<string>),
+    lstat: hooked("lstat", actual.lstat as (path: string) => Promise<import("node:fs").Stats>),
+  };
+});
 
 const exec = promisify(execFile);
 const hc = (process.env.PATH ?? "")
@@ -434,6 +456,34 @@ setInterval(() => {}, 1 << 30);
         },
       });
       await expect(ancestorSwap.read(claude, 50)).rejects.toThrow(refused);
+      // A folder along the path made a symlink to a file outside the homes for the open, restored
+      // for a path check, then made a symlink again for the next: the handle's own location must
+      // be the transcript's, whatever the path says between checks.
+      const outside = join(homes, "outside");
+      await mkdir(outside);
+      await writeFile(join(outside, basename(claudeTranscript)), swapped("outside=secret"));
+      const toOutside = async () => {
+        await rename(project, `${project}.real`);
+        await symlink(outside, project);
+      };
+      const toReal = async () => {
+        await rm(project);
+        await rename(`${project}.real`, project);
+      };
+      const twiceSwapped = sources({ ...env, XDG_STATE_HOME: stateHome }, undefined, {
+        open: async (path) => {
+          await toOutside();
+          pathChecks.realpath = toReal;
+          pathChecks.lstat = toOutside;
+          return noFollow(path);
+        },
+      });
+      try {
+        await expect(twiceSwapped.read(claude, 50)).rejects.toThrow(refused);
+      } finally {
+        pathChecks.realpath = pathChecks.lstat = undefined;
+        if (existsSync(`${project}.real`)) await toReal();
+      }
       expect((await layer.read(claude, 50)).text).toContain("claude: read from its session");
 
       // A record forged to name another of the owner's transcripts is read: nothing Claude Code

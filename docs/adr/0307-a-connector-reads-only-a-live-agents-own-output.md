@@ -133,12 +133,16 @@ agent showed.
     Codex's own lookup by that id finds the same file. A descriptor opened only
     to read names nothing.
   - Either way the transcript is opened once (`O_NOFOLLOW`) and pinned. The
-    handle itself must be a regular file the owner owns, and for Codex the
-    very file (device and inode) the process holds for writing. After the
-    open, its path must be canonical, with no symlink anywhere along it (its
-    config home included), and still name that same file. The transcript is
-    parsed through that handle, so a file or folder swapped before the open
-    is refused, and one swapped after it is never read.
+    handle itself must be a regular file the owner owns, with one link, and
+    for Codex the very file (device and inode) the process holds for
+    writing. Where the handle is comes from the kernel (`/proc/self/fd` on
+    Linux, the vnode path `lsof` reads for Clankie's own descriptor on
+    macOS), never from the path again, since a folder along a path can be
+    swapped between any two checks of it. That location must be the expected
+    canonical path under the harness's home, so a symlink anywhere along it,
+    its config home included, is refused. The transcript is parsed through
+    that handle, so a file or folder swapped before the open is refused, and
+    one swapped after it is never read.
 
   Anything short of exactly one such session, or no transcript, is refused. Its
   screen is never read, so a menu it waits on is named from its session alone.

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
-import { lstat, open, readFile, realpath, type FileHandle } from "node:fs/promises";
+import { open, readFile, readlink, type FileHandle } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -102,10 +102,10 @@ function openNoFollow(path: string): Promise<FileHandle> {
 
 /**
  * The transcript opened once and pinned. The handle itself must be a regular file the owner owns,
- * and the very file a Codex process holds for writing when it named one. After the open, the path
- * must be canonical (no symlink anywhere along it, its root included) and still name that same
- * file: an ancestor swapped for the open, even one swapped back, leaves the handle on a file the
- * path doesn't name, and is refused.
+ * with one name (an unlinked or hard-linked file has no single location), and the very file a
+ * Codex process holds for writing when it named one. Where it is comes from the kernel, for the
+ * open handle, never from the path again: a path's folders can be swapped between any two checks
+ * of it. That location must be the expected path, which is canonical under the harness's home.
  */
 async function pinnedOpen(
   found: { readonly path: string; readonly held?: FileIdentity },
@@ -116,17 +116,29 @@ async function pinnedOpen(
     const opened = await file.stat();
     const held =
       found.held === undefined || (opened.dev === found.held.device && opened.ino === found.held.inode);
-    if (opened.isFile() && opened.uid === process.getuid?.() && held) {
-      if ((await realpath(found.path)) === found.path) {
-        const named = await lstat(found.path);
-        if (named.dev === opened.dev && named.ino === opened.ino) return file;
-      }
-    }
+    if (opened.isFile() && opened.nlink === 1 && opened.uid === process.getuid?.() && held)
+      if ((await openedPath(file)) === found.path) return file;
   } catch {
     // allow-swallowed-rejection -- a file that can't be checked isn't the session's; closed below.
   }
   await file.close();
   return undefined;
+}
+
+/**
+ * Where the kernel says this process's open handle is: `/proc/self/fd` on Linux, and on macOS
+ * the vnode path `lsof` reads for our own descriptor (proc_pidfdinfo, as `F_GETPATH` gives it).
+ */
+async function openedPath(file: FileHandle): Promise<string | undefined> {
+  if (process.platform === "linux") return readlink(`/proc/self/fd/${String(file.fd)}`);
+  if (process.platform !== "darwin") return undefined;
+  const { stdout } = await promisify(execFile)(
+    "lsof",
+    ["-nP", "-a", "-p", String(process.pid), "-d", String(file.fd), "-Fn"],
+    { timeout: LSOF_MS },
+  );
+  const names = stdout.split("\n").flatMap((line) => (line.startsWith("n/") ? [line.slice(1)] : []));
+  return names.length === 1 ? names[0] : undefined;
 }
 
 /**
