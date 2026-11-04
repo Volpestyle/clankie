@@ -163,6 +163,88 @@ it("doctor reads the service's room voice and names a call the provider hung up 
 });
 
 describe("install doctor", () => {
+  it("warns per machine when Herdr Browser's Chromium is behind stable Chrome by security releases (#705)", async () => {
+    const root = await installRoot();
+    // `herdr-browser-update status` as it prints on a Mac with an older embedded Chromium;
+    // the updater's own tests cover how it reads the bundle and the release feeds.
+    let chromium: Record<string, unknown> = {
+      installed: true,
+      embedded: "156.0.8078.60",
+      update: "herdr-browser-update check --force",
+      stable: "157.0.8103.39",
+      upToDate: false,
+      securityReleasesBehind: 2,
+      securityFixesBehind: 234,
+      atLeast: false,
+      checked: "2026-11-04T06:43:17.858306+00:00",
+    };
+    const asked: string[] = [];
+    const execFileImpl: ExecFileImpl = async (command, args) => {
+      if (command !== "herdr-browser-update") return missing(command, args);
+      asked.push(args.join(" "));
+      return { stdout: JSON.stringify({ status: "installed", chromium }), stderr: "" };
+    };
+    const inspect = () =>
+      inspectInstall({
+        repoRoot: root,
+        env: {
+          HOME: join(root, "home"),
+          XDG_CONFIG_HOME: join(root, "config"),
+          CLANKIE_STATE: join(root, "state"),
+        },
+        settings: new SettingsStore(join(root, "settings.json")),
+        credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+        execFileImpl,
+        fetchImpl: offline,
+      });
+
+    const behind = await inspect();
+    // Only the read-only status ever runs; the update is the owner's to run.
+    expect(asked).toEqual(["status"]);
+    expect(behind.herdrBrowser).toMatchObject({ embedded: "156.0.8078.60", securityReleasesBehind: 2 });
+    const text = formatDoctorReport(behind);
+    expect(text).toMatch(
+      /! Herdr Browser on \S+ · Chromium 156\.0\.8078\.60 is behind stable 157\.0\.8103\.39 by 2 security releases \(234 security fixes\) · update: herdr-browser-update check --force/u,
+    );
+    expect(behind.remediations).toContain("herdr-browser-update check --force");
+
+    chromium = {
+      ...chromium,
+      embedded: "157.0.8103.39",
+      upToDate: true,
+      securityReleasesBehind: 0,
+      securityFixesBehind: 0,
+    };
+    const current = await inspect();
+    expect(formatDoctorReport(current)).toMatch(
+      /✓ Herdr Browser on \S+ · Chromium 157\.0\.8103\.39 · up to date with stable Chrome/u,
+    );
+    expect(current.remediations).not.toContain("herdr-browser-update check --force");
+
+    chromium = {
+      installed: true,
+      embedded: "156.0.8078.80",
+      error: "Stable Chrome release data unavailable: offline",
+    };
+    expect(formatDoctorReport(await inspect())).toMatch(
+      /○ Herdr Browser on \S+ · Chromium 156\.0\.8078\.80 · freshness unknown · Stable Chrome release data unavailable: offline/u,
+    );
+
+    // A machine without Herdr Browser, or without the updater, shows no line at all.
+    chromium = { installed: false };
+    expect((await inspect()).herdrBrowser).toBeUndefined();
+    const without = await inspectInstall({
+      repoRoot: root,
+      env: { HOME: join(root, "home") },
+      settings: new SettingsStore(join(root, "settings.json")),
+      credentialStore: new FileCredentialStore(join(root, "credentials.json")),
+      execFileImpl: missing,
+      fetchImpl: offline,
+    });
+    expect(without.herdrBrowser).toBeUndefined();
+    expect(formatDoctorReport(without)).not.toContain("Herdr Browser");
+  });
+
   it("reports the tracker backend and selection reason without probing or writing Linear", async () => {
     const root = await installRoot();
     const settings = new SettingsStore(join(root, "settings.json"));

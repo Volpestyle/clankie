@@ -115,6 +115,7 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
           `  ${mark(report.herdrPlugin.claudePathShim.active === true || report.herdrPlugin.claudePathShim.configured === true)} Claude PATH shim · ${report.herdrPlugin.claudePathShim.state} · ${clean(report.herdrPlugin.claudePathShim.detail)}`,
         ]
       : []),
+    ...formatHerdrBrowser(report.herdrBrowser),
     `  ${mark(missing.length === 0)} Tools · ${
       missing.length ? `missing ${missing.join(", ")}` : `${commands.length} present`
     }`,
@@ -248,6 +249,33 @@ export function formatDoctorReport(report: InstallDoctorReport): string {
 }
 
 /** Devices booted outside leases hold simulator slots; name them and who uses them. */
+/** One line per machine with Herdr Browser: its Chromium against stable Chrome (#705). */
+function formatHerdrBrowser(browser: InstallDoctorReport["herdrBrowser"]): string[] {
+  if (browser === undefined) return [];
+  const where = `Herdr Browser on ${clean(browser.machine)}`;
+  const chromium = browser.embedded === undefined ? "Chromium unknown" : `Chromium ${browser.embedded}`;
+  if (browser.error !== undefined || browser.stable === undefined)
+    return [
+      `  ○ ${where} · ${chromium} · freshness unknown${browser.error ? ` · ${clean(browser.error)}` : ""}`,
+    ];
+  const behind = browser.securityReleasesBehind ?? 0;
+  if (behind > 0) {
+    const releases = `${browser.atLeast ? "at least " : ""}${behind} security release${behind === 1 ? "" : "s"}`;
+    const fixes =
+      browser.securityFixesBehind === undefined
+        ? ""
+        : ` (${browser.atLeast ? "at least " : ""}${browser.securityFixesBehind} security fix${browser.securityFixesBehind === 1 ? "" : "es"})`;
+    return [
+      `  ! ${where} · ${chromium} is behind stable ${browser.stable} by ${releases}${fixes}${browser.update ? ` · update: ${clean(browser.update)}` : ""}`,
+    ];
+  }
+  return [
+    browser.upToDate
+      ? `  ✓ ${where} · ${chromium} · up to date with stable Chrome`
+      : `  ✓ ${where} · ${chromium} · stable is ${browser.stable}, with no newer security releases`,
+  ];
+}
+
 function formatSimulatorLines(simulators: InstallDoctorReport["simulators"]): string[] {
   if (!simulators) return [];
   if (simulators.inventory === "unavailable") return ["    Simulators · CoreSimulator inventory unavailable"];

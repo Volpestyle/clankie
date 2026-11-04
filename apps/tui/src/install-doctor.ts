@@ -10,7 +10,8 @@ import type { FleetToolCatalogHealthPage } from "@clankie/protocol/tool-catalog"
 import { listHerdrSessions } from "./session/herdr-report.ts";
 import { execFile as execFileCallback } from "node:child_process";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
+import { z } from "zod";
 import { readFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
@@ -257,6 +258,8 @@ export interface InstallDoctorReport {
   readonly doorway: GatewayDoorwayReport;
   /** Whether this Mac may sleep, and the owner's always-on opt-in (VUH-1461, ADR 0203). */
   readonly power: HostPowerReport;
+  /** This machine's Herdr Browser Chromium against stable Chrome (#705); absent without Herdr Browser. */
+  readonly herdrBrowser?: HerdrBrowserReport;
   /** One line: the next thing to do for phone access, shared with `status` and the console. */
   readonly nextStep: string;
   readonly selectedModel: SelectedModelReport | null;
@@ -283,6 +286,61 @@ interface SelectedModelReport {
     /** The ref's model id is one this provider declares. */
     readonly declaresModel: boolean;
   };
+}
+
+/**
+ * What `herdr-browser-update status` reports of the browser's own Chromium (#705):
+ * the embedded and stable Chrome versions and how many newer stable releases carried
+ * security fixes. Read-only; the update itself stays the owner's command to run.
+ */
+interface HerdrBrowserReport {
+  readonly machine: string;
+  readonly embedded?: string | undefined;
+  readonly stable?: string | undefined;
+  readonly upToDate?: boolean | undefined;
+  readonly securityReleasesBehind?: number | undefined;
+  readonly securityFixesBehind?: number | undefined;
+  /** The build predates the release feed: at least this many. */
+  readonly atLeast?: boolean | undefined;
+  readonly update?: string | undefined;
+  readonly error?: string | undefined;
+}
+
+const chromeVersion = z.string().regex(/^\d{1,4}(?:\.\d{1,6}){3}$/u);
+const HerdrBrowserStatusSchema = z.object({
+  chromium: z.object({
+    installed: z.boolean().optional(),
+    embedded: chromeVersion.optional(),
+    stable: chromeVersion.optional(),
+    upToDate: z.boolean().optional(),
+    securityReleasesBehind: z.number().int().min(0).max(100_000).optional(),
+    securityFixesBehind: z.number().int().min(0).max(1_000_000).optional(),
+    atLeast: z.boolean().optional(),
+    update: z.string().max(200).optional(),
+    error: z.string().max(500).optional(),
+  }),
+});
+/** The status reads two public release feeds, ten seconds each at most. */
+const HERDR_BROWSER_TIMEOUT_MS = 30_000;
+
+async function probeHerdrBrowser(exec: ExecFileImpl): Promise<HerdrBrowserReport | undefined> {
+  const machine = hostname().replace(/\.local$/u, "");
+  let stdout: string;
+  try {
+    ({ stdout } = await exec("herdr-browser-update", ["status"]));
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ENOENT") return undefined;
+    return { machine, error: "herdr-browser-update status did not answer" };
+  }
+  let parsed;
+  try {
+    parsed = HerdrBrowserStatusSchema.safeParse(JSON.parse(stdout));
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed?.success) return { machine, error: "herdr-browser-update status gave no Chromium report" };
+  const { installed, ...chromium } = parsed.data.chromium;
+  return installed === false ? undefined : { machine, ...chromium };
 }
 
 export type ExecFileImpl = (
@@ -409,6 +467,18 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     linearSecret?.type === "api" && linearSecret.key.trim().length > 0,
   );
   const execute = options.execFileImpl ?? defaultExecFile(env);
+  // Started now so its feed reads overlap the other probes.
+  const herdrBrowser = probeHerdrBrowser(
+    options.execFileImpl ??
+      (async (command, args) => {
+        const result = await execFileAsync(command, [...args], {
+          timeout: HERDR_BROWSER_TIMEOUT_MS,
+          env,
+          encoding: "utf8",
+        });
+        return { stdout: result.stdout, stderr: result.stderr };
+      }),
+  );
   const activeHerdr = join(
     env.CLANKIE_STATE?.trim() || join(env.HOME?.trim() || homedir(), ".clankie"),
     "herdr/bin/herdr",
@@ -496,6 +566,7 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
     trackerCheckpoint,
   });
 
+  const browser = await herdrBrowser;
   return {
     ok: true,
     ...(credentialStore.health ? { credentialStoreHealth: credentialStore.health() } : {}),
@@ -564,7 +635,10 @@ export async function inspectInstall(options: InspectInstallOptions): Promise<In
       }).success,
     }),
     selectedModel,
-    remediations,
+    // Behind on security releases: the update is the owner's to run, never run here.
+    remediations:
+      browser?.securityReleasesBehind && browser.update ? [...remediations, browser.update] : remediations,
+    ...(browser === undefined ? {} : { herdrBrowser: browser }),
   };
 }
 

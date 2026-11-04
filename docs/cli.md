@@ -418,6 +418,15 @@ bounded process observations for up to a minute (fifteen seconds once the pane
 set changes); doctor takes a fresh sample. The sweep reads command lines and
 environments in batches, up to 1,024 node/Codex processes and 256 bridges.
 
+`herdrBrowser` reports this machine's Herdr Browser Chromium against stable
+Chrome, read from `herdr-browser-update status`: the embedded and stable
+versions and how many newer stable releases carried security fixes. When it is
+behind by a security release, `/doctor` shows a warning naming the machine and
+the update command (`herdr-browser-update check --force`), which also joins
+`remediations`. The check is read-only: it never updates the browser or clears
+its cache. It is absent when the machine has no Herdr Browser or updater; each
+Mac reports its own browser in its own doctor.
+
 `toolCatalogHealth` reads the service's native catalog diagnostics for current
 Claude and Codex panes, including the operator head. The roster carries the
 same `toolCatalog` verdict; a mismatch or unverified catalog appears in the
