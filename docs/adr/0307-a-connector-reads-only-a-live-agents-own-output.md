@@ -71,8 +71,9 @@ agent showed.
   a shell (`terminal.get`'s `pid`, `argv` and `foreground`); the agent is the
   terminal's own program unless that is a shell, else the process in front.
   The occupant is the terminal, its root process and the agent's pid, checked
-  again after the read. `herdr_core_read` reads history and screen and passes
-  them through the same scope, with anchors kept per core and terminal, and
+  again after the read. For other harnesses, `herdr_core_read` reads history
+  and screen and passes them through the same scope, with anchors kept per core
+  and terminal (Claude Code and Codex are read from their transcript, below), and
   `herdr_core_list` lists only terminals that hold such an agent (added
   2026-10-31).
 - **A refusal is final.** The connector's Herdr session source used to stream
@@ -114,9 +115,37 @@ agent showed.
   transcript can be read (no
   session reported, no file yet, an unreachable host), the read is refused;
   the screen is never shown in its place. Other harnesses keep the screen
-  read and its cut, and so do the Herdr desktop app's own terminals
-  (`herdr_core_read`), whose owner-started agents carry no session identity
-  ([#530](https://github.com/Volpestyle/clankie/issues/530)).
+  read and its cut. The Herdr desktop app's own terminals (`herdr_core_read`)
+  read Claude Code and Codex from their transcript too
+  ([#530](https://github.com/Volpestyle/clankie/issues/530)). An agent the
+  owner started there carries no session Clankie named, so its session is the
+  one the harness's own files name for that exact process lifetime:
+  - The process's kernel identity and birth are taken before anything is looked
+    up and checked again after the transcript is read and the terminal is seen
+    once more. A process that died, a pid that became another process's, or a
+    lifetime that can't be observed is refused.
+  - Claude Code's `sessions/<pid>.json` in its config home counts only when its
+    recorded start (`procStart`, `ps -o lstart` in UTC) is exactly that birth's
+    second, printed the same way, and its `startedAt` (ms) is at or after the
+    birth itself. An earlier process on the pid, even one born in the same
+    printed second, started before this one and fails the second test.
+  - For Codex, the one rollout the process holds open for writing, and only if
+    Codex's own lookup by that id finds the same file. A descriptor opened only
+    to read names nothing.
+  - Either way the transcript is opened once (`O_NOFOLLOW`) and pinned. The
+    handle itself must be a regular file the owner owns, with one link, and
+    for Codex the very file (device and inode) the process holds for
+    writing. Where the handle is comes from the kernel (`/proc/self/fd` on
+    Linux, the vnode path `lsof` reads for Clankie's own descriptor on
+    macOS), never from the path again, since a folder along a path can be
+    swapped between any two checks of it. That location must be the expected
+    canonical path under the harness's home, so a symlink anywhere along it,
+    its config home included, is refused. The transcript is parsed through
+    that handle, so a file or folder swapped before the open is refused, and
+    one swapped after it is never read.
+
+  Anything short of exactly one such session, or no transcript, is refused. Its
+  screen is never read, so a menu it waits on is named from its session alone.
 
 ## Consequences
 
@@ -137,8 +166,8 @@ agent showed.
   earlier ones.
 - Lines held back by their text also drop an agent line that repeats that text
   exactly (a banner or a border).
-- For Claude Code and Codex in a Herdr pane, the transcript read (#328)
-  closes the gaps below: the suspend case, a launch inside a longer command or
+- For Claude Code and Codex in a Herdr pane, or in the desktop app's terminals
+  (#530), the transcript read (#328) closes the gaps below: the suspend case, a launch inside a longer command or
   multiline block, reprinted or reflowed lines and a hired session resumed by
   hand, including while the agent waits on input. (As first merged, the
   waiting rows came from the screen through the cut, and a suspend, shell
@@ -152,8 +181,27 @@ agent showed.
   Claude Code or Codex agent whose transcript can't be found is now
   unreadable instead of read from its screen, and when it isn't waiting on
   input a read shows only what it wrote to its session, not its live screen.
-  The gaps below remain for other harnesses and for the desktop app's
-  terminals.
+  The gaps below remain for other harnesses.
+- An owner-started Claude Code or Codex agent in the desktop app's terminals
+  is read from the session its harness's own files name for its process
+  (#530), and the read's note says only that.
+  - Codex's claim is bound to the process: the process itself holds that
+    rollout open for writing.
+  - Claude Code's is not. Claude Code holds no file open that would tie a
+    session to its process (checked on 2.1.316), and a resumed session's
+    first entries predate the process, so no entry time can either. The
+    lifetime checks above stop a record left by an earlier process on the pid,
+    but anything running as the owner can write a `sessions/<pid>.json` for a
+    live Claude process, with the right `procStart` and `startedAt` and a
+    session id of its choosing.
+  - **Accepted exception (lead, on review of #744):** such a forged record can
+    point the read at another of the owner's own Claude Code transcripts, one
+    the harness's lookup finds as a regular, owner-owned file at its canonical
+    path in the owner's Claude homes, and only that. It can't point the read at
+    the owner's shell or screen, a symlink, or a file outside those homes. It is
+    accepted because a writer with the owner's account can already read those
+    transcripts directly. It is the same trust Herdr panes place in a session
+    their hook reports.
 - One case still shows the owner's own shell work. An agent suspended
   (Ctrl-Z), with shell commands run and then brought back with `fg`, keeps its
   process and session, so its anchor holds and the shell work in between is

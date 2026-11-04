@@ -6,7 +6,15 @@ import { promisify } from "node:util";
 import { OPERATOR_TERMINAL_READ_MAX, type HerdrCoreAgent } from "@clankie/protocol";
 import { logger } from "../app/log.ts";
 import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
+import { observeNativeBirth } from "../local-fleet-process.ts";
 import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-scope.ts";
+import { TRANSCRIPT_READ_REFUSED, transcriptReadText, transcriptWaiting } from "./agent-transcript-read.ts";
+import {
+  nativeSessionForProcess,
+  readProcessSession,
+  sameLifetime,
+  type NativeSessionLookup,
+} from "./native-session-by-pid.ts";
 
 // herdr-core (`hc`) is the terminal server behind the Herdr desktop app: a
 // second home for agents, beside the terminal Herdr Clankie seats in. Clankie
@@ -16,6 +24,14 @@ import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-sc
 // asks the desktop app to show one. It never sends: `terminal.send` pastes into
 // the terminal, which ADR 0207 rules out, and it never starts a core that isn't
 // running. JSON-RPC 2.0, one message per line, protocol generation 1.
+
+/**
+ * An agent the owner started names its own session only through files its harness wrote in the
+ * owner's account; for Claude Code nothing binds that claim to the process (ADR 0307). The note
+ * claims no more than that.
+ */
+const OWNER_AGENT_READ_DETAIL =
+  "Read from the session transcript this agent's own harness files name for its process, not its screen.";
 
 const GENERATION = 1;
 
@@ -69,6 +85,8 @@ export interface HerdrCoreOptions {
   /** The desktop app's command line; `herdr-app` on PATH by default. */
   readonly appCommand?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** How an owner-started Claude Code or Codex agent's session is found from its process (#530). */
+  readonly nativeSession?: NativeSessionLookup;
 }
 
 /** Where `hc` itself looks for the core: `$XDG_STATE_HOME/herdr-core/<session>/<session>.sock`. */
@@ -119,13 +137,52 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
     async read(terminal) {
       try {
         // Only a live agent is read, and only what it showed (ADR 0307), as for a Herdr pane.
-        const occupant = liveAgentOccupant(
-          (await call(socket(), "terminal.get", { terminal })) as HcTerminal,
-          scope.occupantPid(terminal),
-        );
+        const record = (await call(socket(), "terminal.get", { terminal })) as HcTerminal;
+        const occupant = liveAgentOccupant(record, scope.occupantPid(terminal));
         if (occupant === undefined) {
           scope.forget(terminal);
           return { status: "unavailable", detail: "No coding agent is running in that terminal now." };
+        }
+        // Claude Code and Codex are read from their own session transcript, never their screen,
+        // as in a Herdr pane (#328): terminal text has no author per line, so a screen read can
+        // carry the owner's shell work. Their session is the one their own files say this exact
+        // process writes (#530). No certain session, or no transcript, is a refusal.
+        const harness = transcriptHarness(text(record.status?.app));
+        if (harness !== undefined) {
+          const found = await nativeSessionForProcess(harness, occupant.pid, options.nativeSession);
+          let entries: Awaited<ReturnType<typeof readProcessSession>> | undefined;
+          try {
+            // Read through the handle that passed the proof, never the path again.
+            entries = found === undefined ? undefined : await readProcessSession(harness, found);
+          } finally {
+            await found?.file.close();
+          }
+          const now = (await call(socket(), "terminal.get", { terminal })) as HcTerminal;
+          if (liveAgentOccupant(now, occupant.pid)?.key !== occupant.key) {
+            scope.forget(terminal);
+            return {
+              status: "unavailable",
+              detail: "The agent in that terminal changed while it was read; read it again.",
+            };
+          }
+          if (found === undefined || entries === undefined)
+            return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
+          // The process the session was proved against still lives after the read: a pid that is
+          // now another process's, or whose lifetime can't be observed, is a refusal.
+          const birthOf = options.nativeSession?.birth ?? observeNativeBirth;
+          if (!sameLifetime(await birthOf(occupant.pid), found.birth))
+            return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
+          const said = transcriptReadText(entries);
+          // Its screen is never read, so a menu it waits on is named from its session alone.
+          const waiting =
+            text(record.status?.state) === "blocked" ? transcriptWaiting(entries, undefined) : undefined;
+          const whole = waiting === undefined ? said : `${said}\n\n${waiting}`;
+          return {
+            status: "read",
+            text:
+              whole.length > OPERATOR_TERMINAL_READ_MAX ? whole.slice(-OPERATOR_TERMINAL_READ_MAX) : whole,
+            detail: OWNER_AGENT_READ_DETAIL,
+          };
         }
         const history = await readText(socket(), terminal, HISTORY_LINES);
         const screen = await readText(socket(), terminal, 0);
@@ -141,10 +198,10 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
             detail: "The agent in that terminal changed while it was read; read it again.",
           };
         }
-        const { text, detail } = scope.bound(terminal, occupant, history, screen);
+        const { text: shown, detail } = scope.bound(terminal, occupant, history, screen);
         return {
           status: "read",
-          text: text.length > OPERATOR_TERMINAL_READ_MAX ? text.slice(-OPERATOR_TERMINAL_READ_MAX) : text,
+          text: shown.length > OPERATOR_TERMINAL_READ_MAX ? shown.slice(-OPERATOR_TERMINAL_READ_MAX) : shown,
           ...(detail === undefined ? {} : { detail }),
         };
       } catch (error) {
@@ -247,6 +304,11 @@ export function desktopTerminalAgent(terminal: unknown): string | undefined {
   const record = terminal as HcTerminal;
   if (liveAgentOccupant(record) === undefined) return undefined;
   return text(record.status?.app) ?? text(record.foreground?.name);
+}
+
+/** The harness read from its transcript, by the app name its status reports (`claude-code`, `codex`). */
+function transcriptHarness(app: string | undefined): "claude" | "codex" | undefined {
+  return app === "claude-code" || app === "claude" ? "claude" : app === "codex" ? "codex" : undefined;
 }
 
 function pidOf(value: unknown): number | undefined {
