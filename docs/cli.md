@@ -1301,6 +1301,9 @@ it never launches or sends again. A completed fresh UUID stays fenced permanentl
 use its existing seat for follow-up. Both original settlement evidence and fresh
 receipts remain retained, including across restart and age pruning. Older service
 versions may refuse this journal; upgrade forward rather than editing its records.
+A fresh intent belongs to its start folder's receipts: when the hire is moved to a
+new worktree (ADR 0306), it is dropped and the hire is admitted there as that
+worktree's first, so a connected app's start after settled history goes through.
 
 A successfully delivered hire also counts as settled after a complete native
 inventory proves its original pane absent, including after `close_worker_pane`

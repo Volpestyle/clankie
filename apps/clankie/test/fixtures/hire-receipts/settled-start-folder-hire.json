@@ -1,0 +1,43 @@
+{
+  "messageId": "f12b4cd3-d66c-497b-9fc6-85c5b6852085",
+  "fingerprint": "930faab618fcae75d923194a3b3afe3842f7f2a5847997dcd1b6c2b7a1a32c17",
+  "remoteAdmission": {
+    "target": {
+      "fleet": "pc",
+      "host": "owner@pc-example",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "nonce": "2ca30eca9e99f5a0cb83b4b167a72fe48ae12a5d60ffdf3ab6cc3cc9d699da27"
+  },
+  "remoteLaunchCommitted": true,
+  "recoveryRequested": true,
+  "settlement": {
+    "receiptId": "f12b4cd3-d66c-497b-9fc6-85c5b6852085",
+    "receiptKey": "[\"pc\",\"codex\",\"C:\\\\Users\\\\owner\\\\repos\\\\game-mod\",\"new\"]",
+    "fingerprint": "930faab618fcae75d923194a3b3afe3842f7f2a5847997dcd1b6c2b7a1a32c17",
+    "target": {
+      "fleet": "pc",
+      "host": "owner@pc-example",
+      "session": "default",
+      "shell": "powershell"
+    },
+    "hostIdentity": "efb771fee76776c1d3a662c9dbee3188c226764209619edec0bb76f5d6ed462e",
+    "census": {
+      "observedAt": 1791267170553,
+      "panes": 5,
+      "processes": 548,
+      "sessions": 4,
+      "sha256": "bc3e96a6a74ab623e7e501f8e5e8fcc4e86cf7eaddeded21fb83827ea71559ea"
+    },
+    "disposition": "abandoned",
+    "journal": "authenticated-recovery",
+    "allocation": {
+      "paneId": "pc/w4:p2",
+      "present": false
+    }
+  },
+  "paneId": "pc/w4:p2",
+  "agentName": "fixture-codex-worker",
+  "beforeIds": []
+}

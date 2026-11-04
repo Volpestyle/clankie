@@ -1146,6 +1146,158 @@ it("a settled original start no longer pins its dirty folder; a pending one stil
   }
 });
 
+it("new work after a remote folder's settled hire is admitted in its fresh worktree; a pending one still holds the folder", async () => {
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { DeliveryFence, ReceiptSchema } = await import("../src/captain/delivery-fence.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-remote-settled-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner"),
+    state = join(root, "state");
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // The "pc" machine is this Mac's own shell with its own home, so the real remote checkout
+    // observer makes the worktree there; its Herdr is unreachable and nothing is signed in.
+    const fleet: HerdrFleet = { id: "pc", session: "default", ssh: { host: "fixture@pc", shell: "posix" } };
+    const shell = async (command: string) =>
+      (await exec("/bin/sh", ["-c", command], { env: { ...process.env, HOME: root } })).stdout;
+    // A remote start folder's settled original, in the production journal's shape (anonymized),
+    // moved to this folder and host.
+    const golden = JSON.parse(
+      await readFile(
+        new URL("./fixtures/hire-receipts/settled-start-folder-hire.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const baseKey = JSON.stringify(["pc", "codex", owner, "new"]);
+    const target = { fleet: "pc", host: "fixture@pc", session: "default", shell: "posix" };
+    // The owner linked "pc" and lets it take workers, as `clankie machine` records it.
+    const { ClankieSettingsSchema, emptySettings } = await import("@clankie/settings");
+    await writeFile(
+      join(root, "settings.json"),
+      JSON.stringify(
+        ClankieSettingsSchema.parse({
+          ...emptySettings(),
+          machines: [{ id: "pc", ssh: "fixture@pc", shell: "posix" }],
+          machineAccess: { pc: "workers" },
+          execution: {
+            ...emptySettings().execution,
+            connections: [{ id: "pc", machine: "pc", session: "default", ssh: fleet.ssh }],
+          },
+        }),
+      ),
+    );
+    const receipts = join(state, "herdr-watches.json.hire-receipts.json");
+    const original = async (settled: boolean) => {
+      const { settlement, recoveryRequested: _recovery, ...pending } = golden;
+      await mkdir(state, { recursive: true });
+      await writeFile(
+        receipts,
+        JSON.stringify({
+          [baseKey]: ReceiptSchema.parse({
+            ...pending,
+            remoteAdmission: { ...golden.remoteAdmission, target },
+            ...(settled
+              ? { recoveryRequested: true, settlement: { ...settlement, receiptKey: baseKey, target } }
+              : {}),
+          }),
+        }),
+      );
+    };
+    const hire = async (brief: string) => {
+      // As a connected app's start_agent does, ask the journal what new work here needs.
+      const freshIntent = new DeliveryFence(receipts).nextFreshIntent(baseKey);
+      const captain = createCaptain(
+        {
+          herdrAvailable: () => true,
+          fleets: {
+            list: [fleet],
+            run: () => async () => {
+              throw Error("fixture Herdr is unreachable");
+            },
+            shell: () => shell,
+            remoteWorkspace: async () => true,
+          },
+        } as unknown as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: state,
+          settings: new SettingsStore(join(root, "settings.json")),
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
+        },
+      );
+      try {
+        const answer = await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: owner,
+            fleet: "pc",
+            ...(freshIntent === undefined ? {} : { freshIntent }),
+            effort: "low",
+            effortReason: "A fixture hire only needs to pass admission.",
+          },
+          brief,
+        });
+        if (answer.op !== "spawn_seat") throw Error(JSON.stringify(answer));
+        return { freshIntent, result: answer.result };
+      } finally {
+        await captain.close();
+      }
+    };
+    // Settled, the start folder is fenced only for its own original; new work moves to a
+    // fresh worktree and is admitted there, not refused against the start folder's receipts.
+    await original(true);
+    const moved = await hire("new work after the settled hire");
+    expect(moved.freshIntent).toMatchObject({ afterReceiptId: golden.messageId });
+    // Past every receipt check, it stops only at the plan check: no codex account is signed in
+    // on the fixture machine. Before, the fence refused it with "expected no retained receipt".
+    expect(moved.result).toMatchObject({
+      outcome: "failed",
+      reason: "harness_unavailable",
+      detail: expect.stringContaining("No observed plan can take this hire"),
+    });
+    const worktrees = await checkoutGit(owner, ["worktree", "list", "--porcelain"]);
+    expect(worktrees).toMatch(/\/\.local\/wt-fixture-[0-9a-f]{6}\n/u);
+    // Still pending, it may be running unconfirmed: a new start is checked in place and refused.
+    await original(false);
+    const held = await hire("new work while the original is pending");
+    expect(held.freshIntent).toBeUndefined();
+    expect(held.result).toMatchObject({
+      outcome: "failed",
+      reason: "not_ready",
+      detail: expect.stringMatching(
+        /Start checkout is dirty.*an earlier codex start in this folder is still unresolved/su,
+      ),
+    });
+    expect(await checkoutGit(owner, ["worktree", "list", "--porcelain"])).toBe(worktrees);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("an overlapping hire while a clean in-place hire is still being admitted is never moved once the folder turns dirty", async () => {
   const { vi } = await import("vitest");
   const { createCaptain } = await import("../src/captain/captain.ts");
