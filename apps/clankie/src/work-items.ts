@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -841,23 +841,37 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     path: string,
     gitRun: CommandRunner = run,
     startHead?: string,
+    removed?: { readonly commonDir: string; readonly branchRef: string },
   ): Promise<MainCheckpointHold | undefined> => {
     try {
       let remote: string;
+      // The hire's own worktree, or the shared repository once the worker removed it (#769).
+      let repository = path;
+      let head: string | undefined;
       try {
         remote = (await gitRun("git", ["remote", "get-url", "origin"], path)).trim();
       } catch (error) {
         // Only Git's positive non-repository result exempts research work.
         // Missing paths and a lost recorded hire still need positive proof.
         if (!startHead && /not a git repository/iu.test(String(error))) return undefined;
-        throw error;
+        if (!startHead || !removed || existsSync(path)) throw error;
+        // Its recorded branch carries the worker's commits; a deleted branch stays unknown.
+        repository = removed.commonDir;
+        remote = (await gitRun("git", ["remote", "get-url", "origin"], repository)).trim();
+        head = (
+          await gitRun(
+            "git",
+            ["rev-parse", "--verify", "--end-of-options", `${removed.branchRef}^{commit}`],
+            repository,
+          )
+        ).trim();
       }
       const repo =
         /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
           remote,
         )?.[1];
       if (!repo) return undefined; // Another forge has no GitHub main checkpoint.
-      const head = (await gitRun("git", ["rev-parse", "HEAD"], path)).trim();
+      head ??= (await gitRun("git", ["rev-parse", "HEAD"], path)).trim();
       const base =
         startHead ??
         (
@@ -874,7 +888,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
             },
           )
         ).trim();
-      const own = (await gitRun("git", ["rev-list", "--count", `${base}..${head}`], path)).trim();
+      const own = (await gitRun("git", ["rev-list", "--count", `${base}..${head}`], repository)).trim();
       if (own === "0") return undefined;
       if (!/^\d+$/u.test(own)) throw new Error("Worker commit observation unavailable");
       const access = checkpointAccess((await githubSnapshot())?.token);

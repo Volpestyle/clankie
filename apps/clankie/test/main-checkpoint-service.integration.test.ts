@@ -1,10 +1,12 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { checkpointFixture } from "../../../packages/work-items/test/fixtures/main-checkpoint.ts";
 import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
+import { readSeatCommitBaseline } from "../src/captain/seat-telemetry.ts";
+import { workerWorktreeHold } from "../src/captain/worktree-decisions.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 const fixtures: Awaited<ReturnType<typeof checkpointFixture>>[] = [];
 afterEach(async () => {
@@ -144,3 +146,71 @@ it("closes a long-landed worker on a busy main in time, and still refuses an unk
     expect(await tidy.mainCheckpointHold(agent), mode).toMatchObject({ reason: "main_unknown" });
   }
 }, 60_000);
+
+it("a worker that removed its own worktree closes once its branch landed, and still names unlanded commits (#769)", async () => {
+  const f = await checkpointFixture();
+  fixtures.push(f);
+  await f.git("remote", "set-url", "origin", "git@github.com:fixture/repo.git");
+  const service = createWorkItemsService({
+    stateDirectory: f.root,
+    githubToken: async () => "fixture-only",
+    githubApiBase: f.baseUrl,
+    clock: f.clock,
+  });
+  const root = await realpath(f.root);
+  // Each hire gets a linked worktree from main; the host records it before launch.
+  const hire = async (name: string) => {
+    const path = join(root, ".local", name);
+    await f.git("worktree", "add", "-q", "-b", `clankie/${name}`, path, f.start);
+    const recorded = await readSeatCommitBaseline(path);
+    expect(recorded).toMatchObject({ branchRef: `refs/heads/clankie/${name}`, head: f.start });
+    return { path, recorded: recorded!, agent: { paneId: `herdr-core/${name}`, workingDirectory: path } };
+  };
+  // t6y's case: its work landed (the worker commit merged into main), then it removed its worktree.
+  const landed = await hire("landed");
+  await f.git("-C", landed.path, "reset", "-q", "--hard", f.head);
+  await f.git("worktree", "remove", landed.path);
+  // Another worker committed work main never got, then removed its worktree too.
+  const unlanded = await hire("unlanded");
+  await writeFile(join(unlanded.path, "unlanded"), "unlanded");
+  await f.git("-C", unlanded.path, "add", "unlanded");
+  await f.git("-C", unlanded.path, "commit", "-qm", "work main never got");
+  const kept = await f.git("-C", unlanded.path, "rev-parse", "HEAD");
+  await f.git("worktree", "remove", unlanded.path);
+
+  // Before #769, the landed worker's missing folder left its checkpoint unknown forever.
+  expect(await service.mainCheckpoint(landed.path, undefined, f.start)).toMatchObject({
+    reason: "main_unknown",
+    detail: "Worker repository or GitHub checkpoint unavailable",
+  });
+  // Its recorded branch is read instead: nothing held, and main's checkpoint still applies.
+  expect(await workerWorktreeHold(landed.agent, { recorded: landed.recorded })).toEqual([]);
+  expect(await service.mainCheckpoint(landed.path, undefined, f.start, landed.recorded)).toMatchObject({
+    reason: "main_red",
+    commit: f.merge,
+  });
+  f.mode("green");
+  f.advance();
+  expect(await service.mainCheckpoint(landed.path, undefined, f.start, landed.recorded)).toBeUndefined();
+
+  // Unlanded commits on a removed worktree's branch still refuse, and are named.
+  const [held] = await workerWorktreeHold(unlanded.agent, { recorded: unlanded.recorded });
+  expect(held).toMatchObject({
+    path: unlanded.path,
+    state: "unknown",
+    branch: "clankie/unlanded",
+    head: kept,
+    unlandedCommits: 1,
+  });
+  expect(held!.reason).toContain(`${kept.slice(0, 12)} work main never got`);
+
+  // A branch deleted with its worktree leaves the work unreadable: both reads refuse.
+  await f.git("branch", "-D", "clankie/landed");
+  expect(await workerWorktreeHold(landed.agent, { recorded: landed.recorded })).toMatchObject([
+    { path: landed.path, state: "unknown", reason: expect.stringContaining("clankie/landed is gone") },
+  ]);
+  f.advance();
+  expect(await service.mainCheckpoint(landed.path, undefined, f.start, landed.recorded)).toMatchObject({
+    reason: "main_unknown",
+  });
+});
