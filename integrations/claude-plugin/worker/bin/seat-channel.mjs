@@ -115,7 +115,7 @@ function typedReceipt(receipt, retained = false) {
   if (retained) return { ...receipt, sent: false, retryable: true };
   // A receipt with a delivery ID may have reached the service; one without was never posted.
   const sent = receipt.deliveryStage === "uncertain" && receipt.deliveryId !== undefined ? "unknown" : false;
-  return { ...receipt, sent, retryable: receipt.deliveryStage !== "rejected" };
+  return { ...receipt, sent, retryable: receipt.retryable ?? receipt.deliveryStage !== "rejected" };
 }
 /** Clankie admits a local agent by its pane's process tree; a shared Codex daemon is outside it. */
 const SHARED_DAEMON_NOTE =
@@ -1241,13 +1241,25 @@ export function runSeatChannel({
           ...(REPORT_KINDS.has(kind) ? { kind } : {}),
         }));
       retainedInbound = undefined;
-    } catch (error) {
+    } catch {
       // Never a bare tool failure (#378): the receipt journal still fences any original.
-      receipt = {
-        received: false,
-        deliveryStage: "uncertain",
-        detail: `The report bridge failed before returning a receipt (${error instanceof Error ? error.message : String(error)}). Call message_clankie again: it only reconciles an earlier original and never sends it twice.`,
-      };
+      const original = await sendInbound.reconcilePending();
+      receipt = original?.received
+        ? {
+            received: false,
+            deliveryStage: "unavailable",
+            deliveryId: original.deliveryId,
+            retryable: true,
+            detail:
+              "The original report is stored. This call only recovered its receipt; no additional message was sent. Call again for a distinct follow-up; do not resend the original.",
+          }
+        : (original ?? {
+            received: false,
+            deliveryStage: "unavailable",
+            retryable: true,
+            detail:
+              "The report bridge failed before dispatch; nothing was sent. Call message_clankie again when the bridge is available.",
+          });
     }
     return { isError: !receipt.received, text: JSON.stringify(typedReceipt(receipt, retained)) };
   }

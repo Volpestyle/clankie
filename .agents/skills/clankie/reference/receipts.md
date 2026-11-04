@@ -22,6 +22,15 @@ Clankie yet, for example a fresh bridge whose binding wasn't ready; call again.
 `retryable: false` on a refusal means a retry cannot help until the seat is
 admitted again.
 
+A binding lookup failure happens before report dispatch: it returns `unavailable`,
+`sent: false`, and `retryable: true`, with no pending original. A genuinely
+`uncertain` report always carries its original `deliveryId`. Once admission is
+healthy, another `message_clankie` call reconciles that ID by GET only; a different
+follow-up is not sent during reconciliation. Call again for that follow-up after
+the original settles. An unreadable or locked local journal returns `unavailable`
+with `retryable: false`; preserve it and ask the lead to inspect it rather than
+removing the claim. Receipt lookup never bypasses current native admission.
+
 Sender progress also arrives as `worker-report-receipt` channel events: stored,
 taken into a lead turn, then acknowledged. They never wake you on their own;
 they arrive with your next real event, such as your lead's next message, and

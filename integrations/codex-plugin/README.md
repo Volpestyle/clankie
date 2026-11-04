@@ -134,6 +134,12 @@ and `message_clankie_status`. Keep the original delivery ID and check its curren
 stage before retrying or doing dependent work. The status read never resends or
 acknowledges the report and refuses receipts belonging to another native seat.
 
+Binding lookup failures return `unavailable` before dispatch, so they leave no
+unresolved original. An `uncertain` report includes its stable `deliveryId`;
+a later `message_clankie` call only reconciles it, without sending a different
+follow-up. Receipt reads still require current native admission. Preserve an
+unreadable local journal and ask the lead to inspect it; never delete its claim.
+
 Worker MCP uses `worker`; existing `clankie` registrations remain supported for
 original-session catalog observation and refresh. See the [MCP migration](../claude-plugin/README.md#mcp-name-and-result-migration) for result decoding and update behavior.
 

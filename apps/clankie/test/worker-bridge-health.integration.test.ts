@@ -597,7 +597,7 @@ it("records a real subprocess binding timeout independently of its healthy tool 
   });
   expect(decoded(reply.result)).toMatchObject({
     received: false,
-    deliveryStage: "uncertain",
+    deliveryStage: "unavailable",
     // No claim was written and nothing was posted, so calling again is safe (#378).
     sent: false,
     retryable: true,
@@ -605,7 +605,7 @@ it("records a real subprocess binding timeout independently of its healthy tool 
   expect(decoded(reply.result)).not.toHaveProperty("deliveryId");
   await expect
     .poll(() => f.reportStatus())
-    .toMatchObject({ outcome: "uncertain", reason: "binding_timeout" });
+    .toMatchObject({ outcome: "unavailable", reason: "binding_timeout" });
   expect(f.status().status).toBe("ready");
   expect(f.bindingGets()).toBe(1);
   expect(f.messagePosts()).toBe(0);
@@ -647,11 +647,14 @@ it("carries three real bridge binding timeouts through the inactivity flag, one 
     });
     expect(decoded(reply.result)).toMatchObject({
       received: false,
-      deliveryStage: "uncertain",
+      deliveryStage: "unavailable",
+      sent: false,
+      retryable: true,
     });
+    expect(decoded(reply.result)).not.toHaveProperty("deliveryId");
     await expect
       .poll(() => workers[i]!.reportStatus())
-      .toMatchObject({ outcome: "uncertain", reason: "binding_timeout" });
+      .toMatchObject({ outcome: "unavailable", reason: "binding_timeout" });
     expect(workers[i]!.messagePosts()).toBe(0);
   }
   now = Date.now();

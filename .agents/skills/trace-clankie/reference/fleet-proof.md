@@ -35,6 +35,18 @@ Reading fleet proof alerts and native process/pane refusals.
   socket lookup. An empty or all-relative service PATH supplies no installed
   launcher; proof never falls back to an executable in the working directory.
 
+- **Repeated `process_unavailable` / `ESRCH` before `attempts_exhausted`.**
+  A process stuck in macOS kernel exit can remain in the census and in
+  `KERN_PROC_PID` with `P_WEXIT`, while `PROC_PIDTBSDINFO` without the
+  include-zombies argument returns `ESRCH`. This can block every cold socket
+  proof, including receipt reads; it is not evidence that each seat left the
+  fleet. `kill(pid, 0)` and a short BSD query may still find that process.
+  Preserve fail-closed admission: `P_WEXIT` alone does not prove its FDs are
+  gone. XNU drains process references before `fdt_invalidate`, which can block
+  ([kernel exit](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exit.c)).
+  Escalate the stuck process to the lead; do not skip it, kill an unowned process,
+  clear worker receipts or replay uncertain mail to compensate.
+
 - **Idle Codex panes.** Distinguish persistent worker discovery from temporary
   `mcpServerStatus/list` snapshot clients. A snapshot may end its bridge
   immediately after `tools/list`; bridge health must finish before that
