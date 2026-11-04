@@ -66,6 +66,14 @@ flowchart LR
 
 Independent linked agents reach Clankie through `message_clankie` and the
 per-fleet link. Remote hires use their native harness channels or session APIs.
+Workers may select an explicit report destination from their exact native hire
+record or an owner-added report grant (#347). The host admits that destination;
+worker text, persona, pane title and the destination parameter cannot grant a
+lead role, adoption or control. A refused target never falls back to another
+chat. The original receipt binds text and destination, including after restart;
+reconciliation never redirects or replays it. Historical display provenance is
+not upgraded into a report grant.
+
 Coordinator state remains on disk for inspection; it is no longer a connection.
 
 ## Consequences

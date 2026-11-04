@@ -27,6 +27,23 @@ const HireStarterSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type HireStarter = z.infer<typeof HireStarterSchema>;
+const ReportLeadSchema = z
+  .object({
+    id: z.string().min(1).max(512),
+    owner: ConversationOwnerSchema,
+    connector: z
+      .object({
+        deviceId: z.string().min(1).max(256),
+        ref: z
+          .string()
+          .regex(/^[A-Za-z0-9._:-]{1,128}$/u)
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type HireReportLead = z.infer<typeof ReportLeadSchema>;
 const RecordSchema = z
   .object({
     id: z.string().min(1),
@@ -41,6 +58,7 @@ const RecordSchema = z
     startedBy: HireStarterSchema.optional(),
     /** The occupant an app hired, while that app still leads it (#442); adoption ends it. */
     appLeadOccupantId: z.string().min(1).optional(),
+    reportLeads: z.array(ReportLeadSchema).max(32).optional(),
     owner: ConversationOwnerSchema,
   })
   .strict();
@@ -108,6 +126,73 @@ export class HireOwners {
     return held === undefined
       ? undefined
       : { owner: ConversationOwnerSchema.parse(held.owner), hired: held.hired !== false };
+  }
+  /** Explicit report access never confers adoption or native control. */
+  public reportLeads(paneId: string, seatId: string, occupantId: string): HireReportLead[] {
+    const matches = this.state.hires.filter((entry) => entry.paneId === paneId || entry.seatId === seatId);
+    const held = matches.length === 1 ? matches[0] : undefined;
+    if (!held || held.paneId !== paneId || held.seatId !== seatId || held.occupantId !== occupantId)
+      return [];
+    return [
+      { id: `conversation:${held.owner.conversationId}`, owner: ConversationOwnerSchema.parse(held.owner) },
+      ...(held.reportLeads ?? []).filter((lead) => lead.id !== `conversation:${held.owner.conversationId}`),
+      ...(held.hired === true &&
+      held.startedBy?.kind === "app" &&
+      held.appLeadOccupantId === occupantId &&
+      !held.reportLeads?.some((lead) => lead.id === "hiring-app")
+        ? [
+            {
+              id: "hiring-app",
+              owner: ConversationOwnerSchema.parse(held.owner),
+              connector: {
+                deviceId: held.startedBy.deviceId,
+                ...(held.startedBy.notify ? { ref: held.startedBy.notify.ref } : {}),
+              },
+            },
+          ]
+        : []),
+    ].map((lead) => ReportLeadSchema.parse(lead));
+  }
+  /** Called only after operator-owner authorization and fresh native proof. */
+  public grantReportLead(paneId: string, seatId: string, occupantId: string, lead: HireReportLead): void {
+    const held = this.state.hires.find(
+      (entry) => entry.paneId === paneId && entry.seatId === seatId && entry.occupantId === occupantId,
+    );
+    if (
+      !held ||
+      this.state.hires.filter((entry) => entry.paneId === paneId || entry.seatId === seatId).length !== 1
+    )
+      throw new Error("Report grants require the exact persisted native occupant");
+    const parsed = ReportLeadSchema.parse(lead);
+    this.save({
+      ...this.state,
+      hires: this.state.hires.map((entry) =>
+        entry !== held
+          ? entry
+          : {
+              ...entry,
+              reportLeads: [...(entry.reportLeads ?? []).filter((item) => item.id !== parsed.id), parsed],
+            },
+      ),
+    });
+  }
+  public revokeReportLead(paneId: string, seatId: string, occupantId: string, id: string): void {
+    const held = this.state.hires.find(
+      (entry) => entry.paneId === paneId && entry.seatId === seatId && entry.occupantId === occupantId,
+    );
+    if (!held?.reportLeads?.some((lead) => lead.id === id))
+      throw new Error("No owner-added report destination matches");
+    this.save({
+      ...this.state,
+      hires: this.state.hires.map((entry) =>
+        entry === held
+          ? {
+              ...entry,
+              reportLeads: entry.reportLeads!.filter((lead) => lead.id !== id),
+            }
+          : entry,
+      ),
+    });
   }
   /** Display attribution requires an explicitly recorded hire, never adoption alone. */
   public hiredProjectContext(
@@ -246,6 +331,7 @@ export class HireOwners {
           ...(prior.hired === undefined ? {} : { hired: prior.hired }),
           ...(prior.hireConversationId === undefined ? {} : { hireConversationId: prior.hireConversationId }),
           ...(prior.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
+          ...(prior.occupantId === occupantId && prior.reportLeads ? { reportLeads: prior.reportLeads } : {}),
           ...(prior.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
           ...(prior.appLeadOccupantId === undefined ? {} : { appLeadOccupantId: prior.appLeadOccupantId }),
         },
@@ -287,6 +373,9 @@ export class HireOwners {
             ? {}
             : { hireConversationId: prior.hireConversationId }),
           ...(prior?.hireProjectId === undefined ? {} : { hireProjectId: prior.hireProjectId }),
+          ...(prior?.occupantId === occupantId && prior.reportLeads
+            ? { reportLeads: prior.reportLeads }
+            : {}),
           // Adoption sets the current lead, never who asked for the hire, and ends
           // an app's lead of it: appLeadOccupantId is not carried (#442).
           ...(prior?.startedBy === undefined ? {} : { startedBy: prior.startedBy }),
@@ -385,6 +474,7 @@ export class HireOwners {
     };
     // A successor keeps who asked for display, never the app's lead of the old occupant (#442).
     delete next.appLeadOccupantId;
+    delete next.reportLeads;
     this.save({
       schemaVersion: 1,
       hires: this.state.hires.map((entry) => (entry !== prior ? entry : next)),
@@ -447,6 +537,24 @@ export class HireOwners {
           owner: held ?? owner,
           hired: true,
           hireConversationId: prior?.hireConversationId ?? owner.conversationId,
+          reportLeads:
+            (prior?.occupantId === undefined || prior.occupantId === occupantId) && prior?.reportLeads
+              ? prior.reportLeads
+              : [
+                  { id: `conversation:${(held ?? owner).conversationId}`, owner: held ?? owner },
+                  ...(startedBy?.kind === "app"
+                    ? [
+                        {
+                          id: "hiring-app",
+                          owner: held ?? owner,
+                          connector: {
+                            deviceId: startedBy.deviceId,
+                            ...(startedBy.notify ? { ref: startedBy.notify.ref } : {}),
+                          },
+                        },
+                      ]
+                    : []),
+                ],
           ...((prior?.hireProjectId ?? projectId) === undefined
             ? {}
             : { hireProjectId: prior?.hireProjectId ?? projectId }),

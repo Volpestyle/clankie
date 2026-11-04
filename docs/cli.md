@@ -5415,6 +5415,23 @@ with 200.
 Specs live in `~/.clankie/views/views.json`. Schemas are in
 `packages/protocol/src/views.ts`. Hosted share links are not part of this repository.
 
+### `fleet report-leads PANE [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]`
+
+Read or manage the report destinations for an exact native worker hire. This
+owner-only command uses `POST /v1/fleet/report-leads`; it requires this machine's owner
+operator credential. The worker itself cannot add
+destinations. An optional connected app device and thread reference select that
+app's report inbox without giving it control of the worker.
+
+The worker calls `list_report_leads` and passes an exact returned `id` to
+`message_clankie {text, target, kind}`. The list includes conversation scope,
+project IDs and workspace/machine context when known. Omitting `target` keeps
+today's routing. A refused explicit target never falls back. Text and target
+are bound to one receipt; an uncertain original can only be reconciled, never
+retargeted. Grants survive a service restart for the same native occupant and
+are not inherited by a replacement. Reports stay attributed worker output;
+receiving one does not adopt the worker or make anyone a lead.
+
 ### `fleet room [--older CURSOR] [--limit N] [--follow]`
 
 The fleet room ([ADR 0273](adr/0273-the-fleet-room-is-a-durable-owner-only-coordination-record.md)):

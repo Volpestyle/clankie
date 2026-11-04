@@ -125,6 +125,7 @@ export class LocalFleetLink {
         /^\/v1\/fleet\/seats\/([^/]+)\/(events|hook|messages|peers|peer-messages|review-candidates|review-verdicts|tool-catalog|evidence-uploads)$/u.exec(
           path,
         ) ||
+        (request.method === "GET" ? /^\/v1\/fleet\/seats\/([^/]+)\/(messages)\/leads$/u.exec(path) : null) ||
         // A review candidate's read is its author's or reviewer's own (ADR 0287).
         (request.method !== "GET"
           ? null

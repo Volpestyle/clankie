@@ -42,6 +42,150 @@ tags:
 security: []
 
 paths:
+  /v1/fleet/report-leads:
+    post:
+      tags: [Operator]
+      operationId: manageWorkerReportLeads
+      security: [{ operatorBearer: [] }]
+      summary: Manage an exact native hire's report destinations
+      description: |
+        This machine's owner operator credential is required. A worker, connected
+        app or paired-device token cannot add destinations. Grants name existing
+        private global/workspace lead conversations; an optional active
+        connector device with its existing lead-read grant and ref select that app's
+        report inbox while the owner has selected Apps lead mode. Revoked or
+        expired app destinations are unavailable. Granting report
+        access never adopts the worker or grants control. Grants are bound to
+        the current native occupant and survive service replacement for it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [paneId, change]
+              properties:
+                paneId: { type: string, minLength: 1, maxLength: 512 }
+                change:
+                  oneOf:
+                    - type: object
+                      additionalProperties: false
+                      required: [op]
+                      properties:
+                        op: { const: list }
+                    - type: object
+                      additionalProperties: false
+                      required: [op, conversationId]
+                      properties:
+                        op: { const: grant }
+                        conversationId: { type: string, minLength: 1 }
+                        deviceId: { type: string, minLength: 1, maxLength: 256 }
+                        ref:
+                          {
+                            type: string,
+                            description: Requires deviceId,
+                            pattern: "^[A-Za-z0-9._:-]{1,128}$",
+                          }
+                    - type: object
+                      additionalProperties: false
+                      required: [op, id]
+                      properties:
+                        op: { const: revoke }
+                        id: { type: string, minLength: 1, maxLength: 512 }
+      responses:
+        "200":
+          description: schemaVersion 1 and the exact hire's current leads, with opaque id and conversationId plus known scope, title, projectIds and optional app deviceId/ref
+        "400":
+          description: Invalid request
+        "403":
+          description: Owner operator, native occupant or destination could not be verified
+
+  /v1/fleet/seats/{paneId}/messages/leads:
+    get:
+      tags: [Captain]
+      operationId: listWorkerReportLeads
+      security: []
+      summary: Discover only this native hire's permitted report destinations
+      description: |
+        Requires the same exact native process/pane proof as worker reporting.
+        Returns leads named in the persisted hire record or added by the owner,
+        never a fleet-wide roster. IDs are opaque and grant no lead role,
+        adoption or control. Missing or changed native ownership returns no leads.
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: schemaVersion 1 and leads with opaque id, conversationId and known scope/title/projectIds, optionally app deviceId/ref
+        "403":
+          description: Native sender proof unavailable
+
+  /v1/fleet/seats/{paneId}/messages:
+    get:
+      tags: [Captain]
+      operationId: getWorkerReportBinding
+      security: []
+      summary: Read this native worker's durable report binding
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: schemaVersion 1 and native binding hash
+        "403":
+          description: Native sender proof unavailable
+    post:
+      tags: [Captain]
+      operationId: sendWorkerReport
+      security: []
+      summary: Store attributed worker output for an admitted lead
+      description: |
+        Requires exact native sender proof. An optional target must be an opaque
+        ID from this hire's messages/leads response. Without it, existing report
+        routing applies. A refused explicit destination never falls back. Text
+        and explicit target are bound to the original receipt fingerprint;
+        reconciliation never redirects or replays it. Stored means durable
+        acceptance, not that the lead read or completed it. Reports confer no
+        owner authority, adoption or lead role.
+      parameters:
+        - in: path
+          name: paneId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion, text, delivery]
+              properties:
+                schemaVersion: { const: 1 }
+                text: { type: string, minLength: 1, maxLength: 16384 }
+                target: { type: string, minLength: 1, maxLength: 512 }
+                delivery:
+                  type: object
+                  additionalProperties: false
+                  required: [id, binding]
+                  properties:
+                    id: { type: string, format: uuid }
+                    binding: { type: string, pattern: "^[a-f0-9]{64}$" }
+                urgent: { type: boolean }
+                kind: { type: string, enum: [done, blocked, update] }
+      responses:
+        "200":
+          description: Exact durable receipt, or terminal not_sent refusal for this original; uncertainty always retains its deliveryId
+        "400":
+          description: Invalid report
+        "403":
+          description: Native sender proof unavailable
+
   /v1/fleet/leads:
     get:
       tags: [Operator]

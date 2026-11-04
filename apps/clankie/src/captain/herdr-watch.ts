@@ -2302,6 +2302,33 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return owner;
   }
 
+  public reportLeads(agent: HerdrAgentSnapshot) {
+    this.nativeOwner(agent);
+    return agent.session === undefined
+      ? []
+      : this.hireOwners.reportLeads(agent.paneId, agent.terminalId, occupantIdForHerdrSession(agent.session));
+  }
+  public grantReportLead(agent: HerdrAgentSnapshot, lead: import("./hire-owners.ts").HireReportLead): void {
+    this.nativeOwner(agent);
+    if (!agent.session) throw new Error("Report grants require a native occupant");
+    this.hireOwners.grantReportLead(
+      agent.paneId,
+      agent.terminalId,
+      occupantIdForHerdrSession(agent.session),
+      lead,
+    );
+  }
+
+  public revokeReportLead(agent: HerdrAgentSnapshot, id: string): void {
+    this.nativeOwner(agent);
+    if (!agent.session) throw new Error("Report grants require a native occupant");
+    this.hireOwners.revokeReportLead(
+      agent.paneId,
+      agent.terminalId,
+      occupantIdForHerdrSession(agent.session),
+      id,
+    );
+  }
   /** Who asked for this exact occupant's hire (ADR 0321); display only. */
   /** Whether Clankie recorded hiring this seat with this native session (#584). */
   public hiredSession(seatId: string, harness: string, sessionId: string): boolean {

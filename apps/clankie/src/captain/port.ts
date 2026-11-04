@@ -638,6 +638,14 @@ export interface CaptainPort {
     binding: string,
     deliveryId: string,
   ): Promise<FleetSeatMessageStatus | undefined>;
+  manageWorkerReportLeads(
+    input: import("@clankie/protocol").ManageWorkerReportLeads,
+    authorize: () => Promise<boolean>,
+  ): Promise<import("@clankie/protocol").WorkerReportLead[]>;
+  workerReportLeads(
+    paneId: string,
+    reportDeviceAvailable?: (deviceId: string) => boolean,
+  ): Promise<import("@clankie/protocol").WorkerReportLead[]>;
   receiveFleetSeatMessage(
     paneId: string,
     text: string,
@@ -845,6 +853,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       binding: delivery.binding,
       fingerprint,
     }),
+    manageWorkerReportLeads: async () => [],
+    workerReportLeads: async () => [],
     receiveFleetSeatMessage: async () => false,
     listFleetPeerSeats: async () => undefined,
     sendFleetPeerMessage: async () => {

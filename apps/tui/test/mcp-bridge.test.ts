@@ -451,6 +451,7 @@ describe("clankie mcp", () => {
     // Writing to Clankie needs no channel; only receiving his mail does.
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "list_report_leads",
       "message_clankie_status",
     ]);
     await client.close();

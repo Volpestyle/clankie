@@ -1484,7 +1484,13 @@ it("a read-only hire starts Claude in dontAsk with only reading and reporting al
   expect(settings.permissions.defaultMode).toBe("dontAsk");
   expect(settings.permissions.deny).toEqual(expect.arrayContaining(["Edit", "Write", "WebFetch"]));
   expect(settings.permissions.allow).toEqual(
-    expect.arrayContaining(["Read", "Glob", "Grep", "mcp__plugin_clankie-worker_worker__message_clankie"]),
+    expect.arrayContaining([
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__plugin_clankie-worker_worker__message_clankie",
+      "mcp__plugin_clankie-worker_worker__list_report_leads",
+    ]),
   );
   for (const widening of ["Edit", "Write", "Bash", "WebFetch", "mcp__plugin_clankie-worker_worker"])
     expect(settings.permissions.allow).not.toContain(widening);

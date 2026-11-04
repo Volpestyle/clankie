@@ -6,6 +6,16 @@ import { join } from "node:path";
 import { admissionRefusal, checkFleetMembership } from "./admission.mjs";
 
 const hash = (text) => createHash("sha256").update(text.replace(/\r\n?/gu, "\n").trim()).digest("hex");
+// Match the service's explicit-target domain; legacy UTF-8 text cannot encode 0xff.
+const fingerprint = (text, target) =>
+  target === undefined
+    ? hash(text)
+    : createHash("sha256")
+        .update(new Uint8Array([0xff]))
+        .update(JSON.stringify(["worker-report-target", target, text.replace(/\r\n?/gu, "\n").trim()]))
+        .digest("hex");
+const validTarget = (target) =>
+  target === undefined || (typeof target === "string" && target.length > 0 && target.length <= 512);
 const hex = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 const uuid = (value) => typeof value === "string" && /^[a-f0-9-]{36}$/u.test(value);
 /** Read-only recovery guard. A corrupt claim or abandoned lock remains held. */
@@ -40,7 +50,8 @@ const valid = (value) =>
   hex(value.binding) &&
   hex(value.fingerprint) &&
   typeof value.text === "string" &&
-  hash(value.text) === value.fingerprint;
+  validTarget(value.target) &&
+  fingerprint(value.text, value.target) === value.fingerprint;
 
 export function createInboundSender({ directory, scope, request, onObservation, now = Date.now }) {
   let lastStoredAt;
@@ -162,7 +173,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       }
       unlinkSync(path);
     });
-  const reconcile = async (record, text) => {
+  const reconcile = async (record, text, target) => {
     const query = new URLSearchParams({ binding: record.binding, fingerprint: record.fingerprint });
     const response = await request(`/${record.deliveryId}?${query}`);
     try {
@@ -203,7 +214,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
         {
           ...value,
           detail:
-            hash(text) === record.fingerprint
+            fingerprint(text, target) === record.fingerprint
               ? `Your earlier message ${record.deliveryId} was not sent, and this call sent nothing. Send it again with a new message_clankie call.`
               : `This call only settled your earlier message ${record.deliveryId}, which was not sent; this message was not sent either. Send this message again with a new message_clankie call.`,
         },
@@ -217,7 +228,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
     settle(record, value, true);
     lastStoredAt = new Date(now()).toISOString();
     return observed(
-      hash(text) === record.fingerprint
+      fingerprint(text, target) === record.fingerprint
         ? value
         : {
             received: false,
@@ -233,10 +244,16 @@ export function createInboundSender({ directory, scope, request, onObservation, 
     let record;
     let phase = "local";
     try {
+      if (!validTarget(options?.target))
+        return {
+          received: false,
+          deliveryStage: "rejected",
+          detail: "Choose a target ID returned by list_report_leads; nothing was sent.",
+        };
       record = inspect();
       if (record) {
         phase = "receipt";
-        return await reconcile(record, text);
+        return await reconcile(record, text, options?.target);
       }
       // No write attempt until the authenticated service identifies the native
       // session. Older services are readable but cannot supply durable receipts.
@@ -261,7 +278,14 @@ export function createInboundSender({ directory, scope, request, onObservation, 
           [400, 401, 403, 413].includes(bindingResponse.status) ? "binding_rejected" : "binding_unavailable",
         );
       phase = "local";
-      record = { schemaVersion: 1, deliveryId: randomUUID(), binding, fingerprint: hash(text), text };
+      record = {
+        schemaVersion: 1,
+        deliveryId: randomUUID(),
+        binding,
+        fingerprint: fingerprint(text, options?.target),
+        text,
+        ...(options?.target === undefined ? {} : { target: options.target }),
+      };
       mkdirSync(directory, { recursive: true, mode: 0o700 });
       try {
         // Exclusive creation fences concurrent bridges before the first POST.
@@ -285,7 +309,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
         const original = inspect();
         phase = "receipt";
         return original
-          ? await reconcile(original, text)
+          ? await reconcile(original, text, options?.target)
           : observed(uncertain(), "local_receipt_unavailable");
       }
       let response;
@@ -299,6 +323,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
           body: JSON.stringify({
             schemaVersion: 1,
             text,
+            ...(record.target === undefined ? {} : { target: record.target }),
             delivery: { id: record.deliveryId, binding },
             // A delivery hint only: it is not part of the original's fingerprint (VUH-2274).
             ...(urgent ? { urgent: true } : {}),
@@ -313,7 +338,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
         // accepts anything. The same delivery ID and text again, unlabelled, is
         // the same original (the service dedups by both); a blocked report keeps
         // being heard at once through urgent.
-        if (kind !== undefined && response.status === 400) {
+        if (kind !== undefined && record.target === undefined && response.status === 400) {
           void response.body?.cancel().catch(() => undefined);
           response = await post(undefined, options?.urgent === true || kind === "blocked");
         }
@@ -395,7 +420,7 @@ export function createInboundSender({ directory, scope, request, onObservation, 
       let record;
       try {
         record = inspect();
-        return record === undefined ? undefined : await reconcile(record, record.text);
+        return record === undefined ? undefined : await reconcile(record, record.text, record.target);
       } catch (error) {
         const timeout = error?.name === "TimeoutError" || error?.name === "AbortError";
         return observed(

@@ -29,6 +29,7 @@ This directory and the module READMEs hold the technical references.
 | [Model keys](model-keys.md)                              | Paired-device API for model credentials and selection                       |
 | [Worker harness sign-in](harness-logins.md)              | Sign Claude Code and Codex workers into the owner's own subscriptions       |
 | [Composer transcription](composer-transcription.md)      | Paired-device recording, draft receipts and local/cloud boundaries          |
+| [Worker reports](worker-report-targets.md)               | Permitted report destinations, owner grants and bound receipts              |
 | [Worker access](worker-access.md)                        | Connected tools, native peer messages and manual grants                     |
 | [Tracker identity](worker-tracker-identity.md)           | Connected-account enforcement and remaining isolation work                  |
 | [Worker posts](linear-worker-posts.md)                   | One Linear app, worker names and portraits, compact handoffs                |

@@ -1,6 +1,11 @@
 import { withPresenceCursor } from "../captain/presence.ts";
+import {
+  FLEET_REPORT_LEADS_PATH,
+  ManageWorkerReportLeadsSchema,
+  WorkerReportLeadsSchema,
+} from "@clankie/protocol";
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema, type FleetLead } from "@clankie/protocol/fleet-leads";
-import { isDeviceRunExpired } from "../devices.ts";
+import { isDeviceRunExpired, workerReportDevice } from "../devices.ts";
 import type { LeadWakeSender } from "../lead-wakes.ts";
 import type {
   IssueWriteResult,
@@ -148,6 +153,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   for (const path of [
     FLEET_LEADS_PATH,
     FLEET_ROSTER_PATH,
+    FLEET_REPORT_LEADS_PATH,
     FLEET_ROSTER_RETIRE_PATH,
     FLEET_ROSTER_UNDO_PATH,
   ]) {
@@ -160,12 +166,31 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const authorize = async () => {
           const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
           if (operator && operator !== "unavailable") return true;
+          if (path === FLEET_REPORT_LEADS_PATH) return false;
           const device = await ctx.authenticateDevice(context.req.raw);
           if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
           const record = ctx.devices.get(device.deviceId);
           return ownerDeviceRecord(record, ctx.devices);
         };
         if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
+        if (path === FLEET_REPORT_LEADS_PATH) {
+          const parsed = ManageWorkerReportLeadsSchema.safeParse(
+            await context.req.json().catch(() => undefined),
+          );
+          if (!parsed.success) return context.json({ error: "invalid_request" }, 400);
+          if (
+            parsed.data.change.op === "grant" &&
+            parsed.data.change.deviceId !== undefined &&
+            !workerReportDevice(ctx.devices.get(parsed.data.change.deviceId), ctx.clock())
+          )
+            return context.json({ error: "report_lead_refused" }, 403);
+          try {
+            const leads = await ctx.dependencies.captain.manageWorkerReportLeads(parsed.data, authorize);
+            return context.json(WorkerReportLeadsSchema.parse({ schemaVersion: 1, leads }));
+          } catch {
+            return context.json({ error: "report_lead_refused" }, 403);
+          }
+        }
         if (path === FLEET_LEADS_PATH) {
           if (!ctx.dependencies.captain.fleetLeadState)
             return context.json({ error: "fleet_leads_unavailable" }, 503);

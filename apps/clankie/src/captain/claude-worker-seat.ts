@@ -182,6 +182,7 @@ const READ_ONLY_RULES = [
   ...WORKER_SERVER_RULES.flatMap((server) => [
     `${server}__message_clankie`,
     `${server}__message_clankie_status`,
+    `${server}__list_report_leads`,
   ]),
   // Exact commands only: an open prefix lets options such as `git log --output`
   // write a file.

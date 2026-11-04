@@ -1551,6 +1551,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     : undefined;
   app.route("/", remoteLeads.app);
   const { laneMcp } = registerSeatRoutes({
+    devices,
+    now: clock,
     get dependencies() {
       return dependencies;
     },
