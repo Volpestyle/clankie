@@ -47,10 +47,10 @@ interface Budget {
   readonly perSecond: number;
 }
 
-export type TakeConnectorBudget = (key: string, capacity: number, perSecond: number) => boolean;
+type TakeConnectorBudget = (key: string, capacity: number, perSecond: number) => boolean;
 
 /** The caller, as far as the doorway can tell before spending anything. */
-export interface ConnectorCall {
+interface ConnectorCall {
   readonly hostId: string;
   /** The route without its query. */
   readonly path: string;
@@ -60,7 +60,7 @@ export interface ConnectorCall {
   readonly tokenBody: Buffer | undefined;
 }
 
-export interface ConnectorAdmission {
+interface ConnectorAdmission {
   /** Null when refused; otherwise reads the Mac's reply to this call. */
   admit(call: ConnectorCall): ConnectorReplyObserver | null;
   /** Drops what has expired. */
