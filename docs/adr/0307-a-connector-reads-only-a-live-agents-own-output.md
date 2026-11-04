@@ -132,9 +132,13 @@ agent showed.
   - For Codex, the one rollout the process holds open for writing, and only if
     Codex's own lookup by that id finds the same file. A descriptor opened only
     to read names nothing.
-  - Either way the transcript must be a regular file the owner owns, at its
-    canonical path, with no symlink anywhere along it, its config home
-    included.
+  - Either way the transcript is opened once (`O_NOFOLLOW`) and pinned. The
+    handle itself must be a regular file the owner owns, and for Codex the
+    very file (device and inode) the process holds for writing. After the
+    open, its path must be canonical, with no symlink anywhere along it (its
+    config home included), and still name that same file. The transcript is
+    parsed through that handle, so a file or folder swapped before the open
+    is refused, and one swapped after it is never read.
 
   Anything short of exactly one such session, or no transcript, is refused. Its
   screen is never read, so a menu it waits on is named from its session alone.

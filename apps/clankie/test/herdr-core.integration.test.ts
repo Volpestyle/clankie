@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { constants, existsSync } from "node:fs";
 import {
+  open,
   mkdir,
   mkdtemp,
   readFile,
@@ -12,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { SessionRefusal, SessionSources, createHerdrCoreSessionSource } from "@clankie/agent-hosts/sessions";
@@ -21,7 +22,12 @@ import {
   type CreateOperatorServiceContext,
 } from "../src/captain/captain-operator-service.ts";
 import { createHerdrCore } from "../src/captain/herdr-core.ts";
-import type { NativeSessionLookup } from "../src/captain/native-session-by-pid.ts";
+import { transcriptReadText } from "../src/captain/agent-transcript-read.ts";
+import {
+  nativeSessionForProcess,
+  readProcessSession,
+  type NativeSessionLookup,
+} from "../src/captain/native-session-by-pid.ts";
 import { observeNativeBirth } from "../src/local-fleet-process.ts";
 
 // The Herdr desktop app's agents, end to end against a real herdr-core: the
@@ -387,6 +393,49 @@ setInterval(() => {}, 1 << 30);
       });
       await expect(unobservable.read(claude, 50)).rejects.toThrow(refused);
 
+      // The transcript is opened once and pinned; everything read comes through that handle.
+      const noFollow = (path: string) => open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const swapped = (text: string) =>
+        JSON.stringify({
+          type: "assistant",
+          uuid: "s1",
+          parentUuid: null,
+          message: { role: "assistant", content: [{ type: "text", text }] },
+        }) + "\n";
+      const swapIn = async (path: string, text: string) => {
+        await writeFile(`${path}.next`, text);
+        await rename(`${path}.next`, path);
+      };
+      // A file swapped in after the proof and before the parse is never read: the handle still
+      // holds the file that passed.
+      const claudeText = await readFile(claudeTranscript, "utf8");
+      const proved = (await nativeSessionForProcess("claude", original.pid))!;
+      try {
+        await swapIn(claudeTranscript, swapped("swapped=secret"));
+        const entries = await readProcessSession("claude", proved);
+        expect(transcriptReadText(entries)).toContain("claude: read from its session");
+        expect(JSON.stringify(entries)).not.toContain("swapped=secret");
+      } finally {
+        await proved.file.close();
+      }
+      await swapIn(claudeTranscript, claudeText);
+      // An ancestor folder swapped for the open and swapped back leaves the handle on a file the
+      // path doesn't name; it is refused.
+      const project = dirname(claudeTranscript);
+      const ancestorSwap = sources({ ...env, XDG_STATE_HOME: stateHome }, undefined, {
+        open: async (path) => {
+          await rename(project, `${project}.real`);
+          await mkdir(project);
+          await writeFile(join(project, basename(path)), swapped("ancestor=secret"));
+          const file = await noFollow(path);
+          await rm(project, { recursive: true });
+          await rename(`${project}.real`, project);
+          return file;
+        },
+      });
+      await expect(ancestorSwap.read(claude, 50)).rejects.toThrow(refused);
+      expect((await layer.read(claude, 50)).text).toContain("claude: read from its session");
+
       // A record forged to name another of the owner's transcripts is read: nothing Claude Code
       // keeps ties its session to its process, so this is ADR 0307's accepted exception. It can
       // name only a transcript in the owner's own config home.
@@ -421,6 +470,18 @@ setInterval(() => {}, 1 << 30);
       await symlink(claudeHome, linkedHome);
       process.env.CLAUDE_CONFIG_DIR = linkedHome;
       await expect(layer.read(claude, 50)).rejects.toThrow(refused);
+
+      // A Codex rollout swapped between discovery and the open isn't the file the process holds
+      // for writing, and is refused; so is its path once replaced while the process keeps the
+      // old file open.
+      const swapDuringLookup = sources({ ...env, XDG_STATE_HOME: stateHome }, undefined, {
+        open: async (path) => {
+          await swapIn(path, swapped("codex-swap=secret"));
+          return noFollow(path);
+        },
+      });
+      await expect(swapDuringLookup.read(codex, 50)).rejects.toThrow(refused);
+      await expect(layer.read(codex, 50)).rejects.toThrow(refused);
     } finally {
       for (const address of started) await run("kill", address).catch(() => undefined);
       for (const [key, value] of Object.entries(saved))

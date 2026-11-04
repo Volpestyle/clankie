@@ -7,10 +7,14 @@ import { OPERATOR_TERMINAL_READ_MAX, type HerdrCoreAgent } from "@clankie/protoc
 import { logger } from "../app/log.ts";
 import { DESKTOP_SEAT_FLEET } from "../herdr-fleet.ts";
 import { observeNativeBirth } from "../local-fleet-process.ts";
-import { readHerdrSeatTranscript } from "@clankie/agent-transcript";
 import { AgentReadScope, isShell, type LiveAgentOccupant } from "./agent-read-scope.ts";
 import { TRANSCRIPT_READ_REFUSED, transcriptReadText, transcriptWaiting } from "./agent-transcript-read.ts";
-import { nativeSessionForProcess, sameLifetime, type NativeSessionLookup } from "./native-session-by-pid.ts";
+import {
+  nativeSessionForProcess,
+  readProcessSession,
+  sameLifetime,
+  type NativeSessionLookup,
+} from "./native-session-by-pid.ts";
 
 // herdr-core (`hc`) is the terminal server behind the Herdr desktop app: a
 // second home for agents, beside the terminal Herdr Clankie seats in. Clankie
@@ -146,8 +150,13 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
         const harness = transcriptHarness(text(record.status?.app));
         if (harness !== undefined) {
           const found = await nativeSessionForProcess(harness, occupant.pid, options.nativeSession);
-          const transcript =
-            found === undefined ? undefined : readHerdrSeatTranscript(harness, found.session);
+          let entries: Awaited<ReturnType<typeof readProcessSession>> | undefined;
+          try {
+            // Read through the handle that passed the proof, never the path again.
+            entries = found === undefined ? undefined : await readProcessSession(harness, found);
+          } finally {
+            await found?.file.close();
+          }
           const now = (await call(socket(), "terminal.get", { terminal })) as HcTerminal;
           if (liveAgentOccupant(now, occupant.pid)?.key !== occupant.key) {
             scope.forget(terminal);
@@ -156,19 +165,17 @@ export function createHerdrCore(options: HerdrCoreOptions = {}): HerdrCore {
               detail: "The agent in that terminal changed while it was read; read it again.",
             };
           }
-          if (found === undefined || transcript === undefined)
+          if (found === undefined || entries === undefined)
             return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
           // The process the session was proved against still lives after the read: a pid that is
           // now another process's, or whose lifetime can't be observed, is a refusal.
           const birthOf = options.nativeSession?.birth ?? observeNativeBirth;
           if (!sameLifetime(await birthOf(occupant.pid), found.birth))
             return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
-          const said = transcriptReadText(transcript.entries);
+          const said = transcriptReadText(entries);
           // Its screen is never read, so a menu it waits on is named from its session alone.
           const waiting =
-            text(record.status?.state) === "blocked"
-              ? transcriptWaiting(transcript.entries, undefined)
-              : undefined;
+            text(record.status?.state) === "blocked" ? transcriptWaiting(entries, undefined) : undefined;
           const whole = waiting === undefined ? said : `${said}\n\n${waiting}`;
           return {
             status: "read",

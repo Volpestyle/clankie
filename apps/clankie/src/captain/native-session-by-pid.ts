@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { lstat, readFile, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { constants } from "node:fs";
+import { lstat, open, readFile, realpath, type FileHandle } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { promisify } from "node:util";
 import {
   claudeConfigRoots,
+  parseHerdrSeatTranscript,
   resolveHerdrSeatTranscriptPathAsync,
-  type HerdrAgentSession,
+  type HerdrTranscriptEntry,
 } from "@clankie/agent-transcript";
 import { observeNativeBirth, type NativeBirth } from "../local-fleet-process.ts";
 
@@ -19,10 +21,18 @@ const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const ROLLOUT =
   /[\\/]sessions[\\/]\d{4}[\\/]\d{2}[\\/]\d{2}[\\/]rollout-[^\\/]*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 
-/** A file a process holds open, and whether it may write to it. */
+/** A file a process holds open: whether it may write to it, and the file itself (device, inode). */
 interface OpenFile {
   readonly path: string;
   readonly writable: boolean;
+  readonly device?: number;
+  readonly inode?: number;
+}
+
+/** A file by identity, whatever path names it. */
+interface FileIdentity {
+  readonly device: number;
+  readonly inode: number;
 }
 
 export interface NativeSessionLookup {
@@ -30,12 +40,18 @@ export interface NativeSessionLookup {
   readonly birth?: (pid: number) => Promise<NativeBirth | undefined>;
   /** The files the process holds open. */
   readonly openFiles?: (pid: number) => Promise<readonly OpenFile[]>;
+  /** Opens the transcript to read, never following a symlink in its last part. */
+  readonly open?: (path: string) => Promise<FileHandle>;
 }
 
-/** The session a live process writes, with the lifetime it was proved against. */
+/**
+ * The session a live process writes: the lifetime it was proved against, and its transcript held
+ * open. Everything read comes through that handle, the file that passed the proof, whatever its
+ * path names later. The caller closes it.
+ */
 export interface ProcessSession {
-  readonly session: HerdrAgentSession;
   readonly birth: NativeBirth;
+  readonly file: FileHandle;
 }
 
 /** The session a live Claude Code or Codex process is writing now, or undefined when it isn't certain. */
@@ -53,12 +69,21 @@ export async function nativeSessionForProcess(
       harness === "claude"
         ? await claudeTranscript(pid, birth)
         : await codexTranscript(pid, lookup.openFiles ?? openFilesOf);
-    if (found === undefined || !(await canonicalOwnFile(found.path))) return undefined;
-    return { session: { source: `herdr:${harness}`, kind: "path", value: found.path }, birth };
+    if (found === undefined) return undefined;
+    const file = await pinnedOpen(found, lookup.open ?? openNoFollow);
+    return file === undefined ? undefined : { birth, file };
   } catch {
     // allow-swallowed-rejection -- an unreadable harness file is no session; the read is refused.
     return undefined;
   }
+}
+
+/** The session's entries, read whole through the handle that passed the proof. */
+export async function readProcessSession(
+  harness: "claude" | "codex",
+  session: ProcessSession,
+): Promise<HerdrTranscriptEntry[]> {
+  return parseHerdrSeatTranscript(harness, await session.file.readFile("utf8"), true);
 }
 
 /** Whether the process holds the same lifetime it was proved against: same birth and kernel identity. */
@@ -71,11 +96,37 @@ export function sameLifetime(now: NativeBirth | undefined, then: NativeBirth): b
   );
 }
 
-/** A regular file the owner owns, at its canonical path: no symlink anywhere along it, itself included. */
-async function canonicalOwnFile(path: string): Promise<boolean> {
-  if ((await realpath(path)) !== path) return false;
-  const stats = await lstat(path);
-  return stats.isFile() && stats.uid === process.getuid?.();
+function openNoFollow(path: string): Promise<FileHandle> {
+  return open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+}
+
+/**
+ * The transcript opened once and pinned. The handle itself must be a regular file the owner owns,
+ * and the very file a Codex process holds for writing when it named one. After the open, the path
+ * must be canonical (no symlink anywhere along it, its root included) and still name that same
+ * file: an ancestor swapped for the open, even one swapped back, leaves the handle on a file the
+ * path doesn't name, and is refused.
+ */
+async function pinnedOpen(
+  found: { readonly path: string; readonly held?: FileIdentity },
+  openFile: (path: string) => Promise<FileHandle>,
+): Promise<FileHandle | undefined> {
+  const file = await openFile(found.path);
+  try {
+    const opened = await file.stat();
+    const held =
+      found.held === undefined || (opened.dev === found.held.device && opened.ino === found.held.inode);
+    if (opened.isFile() && opened.uid === process.getuid?.() && held) {
+      if ((await realpath(found.path)) === found.path) {
+        const named = await lstat(found.path);
+        if (named.dev === opened.dev && named.ino === opened.ino) return file;
+      }
+    }
+  } catch {
+    // allow-swallowed-rejection -- a file that can't be checked isn't the session's; closed below.
+  }
+  await file.close();
+  return undefined;
 }
 
 /**
@@ -90,8 +141,9 @@ async function canonicalOwnFile(path: string): Promise<boolean> {
 async function claudeTranscript(pid: number, birth: NativeBirth): Promise<{ path: string } | undefined> {
   const bornMs = Number(birth[0]) * 1000 + Math.floor(Number(birth[1]) / 1000);
   const printed = utcLstart(Number(birth[0]));
+  const roots = claudeConfigRoots();
   const found = new Set<string>();
-  for (const root of claudeConfigRoots()) {
+  for (const root of roots) {
     let raw: string;
     try {
       raw = await readFile(join(root, "sessions", `${String(pid)}.json`), "utf8");
@@ -123,46 +175,61 @@ async function claudeTranscript(pid: number, birth: NativeBirth): Promise<{ path
     kind: "id",
     value: only,
   });
-  return path === undefined ? undefined : { path };
+  // Only under one of Claude's own config homes, the ones the lookup searched.
+  return path !== undefined && roots.some((root) => path.startsWith(join(root, "projects") + sep))
+    ? { path }
+    : undefined;
 }
 
 /**
  * Codex holds its session's rollout open for writing while it runs. Exactly one such rollout
- * names the session, and only if Codex's own lookup by that id finds that same file.
+ * names the session, and only if Codex's own lookup by that id finds that same path. The file
+ * read must then be the one the process holds, by device and inode, not whatever the path names.
  */
 async function codexTranscript(
   pid: number,
   openFiles: (pid: number) => Promise<readonly OpenFile[]>,
-): Promise<{ path: string } | undefined> {
-  const rollouts = new Map<string, string>();
+): Promise<{ path: string; held: FileIdentity } | undefined> {
+  const rollouts = new Map<string, OpenFile>();
   for (const file of await openFiles(pid)) {
     const id = file.writable ? ROLLOUT.exec(file.path)?.[1]?.toLowerCase() : undefined;
-    if (id !== undefined) rollouts.set(id, file.path);
+    if (id !== undefined) rollouts.set(id, file);
   }
   const only = rollouts.size === 1 ? [...rollouts][0] : undefined;
   if (only === undefined) return undefined;
-  const [id, open] = only;
+  const [id, { path, device, inode }] = only;
+  if (device === undefined || inode === undefined) return undefined;
   const found = await resolveHerdrSeatTranscriptPathAsync("codex", {
     source: "herdr:codex",
     kind: "id",
     value: id,
   });
-  return found === open ? { path: open } : undefined;
+  return found === path ? { path, held: { device, inode } } : undefined;
 }
 
-/** The files a process holds open and their access, as `lsof` reports them for that one pid. */
+/** The files a process holds open, their access and identity, as `lsof` reports them for one pid. */
 async function openFilesOf(pid: number): Promise<readonly OpenFile[]> {
-  const { stdout } = await promisify(execFile)("lsof", ["-nP", "-a", "-p", String(pid), "-Fan"], {
+  const { stdout } = await promisify(execFile)("lsof", ["-nP", "-a", "-p", String(pid), "-FaDin"], {
     timeout: LSOF_MS,
     maxBuffer: 4 * 1024 * 1024,
   });
   const files: OpenFile[] = [];
   let access = "";
+  let device: number | undefined;
+  let inode: number | undefined;
   for (const line of stdout.split("\n")) {
-    if (line.startsWith("f")) access = "";
+    if (line.startsWith("f")) [access, device, inode] = ["", undefined, undefined];
     else if (line.startsWith("a")) access = line.slice(1);
+    // lsof prints the device in hex (`0x100000e`) and the inode in decimal.
+    else if (line.startsWith("D")) device = Number(line.slice(1));
+    else if (line.startsWith("i")) inode = Number(line.slice(1));
     else if (line.startsWith("n/"))
-      files.push({ path: line.slice(1), writable: access === "w" || access === "u" });
+      files.push({
+        path: line.slice(1),
+        writable: access === "w" || access === "u",
+        ...(device !== undefined && Number.isSafeInteger(device) ? { device } : {}),
+        ...(inode !== undefined && Number.isSafeInteger(inode) ? { inode } : {}),
+      });
   }
   return files;
 }
