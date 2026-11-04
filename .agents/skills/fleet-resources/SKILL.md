@@ -17,7 +17,9 @@ rules that matter on most turns:
    ungoverned, and stop it when you are done.
 4. Boot simulators only through `clankie simulator acquire`, verify the lease
    before driving the device and release it after. Verified native activity or
-   exact-holder heavy work retains supported holders without timer touches.
+   exact-holder heavy work retains supported holders without timer touches
+   ([ADR 0249](../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md),
+   [ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 5. A wait is the governor working. Never bypass it with another registry,
    launch route or `HOME`, and never stop a job you can't prove is yours.
    Never stop processes by pattern (`pkill -f`, `killall`) on a shared
@@ -27,7 +29,8 @@ rules that matter on most turns:
 7. Wait outside your turn. Run a long heavy command, gate or integration wait
    as your harness's background task and continue on its completion notice;
    never loop on `sleep` in the foreground to poll a log or a status. Each
-   foreground step re-reads your whole context.
+   foreground step re-reads your whole context
+   ([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).
 8. Write shell commands Claude Code can parse safely. Before running one it
    can't, such as an unguarded `rm -rf $VAR/*` or a zsh-only expansion like
    `${(f)"$(cat f)"}`, it asks the owner, never the lead. In a hired seat
@@ -63,7 +66,8 @@ children. Lower them by setting the environment variable; never raise Turbo's
 limit with `--concurrency` or `--parallel`. These limits do not cover arbitrary
 subprocesses, so serialize compilers and multi-package tools inside one
 permit. This repo's `pnpm typecheck` already does
-([typechecking](../../../docs/typechecking.md)).
+([typechecking](../../../docs/typechecking.md);
+[ADR 0179](../../../docs/adr/0179-tests-run-in-forked-processes.md)).
 
 `--seat LABEL` labels the seat in status and `--holder ID` identifies its native
 child; neither grants authority. Arguments after `--` belong to the child, and
@@ -130,7 +134,8 @@ not isolate a service from the live registry.
 
 Never boot with `xcrun simctl boot`, Simulator.app or a test runner that boots
 its own device: a device booted outside a lease holds a fleet slot and other
-lanes wait on it. Follow any task-specific owner approval before acquiring.
+lanes wait on it ([ADR 0249](../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md)).
+Follow any task-specific owner approval before acquiring.
 
 ```sh
 clankie simulator acquire '{"seatId":"SEAT","deviceType":"com.apple.CoreSimulator.SimDeviceType.iPhone-17","runtime":"com.apple.CoreSimulator.SimRuntime.iOS-26-0"}' --wait 600
@@ -180,12 +185,13 @@ background task. A background process alone does not retain a simulator lease;
 there is no general simulator process-holder command yet. For Claude roots, a
 non-heavy tool or quiet thinking beyond one window still needs a positive native
 root-turn API.
-Keep that gap explicit; never replace it with model sleep/touch loops. Explicit
+Keep that gap explicit; never replace it with model sleep/touch loops
+([ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)). Explicit
 touch remains available for a deliberate extension. Release when finished.
 Details and source-proof limits are in the simulator reference.
 
 Release, idle expiry or a verified seat exit shuts the device down and keeps it
 for reuse; nothing deletes devices except an explicit owner tidy naming exact
 stopped UDIDs. Never run global shutdown, erase, delete-all or unavailable-device
-cleanup for fleet work. Queues, holder identity, device choice, usage readings
+cleanup for fleet work ([ADR 0249](../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md#amendment--retain-and-reuse-devices-2026-10-08)). Queues, holder identity, device choice, usage readings
 and create receipts: [simulators](reference/simulators.md).

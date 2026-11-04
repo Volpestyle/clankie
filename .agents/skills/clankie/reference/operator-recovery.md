@@ -32,7 +32,8 @@ history and sends nothing. A completed successful remote hire whose pane was
 closed or harvested permits separately new `freshIntent` work after a complete
 census on its original configured host. Use the latest native receipt or fresh
 intent UUID in `afterReceiptId`; refusals name the expected identity. Keep a new
-brief and intent UUID, never replay an uncertain dispatch or edit a live journal.
+brief and intent UUID, never replay an uncertain dispatch or edit a live journal
+([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md), [ADR 0331](../../../../docs/adr/0331-clankie-settles-a-hire-whose-agent-is-gone.md)).
 
 ## Refreshing worker tools
 
@@ -71,7 +72,8 @@ controller's transport revision is the refresh path.
 For manual or remote clients, report the stale catalog and ask the owner to
 reconnect the exact thread with its original cwd, account home and flags after
 its runtime unloads. Never restart a shared daemon, fork automatically, or
-replay an uncertain tool call. Controller-owned hires need controller recovery.
+replay an uncertain tool call. Controller-owned hires need controller recovery
+([ADR 0235](../../../../docs/adr/0235-worker-catalog-refresh-keeps-the-original-controller.md)).
 
 ## Older bridges
 
@@ -116,7 +118,7 @@ For a finished file, authorized operator access can use
 `clankie file publish --conversation ID PATH`. The file must be inside that
 conversation's real working directory, at most 15 MiB. Its artifact receipt
 means published to that conversation, not sent to Discord or uploaded to Linear.
-A remote filesystem path is not a local publishable path.
+A remote filesystem path is not a local publishable path ([ADR 0174](../../../../docs/adr/0174-finished-files-belong-to-conversations.md)).
 
 ## Sessions and machines
 
@@ -154,7 +156,7 @@ lead tools return `conversation_binding_required`, never a `global-default`
 fallback. A named conversation and every event poll/ack/reply still need the
 verified launch. Do not copy a conversation or nonce to repair a stateless CLI.
 Missing helper, unprovable socket, wrong ancestry, wrong claim and another live
-claimant are distinct refusals. Prime's missing verified kernel PID remains open.
+claimant are distinct refusals ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)). Prime's missing verified kernel PID remains open.
 Joined/delegated seats retain their separate authenticated route; relay/app
 owner dispatch is separate from local MCP. The
 [seat binding reference](../../../../integrations/claude-plugin/README.md#binding-and-the-known-unbound-bridge-gap)

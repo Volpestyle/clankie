@@ -18,7 +18,8 @@ Tracing deliveries between the service and a native operator or worker seat.
   original as `not_sent`. Updated files on disk do not
   update an already imported bridge. Keep the original claim and truthful
   receipt; never label an unsent message `stored`, delete runtime state, or send
-  a replacement to bypass this gap.
+  a replacement to bypass this gap
+  ([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).
 
 - **A no-install remote lead.** The home service persists the launch
   delegation's hash and original native proof. Its bridge rereads the fleet link

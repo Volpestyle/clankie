@@ -21,7 +21,7 @@ the plugin's hooks, and these skills as `/clankie:this-machine` and
 `server:clankie` channel identity). The launcher allows this seat's Clankie CLI and plugin MCP tools while denying
 independent tracker connectors. This avoids routine tool prompts; it does not
 expand the selected conversation's authority. Folder/hook/channel trust remains
-the owner's decision. The seat's own brain is Claude Code's `/model`;
+the owner's decision ([ADR 0152](../../../../docs/adr/0152-a-harness-takes-the-operator-seat.md)). The seat's own brain is Claude Code's `/model`;
 `clankie model` changes the service lanes. A fresh launch takes the shared global
 chat while no live seat holds it; otherwise, or with `--new`, it creates a
 separate workspace chat. Its transcript appears in that chat in the app; tools, self-wakes and herdr
@@ -52,7 +52,8 @@ target/channel ID. Each server channel and DM has its own conversation. Attachin
 to `global-default` affects only that chat; attach to the room's conversation to
 drive its turns. A live seat receives worker reports, escalations, wakes and
 watches through its channel. After it leaves, new inputs use the service runner.
-An accepted or uncertain delivery is never replayed across that handover.
+An accepted or uncertain delivery is never replayed across that handover
+([ADR 0218](../../../../docs/adr/0218-native-seats-drive-their-attached-conversation.md)).
 An authenticated owner's app send is an ordinary `kind="turn"` in the held
 conversation. Answer with normal final text; the app reads the same conversation,
 so no separate `reply` tool call is needed. `owner_kind` and `owner_id` identify
@@ -68,7 +69,8 @@ seat-delivery settle ID abandoned-unknown`, which claims no receipt.
 
 Room replies keep the original actor's route and mouth lease. Attachment never
 adds grants: a cached room MCP bank stays social without generic operator body
-authority. Ordinary `send` and `reset` still refuse room conversations.
+authority. Ordinary `send` and `reset` still refuse room conversations
+([ADR 0176](../../../../docs/adr/0176-every-room-is-an-inspectable-conversation.md)).
 
 `clankie codex --conversation ID` opens the same operator seat
 in the real Codex TUI, using the Codex plugin and a dedicated app-server thread.
@@ -135,7 +137,8 @@ Worker reports reach the conversation that hired them; routing and adoption are
 in `lead`'s [report routing](../../lead/reference/fleet-tools.md#report-routing).
 
 Native projection carries these reports as `kind="message"`, framed as
-untrusted agent output, never an instruction from the owner. Completion harvests
+untrusted agent output, never an instruction from the owner
+([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)). Completion harvests
 stay `kind="watch"`; self-wakes stay `kind="wake"`. The tag changes neither
 the retained owner route nor receipt semantics. A room-owned worker message
 still needs the existing `reply` with its `event_id` to return a correlated answer

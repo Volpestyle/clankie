@@ -74,6 +74,8 @@ and retained diagnostics.
   connected-server authority, fleet and project tracking.
 - [ADRs](adr/README.md) preserve decisions, amendments, and superseded designs.
   Read the current references above for operational instructions.
+- [Why the captain instructions say what they say](../apps/clankie/src/captain/instructions-adrs.md)
+  maps each rule in the captain's instructions to the ADR it rests on.
 - [Testing archive](testing/README.md) contains dated proofs and their limitations;
   [quality gates](testing/quality-gates.md) define the recurring checks.
 - [Desktop runtime design](proposals/2026-09-05-desktop-runtime-design.md) is a dated proposal, not an

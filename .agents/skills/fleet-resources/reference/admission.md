@@ -32,7 +32,8 @@ children, including package scripts and nested commands, preserving lower
 positive integer environment limits. Under `clankie heavy`, inherited
 `VITEST_MAX_WORKERS` beats `--maxWorkers`. Turbo tasks must pass these variables
 through strict environment filtering (this repo's `turbo.json` does). Light-lane
-tool threads are capped at two, preserving a lower explicit cap.
+tool threads are capped at two, preserving a lower explicit cap
+([ADR 0179](../../../../docs/adr/0179-tests-run-in-forked-processes.md)).
 
 Clankie's checkout `pnpm typecheck` serializes compiler tasks and uses the shared
 heap budget in `scripts/typecheck.mjs`; `docs/typechecking.md` describes bounded

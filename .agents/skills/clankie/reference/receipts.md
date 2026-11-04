@@ -3,7 +3,7 @@
 Detail for [Working beside Clankie](../SKILL.md): what each delivery and tool-
 call receipt proves, and how to reconcile one that is uncertain. The rule in
 every case: keep the original receipt, read it, and never resend the same intent
-through another path.
+through another path ([ADR 0211](../../../../docs/adr/0211-a-delivery-says-how-far-it-got.md), [ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 ## Report receipts
 
@@ -11,7 +11,8 @@ Claude seats forward native questions to their exact hiring conversation. An
 operator or lead seat with no such conversation keeps `AskUserQuestion` in its
 own pane's native prompt; this does not create an app ask or supply an answer.
 Notification failures include a credential-redacted cause in the hook reason
-and service log. Permission prompts remain denied if notification fails.
+and service log. Permission prompts remain denied if notification fails
+([ADR 0246](../../../../docs/adr/0246-worker-questions-use-native-hook-answers.md)).
 
 Every `message_clankie` result says `sent` (`true`, `false`, or `"unknown"` when
 the message may have arrived) and `retryable` (whether calling again can help).
@@ -56,7 +57,8 @@ refused (an unknown issue, say) instead returns `isError: true` with the
 provider's message; that answer is definite. Call `clankie_call` with only
 `{receiptId}` to read the original result; never repeat its name and arguments.
 The bridge keeps that ID even when the HTTP reply is lost. Receipt lookup proves
-current admission, tool grant and account binding and never dispatches a write.
+current admission, tool grant and account binding and never dispatches a write
+([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 ## Inspecting and abandoning an uncertain READ
 
@@ -143,7 +145,7 @@ Claude sessions with an observed, process/session-bound worker prompt hook can
 receive held replies once at the next `UserPromptSubmit` without `--channels`.
 A live channel can deliver immediately only when Claude was launched with
 Clankie's worker loaded for that session (`--plugin-dir` with
-`--channels plugin:clankie-worker@inline`, ADR 0317) and the policy allows it;
+`--channels plugin:clankie-worker@inline`, [ADR 0317](../../../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)) and the policy allows it;
 reconnecting the plugin alone does not enable a channel in an original process. The roster's `messageReceiver` names `live` (an exact-session native
 poll, not model awareness), `next-turn-only` (an observed prompt hook without
 a live poll), or `unverified`. Next-turn-only is an idle-wake limitation even
@@ -160,7 +162,7 @@ body-free owner update naming the pane. `stored` awaits the next prompt;
 `unconfirmed` awaits hook output acknowledgment and must not be replayed.
 The TUI keeps an idle lead with either state visible. Never type a fallback draft
 into a pane to compensate for missing native delivery. No observed compatible receiver means
-unavailable; a later pane occupant cannot inherit earlier mail. Codex's worker
+unavailable; a later pane occupant cannot inherit earlier mail ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). Codex's worker
 plugin supplies tools and skills, not a Claude-style next-turn hook; inspect its
 actual native control receipt separately.
 

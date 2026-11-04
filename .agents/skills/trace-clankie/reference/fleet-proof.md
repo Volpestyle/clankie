@@ -23,7 +23,8 @@ Reading fleet proof alerts and native process/pane refusals.
 - **`launcher_mismatch`.** Compare the foreground group leader with the actual
   harness: `clankie claude` leaves its Node launcher in front of a direct Claude
   child. Only the exact installed launcher/command and kernel-proven child chain
-  are supported; never exempt a mismatch just because the pane looks healthy.
+  are supported; never exempt a mismatch just because the pane looks healthy
+  ([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
   ESRCH/EBADF retry diagnostics from the global process/FD scan are not terminal
   refusals; join the final proof result before diagnosing an outage.
 

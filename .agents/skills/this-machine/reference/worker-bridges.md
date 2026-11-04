@@ -42,7 +42,7 @@ plugin adds `message_clankie`. `fleet.tools` defaults to `connected`; `clankie f
 set --tools off` stops new standing admissions, and disconnecting a fleet removes
 admission. Every provider call rechecks admission, setting and account. A call
 already past its last check can still reach a provider after `off` or revocation:
-strict refusal is not guaranteed (ADR 0217).
+strict refusal is not guaranteed ([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 Missing tools do not authorize an operator lane or another Linear connector; ask
 the lead to inspect link admission, `fleet status` and the connected account.
@@ -84,7 +84,7 @@ of these observations grants tool authority. Roster samples live five seconds;
   can stop the daemon and resume each with `codex --no-daemon resume <SESSION>`.
   Do not stop another agent's daemon as a diagnostic step.
 - A hand-started Claude pane reporting `missing` was started without Clankie's
-  worker. Claude loads it for one session (ADR 0317); nothing is installed in the
+  worker. Claude loads it for one session ([ADR 0317](../../../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)); nothing is installed in the
   profile. A prepared Mac pane's `claude` adds it itself. Elsewhere the owner
   resumes with `claude --resume SESSION --plugin-dir <Clankie's
 integrations/claude-plugin/worker> --channels plugin:clankie-worker@inline`, then
@@ -146,7 +146,7 @@ Codex configuration needs its source-owned setup (`clankie herdr prepare NAME
 --codex-source-setup ABSOLUTE_REMOTE_SCRIPT`), never TOML appends; never replace a
 settings symlink to work around a refusal. Claude profiles get nothing installed:
 setup and every update remove an older `clankie-worker@clankie` copy at user and
-project scope (ADR 0317). A symlinked profile whose owning source (for example
+project scope ([ADR 0317](../../../../docs/adr/0317-a-claude-hire-loads-its-worker-plugin-for-that-session.md)). A symlinked profile whose owning source (for example
 dotfiles) still enables that copy is left alone; the refusal names the entry, and
 that source is edited through its owner. A source that only declares the clankie
 marketplace keeps it, and the copy is still removed. Preparation is incomplete while native

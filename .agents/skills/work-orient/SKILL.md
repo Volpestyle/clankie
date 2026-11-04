@@ -12,7 +12,8 @@ from the project or issue prefix. In Clankie's fleet, the same `linear_*` tracke
 tools work on every backend, discovered through `clankie_tools`/`clankie_call` or
 `mcp_tool_search`; load `clankie` for actor and admission boundaries. The tool
 names below are those shapes; use the exposed schema for your route, and
-`clankie work show|activity|list` where that is the repo's interface.
+`clankie work show|activity|list` where that is the repo's interface ([ADR 0191](../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md),
+[ADR 0226](../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 Start from current scope, acceptance criteria and the latest result, then read
 the relevant decisions and replies, including inline comments (`quotedText`).
@@ -44,7 +45,7 @@ scope; incremental reads must not silently drop human changes.
    to its tracker project is refused expanded relations
    (`remote_lead_tracker_project_denied`): omit `includeRelations`, take the
    parent from `parentId` and list sub-issues with `list_issues` by `parentId`;
-   name blocking relations as unread. Follow parents and
+   name blocking relations as unread ([ADR 0259](../../../docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md)). Follow parents and
    dependencies when they change the current plan. Read recently completed
    evidence for claims about what is usable now.
 4. **Canonical docs** — inspect the attached/listed documents governing that

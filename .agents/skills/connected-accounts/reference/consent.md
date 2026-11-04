@@ -13,7 +13,7 @@ the Google identity and keeps refresh/access credentials in its own broker.
 Only an owner/operator or an authorized Take Control device may run the flow.
 Never collect a Google token, authorization code or developer secret in chat.
 Send the owner to the account sheet or `/connect accounts`. The console masks
-the returned `clankie://accounts/google/callback` link; automation sends
+the returned `clankie://accounts/google/callback` link ([ADR 0201](../../../../docs/adr/0201-essentials-start-with-read-only-google-connections.md)); automation sends
 `{state,code}` to `accounts complete google-PROVIDER --json-stdin`.
 Drive completion also supplies `pickedFileIds`, validated from the callback's
 comma-separated `picked_file_ids` value.
@@ -24,7 +24,7 @@ Drive uses `drive.file` and the system Google Picker to authorize selected
 files, with no broad Drive scope. That Google permission permits editing
 selected files, while Clankie's implemented tools only read. Disclose that
 distinction before consent; never claim the Google grant is read-only or
-request `drive.readonly` as a fallback for missing file access.
+request `drive.readonly` as a fallback for missing file access ([ADR 0201](../../../../docs/adr/0201-essentials-start-with-read-only-google-connections.md)).
 
 Use `clankie accounts check google-PROVIDER` for a bounded access check.
 `awaiting_consent` is unfinished authorization. `expired` needs refresh;

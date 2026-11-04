@@ -16,7 +16,8 @@ tool. Read its screenshots with the existing image-capable `read` tool. Clankie
 chooses each action from the latest observation; call Peekaboo's primitives
 directly. `peekaboo agent` and `--analyze` start separate model reasoning and are
 unnecessary for this workflow. Operator and authenticated Discord machine grants
-own machine access; social rooms do not.
+own machine access; social rooms do not
+([ADR 0251](../../../docs/adr/0251-discord-owners-and-room-skills.md)).
 
 The loop is always: observe, **read the actual image**, decide one action, act,
 observe again. A shell response containing a filename does not show the image to
@@ -25,7 +26,8 @@ the model, and dispatch alone does not prove the intended result.
 When your reach card lists a computer-use harness, a long flow in your
 person's apps usually goes better as a hired seat:
 [delegating to a computer-use seat](reference/delegation.md) covers choosing the
-harness, the brief, human checks and the report. The rest of this skill is for
+harness, the brief, human checks and the report
+([ADR 0199](../../../docs/adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)). The rest of this skill is for
 driving the desktop yourself.
 
 ## Stay off the owner's screen
@@ -46,7 +48,8 @@ Peekaboo input without `--foreground` stays in the background as well. Never
 bring an app or window to the front, move the pointer, type into a window they
 are using, or open a window over theirs. A Claude in Chrome seat fronts Chrome
 windows, so it needs the owner's yes for that task, asked right then. When the
-work can only happen in front of them, stop and say so.
+work can only happen in front of them, stop and say so
+([ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)).
 
 ## Web pages go to a browser pane first
 
@@ -98,7 +101,8 @@ Pick the first that fits:
    ask your lead.
 
 Never type a password into a page or a pane. A sign-in goes to your lead, who
-brings it to the owner's sign-in card.
+brings it to the owner's sign-in card
+([ADR 0344](../../../docs/adr/0344-agents-drive-herdr-browser-panes-through-herdr.md)).
 
 The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
@@ -203,7 +207,8 @@ Acquire its driver lease, inventory PID/window IDs, capture and save its frame
 with `--image-path NEW_PNG_PATH`, read that image, then send ordered input
 against the fresh screenshot UUID. Reconcile the same request UUID after
 transport loss and never replay an uncertain input. Omitting `machineId` uses
-the local body; failed selection never picks another screen.
+the local body; failed selection never picks another screen
+([ADR 0255](../../../docs/adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)).
 
 - A **lent screen** at `screen` level only permits asking: its host owner
   confirms observation for one session locally and separately allows input.
@@ -213,7 +218,7 @@ the local body; failed selection never picks another screen.
   computer host, not Peekaboo. Every attachment defaults to read-only; input
   needs an owner's deliberate `allowInput: true` in a clear driving window, and
   is implemented but not yet released for live use. Never overlap the person's
-  use or another driver, and keep ADR 0127's sign-ins, codes, CAPTCHAs,
+  use or another driver, and keep [ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md)'s sign-ins, codes, CAPTCHAs,
   payments, account changes and destructive steps with the person. Respect the
   installed plugin's app/shortcut denies and never bypass native grants.
 

@@ -14,7 +14,7 @@ Herdr workspace. It attaches to an existing server, never starts one. `/agents`
 also retains past agents with saved threads. Do not treat a visible working
 state or a successful workspace focus as a delivery receipt or model-seen proof;
 messages still use native delivery and unconfirmed sends must not be retried
-blindly.
+blindly ([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 ## Cost and effort evidence
 
@@ -51,7 +51,8 @@ deliverable, and in work reads an open draft pull request that closes an issue
 holds it too (`heldBy` lists the pull request's URL). When that draft closes
 unmerged and nothing else holds the issue, Clankie puts the tracker's In Progress
 back to Todo within about ten minutes, as a gated post (#541). An unheld issue the tracker calls in progress reads `todo`, with
-`trackerStatus` showing the tracker's word. Clear it when you stop.
+`trackerStatus` showing the tracker's word. Clear it when you stop
+([ADR 0210](../../../../docs/adr/0210-objectives-outlive-agent-turns.md)).
 The pointer follows the native session through a pane move and service restart;
 a new session does not inherit it. Keep transient actions in `clankie stance`
 notes. Local Codex `/goal` state appears automatically, including paused,
@@ -66,7 +67,8 @@ fleet seat — normal in a plain shell, not an error.
 
 For the World work-kind bubble, read `seat.activity.kind` from roster/fleet;
 `source` distinguishes a native tool observation from an expiring agent statement.
-Never derive it from `doing`, a note or shell command text. Use `clankie stance
+Never derive it from `doing`, a note or shell command text
+([ADR 0148](../../../../docs/adr/0148-an-agent-moves-its-own-figure.md)). Use `clankie stance
 working --activity testing --for 60` to state work a generic shell cannot describe.
 Codex code mode runs every tool inside `exec`, so a Codex seat is observed only
 during a lone literal call of a known tool (in practice `apply_patch`); state your
@@ -101,7 +103,7 @@ PATH` (`--unlink-repo PATH` removes it). Guided reviews on its issues may then r
 that repo. Its churn counts only the linked repo's commits that name one of its
 issue keys. Ownership, settings context, the review gate and hire placement still
 belong to the owning project alone, so never register a second owning workspace
-instead. ADR 0298 has the rules.
+instead. [ADR 0298](../../../../docs/adr/0298-linked-repos-are-read-only-sources.md) has the rules.
 
 For read-only historical drift proof, use `clankie auto rounds --replay --project
 ID --since ISO --until ISO` (at most 14 days, complete local days). It reads tracker
@@ -136,9 +138,10 @@ Clankie did not start use verified native cwd in an enrolled project workspace
 or a verified linked worktree; roster cwd and persona identity are not authority.
 The owner membership API observes local and registered Windows fleet seats,
 rechecks native identity before publication and leaves missing or ambiguous
-proof unscoped. An unconfirmed hire never falls back to cwd assignment.
+proof unscoped. An unconfirmed hire never falls back to cwd assignment
+([ADR 0216](../../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md)).
 Project membership does not restrict connected tools: every admitted pane in a
-Clankie-linked session uses the connected catalog under ADR 0217.
+Clankie-linked session uses the connected catalog under [ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md).
 
 Retire a workspace explicitly with `clankie project remove-workspace NAME
 --workspace PATH`, even if its directory is gone. This preserves roles, caps,
@@ -184,7 +187,8 @@ built-in tracker, enter the exact imported UUID, review and confirm. Empty input
 reuses a saved binding or creates a project; it does not clear the reference.
 `work init` records only the repo convention. Store-specific UUIDs remain in
 settings, never in committed `.clankie/tracking.json`. Linear import reports the
-mapping and cutover applies it automatically; names never establish a binding.
+mapping and cutover applies it automatically; names never establish a binding
+([ADR 0226](../../../../docs/adr/0226-one-tracker-tool-surface.md)).
 
 A connected Linear reference is separate:
 `clankie project settings PROJECT --linear-project UUID` (or `clear`) writes

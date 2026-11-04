@@ -26,7 +26,7 @@ are read without a fetch. GitHub published releases take precedence for the same
 tag. Store builds and release item membership remain unstated unless the source
 supplies them. GitHub/Markdown have no initiative goals; Markdown has no planned
 milestone collection. Device renders use the shared host snapshots, never a
-separate provider poller.
+separate provider poller ([ADR 0191](../../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)).
 
 ## Project settings and narrow writes
 
@@ -42,7 +42,8 @@ request one update after noteworthy progress accumulates, roughly daily unless a
 new milestone lands. Read the previous update and changed issues when asked;
 lead with issue clips and stills at stable asset URLs and short captions, then
 what is open and what comes next. A hint is not proof of delivery or publication
-authority. Reconcile uncertain status-update writes before doing anything else.
+authority. Reconcile uncertain status-update writes before doing anything else
+([ADR 0283](../../../../docs/adr/0283-evidence-first-automatic-project-updates.md)).
 
 `clankie project settings PROJECT --reviewer-role ROLE|--reviewer-seat SEAT|--reviewer none`
 names the project's standing landing reviewer
@@ -60,7 +61,8 @@ owner authorization before changing those settings. A tracker binding points
 to an already enrolled workspace's existing `.clankie/tracking.json`; it does
 not initialize tracking or choose a connected account. The app reads local
 bindings through project repo references. Remote or missing sources
-remain unavailable, never a reason to select another local repo or backend.
+remain unavailable, never a reason to select another local repo or backend
+([ADR 0216](../../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md), [ADR 0248](../../../../docs/adr/0248-owner-settings-use-one-revision-fenced-api.md)).
 
 Owner-authorized devices with `terminalControl` can set work metadata owner,
 add/remove a role label, or append a prerequisite using `work_item_write`.
@@ -72,12 +74,12 @@ uncertainty. Never resend the change with a new ID. This path requires a saved
 local tracker and connected provider account; it preserves unrelated labels
 and prerequisites. Broader agent updates retain the existing CLI and tools.
 Items may have an optional backend-native `parent`; it groups work and does
-not imply a prerequisite.
+not imply a prerequisite ([ADR 0191](../../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)).
 
 During conversational project onboarding, a missing convention can be included
 in `propose_project_create` as `trackerSetup`; `this-machine`'s work reference
 covers that flow. An existing convention must be read and reused;
-initialization refuses to replace it.
+initialization refuses to replace it ([ADR 0191](../../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)).
 
 ## Seat retirement bookkeeping
 
@@ -125,7 +127,7 @@ The optional `freeAgent` field on existing role, conversation and owner work
 writes binds persona, native seat/occupant and project. CLI equivalents append
 `--free-agent JSON` to `agents role`, `send` or `work assign`. It is a restriction,
 never authority; the host refreshes addressed native child and membership proof
-at its existing effect fences. Ordinary commands without it retain their behavior.
+at its existing effect fences ([ADR 0216](../../../../docs/adr/0216-projects-own-agent-roles-and-tool-policy.md)). Ordinary commands without it retain their behavior.
 
 Work assignment and the original “Please pick up…” note have separate receipts.
 Report an applied assignment with an uncertain note plainly; never reverse or

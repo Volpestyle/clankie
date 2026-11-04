@@ -14,7 +14,7 @@ description: >-
 # Work items
 
 Track work where the repo already tracks it. Never impose a tracker on a repo
-that has one (ADR 0191). Use tracking only when the user or project workflow
+that has one ([ADR 0191](../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)). Use tracking only when the user or project workflow
 calls for it; an available tracker is not a reason to create ceremony.
 
 ## The contract
@@ -60,7 +60,7 @@ hire's built-in project, otherwise they refuse. An explicit `repo` override is
 operator-only. The operator fallback for bundle/run ids in per-repo stores also
 requires `repo`. Saved
 views still require `project`/`storeId`; guided reviews still require `issueId`.
-Routing never raises a worker's role or request budget.
+Routing never raises a worker's role or request budget ([ADR 0226](../../../docs/adr/0226-one-tracker-tool-surface.md)).
 Issue summaries have no separate 20,000-character limit: `work create --summary`
 matches canonical `save_issue` descriptions, and `work show`/API reads return
 the full summary. Provider and transport request limits still apply.
@@ -75,7 +75,8 @@ move a project there, run `clankie work export --project P --to markdown
 `{"backend":"markdown","directory":".clankie/work"}` with `clankie project
 settings P tracker ...`. Export copies open items only and never writes the old
 tracker, which stays the frozen record. A file edited after export is never
-overwritten by a re-run. Projects on Auto keep the built-in tracker for now.
+overwritten by a re-run. Projects on Auto keep the built-in tracker for now
+([ADR 0191](../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md), [ADR 0305](../../../docs/adr/0305-connected-apps-write-issues-as-agents.md)).
 
 **Drops** are issue files the owner threw at a project from the phone or the
 Mac (`feed_drop`, `clankie feed drop`): stubs labelled `drop` with `drop_*`
@@ -107,14 +108,14 @@ characters saying exactly what to look at. Only the lead asks: with
 (`request_user_input` with `check`, or `clankie feed check`) for any tracker,
 issue files included; mark one that takes longer than ten seconds `longer`.
 Workers suggest a one-line check in their report instead. Never ask him to read
-evidence gaps, logs or review records.
+evidence gaps, logs or review records ([ADR 0299](../../../docs/adr/0299-the-owners-app-gives-the-verdict-on-finished-work.md)).
 
 ## Rules
 
 1. **Discover before creating.** If `clankie work` returns a `question`, the
    repo tracks work in more than one place or only in a single `TODO.md`. Ask
    the owner (or your lead) once, then record the answer with
-   `clankie work init --backend ...`. Never pick silently.
+   `clankie work init --backend ...`. Never pick silently ([ADR 0191](../../../docs/adr/0191-work-is-tracked-where-the-repo-tracks-it.md)).
 2. **Settings use the same tracker.** `clankie fleet tracker` reads the default
    for new projects; `clankie project settings PROJECT` reads the saved project
    choice. Add `tracker JSON` to propose a project change, then apply the exact
@@ -140,7 +141,7 @@ evidence gaps, logs or review records.
    fleet link, and the tool takes an absolute path), commit at most a short
    `README.md`, and cite the
    printed `clankie://evidence/sha256/...` links. A tracker upload may display a
-   screenshot, but the evidence-store copy is the record. Listing, key inference
+   screenshot, but the evidence-store copy is the record ([ADR 0258](../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md)). Listing, key inference
    and backfill: `docs/cli.md` under `evidence push|fetch`.
    Local storage remains the default. Self-hosted S3 keeps its SDK credential
    chain. Managed evidence has only a default-off scoped broker/provider seam;
@@ -149,7 +150,7 @@ evidence gaps, logs or review records.
    AWS credentials, settings secrets or another destination. Historical reads
    retain their recorded destination and need its own read authority. Offline
    MinIO proof is not hosted STS/IAM/revocation proof; cloud work, startup and
-   owner activation need separate authorization (ADR 0297).
+   owner activation need separate authorization ([ADR 0258](../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md), [ADR 0300](../../../docs/adr/0300-clankie-runs-only-on-the-owners-machine.md)).
 5. **One owner per item.** Set `--owner` when you take an item; do not edit an
    item another agent owns without telling them.
 6. **Keep it small.** Status, criteria, ownership and evidence only. No sprints,
@@ -197,7 +198,7 @@ A held post comes back as `posting_held`, and a refused one as
 through: the same write while it waits is the same post, and Clankie hears how
 it ended. Carry on with the work and keep the note in the issue file meanwhile.
 Reads are never held, and private issue files and the built-in tracker are always
-writable.
+writable ([ADR 0302](../../../docs/adr/0302-posting-to-your-tracker-is-the-owners-call.md), [ADR 0335](../../../docs/adr/0335-connected-apps-post-under-clankie-decides.md)).
 
 ## Where work state lives
 
@@ -221,7 +222,8 @@ after a reset or the owner can pick work up cold from the item:
 - Before retiring a seat (context near full, stale tools), put its durable state
   on the item and its machine state in the worktree handoff; the fresh seat
   starts from the item.
-- Never keep work state in personal files outside the repo or in a lead-only log.
+- Never keep work state in personal files outside the repo or in a lead-only log
+  ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 When work needs the user specifically (a decision, credentials, a physical or
 live check), assign that item to their tracker account and make their part an
@@ -257,7 +259,8 @@ parks completed work In Review for the owner to close. The owner can reopen
 either. Genuine owner-only gates (App Store submission, payments, evals or
 owner-account sign-ups) become linked follow-ups, recorded as unperformed,
 without holding a delivered issue open. Never hide missing implementation or
-verification; a setting grants no permission for the owner-only action.
+verification; a setting grants no permission for the owner-only action
+([ADR 0230](../../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)).
 
 ## Writing
 
@@ -330,7 +333,8 @@ the full active inspection or a retired identity tombstone. The host denies sour
 canonical paths in the issue project's bound local workspace repository, one of
 its read-only linked repos (`project settings PROJECT --link-repo PATH`), or an
 existing approved genuine linked worktree. Arbitrary host paths, symlink aliases
-and remote-machine paths refuse; source paths never bypass tool/project ceilings.
+and remote-machine paths refuse; source paths never bypass tool/project ceilings
+([ADR 0298](../../../docs/adr/0298-linked-repos-are-read-only-sources.md)).
 Refusals include `source_authority_required`, `guided_review_source_refused` and
 `source_authority_changed`. Capture runs outside the store lock, followed by
 under-lock identity/binding checks and a source publication fence.

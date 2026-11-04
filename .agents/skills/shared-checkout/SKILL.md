@@ -26,7 +26,8 @@ herdr agent list
 
 An empty roster does not make existing edits yours or prove their owner ended.
 In Clankie's fleet, coordinate contested paths through `message_peer` when
-available, or `message_clankie` to the lead. Do not type into another pane.
+available, or `message_clankie` to the lead. Do not type into another pane
+([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)).
 
 Two agents in different _subdirectories_ of one repo still share one index.
 Separate worktrees do not — they have their own index and HEAD, which is why
@@ -99,7 +100,8 @@ git add apps/mobile/thing.ts apps/mobile/thing.test.ts
 ```
 
 Name every path. If that list is long enough to be annoying, that is the
-signal your lane is too wide, not a reason to reach for a wildcard.
+signal your lane is too wide, not a reason to reach for a wildcard
+([ADR 0240](../../../docs/adr/0240-changes-land-directly-on-main.md)).
 
 ## Re-check the index in the same breath as the commit
 

@@ -5,18 +5,21 @@ description: Start or recover a local PokeAgents world for Clankie, join FireRed
 
 # PokeAgents with Clankie
 
-Clankie's `pokeagent_*` tools use his own provisioned seat. The separate
+Clankie's `pokeagent_*` tools use his own provisioned seat
+([ADR 0145](../../../docs/adr/0145-the-world-is-the-only-body.md)). The separate
 `pokeagents` program runs the world; joining does not start that server.
 An owner request to start the local world and play includes running its host
 through the machine tools available in that turn, including trusted Discord
-voice handoffs. Keep the existing room authority boundary.
+voice handoffs. Keep the existing room authority boundary
+([ADR 0105](../../../docs/adr/0105-voice-is-as-capable-as-the-room-it-is-in.md)).
 
 Pokémon runs as a game extension under the shared `play` lease with exact-session
 recovery. Extension `health: ready` (`clankie games extensions`, TUI
 `/games extensions`) describes local lifecycle state, not world reachability or
 visible frames; use the status/check/watch evidence below. An uncertain stay
 blocks removal and reuse until core proves the exact connector end; a requested
-stop, lost adapter or deadline is not termination evidence.
+stop, lost adapter or deadline is not termination evidence
+([ADR 0234](../../../docs/adr/0234-games-share-one-extension-contract.md)).
 
 ## Get the world running
 
@@ -52,14 +55,16 @@ README for nondefault ROM, state, watch, or network configuration.
 
 `no_credential` is a separate provisioning problem. Use Clankie's existing
 broker-backed seat; do not read holder secrets into context, borrow another
-player's identity, or mint a replacement just to recover a stopped server.
+player's identity, or mint a replacement just to recover a stopped server
+([ADR 0129](../../../docs/adr/0129-each-player-owns-a-body.md)).
 `pokeagents holders` lists subjects and grants without secrets if needed.
 
 ## Play and watch
 
 Call `pokeagent_join_mmo` with `pokemon-firered` or `pokemon-emerald`. It starts
 Clankie's own play driver as part of joining: do not launch a second generic
-MCP/CLI player or a second button-pressing agent. `joined` confirms the sitting;
+MCP/CLI player or a second button-pressing agent
+([ADR 0254](../../../docs/adr/0254-turn-based-games-share-a-play-kernel.md)). `joined` confirms the sitting;
 `pending` needs a later status check; `join_refused` needs its named cause
 handled. For `play_session_active`, inspect the existing run instead of joining
 again.
@@ -72,7 +77,8 @@ prove departure. Recovery waits for the actual driver to settle and an exact
 world-session leave receipt. Lost authentication or a lost join receipt retains
 uncertainty; do not start a replacement sitting to work around it. Operator
 HTTP intents must select an existing writable `conversationId`; the host
-authenticates the operator separately from those request fields.
+authenticates the operator separately from those request fields
+([ADR 0215](../../../docs/adr/0215-conversations-lease-one-body.md)).
 
 Use `pokeagent_world` to discover the current session's granted operations and
 check its status, `pokeagent_observe` to see the game, and `pokeagent_recall` for
@@ -91,7 +97,8 @@ model decisions stop play after exponential backoff; a valid decision resets it.
 Notable stuck/looping states, two retired objectives, unavailable models and a
 departed world send bounded information to the original conversation. Decide
 whether to tell the room, use `pokeagent_guide` to suggest a different objective,
-or stop; these observations do not gate play or authorize new actions. The play
+or stop; these observations do not gate play or authorize new actions
+([ADR 0092](../../../docs/adr/0092-a-repeat-that-changes-nothing-is-something-he-should-know.md)). The play
 mind keeps choosing. Voice can preempt twice per turn; later lines stay queued.
 
 The local host's default viewer is `http://127.0.0.1:7780/gallery`. Verify the

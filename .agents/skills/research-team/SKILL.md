@@ -108,7 +108,8 @@ outcome and risk; an advisory check-in is not a full audit of every activity.
    seeing outcomes belong to exploration, not the original confirm claim.
 4. **Validate measurements before scaling.** Inspect a small real sample
    containing demonstrated failures and valid controls. Synthetic tests alone
-   cannot establish that a label is true. Reuse accepted unchanged evidence.
+   cannot establish that a label is true. Reuse accepted unchanged evidence
+   ([ADR 0221](../../../docs/adr/0221-tests-prove-the-product-and-its-boundaries.md)).
 5. **Bound resource use.** Paid or long-running jobs need a forecast, an
    authorized finite envelope and a verified end to resource consumption.
    Distinguish forecasts, reservations and conservative bounds from actual
@@ -135,7 +136,7 @@ acceptance, current evidence, limitations and next action. Workers publish a
 substantive result once, with media when useful. Label demos as offline
 predictions, training footage, live behavior or mock data as appropriate.
 Lane notes hold findings, plans hold design, and panes hold coordination;
-none is a second status queue. Preserve unrelated shared-checkout work.
+none is a second status queue ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). Preserve unrelated shared-checkout work.
 
 Lead with what was learned and what it changes. Distinguish produced, accepted,
 landed and demonstrated. Check current records before asking the person to

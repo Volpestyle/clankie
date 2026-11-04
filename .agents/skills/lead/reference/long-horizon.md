@@ -5,8 +5,8 @@ on Auto, and what an Auto round's signals ask for. Three controls are distinct:
 the `clankie auto` master switch gates self-wakes and Auto rounds; the autonomy
 dial (`clankie autonomy`: `off`, `low`, `high` by default, or `full`) sets which
 decisions you take without asking, and its effective gates arrive in "Your
-fleet"; a project on Auto (ADR 0264) hands you its backlog as standing work.
-Below Off is `watch` (ADR 0308): Clankie only shows the fleet, so every write
+fleet" ([ADR 0263](../../../../docs/adr/0263-one-autonomy-dial-over-the-decision-leaves.md)); a project on Auto ([ADR 0264](../../../../docs/adr/0264-projects-on-auto-replace-goals.md)) hands you its backlog as standing work.
+Below Off is `watch` ([ADR 0308](../../../../docs/adr/0308-watch-is-the-step-below-off.md)): Clankie only shows the fleet, so every write
 through him is refused with words saying he is only watching. That is the
 owner's choice, not a fault to route around; the owner leaves it by picking a
 level.
@@ -30,7 +30,8 @@ assign the next ready item in tracker order. Before ending the turn, check that
 one of these sources will fire. If no owned seat is live and no issue activity
 is expected, set a single `schedule_wake` for when the next decision is due (a
 check-in after a long build, a batched review, or the owner's morning). Replace
-it rather than stacking reasons, and cancel it when the work is done.
+it rather than stacking reasons, and cancel it when the work is done
+([ADR 0130](../../../../docs/adr/0130-goals-and-self-wakes-share-the-operator-thread.md), [ADR 0265](../../../../docs/adr/0265-routines-are-recurring-jobs-with-a-run-fence.md)).
 
 Do not poll with short `schedule_wake` intervals when a watch or report already
 covers the worker. Do not start a second lead in another conversation to get
@@ -38,7 +39,8 @@ continuation. Do not use a harness's own scheduler (Claude Code `/loop` or cron
 tools, Codex `/goal`) to keep the lead going: it is tied to one native session,
 and the owner's `/auto off` does not reach it. A worker may still use its
 harness's goal for its own ticket. `/auto off` stops the Auto round and wakes;
-while it is off, tell the owner what is left open instead of working around it.
+while it is off, tell the owner what is left open instead of working around it
+([ADR 0264](../../../../docs/adr/0264-projects-on-auto-replace-goals.md)).
 A wake whose turn fails three times, or once with a rejected model credential,
 is held, not retried, until your seat binds or the service restarts.
 
@@ -56,8 +58,8 @@ may match that way: the one top-level workspace chat scoped to the project's
 folder and machine. Absent or ambiguous ownership goes to the global head.
 Leads hear only their own Auto projects and wake independently when their
 evidence changes or after two hours idle. No separate Auto routing setting
-exists. Each round names its signals and the action it asks for; the sections
-below explain what the follow-up checks prove. Measurements: `clankie auto rounds`.
+exists ([ADR 0264](../../../../docs/adr/0264-projects-on-auto-replace-goals.md)). Each round names its signals and the action it asks for; the sections
+below explain what the follow-up checks prove ([ADR 0270](../../../../docs/adr/0270-auto-rounds-measure-outcomes-and-name-drift.md)). Measurements: `clankie auto rounds`.
 
 ## Drift corrections
 
@@ -106,7 +108,7 @@ completed issues and their retained evidence. Routine rounds request no project
 update; keep routine progress on the issue. Reconcile uncertain status-update
 writes: a missing reply, a service restart or an unsettled round never
 authorizes another post. The next measurement links the observed update to the
-original request and flags routine or excess posts.
+original request and flags routine or excess posts ([ADR 0283](../../../../docs/adr/0283-evidence-first-automatic-project-updates.md)).
 
 Auto's check deadline and each lead's delivery fence survive service restarts;
 a paused master switch still prevents work.

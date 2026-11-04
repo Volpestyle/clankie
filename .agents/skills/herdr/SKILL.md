@@ -6,7 +6,8 @@ description: "Control Herdr, a terminal multiplexer for coding agents. Use only 
 # Herdr
 
 The full skill is compiled into the `herdr` binary, so it always matches the
-runtime this session talks to, including after Clankie updates Herdr. First
+runtime this session talks to, including after Clankie updates Herdr
+([ADR 0157](../../../docs/adr/0157-herdr-is-an-owned-runtime.md)). First
 check that you are inside a Herdr-managed pane:
 
 ```bash

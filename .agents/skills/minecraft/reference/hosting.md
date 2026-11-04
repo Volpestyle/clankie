@@ -45,7 +45,9 @@ instance; they do not create one, and guided provisioning does not exist yet.
 AWS provisioning and budget changes are operator work, outside gameplay tools.
 Use only the configured instance through its scoped broker credential; its
 address may change on each start. Guest idle/max-uptime controls must remain
-active independently of this service. A CloudWatch low-CPU alarm is a fallback
+active independently of this service
+([ADR 0219](../../../../docs/adr/0219-minecraft-is-an-mcp-connected-body.md#instance-backed-host-boundary--2026-10-04)).
+A CloudWatch low-CPU alarm is a fallback
 heuristic. Spot prices can change and interruption is possible; an hour of play
 can also include public IPv4, transfer or CPU credits and the share of
 EBS/snapshots that continues while stopped.

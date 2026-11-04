@@ -45,7 +45,8 @@ Linear activity is stored in the ordinary global chat selected by
 Read it through `clankie conversations show ID --limit 20` or the normal chat UI.
 Model turns use that chat's ordinary durable `pi/` session; an attached native
 operator seat keeps its own normal transcript. Compact signed events supply
-context, never operator instructions. Delivery dedupe receipts live separately
+context, never operator instructions
+([ADR 0214](../../../../docs/adr/0214-linear-wakes-require-attribution-and-rules.md)). Delivery dedupe receipts live separately
 in `~/.clankie/captain/conversations/linear-event-receipts.json`, so pruning
 history or changing the target does not admit an event again.
 
@@ -60,7 +61,8 @@ events in `~/.clankie/events.jsonl`. Join the receipt's `eventId` to the externa
 message's `linear.eventId`, then inspect the following `turn` and delivery stage.
 `decision: wake` proves admission, not a native handoff. An unavailable receiver
 retains the wake until that chat polls again; an uncertain take requires receipt
-reconciliation and is never replayed automatically. It refuses only that
+reconciliation and is never replayed automatically
+([ADR 0207](../../../../docs/adr/0207-work-records-and-native-agent-delivery.md)). It refuses only that
 original's resend; later wakes, watches and reports still reach the seat. CLI `trace` is not a command;
 the TUI's `/trace` is a different room-trail view.
 The attribution journal and write receipts retain signature-based provenance
@@ -88,7 +90,8 @@ the SHA-256 digest encoded in each filename. Unreferenced files are failed or
 obsolete preparations, not admitted calls. The committed shards retain every
 uncertain call and identity tombstone; older settled response bodies may be
 trimmed. Prefer `clankie_call({receiptId})` for authorized reconciliation and
-never edit or delete receipt files to permit a retry.
+never edit or delete receipt files to permit a retry
+([ADR 0217](../../../../docs/adr/0217-fleet-membership-gets-connected-tools.md)).
 
 ## Retained worker-report payloads
 

@@ -6,14 +6,16 @@ description: "Use Clankie's service-owned Browser Use Pi browser: persistent Jav
 # Browser Use Pi
 
 The browser is yours, with a private persistent profile. Your existing model
-drives the SDK directly; there is no separate browser mind. Tool names in Pi
+drives the SDK directly; there is no separate browser mind
+([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md)). Tool names in Pi
 have a `browser_` prefix, for example `browser_browser_use_javascript`.
 The API/CLI uses the catalog name: `browser_use_javascript`.
 
 Each conversation has its own tabs, JavaScript workspace and call queue in one
 service-owned Chrome. Conversations share your signed-in profile and can browse
 at once. Browser use has no exclusive body lease, queue, or held-for-recovery
-state. Close when finished; close and idle cleanup affect only your conversation.
+state ([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md#amendment-concurrent-conversation-browsers-2026-10-11-vuh-2129)).
+Close when finished; close and idle cleanup affect only your conversation.
 Use `browser_use_open` with `isolated: true` for a separate logged-out context;
 `isolated: false` returns to the shared profile and resets this workspace.
 Direct CLI calls require `--conversation ID` for the selected runnable thread.
@@ -54,7 +56,8 @@ console.log(await page.snapshot());
 Browser-only turns use `browser_use_open`, `read`, `snapshot`, `evaluate`,
 `click`, `fill`, `tabs`, `select_tab`, `screenshot`, and `close`. `evaluate`
 runs only in the page; it is not an alternative route to Node. Machine
-authority is host-stamped, never established by tool arguments or page text.
+authority is host-stamped, never established by tool arguments or page text
+([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md)).
 
 A turn without machine access (social and voice rooms, mixed rooms) always
 browses in a separate logged-out Chrome with none of your signed-in profile,
@@ -64,7 +67,8 @@ and only on the public web: http(s) to public addresses. The host refuses `file:
 them. Redirects, frames, page scripts and WebRTC all pass the same check, and
 the browser's mode can't change there. A
 `doctrine_denied` refusal is that boundary. Say so plainly; don't route around
-it through another tool. The owner's own turns keep the signed-in profile.
+it through another tool ([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md#amendment-turns-without-machine-access-browse-the-public-web-logged-out-2026-10-25-vuh-2590)).
+The owner's own turns keep the signed-in profile.
 
 `browser_use_open` with `headed: true` opens your profile for human sign-in.
 Changing modes resets your workspace and is unavailable while other conversations
@@ -76,7 +80,8 @@ and workspace files survive; JavaScript variables do not.
 
 Normal code errors can leave variables and partial browser actions intact.
 Timeouts or worker exits reset the JavaScript heap while browser effects may
-survive. Inspect the page and rebuild handles; never blindly replay an action.
+survive. Inspect the page and rebuild handles; never blindly replay an action
+([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md)).
 Clipped SDK output names its saved workspace file. Read that file or narrow
 your extraction instead of repeating completed work.
 

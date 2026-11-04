@@ -19,14 +19,16 @@ native drain with `recover.ownerRecovery`: record a reason and copy
 native driver has stopped first. Fresh operator authority, no service-tracked
 holder work and no computer operation are required; the host durably records
 this decision before release. This exception cannot recover Windows or lent
-screens, and never authorizes replaying uncertain input.
+screens, and never authorizes replaying uncertain input
+([ADR 0256](../../../../docs/adr/0256-lent-input-needs-native-drain-proof.md)).
 
 ## Lend a joined screen
 
 For an explicitly lent computer, pass its registered `machineId: "join-UUID"`
 through `clankie computer request` alongside `conversationId` and `command`.
 Omitting `machineId` uses the local body; failed selection never picks another
-screen. A body without a local owner desktop can use this one.
+screen. A body without a local owner desktop can use this one
+([ADR 0255](../../../../docs/adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md)).
 
 `screen` level only permits asking. The host owner confirms observation for one
 session locally and separately allows input. Keep the visible pet and Stop
@@ -39,7 +41,8 @@ acknowledgments never release a post-input lease: true queue drain stays
 unknown and the lease held. Stop on person takeover, access reduction or
 uncertain results. Preserve the original request UUID; never replay unknown
 input. Recovery remains usable after reduction, but unknown native quiescence
-holds the lease. Real Mac/PC driving proof is still open; do not infer it from an
+holds the lease ([ADR 0256](../../../../docs/adr/0256-lent-input-needs-native-drain-proof.md)).
+Real Mac/PC driving proof is still open; do not infer it from an
 HTTP fixture or compile. Setup:
 [lent screens](../../../../docs/desktop-control.md#lend-a-joined-screen).
 
@@ -71,7 +74,7 @@ person; never overlap their use or another driver. Host Win32 person-activity
 checks run before each dispatch; wait two seconds between primitives. A new
 input stamp, failed query or session mismatch fences the attachment. Every
 native error, revocation and uncertain receipt stops continuation; recovery
-requires independent native stop proof. Keep ADR 0127's sign-ins, codes,
+requires independent native stop proof. Keep [ADR 0127](../../../../docs/adr/0127-his-accounts-are-his.md)'s sign-ins, codes,
 CAPTCHAs, payments, account changes and destructive steps with the person.
 Respect the installed Windows plugin's app/shortcut denies. Do not bypass native
 grants or fall back to another desktop agent. The adapter denies shell/system
