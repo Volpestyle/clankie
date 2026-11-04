@@ -308,13 +308,12 @@ describe("body account client HTTP/schema boundary", () => {
 
   it("never exposes echoed credentials through HTTP errors or schema failures, and requires HTTP200 for a success", async () => {
     const marker = "gho_fixture_token_that_must_not_escape";
+    // Refused outright: the wrong status, or a body too large to read.
     for (const result of [
       { status: 401, body: { error: marker } },
       { status: 403, body: { error: marker } },
       { status: 502, body: { connections: [] } },
       { status: 201, body: { connections: [] } },
-      { body: { connections: [], access_token: marker } },
-      { body: { connections: [{ provider: "linear", status: "connected", scopes: [], token: marker }] } },
       { body: { echoed: marker.repeat(4096) } },
     ]) {
       const server = await fixture(() => result);
@@ -327,6 +326,18 @@ describe("body account client HTTP/schema boundary", () => {
         expect(String(error)).not.toContain(marker);
         expect(JSON.stringify(error)).not.toContain(marker);
       }
+    }
+    // A 200 body is read tolerantly (#622): keys this client doesn't know, a
+    // credential among them, are dropped, so it never reaches the caller.
+    for (const body of [
+      { connections: [], access_token: marker },
+      { connections: [{ provider: "linear", status: "connected", scopes: [], token: marker }] },
+    ]) {
+      const server = await fixture(() => ({ body }));
+      const client = createAccountsClient({ baseUrl: server.baseUrl, authorization: () => "device" });
+      const read = await client.list();
+      expect(JSON.stringify(read)).not.toContain(marker);
+      expect(read.connections).toHaveLength(body.connections.length);
     }
   });
 
