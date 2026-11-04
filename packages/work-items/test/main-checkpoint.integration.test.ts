@@ -84,7 +84,8 @@ it("coalesces a sweep by merge and run, then refreshes a newly linked bug after 
   const results = await Promise.all(Array.from({ length: 35 }, () => f.check()));
   expect(results.every((result) => result?.reason === "main_red")).toBe(true);
   expect(f.requests.filter((path) => path.startsWith("/search/issues"))).toHaveLength(5);
-  expect(f.requests.filter((path) => path.includes("/actions/runs?"))).toHaveLength(1);
+  // One read of the repository's recent runs, one of the merge's own by head SHA.
+  expect(f.requests.filter((path) => path.includes("/actions/runs?"))).toHaveLength(2);
   const reads = f.requests.length;
   await f.check();
   expect(f.requests).toHaveLength(reads);

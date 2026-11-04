@@ -211,48 +211,59 @@ async function observeCheckpoint(
   let observed: MainCheckpointHold | undefined;
   const base = `repos/${repo}`;
   try {
-    // Prefer this merge's newest checkpoint, even while it is running. Only a
-    // cancelled own run permits coverage by a descendant; unrelated workflows
-    // and older green runs cannot discharge its red result.
+    // Prefer this merge's newest checkpoint, even while it is running. GitHub finds the
+    // merge's own runs by head SHA: walking every later push to reach them cost a
+    // comparison per run and outlasted every close on a busy main (#746).
+    const required = (jobs: Job[]) => jobs.some((job) => jobsRequired.includes(job.name));
+    const owned = (await cache.read(
+      `own:${repo}:${merge}`,
+      async () =>
+        (await api.request(
+          "GET",
+          `${base}/actions/runs?branch=main&event=push&head_sha=${merge}&per_page=100`,
+        )) as { workflow_runs: Run[]; total_count: number },
+    )) as { workflow_runs: Run[]; total_count: number };
     let own: { run: Run; jobs: Job[] } | undefined;
-    let descendant: { run: Run; jobs: Job[] } | undefined;
-    let scanned = false;
-    runs: for (let page = 1; page <= 20; page++) {
-      const response = await recentRuns(api, repo, cache, page);
-      for (const run of response.workflow_runs) {
-        if (run.event !== "push" || run.head_branch !== "main") continue;
-        const coverage: Comparison | undefined =
-          run.head_sha === merge
-            ? undefined
-            : ((await api.request(
-                "GET",
-                `${base}/compare/${merge}...${run.head_sha}?per_page=1`,
-              )) as Comparison);
-        if (coverage?.status === "behind" && coverage.merge_base_commit.sha === run.head_sha) {
-          scanned = true;
-          break runs;
-        }
-        if (
-          coverage &&
-          (coverage.merge_base_commit.sha !== merge || !["ahead", "identical"].includes(coverage.status))
-        )
-          continue;
-        const jobs = await checkpointJobs(api, repo, cache, run.id);
-        if (!jobs.some((job) => jobsRequired.includes(job.name))) continue;
-        if (run.head_sha === merge) {
-          own = { run, jobs };
-          break runs;
-        }
-        if (!descendant && run.status === "completed" && run.conclusion !== "cancelled")
-          descendant = { run, jobs };
-      }
-      if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) {
-        scanned = true;
+    for (const run of owned.workflow_runs) {
+      if (run.event !== "push" || run.head_branch !== "main" || run.head_sha !== merge) continue;
+      const jobs = await checkpointJobs(api, repo, cache, run.id);
+      if (required(jobs)) {
+        own = { run, jobs };
         break;
       }
     }
     if (!own)
-      return unknown(scanned ? "No merge checkpoint result" : "Checkpoint observation limit reached", merge);
+      return unknown(
+        owned.total_count > owned.workflow_runs.length
+          ? "Checkpoint observation limit reached"
+          : "No merge checkpoint result",
+        merge,
+      );
+    // Only a cancelled own run permits coverage by a descendant; unrelated workflows
+    // and older green runs cannot discharge its red result.
+    let descendant: { run: Run; jobs: Job[] } | undefined;
+    if (own.run.conclusion === "cancelled")
+      runs: for (let page = 1; page <= 20; page++) {
+        const response = await recentRuns(api, repo, cache, page);
+        for (const run of response.workflow_runs) {
+          if (run.event !== "push" || run.head_branch !== "main") continue;
+          // Runs are newest first: the merge's own run ends the descendants.
+          if (run.head_sha === merge) break runs;
+          const coverage = (await api.request(
+            "GET",
+            `${base}/compare/${merge}...${run.head_sha}?per_page=1`,
+          )) as Comparison;
+          if (coverage.status === "behind" && coverage.merge_base_commit.sha === run.head_sha) break runs;
+          if (coverage.merge_base_commit.sha !== merge || !["ahead", "identical"].includes(coverage.status))
+            continue;
+          if (run.status !== "completed" || run.conclusion === "cancelled") continue;
+          const jobs = await checkpointJobs(api, repo, cache, run.id);
+          if (!required(jobs)) continue;
+          descendant = { run, jobs };
+          break runs;
+        }
+        if (response.workflow_runs.length < 100 || page * 100 >= response.total_count) break;
+      }
     const chosen = own.run.conclusion === "cancelled" ? descendant : own;
     if (!chosen) return unknown("No completed post-merge checkpoint result", merge);
     const { run, jobs } = chosen;

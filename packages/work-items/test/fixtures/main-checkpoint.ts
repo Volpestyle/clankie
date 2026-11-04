@@ -52,6 +52,9 @@ export async function checkpointFixture() {
     | "descendant-url"
     | undefined;
   const requests: string[] = [];
+  // A busy main: this many green pushes after the merge, newest first, with each
+  // GitHub comparison taking compareMs, as a large repository's do.
+  let busy = { later: 0, compareMs: 0 };
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url!, "http://fixture");
@@ -86,6 +89,7 @@ export async function checkpointFixture() {
         };
       else if (url.pathname === "/repos/fixture/repo/commits/main") data = { sha: tip };
       else if (url.pathname.includes("/compare/")) {
+        if (busy.compareMs) await new Promise((resolve) => setTimeout(resolve, busy.compareMs));
         const [base, target] = url.pathname.split("/compare/")[1]!.split("...") as [string, string];
         const ancestor = await git("merge-base", base, target);
         const shas = (await git("rev-list", "--reverse", `${base}..${target}`)).split("\n").filter(Boolean);
@@ -152,7 +156,17 @@ export async function checkpointFixture() {
                       mode === "cancelled" ? "cancelled" : mode === "green" ? "success" : "failure",
                     ),
                   ];
-        data = { workflow_runs: runs, total_count: runs.length };
+        const all = [
+          ...Array.from({ length: busy.later }, (_, index) =>
+            run(10_000 - index, tip, "completed", "success"),
+          ),
+          ...runs,
+        ].filter(
+          (entry) => !url.searchParams.has("head_sha") || entry.head_sha === url.searchParams.get("head_sha"),
+        );
+        const size = Number(url.searchParams.get("per_page") ?? 30);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        data = { workflow_runs: all.slice((page - 1) * size, page * size), total_count: all.length };
       } else if (/\/actions\/runs\/\d+\/jobs$/u.test(url.pathname)) {
         const own = url.pathname.includes("/runs/280/");
         const success =
@@ -240,6 +254,9 @@ export async function checkpointFixture() {
     check: () => mainCheckpoint(api, "fixture/repo", head, { cache }),
     mode: (next: string) => {
       mode = next;
+    },
+    busy: (later: number, compareMs: number) => {
+      busy = { later, compareMs };
     },
     link: (next: typeof linked, expire = true) => {
       linked = next;
