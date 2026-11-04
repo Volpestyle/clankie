@@ -866,7 +866,7 @@ it("a retry whose launch is still fenced in its clean start folder is never move
     // Only the native launch is stood in for: it stays unconfirmed, so its folder stays fenced.
     const fenced = new Set<string>();
     const launched: string[] = [];
-    vi.spyOn(HerdrWatchStore.prototype, "hireRetained").mockImplementation((input) =>
+    vi.spyOn(HerdrWatchStore.prototype, "hireUnresolved").mockImplementation((input) =>
       fenced.has(input.workingDirectory),
     );
     vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
@@ -1016,6 +1016,135 @@ it("an old unresolved start under another harness doesn't pin a new start to its
   } finally {
     vi.restoreAllMocks();
     await captain?.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("a settled original in the start folder keeps its key but no longer pins new work there; a pending one still does (#721)", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-settled-start-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner"),
+    state = join(root, "state");
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // Only the native launch is stood in for; the real receipt journal decides what the folder holds.
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    // A new captain for each hire reads the journals as a restarted service would.
+    const hire = async (brief: string) => {
+      const captain = createCaptain(
+        { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: state,
+          settings: new SettingsStore(join(root, "settings.json")),
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
+        },
+      );
+      try {
+        return await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: owner,
+            effort: "low",
+            effortReason: "A fixture hire only needs to reach the native launch.",
+          },
+          brief,
+        });
+      } finally {
+        await captain.close();
+      }
+    };
+    // An earlier codex launch made in the start folder itself, its receipt kept under that
+    // folder's own key: pending, or settled by recovery as a remote settlement stays (#721).
+    await mkdir(state, { recursive: true });
+    const key = JSON.stringify(["local", "codex", owner, "new"]);
+    const fingerprint = deliveryFingerprint("original brief");
+    const original = (settled: boolean) =>
+      writeFile(
+        join(state, "herdr-watches.json.hire-receipts.json"),
+        JSON.stringify({
+          [key]: {
+            messageId: "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+            fingerprint,
+            paneId: "herdr-core/t6v",
+            ...(settled
+              ? {
+                  settlement: {
+                    receiptId: "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+                    receiptKey: key,
+                    fingerprint,
+                    disposition: "adopted",
+                    journal: "local-host-inventory",
+                    census: { observedAt: 1, panes: 1, sha256: "0".repeat(64) },
+                    pane: {
+                      paneId: "herdr-core/t6v",
+                      present: true,
+                      terminalId: "herdr-core/t6v",
+                      occupantId: "session-fixture",
+                      owner: { conversationId: "global-default" },
+                    },
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
+    // Pending: it may still be running, so a new start is checked in place and refused there.
+    await original(false);
+    expect(await hire("new work")).toMatchObject({
+      result: {
+        outcome: "failed",
+        detail: expect.stringMatching(
+          /Start checkout is dirty.*an earlier codex start in this folder is still unresolved/su,
+        ),
+      },
+    });
+    expect(launched).toHaveLength(0);
+    // Settled: new work from the folder gets its own worktree instead of being refused forever.
+    await original(true);
+    await hire("new work");
+    expect(launched).toHaveLength(1);
+    expect(launched[0]).toMatch(/[/\\]\.local[/\\]wt-fixture-[0-9a-f]{6}$/u);
+    // The settled original's key itself stays retained against replay.
+    expect(
+      JSON.parse(await readFile(join(state, "herdr-watches.json.hire-receipts.json"), "utf8"))[key],
+    ).toMatchObject({
+      messageId: "719dd6b1-2814-4c2b-9eb6-118fb785427c",
+      settlement: { disposition: "adopted" },
+    });
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   }
 });

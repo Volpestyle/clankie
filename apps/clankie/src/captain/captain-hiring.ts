@@ -264,18 +264,21 @@ export function createHiring(ctx: HiringContext) {
           detail: `Earlier hire worktrees are unreadable: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-      // A launch still fenced, or still being admitted, in the start folder itself is checked
+      // A launch still unresolved, or still being admitted, in the start folder itself is checked
       // there the old way, never moved, so its retry meets that folder's own allocation and
-      // receipt (ADR 0207). A launch under another harness is never this one's retry.
+      // receipt (ADR 0207). A launch under another harness is never this one's retry. A settled
+      // original keeps its key fenced against replay, but new work from the folder gets its own
+      // worktree (#614, #721); only a fresh intent continues at the settled original's place.
       const admitting = retained === undefined && (inPlaceStarts.get(scope) ?? 0) > 0;
+      const held = {
+        fleet: request.fleet,
+        workingDirectory: request.workingDirectory,
+        harness: request.harness,
+      };
       const fenced =
         retained === undefined &&
         !admitting &&
-        herdrWatches.hireRetained({
-          fleet: request.fleet,
-          workingDirectory: request.workingDirectory,
-          harness: request.harness,
-        });
+        (request.freshIntent ? herdrWatches.hireRetained(held) : herdrWatches.hireUnresolved(held));
       const inPlace = admitting || fenced;
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); a hire step that can't be read leaves the hire to its own fence.
