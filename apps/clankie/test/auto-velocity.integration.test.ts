@@ -238,6 +238,24 @@ it("measures a project's velocity from its built-in tracker and origin, and keep
   expect(velocityLine(unknown)).toContain("closures unknown (");
 });
 
+it("records an actionable churn reason for a project's non-git folder and carries it into the wake", async () => {
+  const { project, deps } = await measuredProject();
+  const root = roots.at(-1)!;
+  const folder = join(root, "notes-only");
+  await mkdir(folder);
+  const target = { ...project, workspaces: [{ ...project.workspaces[0]!, path: folder }] };
+  const now = new Date("2026-10-14T03:00:00Z");
+  const velocity = await measureVelocity(target, null, deps, now);
+  const reason = `no Git checkout at ${folder}; configure a project Git folder to measure churn`;
+  expect(velocity.churn).toEqual({ state: "unknown", reason });
+  const directory = join(root, "non-git-rounds");
+  new AutoRoundRecord(directory).measured("lead", [velocity], now);
+  const stored = new AutoRoundRecord(directory).read()[0]!.projects[0]!;
+  expect(stored.churn).toEqual({ state: "unknown", reason });
+  expect(velocityLine(stored)).toContain(`churn unknown (${reason})`);
+  expect(autoRoundPrompt([], [velocityLine(stored)])).toContain(reason);
+});
+
 it("recovers delivery fences from the durable round journal after interrupted settlement", async () => {
   const { project, deps } = await measuredProject();
   const root = roots.at(-1)!;
@@ -752,6 +770,7 @@ it("replays KH2 Shared world as one due post despite its 16-issue cleanup batch"
       outcomes: async () => ({ state: "read", outcomes }),
       history: async () => ({ state: "unknown", reason: "tracker-only replay" }),
       churn: readRepositoryChurn,
+      timeZone: "America/Chicago",
     },
     new Date("2026-10-15T05:00:00Z"),
   );
@@ -762,6 +781,26 @@ it("replays KH2 Shared world as one due post despite its 16-issue cleanup batch"
   expect(report.report!.milestones).toMatchObject([
     { kind: "milestone", ref: "Shared world", at: "2026-10-15T01:44:38.451Z" },
   ]);
+  // VUH-1496 is the actual state transition that completed Shared world. Its
+  // closure stays in that local day's facts, outside the newly opened window.
+  expect(velocity.lastMilestone).toMatchObject({
+    id: "f8bef0a3-1897-432b-b94e-28ee08032db2",
+    at: "2026-10-15T01:44:38.451Z",
+  });
+  expect(outcomes.closed.find((issue) => issue.identifier === "VUH-1496")).toMatchObject({
+    milestoneId: velocity.lastMilestone!.id,
+    completedAt: velocity.lastMilestone!.at,
+  });
+  expect(velocity.closures.state).toBe("known");
+  if (velocity.closures.state !== "known") throw new Error("Captured tracker closures unavailable");
+  const current = Object.values(velocity.closures).flat();
+  expect(current).not.toContain("VUH-1496");
+  expect(current).toContain("VUH-1504"); // A later, unrelated closure still counts.
+  expect(velocity.days.find((day) => day.date === "2026-10-14")!.closed).toEqual({
+    ownerFacing: 16,
+    tooling: 0,
+    unlinked: 0,
+  });
   record.settled(record.measured("lead", [report]), true);
   expect(new AutoRoundRecord(root).withReporting(velocity).report!.milestones).toEqual([]);
   // More than one newly complete milestone in a round still earns one combined post.

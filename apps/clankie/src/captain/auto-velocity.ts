@@ -234,11 +234,20 @@ export async function measureVelocity(
   const closedSince = (from: string) =>
     "state" in outcomes ? [] : outcomes.closed.filter((issue) => issue.completedAt! >= from);
   const classified = "state" in outcomes ? undefined : classify(closedSince(daysSince), known);
-  // The parent that is the milestone closed the previous window, not this one.
+  // A milestone's finishing closure belongs to the window it closed. Keep it
+  // in the daily facts, and keep unrelated closures at the same instant here.
   const inWindow = new Set(
     closedSince(since)
-      .map((issue) => issue.identifier)
-      .filter((key) => lastMilestone?.kind !== "parent" || key !== lastMilestone.ref),
+      .filter((issue) =>
+        lastMilestone?.kind === "parent"
+          ? issue.identifier !== lastMilestone.ref
+          : !(
+              lastMilestone?.kind === "milestone" &&
+              issue.milestoneId === lastMilestone.id &&
+              issue.completedAt === lastMilestone.at
+            ),
+      )
+      .map((issue) => issue.identifier),
   );
   const pick = (keys: readonly string[]) => keys.filter((key) => inWindow.has(key));
 

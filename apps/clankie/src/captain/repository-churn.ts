@@ -133,7 +133,12 @@ export async function originDefaultBranch(
     } catch (error) {
       // --quiet keeps a missing ref silent; anything on stderr means the repository itself is unreadable.
       if ((error as { stderr?: string }).stderr?.trim()) {
-        return { reason: `repository unreadable: ${failure(error)}` };
+        const reason = failure(error);
+        return {
+          reason: reason.startsWith("fatal: not a git repository")
+            ? `no Git checkout at ${repository}; configure a project Git folder to measure churn`
+            : `repository unreadable: ${reason}`,
+        };
       }
     }
   }
