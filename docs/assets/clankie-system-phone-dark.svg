@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 836" width="520" height="836" role="img" aria-labelledby="title desc">
+  <title id="title">How Clankie fits together</title>
+  <desc id="desc">You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and workers report back. The iPhone and iPad app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account.</desc>
+  <style>
+    .bg { fill: #20262a; }
+    .panel { fill: #272e32; stroke: #465056; stroke-width: 2; }
+    .chip { fill: #323b40; }
+    .chip-more { fill: none; stroke: #465056; stroke-width: 2; stroke-dasharray: 6 6; }
+    .core { fill: #2e3f2a; stroke: #9ccc7e; stroke-width: 3; }
+    .app { fill: #3a3224; stroke: #e8b65f; stroke-width: 3; }
+    .optional { fill: #272e32; stroke: #b8b0a0; stroke-width: 2; stroke-dasharray: 8 7; }
+    .wire { fill: none; stroke: #9ccc7e; stroke-width: 3; }
+    .wire-optional { fill: none; stroke: #b8b0a0; stroke-width: 2.5; stroke-dasharray: 8 7; }
+    .head { fill: #9ccc7e; }
+    .head-optional { fill: #b8b0a0; }
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; fill: #eee8da; }
+    .h { font-size: 30px; font-weight: 700; }
+    .h-core { font-size: 38px; font-weight: 700; }
+    .h-small { font-size: 27px; font-weight: 700; }
+    .sub { font-size: 22px; fill: #b8b0a0; }
+    .body { font-size: 22px; }
+    .chip-t { font-size: 24px; font-weight: 600; }
+    .label { font-size: 21px; font-weight: 600; fill: #b8b0a0; }
+  </style>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path class="head" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse"><path class="head-optional" d="M0 0L10 5L0 10z"/></marker>
+  </defs>
+  <rect class="bg" width="520" height="836" rx="20"/>
+
+  <g id="leads">
+    <rect class="panel" x="16" y="16" width="488" height="196" rx="16"/>
+    <text class="h" x="36" y="56">Leads you talk to</text>
+    <text class="sub" x="36" y="86">always on, yours or the built-in</text>
+    <rect class="chip" x="36" y="100" width="219" height="46" rx="12"/>
+    <text class="chip-t" x="145.5" y="131" text-anchor="middle">Built-in lead</text>
+    <rect class="chip" x="265" y="100" width="219" height="46" rx="12"/>
+    <text class="chip-t" x="374.5" y="131" text-anchor="middle">Claude Code</text>
+    <rect class="chip" x="36" y="154" width="98" height="46" rx="12"/>
+    <text class="chip-t" x="85.0" y="185" text-anchor="middle">Codex</text>
+    <rect class="chip" x="144" y="154" width="126" height="46" rx="12"/>
+    <text class="chip-t" x="207.0" y="185" text-anchor="middle">Grok Bot</text>
+    <rect class="chip" x="280" y="154" width="204" height="46" rx="12"/>
+    <text class="chip-t" x="382.0" y="185" text-anchor="middle">Your own bot</text>
+  </g>
+
+  <g id="wires">
+    <path class="wire" marker-start="url(#a)" marker-end="url(#a)" d="M90 216V268"/>
+    <text class="label" x="106" y="250">directly or by gateway (MCP)</text>
+    <path class="wire" marker-end="url(#a)" d="M60 400V444"/>
+    <path class="wire" marker-start="url(#a)" d="M120 400V444"/>
+    <text class="label" x="134" y="430">hire, report</text>
+    <path class="wire-optional" marker-start="url(#o)" marker-end="url(#o)" d="M386 400V444"/>
+    <path class="wire-optional" marker-start="url(#o)" marker-end="url(#o)" d="M386 596V636"/>
+  </g>
+
+  <g id="service">
+    <rect class="core" x="16" y="272" width="488" height="124" rx="16"/>
+    <image x="34" y="288" width="72" height="92" style="image-rendering: pixelated" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEIAAABUBAMAAADE9fxdAAAAJFBMVEUAAADG1mh9j0FvXzaAZEBQOyzy5cgmLzrzsqTj067f3bayrn5CSNASAAAAAXRSTlMAQObYZgAAAP1JREFUSMfVlTsSwiAQQNHR3lhaRcYTiDeQsU6zFtpqvIG5Qq5gaWFjb5XLuZAEiEFnHJYir8kuvBkWwoexPqPEwPz8b5h8ptMxTxx4SmPYbM5REOuOoRopDL5sh0RWEg1LqiujMHB6SLOaEymEsCmjM1y0wX4xGENspNxGNKAF6zAxsTGF3AdklAbscz9noDWkD3pj1yviNGTjUhRX3VcHQzbKsjQzVXEMI/4eq0/UrYvnzAUazu3g4r8/Aoy6Gkvmve0IDDg8EXzw1OcBMQzsVsZdvanJQhmfEqHh1BHFAKi6eP5tsNGsqR7bBFGMY1W9wA2iGO3+/rLRQ4w3jKgvfucT/LMAAAAASUVORK5CYII="/>
+    <text class="h-core" x="124" y="322">Clankie</text>
+    <text class="body" x="124" y="356">Runs on your Mac or Linux host</text>
+  </g>
+
+  <g id="workers">
+    <rect class="panel" x="16" y="448" width="240" height="372" rx="16"/>
+    <text class="h" x="36" y="488">Workers</text>
+    <text class="sub" x="36" y="518">real terminals on</text>
+    <text class="sub" x="36" y="544">Mac, Linux or</text>
+    <text class="sub" x="36" y="570">Windows PC</text>
+    <rect class="chip" x="36" y="590" width="200" height="46" rx="12"/>
+    <text class="chip-t" x="136.0" y="621" text-anchor="middle">Claude Code</text>
+    <rect class="chip" x="36" y="644" width="200" height="46" rx="12"/>
+    <text class="chip-t" x="136.0" y="675" text-anchor="middle">Codex</text>
+    <rect class="chip" x="36" y="698" width="200" height="46" rx="12"/>
+    <text class="chip-t" x="136.0" y="729" text-anchor="middle">OpenCode</text>
+    <rect class="chip" x="36" y="752" width="64" height="46" rx="12"/>
+    <text class="chip-t" x="68.0" y="783" text-anchor="middle">Pi</text>
+    <rect class="chip-more" x="110" y="752" width="126" height="46" rx="12"/>
+    <text class="chip-t" x="173.0" y="783" text-anchor="middle">and more</text>
+  </g>
+
+  <g id="gateway">
+    <rect class="optional" x="268" y="448" width="236" height="144" rx="16"/>
+    <text class="h-small" x="386" y="484" text-anchor="middle">Gateway</text>
+    <text class="sub" x="386" y="514" text-anchor="middle">clankie.bot, optional</text>
+    <text class="sub" x="386" y="544" text-anchor="middle">or LAN and tailnet,</text>
+    <text class="sub" x="386" y="572" text-anchor="middle">no account</text>
+  </g>
+
+  <g id="app">
+    <rect class="app" x="268" y="640" width="236" height="180" rx="16"/>
+    <text class="h-small" x="386" y="680" text-anchor="middle">See the work</text>
+    <text class="body" x="386" y="714" text-anchor="middle">iPhone and iPad</text>
+    <text class="sub" x="386" y="752" text-anchor="middle">Sessions · Feed</text>
+    <text class="sub" x="386" y="782" text-anchor="middle">World · Terminal</text>
+  </g>
+</svg>
