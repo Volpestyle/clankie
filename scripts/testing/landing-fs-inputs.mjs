@@ -39,8 +39,12 @@ export const landingFsInputs = Object.fromEntries([
     "apps/docs/test/landing-fs-selection.integration.test.ts",
     ["scripts/check-landing.mjs", "scripts/testing/landing-graph-reporter.mjs"],
   ],
+  // The cwd census proof also compiles its PID-reuse fixture around the production helper (#708).
+  [
+    "apps/clankie/test/process-working-directories.integration.test.ts",
+    [...fleetInputs, "apps/clankie/test/helpers/native-proof-churn/cwd-reuse.c"],
+  ],
   ...[
-    "process-working-directories.integration.test.ts",
     "fleet-health-metrics.integration.test.ts",
     "tidy-worktrees.integration.test.ts",
     "tidy-worktrees-home-pane.integration.test.ts",
