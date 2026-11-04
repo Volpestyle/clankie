@@ -268,6 +268,8 @@ export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapsh
 export const MAXIMUM_TRUST_MODE_PATH = "/v1/operator/maximum-trust-mode";
 export const MAXIMUM_TRUST_MODE_WORDING = {
   title: "Maximum trust mode",
+  summary:
+    "Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you",
   off: "Off: Clankie leaves each coding agent's own permission settings alone.",
   on: "On: Claude, Codex and Grok skip their permission prompts when Clankie starts them. OpenCode keeps the permissions you set for it, and Pi and Prime Agent never ask anyway. Agents already running stay as they started until they restart.",
   warning:

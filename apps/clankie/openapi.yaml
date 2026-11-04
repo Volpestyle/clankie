@@ -4159,7 +4159,7 @@ paths:
       tags: [Operator]
       operationId: getMaximumTrustMode
       summary: Read whether maximum trust mode is on
-      description: Requests supported native bypass overrides on new Claude, Codex and Grok launches. OpenCode keeps its configured permissions. Native owner confirmations, managed denies, read-only hires and machine access ceilings remain in force. Agents already running stay as they started until they restart. Separate from the autonomy dial.
+      description: Lets Claude, Codex and Grok skip their permission prompts when Clankie starts them. OpenCode keeps its configured permissions; Pi and Prime Agent never ask. Owner confirmations, managed denies, read-only hires and machine access ceilings remain in force. Agents already running stay as they started until they restart. Separate from the autonomy dial.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":
@@ -4174,7 +4174,7 @@ paths:
                   enabled: { type: boolean }
                   seatsOnOtherMode:
                     type: array
-                    description: This machine's live seats still on the other mode until relaunched, read from their process flags; absent when unobservable
+                    description: Agents running on this machine that still use the other mode until they restart, read from their process flags; absent when they could not be checked
                     items:
                       type: object
                       required: [seatId, title, harness, maximumTrust]
@@ -4189,7 +4189,7 @@ paths:
       tags: [Operator]
       operationId: updateMaximumTrustMode
       summary: Turn maximum trust mode on or off
-      description: Owner-only. Applies to the next launches of the operator seat, hires and remote project leads.
+      description: Owner-only. Applies to agents Clankie starts after the change, including clankie claude, codex and grok sessions, hired workers and remote project leads. Agents already running stay as they started until they restart.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       requestBody:
         required: true
@@ -4215,7 +4215,7 @@ paths:
                   enabled: { type: boolean }
                   seatsOnOtherMode:
                     type: array
-                    description: This machine's live seats still on the other mode until relaunched, read from their process flags; absent when unobservable
+                    description: Agents running on this machine that still use the other mode until they restart, read from their process flags; absent when they could not be checked
                     items:
                       type: object
                       required: [seatId, title, harness, maximumTrust]

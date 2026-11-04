@@ -11,11 +11,13 @@ function describeMaximumTrustMode(result: MaximumTrustModeResult): string {
   return [
     `${MAXIMUM_TRUST_MODE_WORDING.title}: ${onOff(result.enabled)}. ${result.description}`,
     ...(result.warning === undefined ? [] : [`Warning: ${result.warning}`]),
-    `Live seat status: this machine only; remote machines are not listed${result.seatsOnOtherMode === undefined ? "; local observation unavailable" : ""}.`,
+    result.seatsOnOtherMode === undefined
+      ? "Running agents: couldn't check this machine; other machines aren't listed."
+      : "Running agents: this machine only; other machines aren't listed.",
     ...(seats.length === 0
       ? []
       : [
-          `Still ${result.enabled ? "guarded" : "in maximum trust"} until relaunched: ${seats
+          `Still ${result.enabled ? "asking permission" : "skipping permission prompts"} until they restart: ${seats
             .map((seat) => `${seat.title || seat.seatId} (${seat.harness})`)
             .join(", ")}.`,
         ]),
@@ -29,7 +31,7 @@ export function maximumTrustModeCommand(
   return {
     name: "maximum-trust-mode",
     aliases: [],
-    description: "Choose native bypass overrides for supported harnesses; owner confirmations remain",
+    description: MAXIMUM_TRUST_MODE_WORDING.summary,
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {

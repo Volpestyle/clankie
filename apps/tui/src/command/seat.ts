@@ -708,7 +708,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   if (plan.conversationId !== undefined) seatEnv.CLANKIE_CONVERSATION_ID = plan.conversationId;
   if (plan.maximumTrustModeUnreadable !== undefined)
     stderr.write(
-      `clankie ${plan.command}: maximum trust mode is unreadable (${plan.maximumTrustModeUnreadable}); launching in auto mode.\n`,
+      `clankie ${plan.command}: couldn't read maximum trust mode (${plan.maximumTrustModeUnreadable}), so Claude starts in auto mode and its usual permission checks apply.\n`,
     );
   // The service admits this seat's bridge only for the harness process registered here (VUH-2816).
   let binding: SeatBinding | undefined;

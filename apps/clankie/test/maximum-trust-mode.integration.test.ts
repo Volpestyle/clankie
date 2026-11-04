@@ -95,6 +95,22 @@ it("names the live seats still on the other mode after a switch", async () => {
     expect((await post(true)).seatsScope).toBe("local");
     expect((await post(true)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_lead"]);
     expect((await post(false)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_kh2"]);
+    const command = maximumTrustModeCommand((args) =>
+      runMaximumTrustModeCommand(args, {
+        ownerFetcher: {
+          fetch: async (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)),
+        },
+      }),
+    );
+    const statuses: string[] = [];
+    const shell = { insertCommandResult: (_name: string, text: string) => statuses.push(text) };
+    await command.run("on", shell as unknown as ClankieFaceShell);
+    await command.run("off", shell as unknown as ClankieFaceShell);
+    expect(statuses[0]).toContain("Running agents: this machine only; other machines aren't listed.");
+    expect(statuses[0]).toContain("Still asking permission until they restart: Clankie (claude).");
+    expect(statuses[1]).toContain(
+      "Still skipping permission prompts until they restart: KH2 worker (codex).",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -179,16 +195,17 @@ it("owner API status, TUI help and CLI help describe supported overrides without
         },
       });
     const command = maximumTrustModeCommand(mode);
-    expect(command.description).toBe(
-      "Choose native bypass overrides for supported harnesses; owner confirmations remain",
-    );
-    expect(
-      commandHelp()
-        .split("\n")
-        .filter((_line, index, lines) => lines[index - 1]?.includes("maximum-trust-mode [status|on|off]")),
-    ).toEqual([
-      "                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)",
-    ]);
+    // The owner reads these aloud: no bypass, harness, seat or launch jargon (#880, #882).
+    const jargon = /bypass|harness|\bseats?\b|launch|relaunch|observation|override/iu;
+    const summary =
+      "Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you";
+    expect(MAXIMUM_TRUST_MODE_WORDING.summary).toBe(summary);
+    expect(command.description).toBe(summary);
+    const helpLine = commandHelp()
+      .split("\n")
+      .filter((_line, index, lines) => lines[index - 1]?.includes("maximum-trust-mode [status|on|off]"));
+    expect(helpLine).toEqual([`                           ${summary} (JSON)`]);
+    for (const text of [summary, ...helpLine]) expect(text).not.toMatch(jargon);
     const docs = await readFile(new URL("../../../docs/cli.md", import.meta.url), "utf8");
     const section = docs.split("### `maximum-trust-mode [status|on|off]`")[1]?.split("\n### ")[0];
     expect(section).toContain("OpenCode is deliberately not mapped to this switch");
@@ -199,6 +216,12 @@ it("owner API status, TUI help and CLI help describe supported overrides without
     const apiSection = apiDocs.split("  /v1/operator/maximum-trust-mode:")[1]?.split(/\n  \/v1\//u)[0];
     expect(apiSection).toContain("OpenCode keeps its configured permissions");
     expect(apiSection).not.toContain("every harness Clankie launches");
+    expect(apiSection).toContain(
+      "Lets Claude, Codex and Grok skip their permission prompts when Clankie starts them",
+    );
+    expect(apiSection).toContain("Pi and Prime Agent never ask");
+    for (const description of apiSection?.match(/^\s+description: .*$/gmu) ?? [])
+      expect(description).not.toMatch(jargon);
     for (const enabled of [true, false]) {
       await mode([enabled ? "on" : "off"]);
       const insertCommandResult = vi.fn();
@@ -207,14 +230,13 @@ it("owner API status, TUI help and CLI help describe supported overrides without
       const [name, status, tone] = insertCommandResult.mock.calls[0]!;
       expect(name).toBe("/maximum-trust-mode");
       expect(tone).toBe("success");
-      expect(status).toContain(
-        "Live seat status: this machine only; remote machines are not listed; local observation unavailable.",
-      );
+      expect(status).toContain("Running agents: couldn't check this machine; other machines aren't listed.");
       expect(status).toContain(enabled ? MAXIMUM_TRUST_MODE_WORDING.on : MAXIMUM_TRUST_MODE_WORDING.off);
       if (enabled) expect(status).toContain("OpenCode keeps the permissions you set for it");
       expect(status).not.toMatch(
-        /every harness|every permission prompt|skip every permission|without its permission prompts and sandbox|bypass|launch mode|launches/u,
+        /every harness|every permission prompt|skip every permission|without its permission prompts and sandbox/u,
       );
+      expect(status).not.toMatch(jargon);
       expect((await settings.load()).maximumTrustMode).toBe(enabled);
     }
   } finally {
