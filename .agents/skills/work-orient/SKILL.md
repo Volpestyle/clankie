@@ -94,3 +94,14 @@ and next blockers with issue/comment links. Distinguish a verified candidate
 from integrated or delivered work. Name unresolved contradictions and the scope
 you actually read; reserve whole-project counts and exhaustive claims for a
 complete enumeration of that scope.
+
+## CI during project onboarding
+
+When first taking on a repository, inspect its CI workflows and recent run logs
+alongside its landing instructions. If full suites repeat on draft pushes,
+superseded jobs keep running, caches start cold or base failures block unrelated
+work, offer the owner a fast-CI starter using the lead skill's
+[delivery guidance](../lead/reference/delivery.md#offer-a-faster-project-ci-setup).
+A missing run history is unknown; do not invent timing evidence. Read-only
+orientation never changes CI or opens a project PR. The owner chooses the offer
+before the normal project worker makes the reviewed change.

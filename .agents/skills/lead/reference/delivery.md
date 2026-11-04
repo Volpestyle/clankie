@@ -79,6 +79,27 @@ replacing the running service for a live test and never holds `main`; release
 one that has outlived its purpose, yours or a worker's, with a recorded reason
 ([ADR 0240](../../../../docs/adr/0240-changes-land-directly-on-main.md)).
 
+## Offer a faster project CI setup
+
+When taking on a repository, read its workflow definitions and recent run logs
+before calling its CI slow. Notice full suites on every draft push, superseded
+runs that keep running, cold dependency/compiler caches, and failures shared
+with the base that hold unrelated work. No run history means unknown, not slow.
+
+Offer the owner a concrete fast-CI starter as a draft pull request: quick checks
+on draft pushes, full checks on the final ready head, cancellation of superseded
+runs, caches seeded from the default branch, and a strict base comparison for
+existing failures. New failures, missing/incomplete results and infrastructure
+errors still fail; no tests or assertions are removed or weakened. The owner
+chooses the commands, runner, test/report format and whether to adopt it.
+
+A project assignment, a slow run or Clankie's own landing doctrine never grants
+permission to rewrite another repository's CI. Show the proposed files and
+tradeoffs first. After the owner chooses the offer, use the normal project
+worker and forge path to open its draft PR. Their review, branch protection and
+merge choices remain theirs. Record the offer and decision on the existing work
+item; an unanswered offer changes nothing.
+
 ## Work repositories
 
 For a work repo, read its owner overrides for push, release and closure. Keep
