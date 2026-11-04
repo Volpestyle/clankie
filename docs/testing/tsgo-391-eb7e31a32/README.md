@@ -18,7 +18,7 @@ it changes neither the bounded tsc gate nor CI's existing native check.
 | Native 3   |    4.33 s | 5.02 GiB | none / 0      |
 | tsc warm 2 |   39.49 s | 1.22 GiB | none / 0      |
 
-Native median: 4.46 s; warm tsc mean: 39.33 s, about 8.8 times slower.
+Native median: 4.46 s; warm tsc mean: 39.33 s, about 8.8 times as long.
 Both compilers resolve the same 1,451 root files. All six clean runs return
 zero without diagnostics. Runs were serial and interleaved under one
 `clankie heavy` permit, with `CLANKIE_TYPECHECK_JOBS=1`; each command includes
@@ -51,19 +51,13 @@ then passed again. No assertion or compiler flag was loosened. This sample
 proves these cases on this snapshot, not equivalence for every future program,
 all packages, or all library types.
 
-```ts
+```text
 export const assignment: number = "wrong";
-export function acceptNumber(value: number) {
-  return value;
-}
+export function acceptNumber(value: number) { return value; }
 export const argument = acceptNumber("wrong");
 export const missing: { id: number; label: string } = { id: 1 };
-export function narrowing(value: string | undefined) {
-  return value.toUpperCase();
-}
-export class PrivateReadProbe {
-  private unreferenced = 1;
-}
+export function narrowing(value: string | undefined) { return value.toUpperCase(); }
+export class PrivateReadProbe { private unreferenced = 1; }
 export const optional: { label?: string } = { label: undefined };
 ```
 
