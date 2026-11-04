@@ -1,5 +1,6 @@
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema, type FleetLead } from "@clankie/protocol/fleet-leads";
 import { isDeviceRunExpired } from "../devices.ts";
+import type { LeadWakeSender } from "../lead-wakes.ts";
 import type {
   IssueWriteResult,
   KeyPressResult,
@@ -973,18 +974,19 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const record = ctx.devices.get(request.appDeviceId);
         return record?.status === "active" && record.scope === "connector" ? record : undefined;
       };
-      let from: string;
+      // The sender is the credential's kind; an app's own name is shown as an app's, never as the owner's.
+      let from: LeadWakeSender;
       if (request.appDeviceId !== undefined) {
         const named = app();
         if (!relay() || named === undefined) return context.json({ error: "app_author_required" }, 403);
-        from = named.name;
+        from = { kind: "app", deviceId: named.deviceId, name: named.name };
       } else {
         const ownerSends =
           owner?.current() === true &&
           (owner.principal.kind === "operator" || ownerDeviceRecord(ctx.devices.get(owner.principal.id)));
         if (!ownerSends || !owner || !(await owner.authorize()))
           return context.json({ error: "owner_required" }, 403);
-        from = "the owner";
+        from = { kind: "owner" };
       }
       if (ctx.dependencies.leadWakes === undefined)
         return reply({ outcome: "unavailable", message: "Waking a lead isn't available on this Clankie." });

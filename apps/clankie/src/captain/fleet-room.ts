@@ -23,7 +23,13 @@ import {
 const OPT_IN_KINDS: ReadonlySet<FleetRoomKind> = new Set(FLEET_ROOM_OPT_IN_KINDS);
 
 function appNote(entry: FleetRoomEntry): AppNote {
-  return { sequence: entry.sequence, at: entry.at, author: entry.from.label, text: entry.text };
+  return {
+    sequence: entry.sequence,
+    at: entry.at,
+    author: entry.from.label,
+    authorKind: "app",
+    text: entry.text,
+  };
 }
 
 /** A page for a reader that didn't ask for projects carries none, as before they existed. */

@@ -50,8 +50,10 @@ async function service(
     deps: {},
     liveSeats: [],
     seatByPersona: new Map(),
-    fleetChanges: { touch: () => {} },
+    fleetChanges: { touch: () => {}, wait: async () => false },
     fleetSnapshot: async () => ({
+      op: "fleet",
+      schemaVersion: 1,
       snapshot: {
         schemaVersion: 1,
         cursor: "c1",
@@ -81,6 +83,7 @@ async function service(
       },
     },
     herdrWatches: {
+      seatStarter: () => undefined,
       tidy: {
         mainCheckpointHold,
         seatWorktreeHold: async (seatId: string) => held.get(seatId) ?? [],
@@ -101,7 +104,7 @@ async function service(
     OperatorConversationServiceResultSchema.parse(
       await serve({ op: "close_seat", schemaVersion: 1, seatId, ...extra }),
     );
-  return { close, exits, held, left };
+  return { close, exits, held, left, serve };
 }
 
 it("a connected app closes only an idle hire Clankie or an app started, logs each close, and never a pane mid-turn", async () => {
@@ -272,4 +275,27 @@ it("connector close_agent holds red main and returns the typed checkpoint blocke
   expect(f.exits).toEqual([]);
   checkpoint.link("url");
   expect(await f.close("worker", { appDeviceId: "app" })).toMatchObject({ closed: true });
+});
+
+it("an app named like the owner or Clankie is listed as the app that started a seat, never as them (#349)", async () => {
+  const f = await service([
+    { seatId: "w1:owner-named", hired: true, starter: { kind: "app", name: "the owner" }, status: "idle" },
+    { seatId: "w1:clankie-named", hired: true, starter: { kind: "app", name: "Clankie" }, status: "idle" },
+    { seatId: "w1:owners", hired: true, starter: { kind: "owner" }, status: "idle" },
+  ]);
+  const source = createHerdrSessionSource(
+    {
+      dispatch: async (request) => f.serve(request as never),
+      terminalTail: async () => {
+        throw new Error("No screen read in this proof");
+      },
+      tailRefusal: async () => new Error("No tail in this proof"),
+    },
+    { surfaceClientId: "starter-proof" },
+  );
+  const sessions = (await source.list()).sessions;
+  const startedBy = (id: string) => sessions.find((session) => session.id === id)?.startedBy;
+  expect(startedBy("w1:owner-named")).toBe('the app "the owner"');
+  expect(startedBy("w1:clankie-named")).toBe('the app "Clankie"');
+  expect(startedBy("w1:owners")).toBe("the owner");
 });

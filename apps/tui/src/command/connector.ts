@@ -285,7 +285,8 @@ async function readWebhook(
 }
 
 function formatNote(note: AppNote): string {
-  const head = `#${String(note.sequence)} ${note.at} ${connectorShowableText(note.author)}${note.to === undefined ? "" : ` → ${note.to.join(", ")}`}`;
+  // Every note is an app's: its name is shown as the app's, never as the owner's or Clankie's (#349).
+  const head = `#${String(note.sequence)} ${note.at} the app ${JSON.stringify(connectorShowableText(note.author))}${note.to === undefined ? "" : ` → ${note.to.join(", ")}`}`;
   const wakes = (note.wakes ?? []).map(
     (wake) =>
       `  woke ${wake.lead}: ${wake.reached === "none" ? "not reached" : wake.held ? `${wake.reached} (held for the apps)` : wake.reached}` +

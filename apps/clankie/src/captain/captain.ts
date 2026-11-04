@@ -1327,7 +1327,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       : new NoteWakes({
           path: join(options.stateDir, "fleet-room", "note-wakes.json"),
           webhookLeads: () => deps.leadWakes!.leads(),
-          webhook: (lead, text) => deps.leadWakes!.send({ lead, from: "clankie", text, kind: "board_note" }),
+          webhook: (lead, text) =>
+            deps.leadWakes!.send({ lead, from: { kind: "clankie" }, text, kind: "board_note" }),
           leadLane: async (text) => {
             const conversationId = conversations.defaultGlobalConversationId();
             // His live lead pane takes the wake first; without one his model's lane does,
@@ -5544,7 +5545,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             value: leftover.session,
           }),
         );
-        if (asked?.kind === "app") return deviceName?.(asked.deviceId) ?? "A connected app";
+        if (asked?.kind === "app") {
+          const name = deviceName?.(asked.deviceId);
+          return name === undefined ? "a connected app" : `the app ${JSON.stringify(name)}`;
+        }
         return asked?.kind === "owner" ? "the owner" : "Clankie";
       },
       observeConnectorLead: (input) => fleetLeadActivity.record(input),

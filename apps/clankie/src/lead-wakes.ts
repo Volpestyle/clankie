@@ -45,6 +45,22 @@ const START_REASON_MAX = 300;
 
 type LeadWakeKind = "lead_wake" | "worker_report" | "start_finished" | "board_note" | "update_outcome";
 
+/**
+ * Who a wake is from. The service decides it from the caller's credential (#349). An
+ * app's own sign-in name is display only and never stands for the owner or Clankie.
+ */
+export type LeadWakeSender =
+  | { readonly kind: "owner" }
+  | { readonly kind: "clankie" }
+  | { readonly kind: "app"; readonly deviceId: string; readonly name: string };
+
+/** The sender as a lead reads it; an app is always named as an app. */
+function senderLabel(sender: LeadWakeSender): string {
+  if (sender.kind === "owner") return "the owner";
+  if (sender.kind === "clankie") return "clankie";
+  return `the app ${JSON.stringify(sender.name)}`;
+}
+
 export interface LeadWakes {
   /** The leads with a stored webhook, by name. */
   leads(): Promise<string[]>;
@@ -65,7 +81,7 @@ export interface LeadWakes {
   close(): void;
   send(input: {
     readonly lead: string;
-    readonly from: string;
+    readonly from: LeadWakeSender;
     readonly text: string;
     readonly kind?: LeadWakeKind;
   }): Promise<LeadWakeResult>;
@@ -90,7 +106,7 @@ export function createLeadWakes(options: {
     void wakes
       .send({
         lead,
-        from: "clankie",
+        from: { kind: "clankie" },
         kind: "worker_report",
         // Blocked reports lead the job, so the lead answers a waiting worker first (#317).
         text: [...events]
@@ -125,10 +141,11 @@ export function createLeadWakes(options: {
   }
   async function deliver({
     lead,
-    from,
+    from: sender,
     text,
     kind = "lead_wake",
   }: Parameters<LeadWakes["send"]>[0]): Promise<LeadWakeResult> {
+    const from = senderLabel(sender);
     let webhook;
     try {
       webhook = await readLeadWake(options.store, lead);
@@ -172,6 +189,7 @@ export function createLeadWakes(options: {
           kind,
           lead,
           from,
+          sender: sender.kind === "app" ? { kind: "app", deviceId: sender.deviceId } : { kind: sender.kind },
           text,
           sentAt: clock().toISOString(),
           ...(kind === "worker_report" || kind === "start_finished" || kind === "update_outcome"
@@ -245,7 +263,7 @@ export function createLeadWakes(options: {
       void wakes
         .send({
           lead,
-          from: "clankie",
+          from: { kind: "clankie" },
           kind: "start_finished",
           text:
             `start=${startId} ref=${ref} outcome=${outcome}${agent === undefined ? "" : ` agent=${agent}`} time=${at}\n` +
@@ -287,7 +305,9 @@ export function createLeadWakes(options: {
       const leads = new Set([...(lead === undefined ? [] : [lead]), ...(stored ?? [])]);
       if (leads.size === 0) return stored === undefined ? "failed" : "none";
       const results = await Promise.all(
-        [...leads].map((name) => wakes.send({ lead: name, from: "clankie", kind: "update_outcome", text })),
+        [...leads].map((name) =>
+          wakes.send({ lead: name, from: { kind: "clankie" }, kind: "update_outcome", text }),
+        ),
       );
       for (const result of results)
         if (result.outcome !== "sent")

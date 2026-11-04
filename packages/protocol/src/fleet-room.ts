@@ -230,6 +230,11 @@ export const AppNoteSchema = z.strictObject({
   at: z.string().datetime({ offset: true }),
   /** The name the app's connector device was approved under; never the caller's own words. */
   author: z.string().min(1).max(120),
+  /**
+   * Who wrote it: always a connected app, never the owner or Clankie, whatever its name reads
+   * as. A name is display only (#349).
+   */
+  authorKind: z.literal("app").optional(),
   text: z.string().max(FLEET_ROOM_TEXT_MAX),
   /** The leads the author addressed (#179). Absent on an unaddressed note. */
   to: z.array(LeadWakeNameSchema).min(1).max(APP_NOTE_ADDRESSEES_MAX).optional(),

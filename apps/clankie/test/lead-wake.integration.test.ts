@@ -205,8 +205,8 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toContain("wake_lead");
 
-    // The job reaches the lead's webhook, signed with the app's approved name; a from
-    // argument is no part of the tool.
+    // The job reaches the lead's webhook, from the app as the service knows it: its approved
+    // name, always shown as an app's, and its device (#349). A from argument is no part of the tool.
     const job = "Restart Clankie on the Mac and report health in one line.";
     const sent = await client.callTool({ name: "wake_lead", arguments: { lead: "grok", text: job } });
     expect(sent.isError).toBeFalsy();
@@ -219,10 +219,17 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
     expect(received[0]).toMatchObject({
       path: hookPath,
       authorization: `Bearer ${key}`,
-      body: { source: "clankie", kind: "lead_wake", lead: "grok", from: "Claude", text: job },
+      body: {
+        source: "clankie",
+        kind: "lead_wake",
+        lead: "grok",
+        from: 'the app "Claude"',
+        sender: { kind: "app", deviceId: expect.any(String) },
+        text: job,
+      },
     });
     expect(Object.keys(received[0]!.body).sort()).toEqual(
-      ["from", "kind", "lead", "reply", "sentAt", "source", "text"].sort(),
+      ["from", "kind", "lead", "reply", "sender", "sentAt", "source", "text"].sort(),
     );
 
     // A lead with no webhook answers with the names that have one, and nothing is sent.
@@ -257,7 +264,11 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
     const tried = await owner(["wake", "send", "grok", "Reply", "with", "one", "line."]);
     expect(tried.code).toBe(0);
     expect(tried.stdout).toContain("Sent.");
-    expect(received.at(-1)!.body).toMatchObject({ from: "the owner", text: "Reply with one line." });
+    expect(received.at(-1)!.body).toMatchObject({
+      from: "the owner",
+      sender: { kind: "owner" },
+      text: "Reply with one line.",
+    });
 
     // The connected hire crosses the relay and actual service into the native Codex protocol fixture.
     expect(
@@ -836,7 +847,7 @@ it("an addressed board note wakes each named lead once, falling through to Clank
     const cli = await owner(["notes"]);
     expect(cli.code).toBe(0);
     expect(cli.stdout).toContain(`#${note.sequence}`);
-    expect(cli.stdout).toContain(`${author} → grok`);
+    expect(cli.stdout).toContain(`the app ${JSON.stringify(author)} → grok`);
     expect(cli.stdout).toContain("woke grok: webhook [webhook delivered]");
     expect(cli.stdout).toContain("woke grok: clankie (held for the apps) [webhook refused, clankie held]");
     const json = JSON.parse((await owner(["notes", "--json"])).stdout);
