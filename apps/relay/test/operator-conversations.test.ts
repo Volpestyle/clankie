@@ -100,11 +100,14 @@ describe("authenticated operator conversation relay", () => {
         }),
       },
     });
-    const body = { op: "presence", schemaVersion: 1, includeCurrentActivity: true };
-    const response = await post(relay.url, "/operator/v1/dispatch", body);
-    expect(response.status).toBe(200);
-    expect(received).toEqual([body]);
-    expect(await response.json()).toMatchObject({ snapshot });
+    for (const optIn of [{ includeCurrentActivity: true }, { includeQuiet: true }]) {
+      received.length = 0;
+      const body = { op: "presence", schemaVersion: 1, ...optIn };
+      const response = await post(relay.url, "/operator/v1/dispatch", body);
+      expect(response.status).toBe(200);
+      expect(received).toEqual([body]);
+      expect(await response.json()).toMatchObject({ snapshot });
+    }
     expect(dispatch).not.toHaveBeenCalled();
   });
   it("routes private current activity with the owner device identity and refuses read-only/support devices", async () => {
@@ -147,7 +150,7 @@ describe("authenticated operator conversation relay", () => {
     expect((await post(support.url, "/operator/v1/dispatch", body)).status).toBe(403);
     expect(deviceDispatch).toHaveBeenCalledTimes(1);
   });
-  it("sends only the owner's own device down its own identity for quiet hours, and errors for nobody", async () => {
+  it("sends only the owner's own device down its own identity for quiet hours", async () => {
     const snapshot = {
       schemaVersion: 1 as const,
       cursor: "quiet",
@@ -177,6 +180,25 @@ describe("authenticated operator conversation relay", () => {
     expect(
       await read({ ...takeControl, supportGrantId: "support", supportScope: "read-state" as const }),
     ).toEqual({ own: 0, relayed: 1 });
+
+    // A connected app holds no presence read at all, on either route.
+    const dispatch = vi.fn(async () => served);
+    const deviceDispatch = vi.fn(async () => served);
+    const connector = await startRelay({
+      dispatch,
+      deviceDispatch,
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: { ...takeControl, scope: "connector" as const },
+        }),
+      },
+    });
+    const refused = await post(connector.url, "/operator/v1/dispatch", body);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "connector_operation_not_allowed" });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(deviceDispatch).not.toHaveBeenCalled();
   });
   it("passes a paired hosted device's presence read and rechecks authorization", async () => {
     const snapshot = {

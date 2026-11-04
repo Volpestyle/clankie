@@ -11023,10 +11023,12 @@ A client deciding whether to play an attention-grabbing alert may request
 effect, and `quietUntil` while quiet. `quietUntil` is omitted if its end can't be
 found. Both join the cursor, so a parked read wakes within half a second of
 either edge. Only this machine's operator or the owner's own Take Control device
-receives them, because they show when the owner sleeps. Any other reader,
-including a connector app, a support session or a Supervise device, gets ordinary
-presence with neither field and no error. Legacy requests omit the fields and
-keep their existing cursor. `clankie status` opts in for the owner.
+receives them, because they show when the owner sleeps. Any other device reading
+through the relay, including a support session or a Supervise device, gets
+ordinary presence with neither field and no error; a connector app has no
+presence read. A device that loses Take Control during the read gets a 403 from
+the relay instead. Legacy
+requests omit the fields and keep their existing cursor. `clankie status` opts in for the owner.
 
 ## Computer body
 

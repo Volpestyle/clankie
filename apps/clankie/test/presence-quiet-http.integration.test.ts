@@ -1,6 +1,6 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import type { Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import { SettingsStore } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain, type CaptainPort } from "../src/captain/port.ts";
 import { DesktopExpressions } from "../src/captain/desktop.ts";
+import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { projectPresence } from "../src/captain/presence.ts";
 
 // The real service route, pairing and revocation, with the real quiet-hours
@@ -21,9 +22,56 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
+/** Take Control devices the owner's pairing can't produce, written as their event history. */
+const NOT_THE_OWNERS = {
+  connector: { mintedBy: "local-operator", scope: "connector" },
+  visitor: { mintedBy: "hosted-account" },
+  support: { mintedBy: "local-operator", supportGrantId: randomUUID() },
+};
+
+function deviceEvents(now: number) {
+  const iso = (offset: number) => new Date(now + offset).toISOString();
+  return Object.entries(NOT_THE_OWNERS).flatMap(([deviceId, device]) => {
+    const event = (type: string, data: object) => ({
+      id: randomUUID(),
+      type,
+      occurredAt: iso(-60_000),
+      missionId: `device:${deviceId}`,
+      correlationId: "presence-quiet",
+      profileHash: "fixture",
+      data: { schemaVersion: 1, deviceId, ...data },
+    });
+    return [
+      event("device.pairing.redeemed", {
+        offerId: deviceId,
+        name: deviceId,
+        platform: "ios",
+        offeredGrants: TAKE_CONTROL_GRANTS,
+        pendingExpiresAt: iso(60_000),
+        ...device,
+      }),
+      event("device.activated", { grants: TAKE_CONTROL_GRANTS, sessionExpiresAt: iso(3_600_000) }),
+    ];
+  });
+}
+
 async function fixture(held?: Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "presence-quiet-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
+  const now = Date.now();
+  const deviceSessionKey = randomBytes(32);
+  const eventLogPath = join(root, "events.jsonl");
+  await writeFile(
+    eventLogPath,
+    deviceEvents(now)
+      .map((row) => JSON.stringify(row))
+      .join("\n") + "\n",
+  );
+  const signer = new DeviceSessionSigner(deviceSessionKey);
+  const tokenFor = (deviceId: string) =>
+    signer.issue(
+      mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
+    );
   // Quiet all day from anywhere: the whole clock but its last minute.
   const desktop = new DesktopExpressions(
     async () => ({
@@ -54,8 +102,8 @@ async function fixture(held?: Promise<void>) {
   const app = await createClankieApp({
     settings: new SettingsStore(join(root, "settings.json")),
     captain: createStubCaptain({ serveOperatorConversation }),
-    eventLogPath: join(root, "events.jsonl"),
-    deviceSessionKey: randomBytes(32),
+    eventLogPath,
+    deviceSessionKey,
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer relay"
         ? { captainId: "relay", steerSourceLane: "api" }
@@ -91,7 +139,7 @@ async function fixture(held?: Promise<void>) {
       await call("/v1/pairing/complete", { completionToken: pending.completionToken, acceptedGrants: grants })
     ).json()) as { deviceId: string; deviceToken: string };
   };
-  return { asked, call, read, pair, parked };
+  return { asked, call, read, pair, parked, tokenFor };
 }
 
 const snapshotOf = async (response: Response) => {
@@ -120,6 +168,22 @@ it("stops at the boundary for a Supervise device and an unknown bearer", async (
     const response = await f.read(bearer);
     expect(response.status).toBe(401);
     expect(JSON.stringify(await response.json())).not.toContain("quiet");
+  }
+  expect(f.asked).toEqual([]);
+});
+
+it("holds other Take Control devices to the service's ordinary presence boundary", async () => {
+  const f = await fixture();
+  for (const deviceId of Object.keys(NOT_THE_OWNERS)) {
+    const bearer = f.tokenFor(deviceId);
+    for (const body of [
+      { op: "presence", schemaVersion: 1 },
+      { op: "presence", schemaVersion: 1, includeQuiet: true },
+    ]) {
+      const response = await f.call("/operator/v1/dispatch", body, bearer);
+      expect(response.status, `${deviceId} ${JSON.stringify(body)}`).toBe(401);
+      expect(JSON.stringify(await response.json())).not.toContain("quiet");
+    }
   }
   expect(f.asked).toEqual([]);
 });
