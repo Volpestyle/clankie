@@ -60,3 +60,21 @@ pane record waits five minutes, long enough for any pane it drew to appear in
 the inventory; after that the inventory rules it out as it does a gone pane.
 An agent of that harness, or any pane in a project hire's directory, keeps the
 place held for the owner or its lead to judge.
+
+## Amendment: project allocations on remote failed starts (#326)
+
+The native receipt can settle while its project allocation still fences the
+folder. Recovery must therefore run before both the captain's checkout decision
+and the store's project reservation. Ordinary remote project starts persist a
+causal native receipt UUID and key before dispatch. After the host's immutable
+not-launched seal, the same project's allocation can release automatically
+through the existing complete double-census path. It must be inactive,
+unobserved, uniquely linked and unchanged at the final locked write; current
+conversation authority is checked across asynchronous evidence collection.
+
+No timeout or current absence alone proves a dead launch. Legacy allocations
+without that link, fresh intents, live or potentially starting workers and
+changed evidence remain held for explicit recovery. The original launch history
+is retained and its key remains fenced. This does not retry a hire or close a
+pane. Loopback joined-machine coverage proves this service boundary; Windows/WSL
+acceptance on real PCs remains separate.

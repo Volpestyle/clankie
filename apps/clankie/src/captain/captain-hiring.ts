@@ -243,6 +243,18 @@ export function createHiring(ctx: HiringContext) {
       const scope = hireWorktreeScope(request);
       const retryScope = hireRetryScope(request, deliveryFingerprint(leadBrief ?? ""));
       place.release = await queueStart(scope);
+      if (request.fleet !== undefined) {
+        const current = await settings();
+        const projectId = await resolveHireProject(request, current.projects, authority);
+        if (request.projectId !== undefined && request.projectId !== projectId)
+          throw new Error("The selected project does not match this hiring conversation or workspace.");
+        await herdrWatches.retireUnsentRemoteAt(
+          request,
+          () => assertConversationAuthority(authority),
+          projectId,
+        );
+        await assertConversationAuthority(authority);
+      }
       let retained: HireWorktreeRelocation | undefined;
       try {
         const launch = hireWorktrees.get(retryScope);

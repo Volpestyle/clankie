@@ -53,6 +53,11 @@ const AllocationSchema = z
     policy: z.string(),
     request: SpawnOperatorSeatSchema,
     started: z.boolean(),
+    /** Exact native attempt; absence on legacy allocations never authorizes automatic release. */
+    nativeReceipt: z
+      .object({ id: z.string().min(1), key: z.string().min(1) })
+      .strict()
+      .optional(),
     /** Legacy allocations predate a recorded start time. */
     beganAt: z.number().int().nonnegative().optional(),
     pane: z.string().optional(),
@@ -608,6 +613,47 @@ export class ProjectHires {
       allocation.proof = ProjectHireProcessProofSchema.parse(next.proof);
     });
   }
+  /** Persist the causal receipt link before anything can dispatch on another host. */
+  public bindNativeReceipt(id: string, receipt: { id: string; key: string }): void {
+    this.change((state) => {
+      const allocation = state.allocations.find((entry) => entry.id === id);
+      const [fleet, harness, cwd] = JSON.parse(receipt.key) as unknown[];
+      if (
+        !allocation ||
+        allocation.gone ||
+        allocation.confirmed ||
+        allocation.pane !== undefined ||
+        allocation.seat !== undefined ||
+        allocation.occupantId !== undefined ||
+        allocation.proof !== undefined ||
+        fleet !== (allocation.request.fleet ?? "local") ||
+        harness !== allocation.request.harness ||
+        cwd !== allocation.request.workingDirectory ||
+        (allocation.nativeReceipt && !isDeepStrictEqual(allocation.nativeReceipt, receipt)) ||
+        state.allocations.some(
+          (other) => other.id !== id && !other.gone && isDeepStrictEqual(other.nativeReceipt, receipt),
+        )
+      )
+        throw Error("Original allocation cannot bind this native receipt; nothing dispatched.");
+      allocation.nativeReceipt = { ...receipt };
+    });
+  }
+  /** Read only: unresolved allocations at the exact fleet/place, including legacy records. */
+  public unresolvedAt(input: {
+    fleet?: string | undefined;
+    workingDirectory: string;
+    harness?: string | undefined;
+  }): Allocation[] {
+    return this.read().allocations.filter(
+      (entry) =>
+        !entry.gone &&
+        !entry.confirmed &&
+        (entry.request.fleet ?? "default") === (input.fleet ?? "default") &&
+        entry.request.workingDirectory === input.workingDirectory &&
+        (input.harness === undefined || entry.request.harness === input.harness),
+    );
+  }
+
   /** Only pre-launch failures release immediately; all native uncertainty remains counted. */
   public failed(id: string): void {
     this.change((state) => {
@@ -655,8 +701,20 @@ export class ProjectHires {
         a.request.workingDirectory === workingDirectory,
     );
   }
-  public release(candidate: Allocation, inventory: unknown): void {
+  public release(
+    candidate: Allocation,
+    inventory: unknown,
+    expectedReceipt?: { id: string; key: string },
+  ): void {
     this.change((state) => {
+      if (
+        expectedReceipt &&
+        state.allocations.filter(
+          (other) =>
+            !other.gone && !other.confirmed && isDeepStrictEqual(other.nativeReceipt, expectedReceipt),
+        ).length !== 1
+      )
+        throw Error("Native receipt no longer identifies one unresolved allocation; nothing released.");
       const entry = state.allocations.find((a) => a.id === candidate.id);
       if (!entry || !isDeepStrictEqual(entry, candidate))
         throw new Error("Original project hire allocation changed; nothing released.");
