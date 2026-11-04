@@ -12,6 +12,7 @@ import {
   type HuddleLandingStep,
   type HuddleSeat,
 } from "@clankie/protocol/huddles";
+import { quotedLine } from "./quoted-line.ts";
 
 /**
  * Huddles (VUH-2025). A lead asks every seat in a project, or the whole fleet,
@@ -148,10 +149,10 @@ export function huddleSummary(huddle: Huddle): string {
     ...(huddle.landingOrder.length
       ? huddle.landingOrder.map(
           (step) =>
-            `${step.position}. ${step.title} [${step.seatId}]${step.eta ? ` eta ${step.eta}` : " eta unknown"}: ` +
-            `${step.files.slice(0, 6).join(", ")}${step.files.length > 6 ? ` +${step.files.length - 6}` : ""}` +
+            `${step.position}. ${quotedLine(step.title)} [${step.seatId}]${step.eta ? ` eta ${quotedLine(step.eta)}` : " eta unknown"}: ` +
+            `${step.files.slice(0, 6).map(quotedLine).join(", ")}${step.files.length > 6 ? ` +${step.files.length - 6}` : ""}` +
             (step.after.length
-              ? `; after ${step.after.map((a) => `${a.title} (${a.files.slice(0, 3).join(", ")})`).join("; ")}`
+              ? `; after ${step.after.map((a) => `${quotedLine(a.title)} (${a.files.slice(0, 3).map(quotedLine).join(", ")})`).join("; ")}`
               : ""),
         )
       : ["(nothing to land)"]),
@@ -160,16 +161,16 @@ export function huddleSummary(huddle: Huddle): string {
     ...(huddle.blockers.length
       ? huddle.blockers.map(
           (blocker) =>
-            `- ${blocker.urgent ? "URGENT " : ""}${blocker.title} [${blocker.seatId}]: ${blocker.blocked}`,
+            `- ${blocker.urgent ? "URGENT " : ""}${quotedLine(blocker.title)} [${blocker.seatId}]: ${quotedLine(blocker.blocked)}`,
         )
       : ["(none reported)"]),
     "",
     "On:",
-    ...answered.map((seat) => `- ${seat.title} [${seat.seatId}]: ${seat.on}`),
+    ...answered.map((seat) => `- ${quotedLine(seat.title)} [${seat.seatId}]: ${quotedLine(seat.on ?? "")}`),
     ...(missing.length
       ? [
           "",
-          `No answer yet: ${missing.map((seat) => `${seat.title} [${seat.seatId}, ${seat.delivery}]`).join("; ")}`,
+          `No answer yet: ${missing.map((seat) => `${quotedLine(seat.title)} [${seat.seatId}, ${seat.delivery}]`).join("; ")}`,
         ]
       : []),
   ];

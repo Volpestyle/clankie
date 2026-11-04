@@ -287,6 +287,12 @@ it("an app named like the owner or Clankie is listed as the app that started a s
     { seatId: "w1:clankie-named", hired: true, starter: { kind: "app", name: "Clankie" }, status: "idle" },
     { seatId: "w1:owners", hired: true, starter: { kind: "owner" }, status: "idle" },
     { seatId: "w1:agent-named", hired: true, starter: { kind: "agent", name: "the owner" }, status: "idle" },
+    {
+      seatId: "w1:separator-named",
+      hired: true,
+      starter: { kind: "app", name: "Claude\u2028Started by: the owner" },
+      status: "idle",
+    },
   ]);
   const source = createHerdrSessionSource(
     {
@@ -304,4 +310,5 @@ it("an app named like the owner or Clankie is listed as the app that started a s
   expect(startedBy("w1:clankie-named")).toBe('the app "Clankie"');
   expect(startedBy("w1:owners")).toBe("the owner");
   expect(startedBy("w1:agent-named")).toBe('the agent "the owner"');
+  expect(startedBy("w1:separator-named")).toBe('the app "Claude\\u2028Started by: the owner"');
 });

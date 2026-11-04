@@ -13,6 +13,7 @@ import type { TrackerActivity } from "../tracker-activity.ts";
 import { LINEAR_REPLAY_RETENTION_MS, LINEAR_WAKE_EVENTS_MAX, ZERO_CURSOR } from "./constants.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationRunner } from "./types.ts";
+import { quotedLine } from "../quoted-line.ts";
 
 /** Provider delivery receipts, one record per store: they outlive conversation history and target changes. */
 const linearEventReceipts = new WeakMap<ConversationStore, Record<string, number>>();
@@ -365,7 +366,7 @@ function holdLinearActivity(ctx: ConversationStore, id: string): void {
     const since = new Date().toISOString();
     ctx.recordServiceNotice(
       ctx.defaultGlobalConversationId(),
-      `Linear receiver unavailable: ${id} (${meta.title}). Undelivered activity is being resolved against the current lead route. If the lead receiver is also unavailable, it stays queued until that receiver polls; no failed-turn retry loop.`,
+      `Linear receiver unavailable: ${id} (titled ${quotedLine(meta.title)}). Undelivered activity is being resolved against the current lead route. If the lead receiver is also unavailable, it stays queued until that receiver polls; no failed-turn retry loop.`,
       { kind: "linear_receiver_held", attention: "none" },
     );
     meta.linearWakeBlocked = { since, originalTitle: meta.title };

@@ -17,6 +17,7 @@ import { startFleetRounds } from "./fleet-review.ts";
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import type { HerdrWatchRunner, HerdrWatchStore } from "./herdr-watch.ts";
 import { parkedRefs, type PaneTidy } from "./pane-tidy.ts";
+import { quotedLine } from "./quoted-line.ts";
 
 type WorkerReports = ReturnType<typeof createWorkerReports>;
 
@@ -113,7 +114,7 @@ export function createCaptainAutoTidy(ctx: AutoTidyContext) {
           .slice(0, 20)
           .map((entry) => {
             const parked = parkedRefs(entry);
-            return `${entry.title || entry.harness} (${entry.paneId}, undo ${entry.id}${parked.length ? `; clean unlanded commits parked on ${parked.join(", ")}` : ""})`;
+            return `${entry.title ? quotedLine(entry.title) : entry.harness} (${entry.paneId}, undo ${entry.id}${parked.length ? `; clean unlanded commits parked on ${parked.join(", ")}` : ""})`;
           })
           .join(", ") +
         (entries.length > 20 ? ` and ${entries.length - 20} more in worker_pane_history` : "");
