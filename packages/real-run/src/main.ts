@@ -11,6 +11,7 @@
  */
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -152,6 +153,9 @@ const exit = await Effect.runPromise(Fiber.await(fiber));
 // The processes have stopped: their logs join the run's own output.
 for (const log of ["service.log", "relay.log"])
   if (existsSync(join(home, log))) copyFileSync(join(home, log), join(out, log));
+// A boot that never answered left its trace, Node reports and samples here (#712).
+if (existsSync(join(home, "diagnostics")))
+  cpSync(join(home, "diagnostics"), join(out, "diagnostics"), { recursive: true });
 const passed = !interrupted && Exit.isSuccess(exit) && exit.value.passed;
 if (interrupted) {
   console.error("real run interrupted");

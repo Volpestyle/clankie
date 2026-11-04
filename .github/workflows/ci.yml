@@ -453,6 +453,7 @@ jobs:
             ${{ runner.temp }}/real-run/run.jsonl
             ${{ runner.temp }}/real-run/service.log
             ${{ runner.temp }}/real-run/relay.log
+            ${{ runner.temp }}/real-run/diagnostics/
           retention-days: 7
       # A job that died before checkout (as at "Set up runner") has no script on disk;
       # mac-findings files for it instead (#551).
