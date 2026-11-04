@@ -832,7 +832,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       const admitted = connectorAdmission.admit({
         hostId: hostRoute.hostId,
         path: hostRoute.path,
-        source: clientAddress(request, options.trustedProxy),
+        source: clientBlock(clientAddress(request, options.trustedProxy)),
         authorization: request.headers.authorization,
         tokenBody,
       });

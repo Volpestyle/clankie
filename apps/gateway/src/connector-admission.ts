@@ -54,6 +54,7 @@ interface ConnectorCall {
   readonly hostId: string;
   /** The route without its query. */
   readonly path: string;
+  /** The client's address block, so one IPv6 /64 is one source. */
   readonly source: string;
   readonly authorization: string | undefined;
   /** The token request's form, read first because the credential is inside it. */

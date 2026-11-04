@@ -228,3 +228,13 @@ it("spends nothing shared on a call its source's own budget refuses", async () =
   // Those refusals left the host's budget for everyone else.
   expect((await discovery("192.0.2.2")).status).toBe(200);
 });
+
+it("counts one IPv6 /64 as one source", async () => {
+  const { discovery } = await doorway();
+
+  const statuses: number[] = [];
+  for (let index = 1; index <= 80; index++)
+    statuses.push((await discovery(`2001:db8:1:2::${index.toString(16)}`)).status);
+  expect(statuses.at(-1)).toBe(429);
+  expect((await discovery("2001:db8:1:3::1")).status).toBe(200);
+});
