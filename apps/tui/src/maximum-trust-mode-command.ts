@@ -29,7 +29,7 @@ export function maximumTrustModeCommand(
   return {
     name: "maximum-trust-mode",
     aliases: [],
-    description: "Launch every harness without its permission prompts and sandbox",
+    description: "Choose native bypass overrides for supported harnesses; owner confirmations remain",
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {

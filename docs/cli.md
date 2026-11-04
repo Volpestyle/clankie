@@ -413,7 +413,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   setup-agent [status | start [--account LABEL] | apply SURVEY [LINE...] | cancel SURVEY]
                            Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
   maximum-trust-mode [status|on|off]
-                           Launch every harness without its permission prompts and sandbox (JSON)
+                           Choose native bypass overrides for supported harnesses; owner confirmations remain (JSON)
   fleet leads [--json]  Read active Clankie and connected app leads
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
   fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
@@ -5970,15 +5970,16 @@ service; older services refuse the query.
 
 ### `maximum-trust-mode [status|on|off]`
 
-The owner's one switch over the guardrails of every harness Clankie launches
-(VUH-2048). Off, the default, keeps each harness's own auto mode: `clankie claude`
+The owner's switch requests native bypass overrides for supported harnesses
+(VUH-2048). Off, the default, adds no bypass override: `clankie claude`
 and Claude hires start with `--permission-mode auto`, whose classifier stops
 risky commands. Claude refuses auto mode for some models (older ones, some
 providers) and would ask before every command, so a local Claude hire first asks
 the installed Claude, without a prompt, and is refused before launch with
 Claude's reason when auto mode is unavailable; the hire receipt's
-`permissionMode` names the mode the worker runs in. On, the next launches start without their permission and
-command guardrails, through each harness's native flag:
+`permissionMode` names the mode the worker runs in. On, new Claude, Codex and
+Grok launches take the native overrides below; OpenCode keeps its configured
+permissions:
 
 | Harness         | Flag while on                                                                                                      | Applied at launch                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
@@ -5992,9 +5993,11 @@ Codex seats and hires run a dedicated app-server whose server and view share
 `-c` overrides, so the flag is applied as the two settings it sets; on hires it
 replaces the `on-request` approval policy fleet gates otherwise select.
 
-What it bypasses: every permission prompt and Claude's auto-mode classifier.
-The agent runs any command, edits any file and reaches the network without
-asking, with the accounts and credentials its machine holds. Claude still
+These overrides request each supported harness's native bypass behavior,
+including Claude's auto-mode classifier. They do not remove every native prompt
+or policy. Agents can run commands, edit files and reach the network with the
+accounts and credentials their machine holds, subject to its access ceiling
+and the harness's remaining policies. Claude still
 enforces deny rules in every mode, so managed denies and the tracker denies
 Clankie adds stay, and a managed `disableBypassPermissionsMode: "disable"`
 refuses the mode outright. Native prompts that still appear remain the owner's. A first-use Claude bypass
