@@ -781,6 +781,21 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/harness-logins/install",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Install Claude Code or Codex on this machine with its vendor's own installer, under the owner's machine-setup preference.",
+      },
+    ],
+    [
+      "GET /v1/harness-logins/install",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read the latest worker harness install's progress and outcome.",
+      },
+    ],
+    [
       "POST /v1/model-keys/subscriptions/cancel",
       {
         access: "Encrypted initiating device bearer with terminalControl (Take Control)",

@@ -27,7 +27,10 @@ To sign a new account into a fresh `~/.claude-LABEL` or `~/.codex-LABEL` home,
 the owner runs `clankie harness login claude|codex --add [LABEL]` or uses the
 app; `--profile LABEL` re-signs that home and `clankie harness login accounts`
 lists every account. Removing one signs it out with the harness's own logout:
-it is the owner's call, never yours.
+it is the owner's call, never yours. A missing harness installs with its
+vendor's own installer through `clankie harness login install claude|codex`
+(`POST /v1/harness-logins/install`); it is machine setup, so while the owner
+keeps machine setup only they approve it (`--approve`).
 Hires rank accounts from `worker_accounts` `allocation`; missing or stale usage is
 unknown, not an empty plan. `hire_agent` can pin `account: "LABEL"`. `clankie
 accounts hold codex LABEL [--machine ID] [--reason TEXT]` keeps an account out of

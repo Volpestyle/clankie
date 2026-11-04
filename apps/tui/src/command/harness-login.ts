@@ -5,9 +5,11 @@ import {
   HARNESS_LOGIN_ACCOUNTS_PATH,
   HARNESS_LOGIN_CANCEL_PATH,
   HARNESS_LOGIN_CODE_PATH,
+  HARNESS_LOGIN_INSTALL_PATH,
   HARNESS_LOGIN_REMOVE_PATH,
   HARNESS_LOGIN_START_PATH,
   HARNESS_LOGIN_STATUS_PATH,
+  HarnessInstallResultSchema,
   HarnessLoginAccountsResponseSchema,
   HarnessLoginRemoveResultSchema,
   HarnessAccountLoginResultSchema,
@@ -18,9 +20,10 @@ import {
 } from "@clankie/protocol/harness-logins";
 import type { BrowserCommandOptions } from "./browser.ts";
 import { commandHost } from "./io.ts";
+import { confirmMachineSetupApproval } from "./machine-setup.ts";
 
 const USAGE =
-  "Usage: clankie harness login [status | accounts | claude|codex [--add [LABEL] | --profile LABEL] | remove claude|codex LABEL [--yes] | cancel SESSION_ID]";
+  "Usage: clankie harness login [status | accounts | claude|codex [--add [LABEL] | --profile LABEL] | install claude|codex [--approve] | remove claude|codex LABEL [--yes] | cancel SESSION_ID]";
 
 /**
  * Sign a worker harness into the owner's own account with its official login.
@@ -33,6 +36,8 @@ export async function runHarnessLoginCommand(
     readonly prompt?: (question: string) => Promise<string>;
     readonly tell?: (text: string) => void;
     readonly pollMs?: number;
+    /** Asks the person at this terminal to approve machine setup; headless is refused. */
+    readonly confirmApproval?: (detail: string) => Promise<void>;
   } = {},
 ): Promise<unknown> {
   if (args[0] !== "login") throw new Error(USAGE);
@@ -72,6 +77,44 @@ export async function runHarnessLoginCommand(
     return HarnessAccountLoginResultSchema.parse(
       (await call("POST", HARNESS_LOGIN_CANCEL_PATH, { sessionId: args[2] })).body,
     );
+  if (verb === "install" && (args.length === 3 || (args.length === 4 && args[3] === "--approve"))) {
+    const installing = LoginHarnessSchema.safeParse(args[2]);
+    if (!installing.success) throw new Error(USAGE);
+    // `--approve` asks the owner here, as every machine-setup approval does: a flag is not consent.
+    if (args[3] === "--approve")
+      await (options.confirmApproval ?? confirmMachineSetupApproval)(
+        `Install ${installing.data === "claude" ? "Claude Code" : "Codex"} on the service's machine with its vendor's own installer.`,
+      );
+    // The vendor's installer runs on the service's machine; its output comes here (stderr) as it runs.
+    const tell = options.tell ?? ((text: string) => process.stderr.write(`${text}\n`));
+    let shown: string[] = [];
+    const show = (progress: readonly string[]) => {
+      // Progress is a rolling window: print only what follows what was already shown.
+      let overlap = Math.min(shown.length, progress.length);
+      while (overlap > 0 && !shown.slice(-overlap).every((line, index) => line === progress[index]))
+        overlap -= 1;
+      for (const line of progress.slice(overlap)) tell(line);
+      shown = [...progress];
+    };
+    let result = HarnessInstallResultSchema.parse(
+      (
+        await call("POST", HARNESS_LOGIN_INSTALL_PATH, {
+          harness: installing.data,
+          ...(args[3] === "--approve" ? { ownerApproved: true } : {}),
+        })
+      ).body,
+    );
+    const installId = result.ok ? result.install.installId : undefined;
+    while (result.ok && result.install.state === "running") {
+      show(result.install.progress);
+      await new Promise((done) => setTimeout(done, options.pollMs ?? 2_000));
+      result = HarnessInstallResultSchema.parse((await call("GET", HARNESS_LOGIN_INSTALL_PATH)).body);
+      if (result.ok && result.install.installId !== installId)
+        throw new Error("Another install replaced this one; read it with GET /v1/harness-logins/install");
+    }
+    if (result.ok) show(result.install.progress);
+    return result;
+  }
   if (verb === "remove" && (args.length === 4 || (args.length === 5 && args[4] === "--yes"))) {
     const removing = LoginHarnessSchema.safeParse(args[2]);
     const profile = HarnessProfileSchema.safeParse(args[3]);

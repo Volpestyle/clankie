@@ -21,6 +21,8 @@ in `@clankie/protocol/harness-logins`.
 | POST   | `/v1/harness-logins/cancel`   | `{ "sessionId": "…" }`                        |
 | GET    | `/v1/harness-logins/accounts` | none                                          |
 | POST   | `/v1/harness-logins/remove`   | `{ "harness", "profile": "<label>" }`         |
+| POST   | `/v1/harness-logins/install`  | `{ "harness", "ownerApproved"? }`             |
+| GET    | `/v1/harness-logins/install`  | none                                          |
 
 GET returns `{ "harnesses": [{ "harness", "installed", "signedIn", "method"? }] }`.
 Claude's `method` is `subscription` or `api_key` (an `ANTHROPIC_API_KEY` on the
@@ -43,6 +45,30 @@ missing from the body answers `not_installed`. Completion is confirmed with the
 harness's own status command, never the login's exit code alone. A completed
 Claude subscription sign-in declines an `ANTHROPIC_API_KEY` on the body so the
 subscription is used.
+
+## Installing a harness
+
+`POST /v1/harness-logins/install` installs a missing harness on this machine with
+its vendor's own installer, as the service's user (#737): Claude Code with
+`curl -fsSL https://claude.ai/install.sh | bash` (PowerShell's `install.ps1` on
+Windows), Codex with `brew install --cask codex` on a Mac that has Homebrew, else
+`npm install -g @openai/codex`. The installer gets only an allowlisted environment
+(PATH, HOME, user, shell, locale, temp and proxy variables), never the service's
+provider keys or tokens. It answers 202 with
+`{ ok: true, install: { installId, harness, installer, state: "running", progress, ownerApproval, … } }`;
+`GET` reads the latest install. `progress` is the installer's latest 40 output
+lines as plain text. When the installer exits, the sign-in list is read again and
+returned as `logins`: `state` is `succeeded` only if the harness is now found,
+otherwise `failed` with `error` `installer_failed`, `not_found_after_install` (it
+exited cleanly but the service's PATH has no such command) or `timed_out` (15
+minutes).
+
+One install runs at a time (`busy`, 409, with the running one), an installed
+harness answers `already_installed`, and a machine with no usable installer
+(Codex with neither Homebrew nor npm) answers `installer_unavailable`. Installing
+software is machine setup: while the owner keeps it (`machineSetup: owner`), the
+request must set `ownerApproved: true` or it is refused with
+`machine_setup_owner_approval_required` (403); the receipt records the claim.
 
 ## Several accounts per harness
 

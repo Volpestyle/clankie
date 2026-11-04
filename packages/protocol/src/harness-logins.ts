@@ -180,3 +180,59 @@ export const HarnessLoginRemoveResultSchema = z.discriminatedUnion("ok", [
   HarnessAccountLoginResultSchema.options[1],
 ]);
 export type HarnessLoginRemoveResult = z.infer<typeof HarnessLoginRemoveResultSchema>;
+
+/**
+ * Install Claude Code or Codex on this machine with its vendor's own installer
+ * (#737): POST starts one, GET reads the latest. Same authority as sign-in.
+ * Installing software is machine setup, so while the owner keeps machine setup
+ * (`machineSetup: owner`) the request must claim their approval.
+ */
+export const HARNESS_LOGIN_INSTALL_PATH = "/v1/harness-logins/install";
+export const HarnessInstallRequestSchema = z
+  .object({ harness: LoginHarnessSchema, ownerApproved: z.boolean().optional() })
+  .strict();
+export const HarnessInstallSchema = z
+  .object({
+    installId: z.string().uuid(),
+    harness: LoginHarnessSchema,
+    /** The vendor's install line this ran, as the owner would paste it. */
+    installer: z.string().max(200),
+    state: z.enum(["running", "succeeded", "failed"]),
+    startedAt: z.string().datetime(),
+    finishedAt: z.string().datetime().optional(),
+    /** The installer's latest output, plain text, newest last. */
+    progress: z.array(z.string().max(500)).max(40),
+    /**
+     * `installer_failed`: it exited non-zero. `not_found_after_install`: it exited
+     * cleanly, yet this service still finds no such command on its PATH.
+     */
+    error: z.enum(["installer_failed", "not_found_after_install", "timed_out"]).optional(),
+    exitCode: z.number().int().nullable().optional(),
+    ownerApproval: z.enum(["claimed", "not_claimed"]),
+    /** `GET /v1/harness-logins`, read again once the installer finished. */
+    logins: HarnessLoginsResponseSchema.optional(),
+  })
+  .strict();
+export type HarnessInstall = z.infer<typeof HarnessInstallSchema>;
+export const HarnessInstallResultSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), install: HarnessInstallSchema }).strict(),
+  z
+    .object({
+      ok: z.literal(false),
+      error: z.enum([
+        /** Another install is running: `install` is that one. */
+        "busy",
+        "already_installed",
+        /** No vendor installer can run here (for Codex: neither Homebrew nor npm). */
+        "installer_unavailable",
+        "machine_setup_owner_approval_required",
+        "install_not_found",
+        "malformed",
+        "forbidden",
+        "unavailable",
+      ]),
+      install: HarnessInstallSchema.optional(),
+    })
+    .strict(),
+]);
+export type HarnessInstallResult = z.infer<typeof HarnessInstallResultSchema>;

@@ -5,10 +5,13 @@ import {
   HARNESS_LOGIN_ACCOUNTS_PATH,
   HARNESS_LOGIN_CANCEL_PATH,
   HARNESS_LOGIN_CODE_PATH,
+  HARNESS_LOGIN_INSTALL_PATH,
   HARNESS_LOGIN_REMOVE_PATH,
   HARNESS_LOGIN_START_PATH,
   HARNESS_LOGIN_STATUS_PATH,
   HarnessAccountLoginResultSchema,
+  HarnessInstallRequestSchema,
+  HarnessInstallResultSchema,
   HarnessLoginAccountsResponseSchema,
   HarnessLoginCodeSchema,
   HarnessLoginRemoveResultSchema,
@@ -17,9 +20,11 @@ import {
   HarnessLoginStartSchema,
   HarnessLoginsResponseSchema,
   type HarnessAccountLoginResult,
+  type HarnessInstallResult,
   type HarnessLoginRemoveResult,
   type HarnessLoginResult,
 } from "@clankie/protocol/harness-logins";
+import type { HarnessInstalls } from "./harness-installs.ts";
 import type { HarnessSignIns } from "./harness-logins.ts";
 
 /** Same authority as model keys: the operator, or a device holding Take Control. */
@@ -27,6 +32,11 @@ export function createHarnessLoginRoutes(
   logins: HarnessSignIns | undefined,
   authorize: (request: Request) => Promise<true | "authentication_required" | "forbidden">,
   principal: (request: Request) => Promise<string | undefined>,
+  setup: {
+    readonly installs?: HarnessInstalls | undefined;
+    /** The owner's fleet machine-setup preference; unreadable keeps it the owner's. */
+    readonly machineSetup?: () => Promise<"owner" | "lead">;
+  } = {},
 ): Hono {
   const app = new Hono();
   app.onError((_error, context) => context.json({ ok: false, error: "unavailable" }, 503));
@@ -39,6 +49,7 @@ export function createHarnessLoginRoutes(
     HARNESS_LOGIN_CODE_PATH,
     HARNESS_LOGIN_CANCEL_PATH,
     HARNESS_LOGIN_REMOVE_PATH,
+    HARNESS_LOGIN_INSTALL_PATH,
   ]) {
     app.use(path, async (context, next) => {
       context.header("cache-control", "no-store");
@@ -62,6 +73,45 @@ export function createHarnessLoginRoutes(
   app.get(HARNESS_LOGIN_ACCOUNTS_PATH, async (context) =>
     context.json(HarnessLoginAccountsResponseSchema.parse(await logins!.accounts())),
   );
+  const installAnswer = (result: HarnessInstallResult, started = false) => {
+    const parsed = HarnessInstallResultSchema.parse(result);
+    if (parsed.ok) return { body: parsed, status: started ? (202 as const) : (200 as const) };
+    const status = {
+      busy: 409,
+      already_installed: 409,
+      installer_unavailable: 409,
+      machine_setup_owner_approval_required: 403,
+      install_not_found: 404,
+      malformed: 400,
+      forbidden: 403,
+      unavailable: 503,
+    }[parsed.error] as 400 | 403 | 404 | 409 | 503;
+    return { body: parsed, status };
+  };
+  app.get(HARNESS_LOGIN_INSTALL_PATH, (context) => {
+    if (!setup.installs) return context.json({ ok: false, error: "unavailable" }, 503);
+    const { body, status } = installAnswer(setup.installs.current());
+    return context.json(body, status);
+  });
+  app.post(HARNESS_LOGIN_INSTALL_PATH, async (context) => {
+    const who = await principal(context.req.raw);
+    if (who === undefined) return context.json({ ok: false, error: "forbidden" }, 403);
+    if (!setup.installs) return context.json({ ok: false, error: "unavailable" }, 503);
+    // allow-swallowed-rejection -- an unreadable body is malformed, answered 400 below.
+    const parsed = HarnessInstallRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
+    const approved = parsed.data.ownerApproved === true;
+    // Installing software is machine setup: while the owner keeps it, they claim it here.
+    // allow-swallowed-rejection -- an unreadable preference keeps machine setup the owner's.
+    const mode = (await setup.machineSetup?.().catch(() => undefined)) ?? "owner";
+    if (mode !== "lead" && !approved)
+      return context.json({ ok: false, error: "machine_setup_owner_approval_required" }, 403);
+    const { body, status } = installAnswer(
+      await setup.installs.start(parsed.data.harness, approved ? "claimed" : "not_claimed"),
+      true,
+    );
+    return context.json(body, status);
+  });
   const answer = (result: HarnessAccountLoginResult | HarnessLoginRemoveResult) => {
     const parsed =
       "deleted" in result

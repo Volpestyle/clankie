@@ -180,6 +180,8 @@ export interface ClankieAppDependencies {
   /** Worker harness sign-in with each harness's own login (Claude, Codex). */
   captainSeats?: import("../captain-seat.ts").CaptainSeats;
   harnessLogins?: import("../harness-logins.ts").HarnessSignIns;
+  /** Installs Claude Code or Codex with its vendor's installer (#737); absent answers 503. */
+  harnessInstalls?: import("../harness-installs.ts").HarnessInstalls;
   /** Proven by the primary listener socket, never a caller-supplied header. */
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** Owner identity proven only by the private same-user Unix mint listener. */
