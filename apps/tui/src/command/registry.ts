@@ -59,6 +59,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["project"],
     lines: [
+      "  project ci offer --json-stdin  Preview an owner-chosen pnpm/Vitest CI starter; changes no repository (JSON)",
       "  project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings",
       "  project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding",
       "  project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides",

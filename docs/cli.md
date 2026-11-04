@@ -212,6 +212,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   harness refresh-tools [--pane PANE]  Refresh an original native catalog
   harness restart-tools --pane PANE [--report /absolute/report]  Check native same-thread restart admission (local Codex exit unavailable)
   harness opencode [status|install]  Whether OpenCode 2 sessions you open yourself can take messages; install adds Herdr's OpenCode plugin to your OpenCode settings (JSON)
+  project ci offer --json-stdin  Preview an owner-chosen pnpm/Vitest CI starter; changes no repository (JSON)
   project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings
   project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding
   project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides
@@ -10797,6 +10798,19 @@ presence, a changed designation, and uncertain dispatch cannot trigger fallback.
 This forwards the explicit request/result only and grants no room privileges.
 
 Discord room inspection, private next-turn guidance, delivery health and exact-stay voice controls are documented in [Discord rooms](discord-rooms.md). Use `clankie discord rooms`, `clankie discord guide CONVERSATION_ID TEXT`, and `clankie discord call`. Doctor and call status report listener-provider readiness before a join: a bounded, five-minute cached admission check with no audio or response generation; `credit_balance_exhausted` outranks unrelated seat warnings. Listener readiness does not prove that a full call can hear and answer.
+
+### `project ci offer --json-stdin`
+
+Preview an owner-chosen fast-CI starter through
+`POST /v1/operator/projects/ci-starter`. JSON supplies the repository, observed
+reason/evidence, quick and full non-test commands, Vitest config, and compiler
+cache paths/key files. The first profile is pnpm/Vitest 4 on GitHub Actions.
+
+The response contains proposed files and PR text with `ownerChoiceRequired: true`
+and `adoption: "unverified"`. It does not execute commands, modify the project,
+open a PR, change runners or choose a merge policy. Only after the owner chooses
+the offer does an ordinary project worker adapt it and open a draft PR. Read the
+[full request, supported profile and adoption evidence](fast-ci-starter.md).
 
 ### Project workspace removal
 

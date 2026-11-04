@@ -1,4 +1,8 @@
 import {
+  PROJECT_CI_STARTER_PATH,
+  ProjectCiStarterOfferSchema,
+} from "../../../packages/protocol/src/project-ci-starter.ts";
+import {
   CAPTAIN_SEAT_PATH,
   CAPTAIN_SEAT_START_PATH,
   CAPTAIN_SEAT_STATUS_PATH,
@@ -868,4 +872,55 @@ it("round-trips Pi enablement through device/relay/service and refuses weaker or
   await f.revoke("control");
   expect((await call({ enabled: false, expectedRevision: current.revision })).status).toBe(401);
   expect((await f.settings.load()).piNativeEnabled).toBe(true);
+});
+
+it("previews CI files through the real device relay without changing settings or borrowing captain authority", async () => {
+  const f = await fixture();
+  const before = await f.settings.load();
+  const body = {
+    schemaVersion: 1,
+    profile: "pnpm-vitest-4",
+    repository: "example/slow-ci",
+    reason: "Offer a faster draft check after inspecting the project's existing CI.",
+    quickCommand: "pnpm lint",
+    fullChecksCommand: "pnpm typecheck",
+    compilerCachePaths: [".cache/tsbuildinfo"],
+    compilerCacheKeyFiles: ["tsconfig.json"],
+  };
+  const send = (token?: string, value: unknown = body) =>
+    fetch(f.relayUrl + PROJECT_CI_STARTER_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(value),
+    });
+  for (const token of [undefined, f.tokens.chat, f.tokens.steer]) {
+    expect((await send(token)).status).toBe(token ? 403 : 401);
+  }
+  expect(f.forwarded).toEqual([]);
+  const response = await send(f.tokens.control);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  const offer = ProjectCiStarterOfferSchema.parse(await response.json());
+  expect(offer).toMatchObject({
+    status: "offered",
+    ownerChoiceRequired: true,
+    adoption: "unverified",
+    repository: body.repository,
+  });
+  expect(offer.files).toHaveLength(5);
+  expect(f.forwarded).toEqual([{ path: PROJECT_CI_STARTER_PATH, token: f.tokens.control }]);
+  expect((await send(f.tokens.control, { ...body, ownerApproved: true })).status).toBe(400);
+  expect(
+    (
+      await fetch(f.relayUrl + PROJECT_CI_STARTER_PATH, {
+        headers: { authorization: `Bearer ${f.tokens.control}` },
+      })
+    ).status,
+  ).toBe(405);
+  expect(f.forwarded).toHaveLength(1);
+  f.hooks.after = () => f.revoke("control");
+  expect((await send(f.tokens.control)).status).toBe(401);
+  expect(f.forwarded).toHaveLength(2);
+  expect(f.captainCalls()).toBe(0);
+  expect(await f.settings.load()).toEqual(before);
 });

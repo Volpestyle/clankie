@@ -674,6 +674,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/operator/projects/ci-starter",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Render reviewable fast-CI proposal files for an owner choice; no target project is read or changed.",
+      },
+    ],
+    [
       "POST /v1/operator/projects/update",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",
@@ -1020,6 +1028,14 @@ function buildNetworkRows() {
       {
         access: "Encrypted live device bearer with terminalControl (Take Control)",
         purpose: "Read project settings, including autonomy overrides when explicitly requested.",
+      },
+    ],
+    [
+      "POST /v1/operator/projects/ci-starter",
+      {
+        access: "Encrypted live device bearer with terminalControl (Take Control)",
+        purpose:
+          "Render reviewable fast-CI proposal files for an owner choice; no target project is read or changed.",
       },
     ],
     [

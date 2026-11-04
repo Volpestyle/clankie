@@ -1,3 +1,8 @@
+import {
+  PROJECT_CI_STARTER_PATH,
+  ProjectCiStarterRequestSchema,
+  ProjectCiStarterOfferSchema,
+} from "../../../packages/protocol/src/project-ci-starter.ts";
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema } from "../../../packages/protocol/src/fleet-leads.ts";
 import {
   CAPTAIN_SEAT_PATH,
@@ -268,6 +273,7 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: "/v1/operator/voice" },
   { method: "GET", path: PROJECTS_PATH },
   { method: "POST", path: PROJECT_UPDATE_SETTINGS_PATH },
+  { method: "POST", path: PROJECT_CI_STARTER_PATH },
 ] as const;
 
 interface ParseSchema {
@@ -384,6 +390,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
   },
   [ROUTINES_PATH]: { methods: ["GET", "POST"], update: RoutineCommandSchema, snapshot: RoutinesStatusSchema },
   [PROJECTS_PATH]: { methods: ["GET"], snapshot: ProjectsSnapshotSchema },
+  [PROJECT_CI_STARTER_PATH]: {
+    methods: ["POST"],
+    update: ProjectCiStarterRequestSchema,
+    snapshot: ProjectCiStarterOfferSchema,
+  },
   [PROJECT_UPDATE_SETTINGS_PATH]: {
     methods: ["POST"],
     update: UpdateProjectSettingsSchema,

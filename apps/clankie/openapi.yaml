@@ -3657,6 +3657,29 @@ paths:
         "200": { description: Project settings and SHA-256 revision }
         "401": { description: Owner authentication required }
         "403": { description: Caller is not the owner }
+  /v1/operator/projects/ci-starter:
+    post:
+      tags: [Operator]
+      operationId: previewProjectCiStarter
+      summary: Offer an owner-chosen fast-CI starter without changing a project
+      description: Renders pnpm/Vitest 4 proposal files only. Requires explicit owner choice before any adoption through the normal project worker. Executes no supplied command, reads no target repository, writes no project file, opens no PR and changes no runner or merge policy. Caller-supplied reason and evidence are not verified. Live adoption evidence remains separate.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProjectCiStarterRequest" }
+      responses:
+        "200":
+          description: Unapplied offer; Cache-Control no-store
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProjectCiStarterOffer" }
+        "400": { description: Malformed request }
+        "401": { description: Authentication required }
+        "403": { description: Current owner or Take Control authority required }
+        "413": { description: Request exceeds 16 KiB }
+        "503": { description: Bundled starter helpers unavailable }
   /v1/operator/projects/create:
     post:
       tags: [Operator]
@@ -8106,6 +8129,123 @@ paths:
 
 components:
   schemas:
+    ProjectCiStarterRequest:
+      {
+        "type": "object",
+        "properties":
+          {
+            "schemaVersion": { "type": "number", "const": 1 },
+            "profile": { "type": "string", "const": "pnpm-vitest-4" },
+            "repository":
+              { "type": "string", "maxLength": 201, "pattern": "^[a-zA-Z0-9_.-]+\\/[a-zA-Z0-9_.-]+$" },
+            "reason": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "evidence":
+              {
+                "default": [],
+                "maxItems": 8,
+                "type": "array",
+                "items": { "type": "string", "maxLength": 2000, "format": "uri" },
+              },
+            "defaultBranch":
+              {
+                "default": "main",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[a-zA-Z0-9_/-]+$",
+              },
+            "quickCommand": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "fullChecksCommand": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "vitestConfig":
+              {
+                "default": "vitest.config.ts",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[a-zA-Z0-9_.*?/-]+$",
+              },
+            "nodeVersion": { "default": "24", "type": "string", "enum": ["22", "24", "26"] },
+            "compilerCachePaths":
+              {
+                "minItems": 1,
+                "maxItems": 8,
+                "type": "array",
+                "items":
+                  { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-zA-Z0-9_.*?/-]+$" },
+              },
+            "compilerCacheKeyFiles":
+              {
+                "minItems": 1,
+                "maxItems": 8,
+                "type": "array",
+                "items":
+                  { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[a-zA-Z0-9_.*?/-]+$" },
+              },
+          },
+        "required":
+          [
+            "schemaVersion",
+            "profile",
+            "repository",
+            "reason",
+            "quickCommand",
+            "fullChecksCommand",
+            "compilerCachePaths",
+            "compilerCacheKeyFiles",
+          ],
+        "additionalProperties": false,
+      }
+    ProjectCiStarterOffer:
+      {
+        "type": "object",
+        "properties":
+          {
+            "schemaVersion": { "type": "number", "const": 1 },
+            "status": { "type": "string", "const": "offered" },
+            "ownerChoiceRequired": { "type": "boolean", "const": true },
+            "adoption": { "type": "string", "const": "unverified" },
+            "repository": { "type": "string" },
+            "reason": { "type": "string" },
+            "evidence": { "type": "array", "items": { "type": "string" } },
+            "files":
+              {
+                "maxItems": 8,
+                "type": "array",
+                "items":
+                  {
+                    "type": "object",
+                    "properties":
+                      { "path": { "type": "string" }, "content": { "type": "string", "maxLength": 65536 } },
+                    "required": ["path", "content"],
+                    "additionalProperties": false,
+                  },
+              },
+            "pullRequest":
+              {
+                "type": "object",
+                "properties": { "title": { "type": "string" }, "body": { "type": "string" } },
+                "required": ["title", "body"],
+                "additionalProperties": false,
+              },
+            "nextSteps": { "type": "array", "items": { "type": "string" } },
+            "limits": { "type": "array", "items": { "type": "string" } },
+          },
+        "required":
+          [
+            "schemaVersion",
+            "status",
+            "ownerChoiceRequired",
+            "adoption",
+            "repository",
+            "reason",
+            "evidence",
+            "files",
+            "pullRequest",
+            "nextSteps",
+            "limits",
+          ],
+        "additionalProperties": false,
+      }
     OwnerSettingsRevision:
       type: string
       pattern: "^[a-f0-9]{64}$"

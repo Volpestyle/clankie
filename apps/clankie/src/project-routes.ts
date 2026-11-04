@@ -1,3 +1,5 @@
+import { projectCiStarterOffer } from "./project-ci-starter.ts";
+import { PROJECT_CI_STARTER_PATH, ProjectCiStarterRequestSchema } from "@clankie/protocol/project-ci-starter";
 import { readConvention, type TrackerToolBackend } from "@clankie/work-items";
 import { createModelRegistry, resolveHireModel } from "@clankie/model-registry";
 import { effectiveHireProfile } from "@clankie/protocol";
@@ -121,6 +123,7 @@ export function createProjectRoutes(
   for (const path of [
     PROJECTS_PATH,
     PROJECT_CREATE_SETTINGS_PATH,
+    PROJECT_CI_STARTER_PATH,
     PROJECT_UPDATE_SETTINGS_PATH,
     PROJECT_REMOVE_WORKSPACE_PATH,
     PROJECT_ADD_WORKTREE_ROOT_PATH,
@@ -135,6 +138,21 @@ export function createProjectRoutes(
     });
     app.use(path, bodyLimit({ maxSize: 16 * 1024 }));
   }
+  app.post(PROJECT_CI_STARTER_PATH, async (context) => {
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "malformed" }, 400);
+    }
+    const input = ProjectCiStarterRequestSchema.safeParse(body);
+    if (!input.success) return context.json({ error: "malformed" }, 400);
+    try {
+      return context.json(await projectCiStarterOffer(input.data));
+    } catch {
+      return context.json({ error: "ci_starter_unavailable" }, 503);
+    }
+  });
   app.get(PROJECTS_PATH, async (context) => {
     const current = await settings.load();
     const authority = await authorize(context.req.raw);

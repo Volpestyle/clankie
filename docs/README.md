@@ -7,6 +7,8 @@ For using Clankie, start with the [public field guide](https://docs.clankie.bot)
 [questions](https://docs.clankie.bot/faq/).
 This directory and the module READMEs hold the technical references.
 
+[Fast-CI starter offers](fast-ci-starter.md) describe the owner-chosen project CI preview and adoption limits.
+
 ## Operate and configure
 
 | Reference                                                | Canonical scope                                                             |
