@@ -10119,6 +10119,14 @@ material. `whoami` always reports **This Mac**. `logout` and `disconnect` change
 nothing and point at `clankie remote-access off`. `clankie connect` explains that
 Clankie runs on the owner's own machine and changes nothing.
 
+`clankie remote-access status` reports the sign-in as `account`: `state` is
+`signed_in`, `signed_out` or `never_set_up`, with `email` once known. The Mac
+app does the same sign-in through `GET /v1/mac-account`, `POST
+/v1/mac-account/start` and `POST /v1/mac-account/complete`. Those routes admit
+only this Mac's own loopback, as the operator or a device with Take Control, and
+restart the service themselves once he is idle
+([ADR 0356](adr/0356-the-app-signs-this-mac-in.md)).
+
 `/remote-access` means **Remote access for this Mac**; `/gateway` remains its
 alias. When the Mac is signed out, its menu opens on
 **Sign this Mac back in** (email + one-time code) and its status text starts with

@@ -18,6 +18,7 @@
     "./model-keys": "./src/model-keys.ts",
     "./turn-model": "./src/turn-model.ts",
     "./local-companion": "./src/local-companion.ts",
+    "./mac-account": "./src/mac-account.ts",
     "./connector": "./src/connector.ts",
     "./composer-transcription": "./src/composer-transcription.ts",
     "./accounts": "./src/accounts.ts",

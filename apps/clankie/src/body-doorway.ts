@@ -64,10 +64,6 @@ export async function connectBodyToGateway(options: {
   }
   if (publicGateway.url !== undefined && publicGateway.installationId !== undefined) {
     try {
-      const resolveAccountToken = createClankieAccountTokenProvider({
-        gatewayUrl: publicGateway.url,
-        store: options.store,
-      });
       // Derive the stable route locally. Network/token resolution belongs to the
       // connector's retry loop, so an offline startup can recover after wake.
       const stored = await options.store.get(CLANKIE_ACCOUNT_PROVIDER_ID);
@@ -75,6 +71,11 @@ export async function connectBodyToGateway(options: {
         throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
       }
       const hostId = derivePublicGatewayHostId(stored.accountId, publicGateway.installationId);
+      const resolveAccountToken = createClankieAccountTokenProvider({
+        gatewayUrl: publicGateway.url,
+        store: options.store,
+        accountId: stored.accountId,
+      });
       return {
         connector: new PublicGatewayConnector({
           ...shared,

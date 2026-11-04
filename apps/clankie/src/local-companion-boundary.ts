@@ -21,8 +21,9 @@ export class LocalCompanionBoundary {
 
   /**
    * A native client on this Mac reaching the primary listener over loopback,
-   * without the JSON body the companion routes demand. It only chooses which
-   * addresses a device is told to use; it confers no authority.
+   * without the JSON body the companion routes demand. A transport gate, not an
+   * identity: it picks a device's addresses, and routes that must stay on this
+   * Mac require it on top of the caller's own credential (ADRs 0314, 0356).
    */
   isSameMac(request: Request): boolean {
     return this.sameMac.has(request);

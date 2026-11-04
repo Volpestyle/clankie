@@ -141,6 +141,19 @@ describe("Clankie account credential", () => {
     },
   );
 
+  it("keeps the account's email across a refresh, which only sign-in can know", async () => {
+    const access = jwt({ sub: "account-1", client_id: "client123", token_use: "access" });
+    const refreshed = await refreshClankieAccountCredential(
+      { ...expiredCredential, metadata: { email: "person@example.com" } },
+      accountConfig,
+      async (_input, init) =>
+        init?.method === "HEAD"
+          ? new Response(null, { status: 405 })
+          : Response.json({ AuthenticationResult: { AccessToken: access } }),
+    );
+    expect(refreshed.metadata).toEqual({ email: "person@example.com" });
+  });
+
   it("does not spend a refresh token while the account endpoint is unreachable after wake", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("network asleep"));
     await expect(
@@ -467,6 +480,17 @@ class MemoryStore implements CredentialStore {
 
   public delete(providerId: string): Promise<boolean> {
     return Promise.resolve(this.values.delete(providerId));
+  }
+
+  public async update(
+    providerId: string,
+    transform: (current: ProviderCredential) => Promise<ProviderCredential>,
+  ): Promise<ProviderCredential | undefined> {
+    const current = this.values.get(providerId);
+    if (current === undefined) return undefined;
+    const next = await transform(current);
+    this.values.set(providerId, next);
+    return next;
   }
 
   public list(): Promise<Record<string, RedactedCredential>> {

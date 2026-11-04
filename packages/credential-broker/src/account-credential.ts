@@ -7,6 +7,7 @@ import {
 } from "@clankie/protocol/public-gateway";
 import { z } from "zod";
 import type { CredentialStore, ProviderCredential } from "./credential-store.ts";
+import { PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID } from "./public-gateway-credential.ts";
 
 export const CLANKIE_ACCOUNT_PROVIDER_ID = "clankie-account";
 export { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
@@ -49,6 +50,7 @@ const AccessTokenClaimsSchema = z
 
 export type ClankieAccountAuthErrorCode =
   | "account_not_invited"
+  | "account_replaced"
   | "code_invalid"
   | "code_expired"
   | "email_invalid"
@@ -91,6 +93,60 @@ export interface ClankieAccountAccessToken {
 }
 
 export type ClankieAccountTokenProvider = () => Promise<ClankieAccountAccessToken>;
+
+/** The slice of settings a sign-in reads and writes; `SettingsStore` satisfies it. */
+interface PublicGatewayIdentity {
+  readonly url?: string | undefined;
+  readonly hostId?: string | undefined;
+  readonly installationId?: string | undefined;
+}
+
+export type ClankieAccountState = "signed_in" | "signed_out" | "never_set_up";
+
+/**
+ * What the broker and settings say about this Mac's account. A rejected
+ * credential still reads signed in here; only the doorway can know that.
+ */
+export async function readClankieAccountState(input: {
+  readonly publicGateway: PublicGatewayIdentity;
+  readonly credentials: CredentialStore;
+}): Promise<{ readonly state: ClankieAccountState; readonly email?: string }> {
+  if (input.publicGateway.installationId === undefined) return { state: "never_set_up" };
+  const stored = await input.credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+  if (stored?.type !== "oauth" || stored.accountId === undefined) return { state: "signed_out" };
+  const email = stored.metadata?.email;
+  return email === undefined ? { state: "signed_in" } : { state: "signed_in", email };
+}
+
+/**
+ * Stores a signed-in account as this Mac's remote-access credential and points
+ * settings at the gateway. Every sign-in ends here (`clankie login`, the
+ * `/gateway` wizard and the app's routes), so a signed-out Mac signs back in
+ * under the same installation id and keeps its host id. The connector opens on
+ * the next service start.
+ */
+export async function storeClankieAccountSignIn<
+  Settings extends { readonly publicGateway: PublicGatewayIdentity },
+>(input: {
+  readonly gatewayUrl: string;
+  readonly credential: OauthCredential;
+  readonly email?: string;
+  readonly credentials: CredentialStore;
+  readonly settings: {
+    load(): Promise<Settings>;
+    update(mutate: (current: Settings) => Settings): Promise<unknown>;
+  };
+}): Promise<void> {
+  const { credential, credentials, email, gatewayUrl, settings } = input;
+  const current = (await settings.load()).publicGateway;
+  const installationId = current.installationId ?? generatePublicGatewayInstallationId();
+  await credentials.set(
+    CLANKIE_ACCOUNT_PROVIDER_ID,
+    email === undefined ? credential : { ...credential, metadata: { ...credential.metadata, email } },
+  );
+  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
+  await settings.update((next) => ({ ...next, publicGateway: { url: gatewayUrl, installationId } }));
+}
 
 export function generatePublicGatewayInstallationId(): string {
   return PublicGatewayInstallationIdSchema.parse(randomBytes(16).toString("base64url"));
@@ -271,10 +327,12 @@ export async function refreshClankieAccountCredential(
     const response = RefreshResponseSchema.parse(await recoverRefreshReply(credential, config, fetchImpl));
     const refresh = response.AuthenticationResult.RefreshToken ?? credential.refresh;
     if (refresh !== credential.refresh) await persistRotation?.({ ...credential, refresh });
-    return credentialFromAuthentication(
+    const renewed = credentialFromAuthentication(
       { ...response.AuthenticationResult, RefreshToken: refresh },
       config.account.clientId,
     );
+    // The account's email is only known at sign-in; a refresh must keep it.
+    return credential.metadata === undefined ? renewed : { ...renewed, metadata: credential.metadata };
   } catch (error) {
     throw mapRefreshError(error);
   }
@@ -322,6 +380,8 @@ export function clankieAccountSignInRequired(error: unknown): boolean {
 export function createClankieAccountTokenProvider(input: {
   readonly gatewayUrl: string;
   readonly store: CredentialStore;
+  /** Refuse tokens once the stored account is another: a host route belongs to one account. */
+  readonly accountId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }): ClankieAccountTokenProvider {
@@ -363,27 +423,53 @@ export async function revokeClankieAccountCredential(input: {
 async function resolveClankieAccountAccessToken(input: {
   readonly gatewayUrl: string;
   readonly store: CredentialStore;
+  readonly accountId?: string;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }): Promise<ClankieAccountAccessToken> {
-  const now = input.now?.() ?? Date.now();
+  const needsRefresh = (candidate: OauthCredential) =>
+    candidate.expires < (input.now?.() ?? Date.now()) + ACCESS_REFRESH_WINDOW_MS;
   const stored = await input.store.get(CLANKIE_ACCOUNT_PROVIDER_ID);
   if (stored === undefined || stored.type !== "oauth" || stored.accountId === undefined) {
     throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
   }
   let credential = stored;
-  if (credential.expires < now + ACCESS_REFRESH_WINDOW_MS) {
-    const config = await discoverPublicGatewayAccount(input.gatewayUrl, input.fetchImpl ?? fetch);
-    credential = await refreshClankieAccountCredential(
-      credential,
-      config,
-      input.fetchImpl ?? fetch,
-      (rotated) => input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, rotated),
-    );
-    await input.store.set(CLANKIE_ACCOUNT_PROVIDER_ID, credential);
+  if (needsRefresh(stored)) {
+    // Not an account error: signing in again would not give this store a lock.
+    if (input.store.update === undefined) throw new Error("Credential store cannot refresh safely");
+    const fetchImpl = input.fetchImpl ?? fetch;
+    const config = await discoverPublicGatewayAccount(input.gatewayUrl, fetchImpl);
+    let failure: { readonly error: unknown } | undefined;
+    // Read, refresh and persist are one transaction under the lock `set` and
+    // `delete` take, in every process, so a sign-in lands wholly before or after.
+    const current = await input.store.update(CLANKIE_ACCOUNT_PROVIDER_ID, async (latest) => {
+      if (latest.type !== "oauth" || !needsRefresh(latest)) return latest;
+      let rotated = latest;
+      try {
+        return await refreshClankieAccountCredential(latest, config, fetchImpl, async (next) => {
+          rotated = next;
+        });
+      } catch (error) {
+        // Cognito has spent the old token: keep its replacement even when the rest failed.
+        failure = { error };
+        return rotated;
+      }
+    });
+    if (failure !== undefined) throw failure.error;
+    if (current?.type !== "oauth") {
+      throw new ClankieAccountAuthError("account_not_invited", "Sign in to your Clankie account first");
+    }
+    credential = current;
   }
   if (credential.accountId === undefined) {
     throw new ClankieAccountAuthError("unexpected_response", "Clankie account token has no subject");
+  }
+  if (input.accountId !== undefined) {
+    const latest = await input.store.get(CLANKIE_ACCOUNT_PROVIDER_ID);
+    const latestAccountId = latest?.type === "oauth" ? latest.accountId : undefined;
+    if (credential.accountId !== input.accountId || latestAccountId !== input.accountId) {
+      throw new ClankieAccountAuthError("account_replaced", "This Mac signed in to another account");
+    }
   }
   return { token: credential.access, accountId: credential.accountId, expiresAt: credential.expires };
 }

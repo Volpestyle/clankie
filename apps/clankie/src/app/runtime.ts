@@ -112,6 +112,7 @@ import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
 import { registerMemoryRoutes } from "./memory-routes.ts";
+import { registerMacAccountRoutes } from "./mac-account-routes.ts";
 import { registerPairingRoutes } from "./pairing-routes.ts";
 import { ConnectorDetection } from "./connector-detection.ts";
 import { ConnectorPromptAnswers } from "./connector-prompt-answers.ts";
@@ -2617,6 +2618,15 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return hostDisplayName;
     },
   });
+  // After pairing: its middleware expires automation credentials before any route reads them.
+  const closeMacAccountRoutes = registerMacAccountRoutes({
+    app,
+    dependencies,
+    clock,
+    recordEvent,
+    authenticateDevice,
+    locks: deviceLocks,
+  });
   const promptAnswers = new ConnectorPromptAnswers(dependencies.connectorPromptAnswersPath);
   const detection = dependencies.connectorDetection ?? new ConnectorDetection();
   registerConnectorRoutes({
@@ -2729,6 +2739,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       stopBodyRequests();
       clearInterval(supportTimer);
       clearInterval(runRevocationTimer);
+      closeMacAccountRoutes();
       stopObservingMessages?.();
       stopObservingRoomFailures?.();
       pushDispatcher?.close();

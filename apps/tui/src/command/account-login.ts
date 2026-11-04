@@ -5,6 +5,7 @@ import {
   completeClankieAccountLogin,
   createDefaultCredentialStore,
 } from "@clankie/credential-broker";
+import { DEFAULT_PUBLIC_GATEWAY_URL } from "@clankie/protocol/mac-account";
 import { gatewayOrigin } from "@clankie/protocol/public-gateway";
 import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { gatewayEnableWithAccount } from "./gateway.ts";
@@ -28,7 +29,7 @@ export async function loginThisMac(
     allowPositionals: true,
     options: {
       email: { type: "string" },
-      url: { type: "string", default: "https://api.clankie.bot" },
+      url: { type: "string", default: DEFAULT_PUBLIC_GATEWAY_URL },
       "code-stdin": { type: "boolean" },
     },
   });
@@ -54,7 +55,7 @@ export async function loginThisMac(
     if (!code) throw new Error("No email code supplied");
     const credential = await completeClankieAccountLogin({ challenge, code });
     const enabled = await gatewayEnableWithAccount(
-      { gatewayUrl, credential },
+      { gatewayUrl, credential, email: challenge.email },
       {
         env,
         settings: new SettingsStore(defaultSettingsPath(env)),

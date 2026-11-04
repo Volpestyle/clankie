@@ -7569,6 +7569,126 @@ paths:
         "429": { description: Support ticket rate limit reached }
         "503": { description: Durable ticket admission or command unavailable }
 
+  /v1/mac-account:
+    get:
+      tags: [Operator]
+      operationId: readMacAccount
+      summary: Read this Mac's clankie.bot sign-in
+      description: |
+        Self-hosted macOS only. Admission for all three mac-account routes: this
+        Mac's own loopback first, whatever the credential, then the operator
+        bearer or a device with Take Control (ADR 0314). Not reachable through
+        the gateway, the relay, the hosted operator or the LAN doorway. No-store;
+        tokens and the Cognito session never leave the service and broker.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: signed_in, signed_out (includes a credential the account rejected) or never_set_up
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state, pending, doorway]
+                properties:
+                  state: { type: string, enum: [signed_in, signed_out, never_set_up] }
+                  email: { type: string, description: Absent for a Mac signed in before the email was kept }
+                  pending: { type: boolean, description: A sign-in is waiting for its emailed code }
+                  doorway:
+                    type: object
+                    required: [state]
+                    properties:
+                      state:
+                        {
+                          type: string,
+                          enum: [disabled, unavailable, connecting, connected, sign_in_required],
+                        }
+                      since: { type: string }
+        "401": { description: operator_authentication_required }
+        "403": { description: native_loopback_required, or forbidden without Take Control }
+        "404": { description: not_found }
+        "503": { description: Authentication unavailable }
+  /v1/mac-account/start:
+    post:
+      tags: [Operator]
+      operationId: startMacAccountSignIn
+      summary: Email this Mac's owner a one-time sign-in code
+      description: Same admission as GET /v1/mac-account. Settings name the gateway, never the caller. A new start replaces any sign-in waiting for its code.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [email]
+              properties:
+                email: { type: string, maxLength: 320 }
+      responses:
+        "200":
+          description: Code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [email, expiresAt]
+                properties:
+                  email: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "400": { description: malformed or email_invalid }
+        "401": { description: operator_authentication_required }
+        "403": { description: native_loopback_required, forbidden or account_not_invited }
+        "404": { description: not_found }
+        "429": { description: rate_limited }
+        "502": { description: unexpected_response }
+        "503": { description: service_unavailable }
+  /v1/mac-account/complete:
+    post:
+      tags: [Operator]
+      operationId: completeMacAccountSignIn
+      summary: Finish the sign-in with the emailed code
+      description: |
+        Same admission as GET /v1/mac-account, and only the identity that started
+        the sign-in may finish it, within five attempts. The broker stores the
+        tokens, then the service restarts to open the doorway, once he is idle.
+        `restarting` means the exit began, not that the replacement is healthy:
+        read the doorway from GET /v1/mac-account. Storing can wait behind a
+        refresh already in progress, for up to about a minute.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^\s*\d{4,12}\s*$' }
+      responses:
+        "200":
+          description: Signed in; the service is restarting or waiting for his current turn to end
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [state, email, restart]
+                properties:
+                  state: { type: string, const: signed_in }
+                  email: { type: string }
+                  restart: { type: string, enum: [restarting, waiting] }
+        "400": { description: malformed or code_invalid }
+        "401": { description: operator_authentication_required }
+        "403": { description: native_loopback_required, forbidden or account_not_invited }
+        "404": { description: not_found }
+        "409": { description: no_sign_in_pending }
+        "410": { description: code_expired }
+        "429": { description: rate_limited }
+        "502": { description: unexpected_response }
+        "503": { description: service_unavailable }
   /v1/pairing/local/offer:
     post:
       tags: [Operator]

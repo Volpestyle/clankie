@@ -12,6 +12,11 @@ off` takes the Mac off remote access. `/remote-access` (`/gateway` alias) is the
 same flow in the console. There is no hosted Clankie to connect to: `clankie
 connect` says so and changes nothing.
 
+`clankie remote-access status` shows `account.state` (`signed_in`, `signed_out`,
+`never_set_up`). The Mac app signs in through `/v1/mac-account`, `/start` and
+`/complete`; they admit this Mac's loopback only, and `complete` restarts the
+service when he is idle. A phone or the gateway cannot reach them.
+
 ## Model keys and connected accounts
 
 Provider-key management uses the owner model-key API
