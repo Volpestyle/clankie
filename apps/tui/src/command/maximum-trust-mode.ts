@@ -18,7 +18,7 @@ export interface MaximumTrustModeResult {
   readonly seatsOnOtherMode?: readonly MaximumTrustSeat[];
 }
 
-/** The owner's one switch over every launched harness's guardrails (VUH-2048), over the owner API. */
+/** The owner's switch over supported launched harnesses' guardrails (VUH-2048), over the owner API. */
 export async function runMaximumTrustModeCommand(
   args: readonly string[],
   options: OwnerSettingsApiOptions = {},

@@ -11,7 +11,7 @@ import { logger } from "./app/log.ts";
 
 /**
  * Maximum trust mode (VUH-2048): the owner's one switch over the guardrails of
- * every harness Clankie launches next. Owner routes only; no worker, peer,
+ * supported harnesses Clankie launches next. Owner routes only; no worker, peer,
  * room or tool reaches it.
  */
 export function createMaximumTrustModeRoutes(

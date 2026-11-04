@@ -6003,7 +6003,7 @@ and an owner-only fix. The owner reviews and accepts it once in the same Claude
 profile (the hire's account / `CLAUDE_CONFIG_DIR`). Clankie never answers that
 confirmation or writes `skipDangerousModePermissionPrompt` for the owner. Inspect
 the original pane before retrying: a failed readiness check does not prove the
-initial brief was never submitted.
+initial brief was never submitted. See [Claude's bypass confirmation](https://code.claude.com/docs/en/permission-modes#skip-all-checks-with-bypasspermissions-mode).
 
 OpenCode is deliberately not mapped to this switch. On versions that expose it
 in `opencode --help`, the nearest native control is `--auto`: it approves requests

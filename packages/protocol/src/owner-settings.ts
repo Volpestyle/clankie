@@ -258,9 +258,9 @@ export const UpdateAppearanceSettingsSchema = z
 export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapshotSchema>;
 
 /**
- * Maximum trust mode (VUH-2048): one owner switch. While on, every harness
- * Clankie launches next starts without its own permission and command
- * guardrails, through that harness's native flag. Seats already running keep
+ * Maximum trust mode (VUH-2048): one owner switch for the native bypass
+ * overrides mapped below. Other harnesses keep their configured behavior.
+ * Machine ceilings and read-only hires still apply. Seats already running keep
  * the mode they launched with. It is not the autonomy dial: that decides what
  * Clankie does without asking, this only what a launched harness may run
  * without asking.
