@@ -271,6 +271,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["asks"],
+    lines: [
+      "  asks [list] [--all]   Workers' open structured asks to their leads (--all includes settled ones)",
+      "  asks answer ASK_ID (--value VALUE | --text TEXT)   Answer one; the worker hears it tied to the ask",
+      "  asks withdraw ASK_ID   Drop an ask that will not be answered",
+    ],
+  },
+  {
     nouns: ["huddle"],
     lines: [
       "  huddle [list | ID] [--json]   Recent huddles, or one huddle's board: seats, blockers, landing order",

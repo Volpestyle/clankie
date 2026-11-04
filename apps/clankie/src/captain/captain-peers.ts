@@ -12,6 +12,7 @@ import type { ObservedHeadSeat } from "./herdr-census.ts";
 import type { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner, HerdrWatchStore } from "./herdr-watch.ts";
 import { createHuddleService, HuddleStore, type HuddleSeatTarget } from "./huddles.ts";
+import { createWorkerAskService, WorkerAskStore, type WorkerAskRecord } from "./worker-asks.ts";
 import { PeerSeatMessages } from "./peer-seat-messages.ts";
 import { localWorkspaceProject, reviewCheckoutProject } from "./project-hire-context.ts";
 import { ReviewGate } from "./review-gate.ts";
@@ -32,9 +33,11 @@ export interface PeersContext {
   readonly noteFleetRoom: (record: FleetRoomRecord) => void;
   readonly workerParty: (seatId: string) => FleetRoomParty;
   readonly leadParty: (conversationId: string) => FleetRoomParty;
+  /** The host-observed inbound binding of a native occupant (pane, terminal, harness, session). */
+  readonly inboundBinding: (agent: HerdrAgentSnapshot | undefined) => string | undefined;
 }
 
-/** Huddles, peer messages between seats, and the standing review gate. */
+/** Huddles, workers' structured asks, peer messages between seats, and the standing review gate. */
 export function createPeers(ctx: PeersContext) {
   const {
     options,
@@ -50,6 +53,7 @@ export function createPeers(ctx: PeersContext) {
     noteFleetRoom,
     workerParty,
     leadParty,
+    inboundBinding,
   } = ctx;
   // Huddles (VUH-2025): one structured question to every seat, answered
   // between steps through message_clankie, compiled into one lead wake.
@@ -114,6 +118,52 @@ export function createPeers(ctx: PeersContext) {
     changed: () => fleetChanges.touch(),
   });
   herdrWatches.huddles = huddleService;
+  // A worker's ask is answered down the same lane a lead's message takes (#604),
+  // only to the exact occupant that raised it while its original lead holds it.
+  const askRecipient = (agent: HerdrAgentSnapshot | undefined, ask: WorkerAskRecord): boolean => {
+    if (!agent?.session || agent.paneId !== ask.paneId || inboundBinding(agent) !== ask.recipient.binding)
+      return false;
+    try {
+      // The same proof the report recorded: its native lead, `null` when it had none.
+      return JSON.stringify(herdrWatches.nativeOwner(agent) ?? null) === ask.recipient.owner;
+    } catch {
+      return false;
+    }
+  };
+  const workerAsks = createWorkerAskService({
+    store: new WorkerAskStore(join(options.stateDir, "worker-asks.json")),
+    recipientCurrent: async (ask) => askRecipient(await herdrRunner.resolveTerminal(ask.seatId), ask),
+    deliver: (ask, text, authorized) =>
+      deliverToSeat(
+        ask.seatId,
+        text,
+        {
+          conversationId: ask.conversationId,
+          source: "worker-ask",
+          ...(JSON.parse(ask.recipient.owner)?.conversationId === ask.conversationId
+            ? { fromLead: true as const }
+            : {}),
+        },
+        {
+          // A lead's answer, never peer output.
+          source: "operator",
+          recipientBinding: ask.recipient.binding,
+          // Rechecked at dispatch: the answerer still holds authority, and the
+          // seat still holds the occupant and lead the ask was raised from.
+          // A refusal sends nothing; the service then says which one refused.
+          fence: async (agent) => {
+            try {
+              await authorized?.();
+            } catch {
+              return false;
+            }
+            return askRecipient(agent, ask);
+          },
+        },
+      ),
+    changed: () => fleetChanges.touch(),
+  });
+  herdrWatches.workerAsks = workerAsks;
 
   const peerMessages = new PeerSeatMessages({
     path: join(options.stateDir, "delivery-receipts", "peer-messages.json"),
@@ -255,5 +305,5 @@ export function createPeers(ctx: PeersContext) {
 
   herdrWatches.reviews = reviews;
 
-  return { huddleService, peerMessages, reviews };
+  return { huddleService, workerAsks, peerMessages, reviews };
 }

@@ -201,6 +201,11 @@ export async function runHeadlessCaptainCommand(
       else stdout.write(`${(await import("../src/command/usage.ts")).formatUsageTable(result)}\n`);
       return 0;
     }
+    if (command === "asks") {
+      const { runAsksCommand } = await import("../src/command/asks.ts");
+      outputJson(stdout, await runAsksCommand(rest, options));
+      return 0;
+    }
     if (command === "huddle") {
       const json = rest.includes("--json");
       const { runHuddleCommand, formatHuddleBoard } = await import("../src/command/huddle.ts");

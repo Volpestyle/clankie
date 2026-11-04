@@ -617,6 +617,8 @@ export interface CaptainPort {
   ): Promise<FleetSeatMessageReceipt>;
   /** Huddles (VUH-2025); absent on bodies without a fleet. */
   readonly huddles?: HuddleService;
+  /** Workers' structured asks to their leads (#604). */
+  readonly workerAsks?: import("./worker-asks.ts").WorkerAskService;
   /** Home-admitted joined native worker; target and binding come only from its lead grant. */
   receiveJoinedWorkerReport?(
     input: {

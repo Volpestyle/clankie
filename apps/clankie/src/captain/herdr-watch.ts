@@ -442,6 +442,7 @@ export interface HerdrWatchPort {
   workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   /** Huddles (VUH-2025). */
   huddles?: import("./port.ts").HuddleService;
+  workerAsks?: import("./worker-asks.ts").WorkerAskService;
   /** The standing review gate (ADR 0287). */
   reviews?: import("./review-gate.ts").ReviewGate;
   readoptSeat?(seatId: string, authority: ConversationAuthority): Promise<void>;
@@ -1088,6 +1089,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   public restartSeat?: RestartSeat;
   public workerAccountsReport?: (fleet?: string) => Promise<MachineWorkerAccounts>;
   public huddles?: import("./port.ts").HuddleService;
+  public workerAsks?: import("./worker-asks.ts").WorkerAskService;
   /** The standing review gate (ADR 0287), for the lead's waiver tool. */
   public reviews?: import("./review-gate.ts").ReviewGate;
   public routines?: NonNullable<HerdrWatchPort["routines"]>;

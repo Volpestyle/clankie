@@ -1110,7 +1110,7 @@ export async function connectLaneUpstream(input: {
 const MESSAGE_CLANKIE_TOOL = {
   name: "message_clankie",
   description:
-    "Send Clankie, the agent leading this machine's fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message.",
+    'Send Clankie, the agent leading this machine\'s fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message. To ask your lead to choose, add one JSON block to the text: {"ask": {"question": "...", "options": [{"value": "a", "label": "..."}, {"value": "b", "label": "..."}], "freeText": false, "confirms": "push"}} with 2 to 5 options, freeText true to allow an answer in their own words, and confirms (push, merge, restart, rotate, delete or release) only when it confirms a risky action. Your lead answers it as a card, and you hear the chosen value tied to the ask.',
   inputSchema: {
     type: "object" as const,
     properties: {

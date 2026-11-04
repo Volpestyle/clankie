@@ -347,6 +347,9 @@ export function captainTools(
             ? []
             : [workerAccountsTool(herdrWatches.workerAccountsReport)]),
           ...(herdrWatches.huddles === undefined ? [] : [huddleTool(herdrWatches.huddles, turn)]),
+          ...(herdrWatches.workerAsks === undefined
+            ? []
+            : [answerWorkerAskTool(herdrWatches.workerAsks, turn)]),
           ...(herdrWatches.reviews === undefined || lane !== "operator"
             ? []
             : [waiveReviewTool(herdrWatches.reviews, turn)]),
@@ -976,6 +979,51 @@ function huddleTool(huddles: HuddleService, turn: TurnContext): ToolDefinition {
             : huddles.get(input.id);
       if (!huddle) throw new Error(input.id ? `No huddle ${input.id}` : "No huddle yet; start one");
       return json({ summary: huddleSummary(huddle), huddle });
+    },
+  });
+}
+
+function answerWorkerAskTool(
+  asks: import("./worker-asks.ts").WorkerAskService,
+  turn: TurnContext,
+): ToolDefinition {
+  return defineTool({
+    name: "answer_worker_ask",
+    label: "Answer a worker's ask",
+    description:
+      "Answer a structured ask a worker you lead raised in its report (#604): the report names the askId and its " +
+      "options. Pass value (one of the option values) or, when the ask allows it, text in your own words; the worker " +
+      "hears it tied to the ask. action list shows this conversation's open asks; withdraw drops one you will not " +
+      "answer. An ask whose answer was uncertain is never answered again. Outcomes: answered, uncertain (it may have " +
+      "arrived; do not resend), withdrawn, or refused with a reason.",
+    parameters: Type.Object({
+      action: Type.Optional(
+        Type.Union([Type.Literal("answer"), Type.Literal("list"), Type.Literal("withdraw")], {
+          description: "answer (default), list or withdraw.",
+        }),
+      ),
+      askId: Type.Optional(Type.String({ format: "uuid" })),
+      value: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+      text: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+    }),
+    executionMode: "sequential",
+    execute: async (_id, input) => {
+      const authority = captureConversationAuthority(turn.conversationAuthority);
+      await assertConversationAuthority(authority);
+      const conversationId = authority.owner.conversationId;
+      if (input.action === "list") return json({ asks: asks.list({ state: "open", conversationId }) });
+      if (input.askId === undefined) throw new Error("Name the askId from the worker's report.");
+      if (input.action === "withdraw") return json(asks.withdraw(input.askId, conversationId));
+      if ((input.value === undefined) === (input.text === undefined))
+        throw new Error("Supply exactly one of value or text; nothing was sent.");
+      return json(
+        await asks.answer(
+          input.askId,
+          input.value === undefined ? { text: input.text! } : { value: input.value },
+          // This conversation's own workers only, its authority rechecked at the send.
+          { conversationId, authorized: () => assertConversationAuthority(authority) },
+        ),
+      );
     },
   });
 }

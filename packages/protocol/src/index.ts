@@ -44,6 +44,7 @@ export * from "./discord-attention.ts";
 export * from "./worker-accounts.ts";
 export * from "./fleet-capacity.ts";
 export * from "./huddles.ts";
+export * from "./worker-asks.ts";
 export { OPERATOR_SEAT_HARNESSES, type OperatorSeatHarness } from "./seat-harnesses.ts";
 export {
   MachineSchema,

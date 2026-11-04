@@ -38,7 +38,11 @@ any decision needed.
   send returns uncertain, unconfirmed or `not_sent`, post the same blocker on
   your work item and check `message_clankie_status` again before your turn ends.
   Keep doing unblocked work meanwhile.
-- Ask your lead with `message_clankie`. Your harness's own ask-the-user prompt
+- Ask your lead with `message_clankie`. For a decision with a few clear choices,
+  add one `{"ask": {"question", "options": [{"value", "label"}], "freeText"?,
+"confirms"?}}` JSON block (2–5 options; `confirms` only before a risky action
+  such as a push or merge): your lead answers it as a card and you hear the
+  chosen value tied to the ask's id. A malformed block is sent as a plain report. Your harness's own ask-the-user prompt
   reaches the lead only on a managed seat that routes it; otherwise it waits
   unseen in your pane.
 - Every report your lead reads adds to a turn over its whole context, and an
