@@ -317,6 +317,22 @@ export class HireOwners {
     const held = this.state.hires.find((entry) => entry.seatId === seatId && entry.occupantId === occupantId);
     return held?.hired === true ? held.startedBy : undefined;
   }
+  /** The lead a hire on this seat or pane named for report wakes, newest hire first (#735). */
+  public notifyLead(seatId: string | undefined, paneId: string): string | undefined {
+    const held = this.state.hires.findLast(
+      (entry) =>
+        entry.hired === true &&
+        (entry.paneId === paneId || (seatId !== undefined && entry.seatId === seatId)) &&
+        entry.startedBy?.kind === "app",
+    );
+    return held?.startedBy?.kind === "app" ? held.startedBy.notify?.lead : undefined;
+  }
+  /** Whether a seat holds a finished hire, for a start receipt that outlived its service (#735). */
+  public hiredSeat(seatId: string): boolean {
+    return this.state.hires.some(
+      (entry) => entry.hired === true && entry.seatId === seatId && entry.startupFailure === undefined,
+    );
+  }
   /**
    * Whether this connector device hired this exact occupant and still leads it
    * (#442, ADR 0321): never a replacement occupant, and never after any

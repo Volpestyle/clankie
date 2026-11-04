@@ -1479,6 +1479,7 @@ const connectorDetection = new ConnectorDetection(join(stateRoot, "connector-det
 const leadWakes = createLeadWakes({
   store: operatorCredentialStore,
   log: (fields, message) => logger.info({ event: "lead.wake", ...fields }, message),
+  warn: (fields, message) => logger.warn({ event: "lead.wake", ...fields }, message),
 });
 const captain = createCaptain(
   {
@@ -2101,6 +2102,12 @@ const runtimeCanary =
           }
           return alerts.notifyRuntimeHealthAlert(text, conversationId);
         },
+        wake: async (text, lead) =>
+          leadWakes.updateOutcome({
+            text,
+            ...(lead === undefined ? {} : { lead }),
+            appsLead: (await captain.fleetLeadState?.())?.lead === "apps",
+          }),
         onError: (error) =>
           logger.warn(
             { event: "runtime.canary.unavailable", error },

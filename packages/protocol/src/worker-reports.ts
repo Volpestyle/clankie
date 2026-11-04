@@ -8,6 +8,19 @@ import { z } from "zod";
 export const WorkerReportKindSchema = z.enum(["done", "blocked", "update"]);
 export type WorkerReportKind = z.infer<typeof WorkerReportKindSchema>;
 
+/**
+ * Whether a hire's report wakes can reach their lead (#735). `set`: a webhook is stored
+ * and nothing has been sent yet. `not_set`: no webhook goes by that name, so wakes go
+ * nowhere. Otherwise the outcome of the lead's latest wake this boot.
+ */
+export const HireNotifySchema = z
+  .object({
+    lead: z.string().min(1).max(32),
+    state: z.enum(["set", "sent", "not_set", "refused", "uncertain", "unavailable"]),
+  })
+  .strict();
+export type HireNotify = z.infer<typeof HireNotifySchema>;
+
 /** Durable worker output remains visible independently of its pane's lifetime. */
 export const WorkerReportSummarySchema = z
   .object({
@@ -28,7 +41,9 @@ export const WorkerReportPageSchema = z
   .object({
     conversationId: z.string().min(1).max(256),
     unreadCount: z.number().int().min(0),
-    items: z.array(WorkerReportSummarySchema.extend({ text: z.string() })).max(100),
+    items: z
+      .array(WorkerReportSummarySchema.extend({ text: z.string(), notify: HireNotifySchema.optional() }))
+      .max(100),
     /** Only these fully offered IDs may be acknowledged. Reading never acknowledges. */
     ackDeliveryIds: z.array(z.string().uuid()).max(100),
   })

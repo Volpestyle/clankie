@@ -1,6 +1,7 @@
 import { resolveOperatorCredential } from "@clankie/credential-broker";
 import { commandHost } from "./io.ts";
 import type { BrowserCommandOptions } from "./browser.ts";
+import { LeadWakeNameSchema } from "@clankie/protocol/connector";
 import { HoldOverrideSchema } from "@clankie/protocol/deploy-holds";
 import { HOST_SETTINGS_PATH, HostSettingsSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings-api.ts";
@@ -12,7 +13,7 @@ import {
 const AUTO_USAGE = "Usage: clankie update auto [status|on|off]";
 
 export const UPDATE_USAGE =
-  "Usage: clankie update [now] [--ref REF] [--override-holds --reason TEXT] [--json]\n       clankie update status|cancel [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\n       clankie update holds | hold --holder NAME --reason TEXT --minutes 1-60 | release UUID --actor NAME --reason TEXT\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.\nA source checkout batches updates that follow main: while the body is busy and the service has run under two hours (CLANKIE_UPDATE_BATCH_MINUTES), the request is deferred and the newest main applies once the body is idle or the batch is due. `now` applies at once; `cancel` drops a deferred batch. An explicit --ref or a hold override always applies at once.";
+  "Usage: clankie update [now] [--ref REF] [--notify LEAD] [--override-holds --reason TEXT] [--json]\n       clankie update status|cancel [--json]\n       clankie update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N] [--json]\n       clankie update auto [status|on|off] [--json]\n       clankie update holds | hold --holder NAME --reason TEXT --minutes 1-60 | release UUID --actor NAME --reason TEXT\nTerminal output explains holds and update progress; --json or piped output stays structured.\nVerified superseded canary holds release after a full passing replacement canary; independent holds remain blocking until explicitly released or overridden. Owner overrides are audited per hold. Legacy --override-hold UUID [--actor NAME] --reason TEXT is also accepted; the server records the authenticated owner.\nUse status after acceptance or a disconnect. Do not resend an uncertain update or restart services. A recorded pre-cutover failure may retry, subject to holds.\nA source checkout batches updates that follow main: while the body is busy and the service has run under two hours (CLANKIE_UPDATE_BATCH_MINUTES), the request is deferred and the newest main applies once the body is idle or the batch is due. `now` applies at once; `cancel` drops a deferred batch. An explicit --ref or a hold override always applies at once.\n--notify wakes that lead at its stored webhook with the outcome (passed, failed or rolled-back); a name with no stored webhook refuses the update. While connected apps lead, every stored lead hears it.";
 
 export function parseUpdateArgs(args: readonly string[]) {
   args = args.filter((arg) => arg !== "--json");
@@ -40,7 +41,7 @@ export function parseUpdateArgs(args: readonly string[]) {
   }
   let ref = "main";
   const holdIds: string[] = [];
-  let actor: string | undefined, reason: string | undefined;
+  let actor: string | undefined, reason: string | undefined, notify: string | undefined;
   let overrideHolds = false;
   if (!status && !canary) {
     for (let i = 0; i < args.length; i++) {
@@ -53,12 +54,13 @@ export function parseUpdateArgs(args: readonly string[]) {
       if (
         !value ||
         value.startsWith("-") ||
-        !["--ref", "--override-hold", "--actor", "--reason"].includes(key ?? "")
+        !["--ref", "--override-hold", "--actor", "--reason", "--notify"].includes(key ?? "")
       )
         throw Error(UPDATE_USAGE);
       if (key === "--ref") ref = value;
       else if (key === "--override-hold") holdIds.push(value);
       else if (key === "--actor") actor = value;
+      else if (key === "--notify") notify = LeadWakeNameSchema.parse(value);
       else reason = value;
     }
   }
@@ -71,7 +73,7 @@ export function parseUpdateArgs(args: readonly string[]) {
   );
   if (overrideHolds) HoldOverrideSchema.shape.reason.parse(reason);
   if (now && (status || canary)) throw Error(UPDATE_USAGE);
-  return { canary, status, policy, ref, overrides, overrideHolds, reason, now };
+  return { canary, status, policy, ref, overrides, overrideHolds, reason, now, notify };
 }
 
 export async function runUpdateCommand(
@@ -138,7 +140,7 @@ export async function runUpdateCommand(
       throw Error("Usage: clankie update cutover --operation UUID --instance UUID");
     cutover = ScheduledReleaseCutoverRequestSchema.parse({ operationId: args[2], instanceId: args[4] });
   }
-  const { canary, status, policy, ref, overrides, overrideHolds, reason, now } = parseUpdateArgs(
+  const { canary, status, policy, ref, overrides, overrideHolds, reason, now, notify } = parseUpdateArgs(
     cutover ? [] : args,
   );
   const env = options.env ?? process.env;
@@ -182,6 +184,7 @@ export async function runUpdateCommand(
                         ...(overrides.length ? { overrides } : {}),
                         ...(overrideHolds ? { overrideHolds, reason } : {}),
                         ...(now ? { now } : {}),
+                        ...(notify ? { notify } : {}),
                       }),
               ),
             }),

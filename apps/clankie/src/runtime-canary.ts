@@ -146,6 +146,11 @@ export class RuntimeCanary {
     /** Host observations are independent of the candidate health endpoint. */
     pressure?: () => { load1: number; load15: number; cores: number; cpuRatio?: number };
     alert?: (text: string, conversationId?: string) => Promise<boolean>;
+    /**
+     * Wakes leads with an update's outcome (ADR 0355): `lead` is the one `--notify` named.
+     * `none` when nobody was to hear it, `failed` when nobody took it.
+     */
+    wake?: (text: string, lead?: string) => Promise<"sent" | "none" | "failed">;
     onError?: (error: unknown) => void;
     /** Best-effort retention after the passed canary's hold release is durable. */
     onPassed?: () => Promise<void>;
@@ -561,8 +566,12 @@ export class RuntimeCanary {
     if (result !== undefined && ["rolled-back", "failed", "stop-unconfirmed"].includes(result.phase)) {
       await this.releasePrehealthyRollback(result);
       await this.alertUnconfirmed(result);
+      await this.wakeLeads(result, result.phase === "rolled-back" ? "rolled-back" : "failed");
       return;
     }
+    // Scheduled installs are refused routinely, so only a lead that asked hears of one.
+    if (result?.phase === "refused" && result.initiator?.notifyLead !== undefined)
+      await this.wakeLeads(result, "failed");
     if (!result || result.phase !== "healthy") return;
     if (result.newCommit !== this.options.runtime.commit) {
       if (result.canary?.state === "pending") await this.recover();
@@ -574,6 +583,7 @@ export class RuntimeCanary {
     }
     if (result.canary?.state === "passed") {
       await this.releasePassed(result);
+      await this.wakeLeads(result, "passed");
       return;
     }
     if (!this.session || this.session.id !== result.id) {
@@ -813,6 +823,7 @@ export class RuntimeCanary {
     const claimed = { ...result.canary, alertState: "claimed" as const };
     // A crash after this claim leaves delivery unknown. It must never replay an uncertain notification.
     await this.save(result, claimed);
+    await this.wakeLeads(result, text === undefined ? "failed" : "extended");
     let submitted = false;
     try {
       submitted =
@@ -827,6 +838,47 @@ export class RuntimeCanary {
     }
     // Acceptance by the native notification path does not confirm receipt.
     await this.save(result, { ...claimed, alertState: submitted ? "submitted" : "unavailable" });
+  }
+
+  /**
+   * Tells leads how an update went, once (ADR 0355). The conversation alerts stay as they
+   * are: a held conversation never reaches a webhook, so this is the path that does. Only
+   * service-owned facts go, since a webhook leaves the Mac; error text stays local. Runs
+   * from ticks, never recovery, so a slow webhook can't hold the service's boot.
+   */
+  private async wakeLeads(
+    result: RuntimeUpdateResult,
+    outcome: "passed" | "failed" | "rolled-back" | "extended",
+  ): Promise<void> {
+    if (!this.options.wake) return;
+    const path = join(
+      this.options.updatesDirectory,
+      result.id,
+      outcome === "extended" ? "lead-wake-extended.json" : "lead-wake-outcome.json",
+    );
+    if (existsSync(path)) return;
+    const reason = /^runtime-canary-[a-z-]+/u.exec(result.canary?.error ?? "")?.[0] ?? result.reason;
+    const text = [
+      `update=${result.id} outcome=${outcome} from=${result.oldCommit.slice(0, 9)} to=${result.newCommit.slice(0, 9)}${reason === undefined ? "" : ` reason=${reason}`} running=${this.options.runtime.commit.slice(0, 9)}`,
+      outcome === "passed" ? "" : "The owner inspects it with: clankie update status",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    // A crash after this claim leaves delivery unknown. It must never replay an uncertain notification.
+    await durableJson(path, "claimed");
+    let delivered: "sent" | "none" | "failed";
+    try {
+      delivered = await this.options.wake(text, result.initiator?.notifyLead);
+    } catch {
+      return;
+    }
+    await durableJson(path, delivered);
+    // Like a board note whose webhook failed, an outcome falls back to Clankie's own lane.
+    if (delivered === "failed" && outcome !== "extended")
+      await this.options
+        .alert?.(`A lead couldn't be told how this update ended. ${text}`, result.initiator?.conversationId)
+        // allow-swallowed-rejection -- the conversation is the last resort; `update status` still shows the outcome
+        .catch(() => false);
   }
 
   private async releasePassed(result: RuntimeUpdateResult): Promise<void> {

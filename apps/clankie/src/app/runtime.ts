@@ -563,6 +563,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       updater: dependencies.runtimeUpdater,
       scheduledCutover: dependencies.scheduledReleaseCutover,
       canary: dependencies.runtimeCanary,
+      leads: dependencies.leadWakes === undefined ? undefined : () => dependencies.leadWakes!.leads(),
       refreshHarnesses: dependencies.refreshHarnesses,
       settings: settingsSource,
       setup: { runtimes: dependencies.runtimes, herdrBinding: dependencies.herdrBinding },

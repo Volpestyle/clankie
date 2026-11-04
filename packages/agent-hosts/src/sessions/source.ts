@@ -28,6 +28,8 @@ export interface Session {
    * never who may act.
    */
   readonly startedBy?: string;
+  /** Whether its report wakes can reach their lead, on a hire that named one (#735). */
+  readonly notify?: { readonly lead: string; readonly state: string };
   readonly canMessage: boolean;
 }
 

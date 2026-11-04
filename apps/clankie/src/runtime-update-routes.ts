@@ -4,6 +4,7 @@ import { z } from "zod";
 import { realpath } from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-updater.ts";
+import { LeadWakeNameSchema } from "@clankie/protocol/connector";
 import { HoldOverrideSchema } from "@clankie/protocol/deploy-holds";
 import {
   SCHEDULED_RELEASE_CUTOVER_PATH,
@@ -50,6 +51,8 @@ export function createRuntimeUpdateRoutes(options: {
       ) => Promise<{ outcome: "ready" } | { outcome: "waiting"; reason: "disabled" | "body-busy" }>)
     | undefined;
   readonly canary?: RuntimeCanary | undefined;
+  /** The leads with a stored wake webhook, which `notify` may name. */
+  readonly leads?: (() => Promise<readonly string[]>) | undefined;
   readonly holds?: DeployHolds | undefined;
   readonly refreshHarnesses?: ((authority: HarnessRefreshAuthority) => Promise<unknown>) | undefined;
   readonly settings?: Pick<SettingsStore, "load"> | undefined;
@@ -362,6 +365,8 @@ export function createRuntimeUpdateRoutes(options: {
         reason: HoldOverrideSchema.shape.reason.optional(),
         /** Apply at once instead of joining a source checkout's batch (VUH-2393). */
         now: z.boolean().optional(),
+        /** The lead that hears the outcome at its wake webhook (ADR 0355). */
+        notify: LeadWakeNameSchema.optional(),
       })
       .strict()
       .refine((input) =>
@@ -377,6 +382,24 @@ export function createRuntimeUpdateRoutes(options: {
       const actor = authority.initiator?.operatorId;
       if ((parsed.data.overrideHolds || parsed.data.overrides.length) && !actor)
         return context.json({ error: "override_owner_identity_required" }, 403);
+      const notifyLead = parsed.data.notify;
+      if (notifyLead !== undefined) {
+        // A name nobody stores could never hear the outcome, so the update isn't taken.
+        const leads = await options.leads?.();
+        if (!leads?.includes(notifyLead))
+          return context.json(
+            {
+              accepted: false,
+              error: "unknown_lead",
+              detail:
+                leads === undefined || leads.length === 0
+                  ? `No lead has a wake webhook yet. Store one with: clankie connector wake set ${notifyLead}`
+                  : `No lead goes by ${notifyLead}. --notify can name: ${leads.join(", ")}.`,
+              leads: leads ?? [],
+            },
+            409,
+          );
+      }
       const guard = async () => {
         await authority.guard();
         if (!authority.current()) throw Error("operator_revoked");
@@ -385,7 +408,13 @@ export function createRuntimeUpdateRoutes(options: {
         await guard();
         return options.updater!.request(
           parsed.data.ref ?? "main",
-          { ...authority, overriddenHolds },
+          {
+            ...authority,
+            ...(notifyLead === undefined
+              ? {}
+              : { initiator: { kind: "operator" as const, ...authority.initiator, notifyLead } }),
+            overriddenHolds,
+          },
           { now: parsed.data.now === true },
         );
       };

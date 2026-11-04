@@ -5429,6 +5429,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       };
     },
     serveOperatorConversation: createOperatorService({
+      connectorStartsPath: join(options.stateDir, "connector-starts.json"),
       prepareFreeAgentIntent,
       get personas() {
         return personas;

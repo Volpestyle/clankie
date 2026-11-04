@@ -70,13 +70,15 @@ async function fixture(failure?: Awaited<ReturnType<HireSeat>>) {
     },
   });
   let closeSeat: (() => Promise<void>) | undefined;
+  const recorded = new Set<string>();
   const context = {
     shutdown: new AbortController(),
     personas: { ready: async () => {} },
     settingsStore: {},
     settings: async () => settings,
     conversations: { runsCaptainTurns: () => true },
-    herdrWatches: { nextFreshIntent: () => undefined },
+    herdrWatches: { nextFreshIntent: () => undefined, hiredSeat: (seatId: string) => recorded.has(seatId) },
+    connectorStartsPath: join(root, "connector-starts.json"),
     deps: { fleets: { remoteWorkspace: async () => true } },
     hireSeat: async (...args: Parameters<HireSeat>) => {
       const [_seat, brief, source] = args;
@@ -151,6 +153,9 @@ async function fixture(failure?: Awaited<ReturnType<HireSeat>>) {
   return {
     dispatch,
     request,
+    // The same state directory under a new service, as after `clankie update`.
+    restart: () => createOperatorService(context as unknown as CreateOperatorServiceContext),
+    recorded,
     native,
     entered,
     allocate,
@@ -224,6 +229,63 @@ it("returns the allocated pane pending before native readiness and status reads 
     await f.dispatch(read);
     expect(f.launches()).toBe(1);
     expect(f.native.requests.filter((r) => r.method === "turn/start")).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+it("answers a finished hire's receipt after a service restart, to its caller only, without replaying it", async () => {
+  const f = await fixture();
+  try {
+    f.allocate.resolve();
+    f.deliver.resolve();
+    const result = await f.dispatch(f.request);
+    if (result.op !== "start_agent" || !result.startId) throw Error("missing start receipt");
+    const read: OperatorConversationServiceRequest = {
+      op: "start_agent",
+      schemaVersion: 1,
+      startId: result.startId,
+      appDeviceId: "connector-proof",
+    };
+    await expect.poll(async () => ((await f.dispatch(read)) as { status: string }).status).toBe("started");
+    const restarted = f.restart();
+    expect(await restarted(read, undefined, undefined)).toMatchObject({
+      status: "started",
+      seatId: "pc/term_proof",
+      startId: result.startId,
+    });
+    expect(await restarted({ ...read, appDeviceId: "another-app" }, undefined, undefined)).toMatchObject({
+      status: "refused",
+      detail: expect.stringContaining("unavailable"),
+    });
+    expect(f.launches()).toBe(1);
+  } finally {
+    await f.close();
+  }
+});
+
+it("resolves a start the restart cut off from the hire records, and names its pane when none is recorded", async () => {
+  const f = await fixture();
+  try {
+    f.allocate.resolve();
+    const result = await f.dispatch(f.request);
+    if (result.op !== "start_agent" || !result.startId) throw Error("missing start receipt");
+    expect(result).toMatchObject({ status: "pending", seatId: "pc/term_proof" });
+    const read: OperatorConversationServiceRequest = {
+      op: "start_agent",
+      schemaVersion: 1,
+      startId: result.startId,
+      appDeviceId: "connector-proof",
+    };
+    const restarted = f.restart();
+    const unrecorded = await restarted(read, undefined, undefined);
+    expect(unrecorded).toMatchObject({ status: "refused", seatId: "pc/term_proof" });
+    expect(unrecorded).toMatchObject({ detail: expect.stringContaining("pane pc/term_proof") });
+    f.recorded.add("pc/term_proof");
+    expect(await restarted(read, undefined, undefined)).toMatchObject({
+      status: "started",
+      seatId: "pc/term_proof",
+    });
   } finally {
     await f.close();
   }

@@ -1,6 +1,7 @@
 # 0343. Connected hires wake their lead on reports
 
-Status: accepted (2026-11-01). Amends [ADR 0336](0336-a-connected-app-wakes-a-lead-at-its-webhook.md).
+Status: accepted (2026-11-01). Amends [ADR 0336](0336-a-connected-app-wakes-a-lead-at-its-webhook.md). Amended by
+[ADR 0355](0355-an-updates-outcome-reaches-its-lead.md).
 
 A connected app may give `start_agent` a `notify: {lead, ref}` reference.
 The hire retains it with the hiring device. A worker report or settled watch

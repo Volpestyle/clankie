@@ -2307,6 +2307,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
     return this.hireOwners.starter(seatId, occupantId);
   }
 
+  /** The lead a hire on this seat or pane named for report wakes (#735). */
+  public notifyLead(seatId: string | undefined, paneId: string): string | undefined {
+    return this.hireOwners.notifyLead(seatId, paneId);
+  }
+
+  /** Whether a seat holds a finished hire, for a start receipt that outlived its service (#735). */
+  public hiredSeat(seatId: string): boolean {
+    return this.hireOwners.hiredSeat(seatId);
+  }
+
   /** Whether this connector device hired this exact occupant and still leads it (#442). */
   public connectorLeads(seatId: string, occupantId: string, deviceId: string): boolean {
     return this.hireOwners.appLead(seatId, occupantId, deviceId);
