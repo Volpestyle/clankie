@@ -316,7 +316,7 @@ it("serves all four Pi states over real HTTP and persists owner/Take Control ena
   });
   const server = await startFixtureServer(app.app.fetch);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
-  const request = (path: string, body?: unknown, auth = headers) =>
+  const request = (path: string, body?: unknown, auth: Record<string, string> = headers) =>
     fetch(`${server.host}${path}`, {
       method: body === undefined ? "GET" : "POST",
       headers: auth,
