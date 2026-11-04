@@ -145,7 +145,7 @@ it("a budget crossed mid-run warns, stops new hires, names the pause, and lifts 
     seat("w2", "other"),
     seat("w3", "default", "box"),
   ]);
-  expect(wake).toContain("Your seats on it: w1 (work w1).");
+  expect(wake).toContain('Your seats on it: w1 (titled "work w1").');
   expect(budgetNoticeText(now.fresh[0]!, [seat("w2", "other")])).toContain("None of your seats run on it.");
   expect((await round()).fresh).toEqual([]);
 

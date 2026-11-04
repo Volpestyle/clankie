@@ -29,6 +29,7 @@ import { SeatOutbox } from "./seat-outbox.ts";
 
 import type { RefreshFleet, WakeConversation } from "./captain-context.ts";
 import type { OperatorFleetReadWarnings } from "@clankie/protocol";
+import { quotedLine } from "./quoted-line.ts";
 
 export interface FleetRoundsContext {
   readonly options: CaptainOptions;
@@ -386,6 +387,6 @@ export function budgetNoticeText(notice: BudgetNotice, led: readonly OperatorFle
       notice.names.includes(seat.account.label),
   );
   return on.length
-    ? `${notice.text}\nYour seats on it: ${on.map((seat) => `${seat.seatId} (${seat.title.slice(0, 80)})`).join("; ")}.`
+    ? `${notice.text}\nYour seats on it: ${on.map((seat) => `${seat.seatId} (titled ${quotedLine(seat.title.slice(0, 80))})`).join("; ")}.`
     : `${notice.text}\nNone of your seats run on it.`;
 }

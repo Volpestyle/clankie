@@ -51,13 +51,15 @@ function workedOnWords(entries: NonNullable<OperatorFleetSeat["workedOn"]>): str
   return parts.length === 0 ? undefined : parts.join("; ");
 }
 
+/** A caller's name as one JSON string with no line break of any kind (U+2028 and U+2029 too). */
+const quoted = (text: string) =>
+  JSON.stringify(text).replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
+
 function starterWords(starter: NonNullable<OperatorFleetSeat["startedBy"]>): string {
-  // An app is named as an app, so no app name reads as the owner or Clankie (#349).
-  return starter.kind === "owner"
-    ? "the owner"
-    : starter.kind === "clankie"
-      ? "Clankie"
-      : `the app ${JSON.stringify(starter.name)}`;
+  // An app or agent is named as one, so no name reads as the owner or Clankie (#349).
+  if (starter.kind === "owner") return "the owner";
+  if (starter.kind === "clankie") return "Clankie";
+  return `the ${starter.kind} ${quoted(starter.name)}`;
 }
 
 export function createHerdrSessionSource(

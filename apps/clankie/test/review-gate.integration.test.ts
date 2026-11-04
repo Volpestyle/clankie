@@ -196,6 +196,8 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).toMatchObject({ seatId: "pc/term_reviewer", conversationId: "lead-chat" });
     expect(delivered[0]!.text).toContain(candidate.patchId);
+    // A seat's own title is a quoted label on the service's line, never words of its own (#349).
+    expect(delivered[0]!.text).toContain('Author: titled "author" (pc/term_author, claude).');
     expect(leadNotices).toEqual([]);
     expect((await owner(["status", "--directory", repo.root])).body).toMatchObject({
       required: true,
@@ -239,6 +241,7 @@ it("holds landing until the reviewer approves the exact patch, across CHANGES an
     expect(changes.body.candidate).toMatchObject({ status: "changes", verdict: { sameHarness: false } });
     expect(delivered.at(-1)).toMatchObject({ seatId: "pc/term_author" });
     expect(delivered.at(-1)!.text).toContain("other.ts still exports the stale value");
+    expect(delivered.at(-1)!.text).toContain('CHANGES from pc/term_reviewer (titled "reviewer") (codex)');
     expect(leadNotices.at(-1)).toContain("CHANGES");
     expect((await owner(["status", "--directory", repo.root])).ok).toBe(false);
 
