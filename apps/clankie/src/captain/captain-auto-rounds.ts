@@ -18,7 +18,7 @@ import { milestoneSignals, reportingSection } from "./auto-reporting.ts";
 import { AutoRoundRecord } from "./auto-rounds.ts";
 import {
   autoPlanCapacity,
-  autoStaffingSeats,
+  autoStaffingCensus,
   projectStaffing,
   projectStaffingSeats,
   projectIssueKeys,
@@ -126,31 +126,29 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
       console.warn("Auto cadence settlement unavailable", roundId, String(error));
     }
   };
-  const unavailableAutoMachines = () =>
-    new Set(
-      [...unansweredFleetSources, ...pendingFleetSources]
-        .filter((source) => source.startsWith("herdr:"))
-        .map((source) => {
-          const fleet = source.slice(6);
-          return fleet === "default" || ctx.namedLocal.some((entry) => entry.id === fleet) ? "local" : fleet;
-        }),
-    );
   const readAutoStaffingCensus = async () => {
-    const seats = autoStaffingSeats(
-      await refreshFleet(),
+    const seats = await refreshFleet();
+    return autoStaffingCensus(
+      seats,
+      await settings(),
+      new Set([...unansweredFleetSources, ...pendingFleetSources]),
       ctx.namedLocal.map((fleet) => fleet.id),
     );
-    return { seats, unavailableMachines: unavailableAutoMachines() };
   };
   const readAutoRounds = async (snapshot?: Awaited<ReturnType<typeof readAutoStaffingCensus>>) => {
     const current = await settings();
-    const { seats, unavailableMachines } = snapshot ?? (await readAutoStaffingCensus());
+    const census = snapshot ?? (await readAutoStaffingCensus());
+    const { seats, unavailableMachines } = census;
     const workerCounts = new Map(
       current.projects.projects.map((project) => {
-        const workers = projectStaffingSeats(project, seats, issueKeysByProject.get(project.id));
+        const workers = projectStaffingSeats(
+          census.project(project),
+          seats,
+          issueKeysByProject.get(project.id),
+        );
         const unknown =
           [...project.workspaces, ...project.worktreeRoots].some((root) =>
-            unavailableMachines.has(root.machineId),
+            unavailableMachines.has(census.machineId(root.machineId)),
           ) || workers.some((seat) => seat.status === "unknown");
         return [project.id, unknown ? null : workers.length] as const;
       }),
@@ -241,14 +239,18 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
     const machines = [
       ...new Set(
         autoProjects.flatMap((project) =>
-          [...project.workspaces, ...project.worktreeRoots].map((root) => root.machineId),
+          [...project.workspaces, ...project.worktreeRoots].map((root) => census.machineId(root.machineId)),
         ),
       ),
     ];
     const reports = await Promise.all(
       machines.map(async (machine) => {
         try {
-          return await readWorkerAccounts(machine === "local" ? undefined : machine, ["claude", "codex"]);
+          const report = await readWorkerAccounts(
+            machine === "local" ? undefined : census.connection(machine),
+            ["claude", "codex"],
+          );
+          return { ...report, machine: census.machineId(report.machine) };
         } catch {
           return undefined;
         } // Missing observations stay unknown; never authorize a hire.
@@ -280,7 +282,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
         autoMeasurements.set(project.id, {
           ...velocity,
           staffing: projectStaffing({
-            project,
+            project: census.project(project),
             queue,
             seats,
             plans,
@@ -315,7 +317,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
         );
         const groupMachines = new Set(
           groupProjects.flatMap((project) =>
-            [...project.workspaces, ...project.worktreeRoots].map((root) => root.machineId),
+            [...project.workspaces, ...project.worktreeRoots].map((root) => census.machineId(root.machineId)),
           ),
         );
         try {
@@ -326,7 +328,7 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
             staffingTotals(
               velocities,
               plans.filter((plan) => groupMachines.has(plan.machine)),
-              { seats, projects: groupProjects, issueKeys: issueKeysByProject },
+              { seats, projects: groupProjects.map(census.project), issueKeys: issueKeysByProject },
             ),
           );
           autoCadence.claim(conversationId, roundId, fingerprint);

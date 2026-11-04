@@ -7,11 +7,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { AutoRoundsResponseSchema } from "@clankie/protocol/auto-rounds";
+import { SettingsStore } from "@clankie/settings";
 import { ProjectSchema } from "@clankie/protocol/projects";
 import { createLocalTracker, TRACKER_LEAD, TRACKER_OWNER } from "@clankie/work-items";
 import {
   autoPlanCapacity,
   autoStaffingSeats,
+  autoStaffingCensus,
   projectIssueKeys,
   projectStaffing,
   staffingSection,
@@ -658,4 +660,150 @@ it("counts a seat holding the project's issue from another repo's worktree, by u
       issueKeys: new Map([[project.id, issueKeys]]),
     }),
   ).toMatchObject({ activeSeats: 1, idleSeats: 2 });
+});
+
+it("uses the registered PC identity for staffing, without hiding a different failed inventory (#356)", async () => {
+  const root = await mkdtemp(join(tmpdir(), "staffing-machine-"));
+  roots.push(root);
+  const store = new SettingsStore(join(root, "settings.json"));
+  const saved = await store.update((current) => ({
+    ...current,
+    machines: [{ id: "builder", ssh: "fixture-pc", shell: "powershell", aliases: ["old-pc"] }],
+    execution: {
+      ...current.execution,
+      connections: [
+        {
+          id: "offline",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "online",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "other",
+          machine: "builder",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "other",
+          ssh: { host: "fixture-pc", shell: "powershell" },
+        },
+        {
+          id: "unrelated",
+          machine: "another",
+          kind: "herdr",
+          capabilities: [],
+          enabled: true,
+          session: "work",
+          ssh: { host: "fixture-other", shell: "powershell" },
+        },
+      ],
+    },
+    agentHosts: {
+      connections: [
+        { id: "builder", ssh: "fixture-pc", shell: "powershell" },
+        { id: "old-pc", ssh: "fixture-pc", shell: "powershell" },
+        { id: "another", ssh: "fixture-other", shell: "powershell" },
+      ],
+    },
+  }));
+  const project = ProjectSchema.parse({
+    id: "kh2",
+    name: "KH2",
+    auto: true,
+    workspaces: [{ id: "kh2-work", machineId: "offline", platform: "windows", path: "C:\\Repos\\KH2" }],
+    workerCap: 4,
+  });
+  const raw = [
+    {
+      seatId: "online/t1",
+      occupantId: "one",
+      fleet: "online",
+      machine: "arbitrary-display",
+      workingDirectory: "c:/repos/kh2/work",
+      status: "working",
+    },
+    {
+      seatId: "other/t1",
+      occupantId: "one",
+      fleet: "other",
+      machine: "different-display",
+      workingDirectory: "C:\\Repos\\KH2\\work",
+      status: "working",
+    },
+    {
+      seatId: "online/t2",
+      occupantId: "two",
+      fleet: "online",
+      workingDirectory: "C:/Repos/KH2/idle",
+      status: "idle",
+    },
+    {
+      seatId: "unrelated/t1",
+      occupantId: "one",
+      fleet: "unrelated",
+      workingDirectory: "C:/Repos/KH2/work",
+      status: "working",
+    },
+  ];
+  const read = (failures: string[]) => autoStaffingCensus(raw, saved, new Set(failures));
+  const census = read(["herdr:offline"]);
+  const staffing = projectStaffing({
+    project: census.project(project),
+    seats: census.seats,
+    unavailableMachines: census.unavailableMachines,
+    queue: { state: "known", ready: [], backlog: [], blocked: [] },
+    plans: [],
+    started: { state: "known", total: 0, byState: {}, cap: null },
+  });
+  expect(staffing).toMatchObject({ activeSeats: 1, idleSeats: 1, occupiedSeats: 2 });
+  expect(census.unavailableMachines.has("builder")).toBe(false);
+  expect(census.connection("offline")).toBe("online");
+  expect(
+    census.project({ ...project, workspaces: project.workspaces.map((w) => ({ ...w, machineId: "old-pc" })) })
+      .workspaces[0]!.machineId,
+  ).toBe("builder");
+  expect(project.workspaces[0]!.machineId).toBe("offline"); // No settings/authority rebinding.
+  expect(read(["herdr:offline", "herdr:online"]).unavailableMachines.has("builder")).toBe(true);
+  expect(read(["herdr:other"]).unavailableMachines.has("builder")).toBe(true); // Same PC, different inventory.
+  expect(
+    read(["herdr:offline", "herdr:online", "herdr:other"]).seats.some((s) => s.machine === "builder"),
+  ).toBe(false);
+  const record = new AutoRoundRecord(join(root, "rounds"));
+  record.measured(
+    "lead",
+    [
+      {
+        ...(await measureVelocity(
+          project,
+          null,
+          {
+            outcomes: async () => ({ state: "unavailable", reason: "fixture" }),
+            history: async () => ({ state: "unknown", reason: "fixture" }),
+            churn: async () => ({ state: "unknown", reason: "fixture" }),
+            timeZone: "UTC",
+          },
+          at,
+        )),
+        staffing,
+      },
+    ],
+    at,
+  );
+  expect(new AutoRoundRecord(join(root, "rounds")).read()[0]!.projects[0]!.staffing).toMatchObject({
+    activeSeats: 1,
+    idleSeats: 1,
+    occupiedSeats: 2,
+  });
 });
