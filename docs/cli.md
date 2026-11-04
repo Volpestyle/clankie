@@ -802,7 +802,13 @@ a worker's `message_clankie` retries its binding lookup instead of failing with
 `binding_unavailable` (VUH-2208). A local fleet request refused the same way
 carries its fixed refusal code there too, such as `native_initial_unavailable`,
 `connection_changed` or `private_seat_lifetime_unavailable`; the code is a
-diagnostic and grants nothing (#564).
+diagnostic and grants nothing (#564). A definite local membership refusal
+keeps HTTP 403 `local_process_membership_required`, adds the fixed native code
+in `refusal` and a bounded explanation in `reason`, and asks the lead to inspect
+`clankie fleet status` and the worker's original pane/admission. The worker
+bridge preserves known refusal/observation codes in its diagnostic, including
+load-gate evidence; it never echoes arbitrary server text. These fields change
+neither membership nor retry/replay permission (#354).
 No expired proof or uncertain tool call is replayed.
 
 Doctor observes operator bridges separately from worker bridges; an operator
@@ -7748,9 +7754,10 @@ More than 1% terminal proof refusals in five
 minutes produces an alert once that window has at least 100 attempts and five
 refusals and stays elevated for at least one minute. Metrics count every
 refusal; the alert counts only what points at a fleet fault (#324). It leaves
-out `caller_exited` (the caller exited before its own check finished), every
-check from a pane that holds no Clankie hire (the owner's own sessions, the
-operator seat, a hand-started seat a lead adopted by messaging), and a hire's
+out `caller_exited` (the caller exited before its own check finished),
+`closed_socket` (the caller's connection ended), every check from a pane that holds no Clankie hire (the owner's own sessions, the
+operator seat, a hand-started seat a lead adopted by messaging, or a legacy
+ownership record with no explicit hire provenance), and a hire's
 `not_member` during the first minute after Clankie first sees it, while its
 admission completes. A hire's later `not_member` and its observation failures
 count, and so does a request that claims no pane. Startup and high machine load

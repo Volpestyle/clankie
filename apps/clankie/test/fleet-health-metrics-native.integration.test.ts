@@ -233,7 +233,10 @@ nativeIt(
           pane_changed: 1,
         },
       });
-      expect(snapshot.totals.transportDiagnostics.helper_unavailable).toBe(1);
+      // The empty initial observation gets one fresh retry (#574/#613).
+      // Both helper spawn failures remain diagnostics; together they are still
+      // one terminal refusal, pinned independently by the proof totals above.
+      expect(snapshot.totals.transportDiagnostics.helper_unavailable).toBe(2);
       expect(snapshot.windows[0].proofRefusalRate).toBe(16 / 17);
       expect(JSON.stringify(snapshot)).not.toContain(herdr.socketPath);
       expect(JSON.stringify(snapshot)).not.toMatch(/\bpid\b/u);

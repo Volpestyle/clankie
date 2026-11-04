@@ -32,6 +32,10 @@ const seatHookInputs = workerBin("seat-hook", "link", "codex-tool-catalog", "pan
 
 export const landingFsInputs = Object.fromEntries([
   [
+    "apps/clankie/test/fleet-refusal-native.integration.test.ts",
+    [...fleetInputs, "integrations/claude-plugin/worker/bin/admission.mjs"],
+  ],
+  [
     "apps/clankie/test/transcript-checkpoint.integration.test.ts",
     ["apps/clankie/test/fixtures/transcript-checkpoint-service.ts"],
   ],

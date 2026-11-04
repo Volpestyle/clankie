@@ -3,11 +3,17 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Socket } from "node:net";
 import type { HttpBindings, Http2Bindings } from "@hono/node-server";
-import type { HerdrBinding } from "@clankie/protocol";
+import {
+  FleetProofRefusalReasonSchema,
+  type FleetProofRefusalReason,
+  type HerdrBinding,
+} from "@clankie/protocol";
 import { z } from "zod";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
 import {
   FleetAdmissionUnavailableError,
+  FleetAdmissionRefusedError,
+  fleetAdmissionRefusedResponse,
   fleetAdmissionUnavailableResponse,
 } from "./local-fleet-admission.ts";
 
@@ -88,6 +94,7 @@ export class LocalFleetLink {
       pane: string,
       signal?: AbortSignal,
       context?: LocalFleetProofRequestContext,
+      reportRefusal?: (reason: FleetProofRefusalReason) => void,
     ): Promise<boolean>;
     projectProof?(
       socket: Socket,
@@ -182,10 +189,14 @@ export class LocalFleetLink {
               "Local fleet connection is unavailable",
               "connection_unavailable",
             );
-          const admitted = await this.options.prove(socket, pane, cancelled, context);
+          let refusal: FleetProofRefusalReason | undefined;
+          const admitted = await this.options.prove(socket, pane, cancelled, context, (reason) => {
+            if (FleetProofRefusalReasonSchema.safeParse(reason).success) refusal = reason;
+          });
           cancelled.throwIfAborted();
           if (!current())
             throw new FleetAdmissionUnavailableError("Local fleet connection changed", "connection_changed");
+          if (!admitted && refusal !== undefined) throw new FleetAdmissionRefusedError(refusal);
           return admitted;
         },
         projectProof: async (signal?: AbortSignal) => {
@@ -226,11 +237,11 @@ export class LocalFleetLink {
         this.options.projectProof !== undefined && /\/peer(?:s|-messages)(?:\/[^/]+)?$/u.test(path);
       if (path !== "/v1/fleet/mcp" && !nativePeer) {
         try {
-          if (!(await identity.validate()))
-            return Response.json({ error: "local_process_membership_required" }, { status: 403 });
+          if (!(await identity.validate())) return fleetAdmissionRefusedResponse();
         } catch (error) {
           if (request.signal.aborted)
             return Response.json({ error: "local_admission_cancelled" }, { status: 504 });
+          if (error instanceof FleetAdmissionRefusedError) return fleetAdmissionRefusedResponse(error.code);
           if (error instanceof FleetAdmissionUnavailableError)
             return fleetAdmissionUnavailableResponse(error.code ? { observation: error.code } : {});
           throw error;

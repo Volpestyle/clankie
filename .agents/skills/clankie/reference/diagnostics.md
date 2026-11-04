@@ -20,6 +20,20 @@ Project roles, caps, hiring and tracker binding are separate. Tool access is not
 permission for every write. If tools are absent, report the machine/session,
 catalog and refusal so the lead can inspect admission, the setting and account.
 
+A local HTTP 403 `local_process_membership_required` names the native refusal
+in `refusal` (for example `not_member`, `pane_unavailable`, `pane_moved`) and gives
+a recovery action in `reason`. Report that code to the lead, who inspects
+`clankie fleet status` and the worker's original pane/admission. A 503
+`fleet_admission_unavailable` carries its fixed code in `observation`; it is an
+unavailable check, not proof of lost membership. The bridge keeps known codes in
+its diagnostic and load evidence. Neither a diagnostic nor repeated retry can
+grant admission or authorize replay of an uncertain operation.
+
+Fleet refusal alerts require explicit hire provenance. Personal/adopted panes
+and legacy ownership records without it stay visible in metrics but do not page.
+An ended caller or connection also stays in telemetry without counting as a
+fleet fault. A known hire's sustained observation failure still alerts.
+
 ## Linear connectors
 
 Never substitute a harness's independent Linear connector. Claude worker and operator plugins deny

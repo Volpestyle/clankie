@@ -3,6 +3,8 @@ import type { FleetSettings } from "@clankie/settings";
 import type { LocalFleetIdentity } from "./local-fleet-link.ts";
 import {
   FleetAdmissionUnavailableError,
+  FleetAdmissionRefusedError,
+  fleetAdmissionRefusedResponse,
   fleetAdmissionUnavailableResponse,
 } from "./local-fleet-admission.ts";
 import type { ProjectProcessProof } from "./project-process-proof.ts";
@@ -307,9 +309,6 @@ const receiptClassification = (receipt: Pick<WorkerCallReceipt, "readSnapshot" |
 export const FLEET_CATALOG_REVISION_HEADER = "x-clankie-catalog-revision";
 // Settings are owner-authored files; one service-side read covers every parked seat.
 const CATALOG_INPUTS_WATCH_MS = 5_000;
-// The local listener delegates MCP admission to this boundary. Preserve its
-// public refusal without exposing process, account or credential details.
-class LocalFleetAdmissionError extends Error {}
 async function beforeWorkerDeadline<T>(
   signal: AbortSignal,
   name: string,
@@ -1371,8 +1370,7 @@ export class WorkerMcp {
     return this.fleetRequest(
       request,
       async (signal) => {
-        if (!(await identity.validate(signal)))
-          throw new LocalFleetAdmissionError("Local fleet membership unavailable");
+        if (!(await identity.validate(signal))) throw new FleetAdmissionRefusedError();
         const fleet = identity.fleet ?? "default";
         const authorization = await this.fleetAuthorization(
           fleet,
@@ -1564,8 +1562,7 @@ export class WorkerMcp {
           { error: "worker_authentication_timeout", reason: "Worker admission timed out or was cancelled" },
           { status: 504 },
         );
-      if (error instanceof LocalFleetAdmissionError)
-        return Response.json({ error: "local_process_membership_required" }, { status: 403 });
+      if (error instanceof FleetAdmissionRefusedError) return fleetAdmissionRefusedResponse(error.code);
       if (error instanceof FleetAdmissionUnavailableError)
         return fleetAdmissionUnavailableResponse(error.code ? { observation: error.code } : {});
       return Response.json(

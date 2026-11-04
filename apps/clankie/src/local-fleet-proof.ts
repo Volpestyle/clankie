@@ -224,12 +224,20 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
     pane: string,
     signal?: AbortSignal,
     context?: LocalFleetProofRequestContext,
+    reportRefusal?: (reason: FleetProofRefusalReason) => void,
   ): Promise<boolean> => {
     const emit = (event: LocalFleetProofDiagnostic) => diagnostic(options, event, pane, context);
     signal?.throwIfAborted();
     let refusalRecorded = false;
     const refuse = (reason: Extract<LocalFleetProofDiagnostic, { source: "proof" }>["reason"]) => {
       emit({ source: "proof", reason });
+      // Per invocation: concurrent requests cannot overwrite another request's
+      // refusal. Reporting never grants membership or changes the proof outcome.
+      try {
+        reportRefusal?.(reason);
+      } catch {
+        /* A diagnostic consumer cannot change admission. */
+      }
       refusalRecorded = true;
       if (
         admission &&

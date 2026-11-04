@@ -89,6 +89,7 @@ async function gate() {
   };
   let service: ChildProcess | undefined;
   let herdrProcess: ChildProcess | undefined;
+  let stopHerdr: (() => Promise<unknown>) | undefined;
   let provider: Awaited<ReturnType<typeof startLinearFixture>> | undefined;
   let fixture: Awaited<ReturnType<typeof seedCodex>> | undefined;
   let started = 0;
@@ -164,6 +165,8 @@ async function gate() {
     Object.assign(env, {
       PATH: `${join(root, "bin")}:${dirname(herdr)}:${process.env.PATH ?? ""}`,
       HOME: join(root, "home"),
+      NODE_ENV: "test",
+      VITEST: "true",
       HERDR_SOCKET_PATH: socket,
       XDG_CONFIG_HOME: join(root, "xdg"),
       XDG_STATE_HOME: join(root, "xdg"),
@@ -196,13 +199,14 @@ async function gate() {
     );
     await execute("git", ["init", "--quiet", workspace]);
     fixture = await seedCodex(codex, workspace, workers, largeMb);
-    herdrProcess = spawn(herdr, ["server"], { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    herdrProcess = spawn(herdr, ["server"], { env, stdio: ["ignore", "pipe", "pipe"] });
     herdrProcess.stdout?.on("data", (chunk) => logs.push(String(chunk)));
     herdrProcess.stderr?.on("data", (chunk) => logs.push(String(chunk)));
     const herdrRun = async (args: string[]) => {
       const { stdout } = await execute(herdr, args, { env, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 });
       return stdout.trim() ? JSON.parse(stdout) : undefined;
     };
+    stopHerdr = () => herdrRun(["server", "stop"]);
     const deadline = Date.now() + 30_000;
     while (true) {
       try {
@@ -227,7 +231,6 @@ async function gate() {
     await writeFile(join(root, "service.json"), JSON.stringify(config));
     service = fork(script, ["--internal-service", join(root, "service.json")], {
       env,
-      detached: true,
       stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     service.stdout?.on("data", (chunk) => logs.push(String(chunk)));
@@ -552,23 +555,30 @@ async function gate() {
         2,
       ),
     );
-    // Both groups were created by this invocation; isolated Herdr owns every
-    // fixture pane. Never inspect, stop or close the owner's active server.
+    // Keep children in the governor's process group. Herdr owns its fixture
+    // PTYs: stop that private namespace first, then reap only the exact children
+    // this invocation started. Never signal a process group or the owner's server.
+    if (herdrProcess?.exitCode === null && herdrProcess.signalCode === null) {
+      try {
+        await stopHerdr?.();
+      } catch {
+        // The exact owned daemon is terminated below if its control route failed.
+      }
+    }
     const stopOwned = async (child: ChildProcess | undefined) => {
-      if (!child?.pid || child.exitCode !== null) return;
+      if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
+      const running = () => child.exitCode === null && child.signalCode === null;
+      const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
       if (child.connected) child.send("stop");
       else child.kill("SIGTERM");
-      await Promise.race([new Promise<void>((resolve) => child.once("exit", () => resolve())), sleep(3000)]);
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        /* Already closed. */
+      await Promise.race([exited, sleep(3000)]);
+      if (running()) {
+        child.kill("SIGTERM");
+        await Promise.race([exited, sleep(1000)]);
       }
-      await sleep(250);
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch {
-        /* Already closed. */
+      if (running()) {
+        child.kill("SIGKILL");
+        await exited;
       }
     };
     await stopOwned(service);

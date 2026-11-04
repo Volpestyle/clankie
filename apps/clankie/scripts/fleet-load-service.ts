@@ -16,6 +16,8 @@ export interface FleetLoadServiceConfig {
   herdr: string;
   provider: string;
   bearer: string;
+  /** Integration-only alert clock, separate from all native/process/admission clocks. */
+  proofMetricsClock?: number;
   /** Explicit private registry for the separate manual resource burst only. */
   fleetResources?: { directory: string; policy: FleetResourcePolicy };
 }
@@ -169,10 +171,33 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     ...nativeModule.fleetMembershipNative(binding),
     hires: captain,
   });
+  let proofMetricsNow = config.proofMetricsClock ?? Date.now();
+  const proofMetrics =
+    config.proofMetricsClock === undefined
+      ? undefined
+      : new (
+          (await load(
+            "apps/clankie/src/fleet-health-metrics.ts",
+          )) as typeof import("../src/fleet-health-metrics.ts")
+        ).FleetHealthMetrics({
+          now: () => proofMetricsNow,
+          caller: (pane) => captain.fleetProofCaller?.(pane),
+          onAggregateProofAlert: (rates, callers) => {
+            process.send?.({
+              kind: "proof_alert",
+              refusals: rates.proof.refusals,
+              panes: callers
+                .filter((caller) => caller.window.proof.refusals > 0)
+                .map((caller) => caller.claimedPane),
+            });
+            return true;
+          },
+        });
   let admissions = 0;
   const diagnostics: NonNullable<
     Parameters<typeof proofModule.localFleetAdmissionProof>[0]["diagnostics"]
   > = (event, pane, context) => {
+    proofMetrics?.observeProof("fleet", event, pane);
     if (event.source === "proof_success" || event.source === "socket_owner") return;
     // Keep refusal evidence outside the rolling service-log tail. No socket,
     // credentials, question input or caller-supplied process identity is serialized.
@@ -201,6 +226,7 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     agentSessions,
     localFleet: link,
     fleetProjectMembership: membership,
+    ...(proofMetrics ? { fleetHealthMetrics: proofMetrics } : {}),
     eventLogPath: join(config.root, "events.jsonl"),
     herdrBinding: () => ({ runtime: "external", session: "default", socketPath: config.socket }),
     ...(fleetResources ? { fleetResources } : {}),
@@ -267,6 +293,13 @@ export async function startFleetLoadService(config: FleetLoadServiceConfig) {
     await Promise.all(servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
   };
   process.on("message", (message) => {
+    if (proofMetrics && message && typeof message === "object" && "advanceProofMetricsMs" in message) {
+      const advance = Number(message.advanceProofMetricsMs);
+      if (Number.isFinite(advance) && advance >= 0 && advance <= 3_600_000) {
+        proofMetricsNow += advance;
+        process.send?.({ kind: "proof_clock", now: proofMetricsNow });
+      }
+    }
     if (message === "measure") {
       measuring = true;
       previousCpu = process.cpuUsage();

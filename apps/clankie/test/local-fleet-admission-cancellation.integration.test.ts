@@ -296,7 +296,12 @@ localIt(
       f.state.shell = 99;
       expect(await f.initialize()).toEqual({
         status: 403,
-        body: { error: "local_process_membership_required" },
+        body: {
+          error: "local_process_membership_required",
+          refusal: "not_member",
+          reason:
+            "The requesting process is not in the claimed pane's native lineage or registered private seat. Ask the lead to inspect clankie fleet status and confirm this worker's original pane and native admission before retrying.",
+        },
       });
       expect(f.state.controls).toBe(1);
       expect((await f.journal()).filter((row) => row.mode === "proof")).toHaveLength(1);
@@ -357,7 +362,12 @@ localIt("rechecks fresh native proof after census failure without admitting a re
     f.state.shell = 99;
     expect(await f.initialize()).toEqual({
       status: 403,
-      body: { error: "local_process_membership_required" },
+      body: {
+        error: "local_process_membership_required",
+        refusal: "not_member",
+        reason:
+          "The requesting process is not in the claimed pane's native lineage or registered private seat. Ask the lead to inspect clankie fleet status and confirm this worker's original pane and native admission before retrying.",
+      },
     });
   } finally {
     await f.close();
@@ -406,7 +416,12 @@ localIt("distinguishes malformed pane observation from Herdr's definitive missin
     f.state.missingPane = true;
     expect(await f.initialize()).toEqual({
       status: 403,
-      body: { error: "local_process_membership_required" },
+      body: {
+        error: "local_process_membership_required",
+        refusal: "pane_unavailable",
+        reason:
+          "Herdr no longer reports the claimed pane. Ask the lead to inspect clankie fleet status and confirm this worker's original pane and native admission before retrying.",
+      },
     });
   } finally {
     await f.close();

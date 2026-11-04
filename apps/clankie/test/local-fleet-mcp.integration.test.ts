@@ -215,7 +215,11 @@ localIt(
       for (const method of ["initialize", "tools/call"]) {
         const result = await f.rpc(method);
         expect(result.response.status).toBe(403);
-        expect(result.body).toEqual({ error: "local_process_membership_required" });
+        expect(result.body).toEqual({
+          error: "local_process_membership_required",
+          reason:
+            "This request has no verified local fleet membership. Ask the lead to inspect clankie fleet status and confirm this worker's original pane and native admission before retrying.",
+        });
       }
       const malformed = await f.rpc("initialize", {}, { bridgeId: "not-a-uuid-secret" });
       expect(malformed.response.status).toBe(403);
@@ -269,7 +273,11 @@ localIt("reauthenticates the current HTTP socket after the initialize socket clo
     f.state.admitted = false;
     const revoked = await f.rpc("tools/list", {}, { session });
     expect(revoked.response.status).toBe(403);
-    expect(revoked.body).toEqual({ error: "local_process_membership_required" });
+    expect(revoked.body).toEqual({
+      error: "local_process_membership_required",
+      reason:
+        "This request has no verified local fleet membership. Ask the lead to inspect clankie fleet status and confirm this worker's original pane and native admission before retrying.",
+    });
   } finally {
     await f.close();
   }
