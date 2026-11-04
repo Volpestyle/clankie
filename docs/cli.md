@@ -2287,10 +2287,16 @@ named by agent id when it is a known agent. A number Clankie does not have is
 `"unknown"`. It does not include homes, emails, session ids or credentials, and
 it hires nothing. Opt in with `includeMachineResources: true` on the
 `fleet_capacity` request to add a `machineResources` map keyed by canonical
-machine IDs, including joined hosts. Each available entry gives an observation
-time and full, light and server slots, used, queued and remaining counts. Missing
-lane readings are `"unknown"`; offline or unsupported hosts are unavailable,
-never free capacity. This summary omits holders and command paths; the owner
+machine IDs, including joined hosts. Each entry says `source: "host-reported"`
+and `advisory: true`. Available entries carry the host's own `observedAt`
+measurement time and full, light and server slots, used, queued and remaining
+counts. Home receipt time never replaces a host measurement. Joined replies
+must echo the current request nonce. Missing or mismatched correlation, missing
+time, age over five seconds or a clock over one second ahead makes the reading
+unavailable, with no free capacity counted; missing time remains `"unknown"`.
+The host supplies these advisory numbers and may misreport them; its own local
+governor decides admission. Missing lane readings are `"unknown"`; offline or
+unsupported hosts are unavailable, never free capacity. This summary omits holders and command paths; the owner
 resource route retains those details. Without the opt-in, the response and its
 local `heavy` field keep their existing shape. `message_agent` can carry
 up to four images (by public https address or as base64), which the agent finds

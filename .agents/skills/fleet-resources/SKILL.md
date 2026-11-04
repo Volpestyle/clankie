@@ -129,8 +129,15 @@ budget and crash/cancel recovery. Simulator capacity is zero without macOS.
 
 Connected leads may opt in to `fleet_capacity` with
 `includeMachineResources: true` for canonical per-machine full/light/server
-counts and availability. An unavailable reading is never a free slot. Holder
-identities and command paths stay in the owner's resource route.
+counts and availability. Each entry is labelled `source: "host-reported"` and
+`advisory: true`; admission stays with that host's local governor. `observedAt`
+is the host's measurement time and is never replaced with home receipt time.
+Joined reports echo a fresh request nonce. A mismatched/missing nonce, missing
+measurement, age over five seconds, or clock more than one second ahead makes
+the reading unavailable and contributes no free capacity. Missing time stays
+`"unknown"`. An authenticated host can misreport its own numbers, so these are
+advisory readings. Holder identities and command paths stay in the owner's
+resource route.
 
 ## Pairings created by automation
 

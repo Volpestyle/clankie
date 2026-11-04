@@ -206,11 +206,21 @@ export const FleetCapacitySchema = z
         FleetResourceMachineIdSchema,
         z.discriminatedUnion("status", [
           z.strictObject({
+            source: z.literal("host-reported"),
+            advisory: z.literal(true),
             status: z.literal("unavailable"),
-            observedAt: z.iso.datetime(),
-            reason: z.enum(["governor-unavailable", "probe-unavailable", "unsupported-platform"]),
+            observedAt: knownInstant,
+            reason: z.enum([
+              "governor-unavailable",
+              "probe-unavailable",
+              "unsupported-platform",
+              "stale-observation",
+              "uncorrelated-observation",
+            ]),
           }),
           z.strictObject({
+            source: z.literal("host-reported"),
+            advisory: z.literal(true),
             status: z.literal("available"),
             observedAt: z.iso.datetime(),
             full: resourceLane(),

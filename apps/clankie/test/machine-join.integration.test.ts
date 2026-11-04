@@ -1,5 +1,5 @@
 import { runHeadlessCaptainCommand } from "../../tui/bin/headless-captain.ts";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomUUID, randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
@@ -11,7 +11,11 @@ import { Hono } from "hono";
 import { expect, test, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
-import { MachineJoinLeaseSchema, MachineJoinStatusSchema } from "@clankie/protocol/machine-join";
+import {
+  type JoinedMachineResourceResult,
+  MachineJoinLeaseSchema,
+  MachineJoinStatusSchema,
+} from "@clankie/protocol/machine-join";
 import { machineJoinHash, machineJoinKey } from "../src/machine-join-crypto.ts";
 import { openGatewayValue, sealGatewayValue } from "../src/gateway-encryption.ts";
 import { machineJoinLeaseAad, machineJoinExchangeAad } from "@clankie/protocol/machine-join";
@@ -1346,8 +1350,12 @@ test.each([
     });
     try {
       for (const request of [
-        { action: "status" as const },
-        { action: "configure" as const, policy: FleetResourcePolicySchema.parse({ heavySlots: 1 }) },
+        { action: "status" as const, requestNonce: randomUUID() },
+        {
+          action: "configure" as const,
+          requestNonce: randomUUID(),
+          policy: FleetResourcePolicySchema.parse({ heavySlots: 1 }),
+        },
       ]) {
         expect(
           await f.joins.request(credential.lease.machineId, { kind: "resources", request }),
@@ -1427,7 +1435,7 @@ test.runIf(nativeResourcesSupported)(
       expect(
         await f.joins.request(credential.lease.machineId, {
           kind: "resources",
-          request: { action: "status" },
+          request: { action: "status", requestNonce: randomUUID() },
         }),
       ).toMatchObject({ ok: false, error: "machine_access_refused" });
     } finally {
@@ -1467,7 +1475,11 @@ test.runIf(nativeResourcesSupported)(
       });
       await until(() => locked);
       const writing = ports.resources!(
-        { action: "configure", policy: FleetResourcePolicySchema.parse({ heavySlots: 7 }) },
+        {
+          action: "configure",
+          requestNonce: randomUUID(),
+          policy: FleetResourcePolicySchema.parse({ heavySlots: 7 }),
+        },
         new AbortController().signal,
         () => {
           checks++;
@@ -1568,4 +1580,149 @@ test.runIf(nativeResourcesSupported)(
     }
   },
   15_000,
+);
+
+test.runIf(nativeResourcesSupported)(
+  "expired or uncorrelated host reports contribute no free capacity while the real host is busy",
+  async () => {
+    const f = await fixture();
+    const credential = await f.approve();
+    await saveJoinedMachineCredential(f.store, credential);
+    const directory = join(f.root, "reported-resources");
+    const native = joinedMachineResourcePorts({ directory, env: {} });
+    const runner = createResourceGovernor({ directory });
+    await runner.configure({ ...defaultResourcePolicy(), heavySlots: 1, simulatorSlots: 0 });
+    const abort = new AbortController();
+    let mode: "live" | "replay" | "aged" | "missing-time" | "future" = "live";
+    let cached: JoinedMachineResourceResult | undefined;
+    const oldTime = Date.now() - 6_000;
+    const channel = runJoinedMachineChannel(credential, {
+      store: f.store,
+      signal: abort.signal,
+      intervalMs: 10,
+      ports: {
+        ...native,
+        resources: async (request, signal, guard) => {
+          if (mode === "live") {
+            cached = await native.resources!(request, signal, guard);
+            return cached;
+          }
+          if (cached?.status !== "available") throw Error("fixture_snapshot_missing");
+          const report = structuredClone(cached);
+          if (mode === "replay") return report; // Old nonce inside a freshly authenticated transport result.
+          report.requestNonce = request.requestNonce;
+          if (mode === "missing-time") delete report.snapshot.pressure;
+          else
+            report.snapshot.pressure = {
+              ...report.snapshot.pressure!,
+              sampledAtMs: mode === "future" ? Date.now() + 60_000 : oldTime,
+            };
+          return report;
+        },
+      },
+    });
+    const id = credential.lease.machineId;
+    const machines = createMachineFleetResources({
+      settings: () => f.settings.load(),
+      remote: joinedFleetResources(f.joins),
+      joined: f.joins,
+    });
+    const capacityReader = (now: () => number = Date.now) =>
+      createFleetCapacityReader({
+        now,
+        settings: () => f.settings.load(),
+        accounts: async () => ({ machine: "local", unread: true }),
+        seats: async () => [],
+        leadSeatId: () => undefined,
+        heavy: () => undefined,
+        tracker: () => undefined,
+        history: new UsageHistory(join(f.root, "capacity-history.json")),
+        machineResources: { ids: async () => [id], status: (machine) => machines.status(machine) },
+      });
+    const readCapacity = capacityReader();
+    const release = join(f.root, "release-heavy");
+    let job: Promise<number> | undefined;
+    try {
+      const first = await machines.status(id);
+      expect(first).toMatchObject({
+        status: "available",
+        snapshot: { capacity: { heavySlots: 1, used: 0 } },
+      });
+      if (cached?.status !== "available") throw Error("fixture_snapshot_missing");
+      const reportedAt = new Date(cached.snapshot.pressure!.sampledAtMs).toISOString();
+      job = runner.runHeavy(process.execPath, [
+        "-e",
+        `const fs=require('node:fs');const wait=()=>fs.existsSync(${JSON.stringify(release)})?process.exit(0):setTimeout(wait,20);wait();`,
+      ]);
+      await until(async () => (await runner.snapshot()).capacity.used === 1);
+      mode = "replay";
+      expect(await machines.status(id)).toMatchObject({
+        status: "unavailable",
+        reason: "uncorrelated-observation",
+        observedAt: reportedAt,
+      });
+      const replayed = (await readCapacity(true)).machineResources![id]!;
+      expect(replayed).toMatchObject({
+        source: "host-reported",
+        advisory: true,
+        status: "unavailable",
+        reason: "uncorrelated-observation",
+        observedAt: reportedAt,
+      });
+      expect(replayed).not.toHaveProperty("full");
+      mode = "aged";
+      expect(await machines.status(id)).toMatchObject({
+        status: "unavailable",
+        reason: "stale-observation",
+        observedAt: new Date(oldTime).toISOString(),
+      });
+      const stale = (await readCapacity(true)).machineResources![id]!;
+      expect(stale).toMatchObject({
+        source: "host-reported",
+        advisory: true,
+        status: "unavailable",
+        reason: "stale-observation",
+        observedAt: new Date(oldTime).toISOString(),
+      });
+      expect(stale).not.toHaveProperty("full");
+      mode = "missing-time";
+      expect((await readCapacity(true)).machineResources![id]).toMatchObject({
+        status: "unavailable",
+        reason: "stale-observation",
+        observedAt: "unknown",
+      });
+      mode = "future";
+      expect((await readCapacity(true)).machineResources![id]).toMatchObject({
+        status: "unavailable",
+        reason: "stale-observation",
+      });
+      mode = "live";
+      const current = (await readCapacity(true)).machineResources![id]!;
+      expect(current).toMatchObject({
+        source: "host-reported",
+        advisory: true,
+        status: "available",
+        full: { slots: 1, used: 1, queued: 0, remaining: 0 },
+      });
+      if (cached?.status !== "available") throw Error("fixture_snapshot_missing");
+      expect(current.observedAt).toBe(new Date(cached.snapshot.pressure!.sampledAtMs).toISOString());
+      const delayed = (await capacityReader(() => Date.now() + 6_000)(true)).machineResources![id]!;
+      expect(delayed).toMatchObject({
+        source: "host-reported",
+        advisory: true,
+        status: "unavailable",
+        reason: "stale-observation",
+      });
+      expect(delayed).not.toHaveProperty("full");
+      if (cached?.status !== "available") throw Error("fixture_snapshot_missing");
+      expect(delayed.observedAt).toBe(new Date(cached.snapshot.pressure!.sampledAtMs).toISOString());
+    } finally {
+      abort.abort();
+      await channel;
+      await writeFile(release, "");
+      await job;
+      await runner.close();
+      await f.close();
+    }
+  },
 );

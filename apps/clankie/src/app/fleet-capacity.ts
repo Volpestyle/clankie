@@ -2,6 +2,7 @@ import {
   FLEET_REVIEW_BUDGET,
   FleetCapacitySchema,
   FleetResourceSnapshotSchema,
+  fleetResourceObservationIsFresh,
   FleetMachineResourceSnapshotSchema,
   FleetResourceMachineIdSchema,
   type FleetCapacity,
@@ -431,9 +432,22 @@ export function createFleetCapacityReader(input: {
           if (!resources) throw Error("resource_reader_unavailable");
           const reading = FleetMachineResourceSnapshotSchema.parse(await resources.status(machine));
           if (reading.machine !== machine) throw Error("resource_identity_mismatch");
-          const observedAt = new Date(now()).toISOString();
+          const sampledAt =
+            reading.status === "available" ? reading.snapshot.pressure?.sampledAtMs : undefined;
+          const reportedAt =
+            reading.observedAt ?? (sampledAt === undefined ? undefined : new Date(sampledAt).toISOString());
+          const observation = {
+            source: "host-reported" as const,
+            advisory: true as const,
+            observedAt: reportedAt ?? "unknown",
+          };
           if (reading.status === "unavailable")
-            return [machine, { status: reading.status, reason: reading.reason, observedAt }] as const;
+            return [machine, { ...observation, status: reading.status, reason: reading.reason }] as const;
+          if (reportedAt === undefined || !fleetResourceObservationIsFresh(Date.parse(reportedAt), now()))
+            return [
+              machine,
+              { ...observation, status: "unavailable" as const, reason: "stale-observation" as const },
+            ] as const;
           const snapshot = reading.snapshot;
           const lane = (slots: number | undefined, used: number | undefined, queued: number | undefined) =>
             slots === undefined || used === undefined || queued === undefined
@@ -442,8 +456,8 @@ export function createFleetCapacityReader(input: {
           return [
             machine,
             {
+              ...observation,
               status: "available" as const,
-              observedAt,
               full: lane(
                 snapshot.capacity.heavySlots,
                 snapshot.capacity.used,
@@ -465,9 +479,11 @@ export function createFleetCapacityReader(input: {
           return [
             machine,
             {
+              source: "host-reported" as const,
+              advisory: true as const,
               status: "unavailable" as const,
               reason: "probe-unavailable" as const,
-              observedAt: new Date(now()).toISOString(),
+              observedAt: "unknown" as const,
             },
           ] as const;
         }

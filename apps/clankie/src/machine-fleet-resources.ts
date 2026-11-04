@@ -18,8 +18,17 @@ export interface RemoteFleetResourceHost {
     machine: string,
     signal?: AbortSignal,
   ): Promise<
-    | { machine: string; specs: FleetResourceMachineSpecs; snapshot: FleetResourceSnapshot }
-    | { machine: string; unavailable: "unsupported-platform" }
+    | {
+        machine: string;
+        specs: FleetResourceMachineSpecs;
+        snapshot: FleetResourceSnapshot;
+        observedAt?: string;
+      }
+    | {
+        machine: string;
+        unavailable: Extract<FleetMachineResourceSnapshot, { status: "unavailable" }>["reason"];
+        observedAt?: string;
+      }
     | undefined
   >;
   configure(machine: string, policy: FleetResourcePolicy, signal?: AbortSignal): Promise<void>;
@@ -70,13 +79,15 @@ export function createMachineFleetResources(input: {
       const machine = resourceMachine(settings, selector, input.joined);
       const policy = machineResourcePolicy(settings, machine);
       const unavailable = (
-        reason: "governor-unavailable" | "probe-unavailable" | "unsupported-platform",
+        reason: Extract<FleetMachineResourceSnapshot, { status: "unavailable" }>["reason"],
+        observedAt?: string,
       ): FleetMachineResourceSnapshot => ({
         schemaVersion: 1,
         machine,
         policy,
         status: "unavailable",
         reason,
+        ...(observedAt === undefined ? {} : { observedAt }),
       });
       if (machine === "local") {
         const snapshot = input.local?.status();
@@ -99,7 +110,7 @@ export function createMachineFleetResources(input: {
           : undefined;
         if (!host) return unavailable("governor-unavailable");
         if (host.machine !== machine) return unavailable("probe-unavailable");
-        if ("unavailable" in host) return unavailable(host.unavailable);
+        if ("unavailable" in host) return unavailable(host.unavailable, host.observedAt);
         return FleetMachineResourceSnapshotSchema.parse({
           schemaVersion: 1,
           machine,
@@ -107,6 +118,7 @@ export function createMachineFleetResources(input: {
           status: "available",
           specs: host.specs,
           snapshot: host.snapshot,
+          ...(host.observedAt === undefined ? {} : { observedAt: host.observedAt }),
         });
       } catch {
         return unavailable("probe-unavailable");

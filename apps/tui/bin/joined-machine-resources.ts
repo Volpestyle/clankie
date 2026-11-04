@@ -33,7 +33,8 @@ export function joinedMachineResourcePorts(
     async resources(raw, signal, guard) {
       const request = JoinedMachineResourceRequestSchema.parse(raw);
       guard();
-      if (!governor) return { status: "unavailable", reason: "unsupported-platform" };
+      if (!governor)
+        return { status: "unavailable", reason: "unsupported-platform", requestNonce: request.requestNonce };
       const specs = {
         platform: platform === "darwin" ? ("darwin" as const) : ("linux" as const),
         cores: availableParallelism(),
@@ -49,6 +50,7 @@ export function joinedMachineResourcePorts(
       guard();
       return JoinedMachineResourceResultSchema.parse({
         status: "available",
+        requestNonce: request.requestNonce,
         specs,
         snapshot:
           platform === "darwin"

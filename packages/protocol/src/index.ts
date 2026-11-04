@@ -814,6 +814,7 @@ export {
 export { RoomHandoffMetadataSchema, type RoomHandoffMetadata } from "./operator-conversations.ts";
 export {
   FLEET_RESOURCES_PATH,
+  fleetResourceObservationIsFresh,
   FLEET_SIMULATORS_PATH,
   FleetResourceMachineIdSchema,
   FleetResourceMachineSpecsSchema,

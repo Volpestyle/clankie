@@ -117,16 +117,26 @@ export const JoinedMachinePolicySchema = z
   .strict();
 /** Metadata/policy only. Heavy jobs always execute against the joining host's local registry. */
 export const JoinedMachineResourceRequestSchema = z.discriminatedUnion("action", [
-  z.strictObject({ action: z.literal("status") }),
-  z.strictObject({ action: z.literal("configure"), policy: FleetResourcePolicySchema }),
+  z.strictObject({ action: z.literal("status"), requestNonce: z.uuid() }),
+  z.strictObject({
+    action: z.literal("configure"),
+    requestNonce: z.uuid(),
+    policy: FleetResourcePolicySchema,
+  }),
 ]);
 export const JoinedMachineResourceResultSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("available"),
+    /** Optional only so an older or unbound report becomes explicitly unavailable. */
+    requestNonce: z.uuid().optional(),
     specs: FleetResourceMachineSpecsSchema,
     snapshot: FleetResourceSnapshotSchema,
   }),
-  z.strictObject({ status: z.literal("unavailable"), reason: z.literal("unsupported-platform") }),
+  z.strictObject({
+    status: z.literal("unavailable"),
+    reason: z.literal("unsupported-platform"),
+    requestNonce: z.uuid().optional(),
+  }),
 ]);
 export type JoinedMachineResourceRequest = z.infer<typeof JoinedMachineResourceRequestSchema>;
 export type JoinedMachineResourceResult = z.infer<typeof JoinedMachineResourceResultSchema>;
