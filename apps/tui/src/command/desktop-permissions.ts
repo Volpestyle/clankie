@@ -43,6 +43,10 @@ function run() {
   const { stdout } = await exec("/usr/bin/osascript", ["-l", "JavaScript", "-e", script], {
     timeout: 10_000,
     maxBuffer: 4096,
+  }).catch(() => {
+    throw Error(
+      "No permission report from the acting terminal. Run this check inside that Mac terminal app.",
+    );
   });
   return DesktopActorPermissionsSchema.parse(JSON.parse(stdout));
 }

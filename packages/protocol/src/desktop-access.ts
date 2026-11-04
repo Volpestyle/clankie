@@ -48,6 +48,7 @@ export const DesktopAccessSnapshotSchema = z.strictObject({
   leadModes: z.record(DesktopLeadIdSchema, DesktopModeSchema),
   selectedLead: DesktopLeadIdSchema.optional(),
   selectedMode: DesktopModeSchema,
+  /** Ceiling-bounded preference, not runtime/VM readiness or authorization. */
   effectiveMode: DesktopModeSchema,
   accessLevel: MachineAccessLevelSchema,
   permissions: DesktopPermissionsSnapshotSchema,

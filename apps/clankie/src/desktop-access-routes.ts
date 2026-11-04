@@ -24,6 +24,8 @@ export function createDesktopAccessRoutes(options: {
   const app = new Hono();
   const authorizeRoute = async (context: import("hono").Context, next: import("hono").Next) => {
     context.header("cache-control", "no-store");
+    if (context.req.method === "POST" && new URL(context.req.url).search)
+      return context.json({ error: "malformed" }, 400);
     const authorize =
       context.req.method === "GET"
         ? options.read

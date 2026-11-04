@@ -12,16 +12,27 @@ import type { ClankieSettings, SettingsStore } from "@clankie/settings";
 /** Permission observations inform the owner only. They never authorize an operation. */
 export class DesktopAccess {
   private readonly observations = new Map<string, DesktopActorPermissions>();
+  private readonly settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>;
+  private readonly access: (settings: ClankieSettings, id: string) => MachineAccessLevel;
+  private readonly now: () => number;
   constructor(
-    private readonly settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
-    private readonly access: (settings: ClankieSettings, id: string) => MachineAccessLevel,
-    private readonly now: () => number = Date.now,
-  ) {}
+    settings: Pick<SettingsStore, "load"> & Partial<Pick<SettingsStore, "update">>,
+    access: (settings: ClankieSettings, id: string) => MachineAccessLevel,
+    now: () => number = Date.now,
+  ) {
+    this.settings = settings;
+    this.access = access;
+    this.now = now;
+  }
 
   snapshot(current: ClankieSettings, machineId: string, lead?: string): DesktopAccessSnapshot {
-    const choice = current.computer.machines[machineId] ?? DesktopChoiceSchema.parse({});
-    const selectedMode = (lead === undefined ? undefined : choice.leadModes[lead]) ?? choice.desktopMode;
-    const accessLevel = this.access(current, machineId);
+    const choice = Object.hasOwn(current.computer.machines, machineId)
+      ? current.computer.machines[machineId]!
+      : DesktopChoiceSchema.parse({});
+    const selectedMode =
+      (lead !== undefined && Object.hasOwn(choice.leadModes, lead) ? choice.leadModes[lead] : undefined) ??
+      choice.desktopMode;
+    const accessLevel = current.autonomy.watch ? "portal" : this.access(current, machineId);
     const observation = this.observations.get(machineId);
     return {
       schemaVersion: 1,
@@ -35,7 +46,8 @@ export class DesktopAccess {
       permissions:
         observation === undefined
           ? { state: "unavailable", reason: "not_checked" }
-          : this.now() - Date.parse(observation.observedAt) > 60_000
+          : this.now() - Date.parse(observation.observedAt) > 60_000 ||
+              this.now() < Date.parse(observation.observedAt)
             ? { state: "unavailable", reason: "stale" }
             : { state: "observed", observation },
       vm: { state: "unavailable" },
@@ -48,7 +60,7 @@ export class DesktopAccess {
 
   async set(
     machineId: string,
-    input: { expectedRevision: string; mode: DesktopMode; lead?: string },
+    input: { expectedRevision: string; mode: DesktopMode; lead?: string | undefined },
     guard: () => Promise<void>,
   ): Promise<DesktopAccessSnapshot> {
     if (!this.settings.update) throw Error("desktop_settings_unavailable");
@@ -59,7 +71,9 @@ export class DesktopAccess {
         if (state.revision !== input.expectedRevision) throw Error("desktop_mode_conflict");
         if (!desktopModeAllowed(input.mode, state.accessLevel)) throw Error("desktop_mode_above_ceiling");
         before = JSON.stringify(current);
-        const previous = current.computer.machines[machineId] ?? DesktopChoiceSchema.parse({});
+        const previous = Object.hasOwn(current.computer.machines, machineId)
+          ? current.computer.machines[machineId]!
+          : DesktopChoiceSchema.parse({});
         const choice =
           input.lead === undefined
             ? { ...previous, desktopMode: input.mode }

@@ -209,3 +209,14 @@ captain authority cannot issue one ([details](reference/remote-and-bodies.md#sup
 - [Browser and persona images](reference/browser-and-persona.md).
 - Mail, Google accounts and their consent: the `connected-accounts` skill.
 - Leading, wakes, report routing, receipts and closing panes: the `lead` skill.
+
+## Desktop choice and permission reports
+
+`clankie computer mode --json` reads the owner choice (default `none`, private
+browser only); `--machine ID` selects a registered machine and `--lead NAME`
+selects an owner-set override. Only change it on the owner's direction. Writes
+use the API revision and never raise a machine's existing access ceiling.
+`clankie computer permissions --json` reads the named actor's recent report;
+`--refresh` is explicit, local, and must run inside the actual acting terminal
+app. A service/app TCC check cannot substitute for that app. Unavailable stays
+unknown. [API, authority and unimplemented routing/VM limits](../../../docs/desktop-control.md#desktop-choice-and-permission-status).

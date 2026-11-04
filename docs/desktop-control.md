@@ -19,6 +19,57 @@ the desktop-control skill's
 [delegation reference](../.agents/skills/desktop-control/reference/delegation.md).
 `clankie browser harnesses` lists what this machine has.
 
+## Desktop choice and permission status
+
+ADR 0342's owner setting is available through `clankie computer mode --json`.
+It starts at `none` (each agent's own private browser only). An owner can choose
+`host`, `screen`, `vm` or `none`, optionally `--machine ID` and `--lead NAME`.
+`--lead` writes that lead's override; other leads keep the machine default.
+`--expected-revision SHA256` makes a reviewed write conditional on the version
+already read. A conflict requires another read and review, never an automatic retry.
+
+The shared, node-free contract is
+[`desktop-access.ts`](../packages/protocol/src/desktop-access.ts):
+
+- `GET /v1/operator/computer?machine=local&lead=NAME` reads the choice. Both
+  query parameters are optional. `POST /v1/operator/computer` takes
+  `{schemaVersion: 1, machineId, expectedRevision, mode, lead?}`.
+- The owner operator or a current owner device with Take Control may read/write.
+  Worker, captain, joined-host and room credentials are not setters. This route
+  never writes `machineAccess`: `host`/`screen` require existing `screen` access;
+  `vm` requires existing `workers` access. Watch caps it at Portal too.
+- `desktopMode` is the machine default; `selectedMode` includes the named lead's
+  override; `effectiveMode` is that preference bounded by current machine access.
+  These are **preferences, not proof that a desktop is available or running**.
+  This API does not implement ADR 0342's desktop hire routing, connected leads'
+  supplied desktops, or VM lifecycle. `vm.state` is `unavailable`; no disk-space
+  or ready-guest result is invented. Saving does not launch anything.
+- `GET /v1/machines?includeDesktopAccess=true` (CLI: `machines list --desktop --json`)
+  adds `desktopAccess` with the same snapshot to each machine. Without that
+  opt-in the inventory keeps its old shape for strict old clients. Permission
+  observations are not copied from the service's own macOS process.
+
+`clankie computer permissions --json` reads the API's last actor observation.
+To refresh explicitly, the owner runs
+`clankie computer permissions --refresh --json` **inside the terminal app that
+will perform the desktop work, against that Mac's local service**. It performs
+non-prompting Accessibility and Screen Recording preflights in a child of that
+terminal, identifies the app through native process ancestry, and publishes
+its named actor, PID, time and result through the operator-only
+`POST /v1/operator/computer/permissions` route. This is an authenticated owner
+report, not remote attestation or an OS permission grant. The doorway/relay do
+not forward publication, and a paired app cannot publish a report.
+
+A report describes only its named actor/context, never every terminal on the
+Mac. Preflight `not_granted` cannot distinguish denied from never asked. Missing,
+failed, stale (over one minute) or unreported remote context stays unavailable;
+service restart discards reports. An owner should refresh after changing grants.
+No read or save requests a permission, captures a screen, opens Settings, moves
+input or provisions a VM. Observed grants never authorize desktop work and never
+raise a ceiling. Existing machine authority, consent and stop boundaries remain
+in force. Clients must not display a missing observation as a denied grant or
+an absent API as the default choice.
+
 ## Execution and authority
 
 ```mermaid

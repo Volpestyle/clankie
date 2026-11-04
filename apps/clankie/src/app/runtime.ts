@@ -622,6 +622,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const desktopAccess = new DesktopAccess(
     settingsSource,
     (current, id) => desktopMachines?.desktopAccessLevel(current, id) ?? machineAccessLevel(current, id),
+    () => clock().getTime(),
   );
   desktopMachines?.setDesktopAccess(desktopAccess);
   const desktopOperator = async (request: Request): Promise<true | "authentication_required"> => {
@@ -1062,7 +1063,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (!dependencies.runtimes) return context.json({ error: "machines_unavailable" }, 503);
-    return context.json(await dependencies.runtimes.machines.list(context.req.query("discover") === "true"));
+    return context.json(
+      await dependencies.runtimes.machines.list(
+        context.req.query("discover") === "true",
+        context.req.query("includeDesktopAccess") === "true",
+      ),
+    );
   });
   app.post("/v1/machines", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

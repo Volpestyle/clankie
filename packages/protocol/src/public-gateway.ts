@@ -500,7 +500,8 @@ export function publicGatewayTargetFor(
     path = PROJECT_UPDATE_SETTINGS_PATH;
   if (method === "POST" && /^\/v1\/support\/grants\/[a-f0-9-]{36}\/(?:revoke|pairing-offer)$/u.test(path))
     return "control";
-  if ((method === "GET" || method === "POST") && isDesktopAccessRoute(path)) return "relay";
+  if ((method === "GET" && isDesktopAccessRoute(path)) || (method === "POST" && path === DESKTOP_ACCESS_PATH))
+    return "relay";
   const connector = connectorRouteTarget(method, path);
   if (connector !== undefined) return connector;
   return (

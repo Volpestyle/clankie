@@ -409,12 +409,12 @@ export class Machines {
     return { refusals: await readMachineAccessRefusals(this.options.settings, this.joined) };
   }
 
-  async list(refresh = false): Promise<MachineInventory> {
+  async list(refresh = false, includeDesktopAccess = false): Promise<MachineInventory> {
     if (refresh || !this.cached || this.cached.expires <= Date.now()) {
       this.cached = { expires: Date.now() + 15_000, inventory: this.discover() };
     }
     const inventory = await this.cached.inventory;
-    if (!this.desktop) return inventory;
+    if (!this.desktop || !includeDesktopAccess) return inventory;
     const current = await this.options.settings.load();
     return {
       ...inventory,
@@ -432,6 +432,7 @@ export class Machines {
     const configured: Machine[] = [
       {
         id: "local",
+        platform: process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "win32" : "linux",
         transport: "local",
         configured: true,
         state: "discovering",

@@ -99,6 +99,53 @@ export const flows: readonly Flow[] = [
       }),
   },
   {
+    name: "desktop-access",
+    proves:
+      "desktop choices default to a private browser, survive owner writes and reject stale revisions without changing the ceiling",
+    run: (stack) =>
+      Effect.gen(function* () {
+        const before = yield* stack.cliJson("computer", "mode", "--json");
+        yield* check(
+          before.desktopMode === "none" && before.effectiveMode === "none",
+          "desktop access starts at private-browser-only",
+          before,
+        );
+        yield* check(
+          before.permissions.state === "unavailable",
+          "the service never substitutes its own TCC state",
+          before.permissions,
+        );
+        const selected = yield* stack.cliJson("computer", "mode", "host", "--json");
+        yield* check(
+          selected.desktopMode === "host" && selected.accessLevel === before.accessLevel,
+          "an owner choice preserves the machine ceiling",
+          selected,
+        );
+        const stale = yield* stack.cli("computer", "mode", "screen", "--expected-revision", before.revision);
+        yield* check(
+          stale.code !== 0 && stale.stderr.includes("Settings changed"),
+          "a stale owner choice refuses without retry",
+          stale.code,
+        );
+        const unchanged = yield* stack.cliJson("computer", "mode", "--json");
+        yield* check(
+          unchanged.desktopMode === "host",
+          "the refused write leaves the owner's choice intact",
+          unchanged,
+        );
+        const machines = yield* stack.cliJson("machines", "list", "--desktop", "--json");
+        yield* check(
+          machines.machines.some(
+            (machine: { id: string; desktopAccess?: { desktopMode: string } }) =>
+              machine.id === "local" && machine.desktopAccess?.desktopMode === "host",
+          ),
+          "the opted-in machine CLI reports the same choice",
+          machines,
+        );
+        yield* stack.cliJson("computer", "mode", "none");
+      }),
+  },
+  {
     name: "legacy-join-admission",
     proves: "the owner can disable new legacy joins through the CLI and restore admission",
     run: (stack) =>
@@ -221,6 +268,23 @@ export const flows: readonly Flow[] = [
           {
             status: settings.status,
           },
+        );
+        const desktop = yield* Effect.tryPromise(() =>
+          fetch(`${stack.relayUrl}/v1/operator/computer?machine=local`, {
+            headers: { authorization: `Bearer ${paired.deviceToken}` },
+            signal: AbortSignal.timeout(10_000),
+          }),
+        );
+        yield* check(
+          desktop.status === 200,
+          "the phone reads the real desktop choice through the relay",
+          desktop.status,
+        );
+        const desktopState = yield* Effect.promise(() => desktop.json());
+        yield* check(
+          desktopState.desktopMode === "none" && desktopState.permissions.state === "unavailable",
+          "the relay preserves choice and unknown actor permissions",
+          desktopState,
         );
         const reused = yield* post("/v1/pairing/redeem", {
           code: offer.code,

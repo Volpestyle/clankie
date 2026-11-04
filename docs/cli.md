@@ -227,6 +227,8 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   update now | cancel  Apply a batched checkout update at once, or drop it (updates that follow main batch while the body is busy)
   update --override-holds --reason TEXT  Owner-only update with one audited override per hold
   update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)
+  computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json  Read or change the owner’s desktop choice
+  computer permissions [--machine ID] [--refresh] --json  Read permission status; refresh only in the acting terminal on its Mac
   computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)
   body status | request JSON  Inspect or explicitly request conversation body leases (JSON)
   login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]
@@ -433,7 +435,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
                            Move Clankie to another body and back; one body holds him at a time
   join --gateway URL --host HOST_ID [--directory PATH] | approve CODE --access LEVEL | resume|status|leave
                            Approve an outbound machine connection without SSH
-  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | shell-audit | sessions NAME
+  machines [list|discover] [--desktop] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | shell-audit | sessions NAME
                            Machines where agents run; connections apply live
   herdr [status|open|create|disable] | use NAME
                            Open his workspace or choose your Herdr session

@@ -1,4 +1,5 @@
 import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
+import { DESKTOP_ACCESS_PATH, isDesktopAccessRoute } from "./desktop-access.ts";
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
 import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
@@ -57,6 +58,8 @@ function discordAllows(method: string, path: string): boolean {
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  if (method === "GET" && isDesktopAccessRoute(path)) return true;
+  if (method === "POST" && path === DESKTOP_ACCESS_PATH) return true;
   // Moving Clankie between bodies is the owner's own action (ADR 0286).
   if (BODY_TRANSFER_ROUTES.some((route) => route.method === method && route.path === path)) return true;
   if (
