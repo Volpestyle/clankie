@@ -24,14 +24,18 @@ function describeMaximumTrustMode(result: MaximumTrustModeResult): string {
   ].join("\n");
 }
 
-/** `/maximum-trust-mode`: the owner's switch (VUH-2048), over the same owner API as the CLI. */
+/**
+ * `/maximum-trust-mode`: the owner's switch (VUH-2048), over the same owner API as the CLI.
+ * Its description stays a literal for the public docs extractor; the test pins it to the summary.
+ */
 export function maximumTrustModeCommand(
   mode: ((args: readonly string[]) => Promise<MaximumTrustModeResult>) | undefined,
 ): FaceShellCommand {
   return {
     name: "maximum-trust-mode",
     aliases: [],
-    description: MAXIMUM_TRUST_MODE_WORDING.summary,
+    description:
+      "Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you",
     argumentHint: "[on|off]",
     takesArgument: true,
     async run(argument, shell): Promise<void> {
