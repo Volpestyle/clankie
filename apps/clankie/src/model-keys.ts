@@ -487,6 +487,7 @@ export function createModelKeys(options: {
         return { ok: false, error: "managed_credits_only" };
       const local = localRuntimes.find((entry) => entry.id === providerId);
       if (local === undefined) return { ok: false, error: "unsupported_provider" };
+      // allow-swallowed-rejection -- a runtime that is down is the endpoint_unavailable answer below
       const models = await probeLocalModels(local.baseURL).catch(() => undefined);
       if (models === undefined || models.length === 0) return { ok: false, error: "endpoint_unavailable" };
       if (!models.some((model) => model.id === modelId)) return { ok: false, error: "unsupported_model" };

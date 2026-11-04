@@ -173,6 +173,7 @@ export function createModelKeyRoutes(
   });
   app.post(MODEL_LOCAL_ENDPOINT_ADD_PATH, async (context) => {
     try {
+      // allow-swallowed-rejection -- an unreadable body fails the schema and answers malformed
       const parsed = LocalEndpointAddRequestSchema.safeParse(await context.req.json().catch(() => undefined));
       if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
       if (models!.addLocalEndpoint === undefined)
