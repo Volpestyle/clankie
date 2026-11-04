@@ -16,6 +16,7 @@ import { SettingsStore, defaultSettingsPath } from "@clankie/settings";
 import { probeHealth, type GatewayDoorwayReport } from "./gateway.ts";
 import { readSeatBridges } from "./seat-delivery.ts";
 import { THIS_MAC_CONNECTION } from "./account-login.ts";
+import { cpuProfileStatus, type CpuProfileStatus } from "./cpu-profile.ts";
 
 export interface StatusCommandOptions extends CreateServiceOptionsInput {
   readonly host?: string;
@@ -31,6 +32,8 @@ export interface StatusCommandResult {
     | OperatorCredentialStatus
     | { readonly present: false; readonly source: "none"; readonly consistency: "invalid" };
   readonly services: readonly ServiceStatus[];
+  /** Whether the running service is profiling, and what later starts will do. */
+  readonly cpuProfile?: CpuProfileStatus;
   /** Which machine and access this terminal uses: what `whoami` reports. */
   readonly connection?: unknown;
   /** Live remote-access doorway for phone pairing (absent when settings cannot be read). */
@@ -126,7 +129,18 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
       /* A failed read must never manufacture an idle mood. */
     }
   }
+  let cpuProfile: CpuProfileStatus | undefined;
+  try {
+    cpuProfile = cpuProfileStatus({
+      configured: (await new SettingsStore(defaultSettingsPath(env)).load()).host.cpuProfileDir,
+      service: clankie,
+      readCommand: options.readProcessCommandImpl,
+    });
+  } catch {
+    /* Unreadable settings leave this unknown; status still reports the rest. */
+  }
   return {
+    ...(cpuProfile === undefined ? {} : { cpuProfile }),
     ...(presence === undefined ? { presenceState: "unreachable" as const } : { presence }),
     ok: serviceHealthy && operatorCredentialHealthy && !access.self?.dormant,
     status: !serviceHealthy

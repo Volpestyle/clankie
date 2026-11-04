@@ -86,7 +86,7 @@ const TARGET_ALIASES: Readonly<Record<string, ServiceTarget>> = {
  * a production service from opening an unauthenticated inspector on
  * 127.0.0.1:9229 when any local process signals it: the live service logged
  * "Debugger listening" mid-run nine times between 2026-09-06 and 2026-10-17,
- * never at start (VUH-2393). Profiling uses `CLANKIE_CPU_PROFILE_DIR` instead.
+ * never at start (VUH-2393). Profiling uses `clankie cpu-profile` instead.
  */
 const SERVICE_NODE_FLAGS = ["--disable-sigusr1"] as const;
 
@@ -594,6 +594,7 @@ export async function applyLauncherEnvironment(env: NodeJS.ProcessEnv = process.
     // The owner's always-on choice (on by default for a self-hosted Mac) decides
     // whether the launcher runs `caffeinate`.
     [KEEP_AWAKE_ENV]: keepAwakeEnabled(stored) ? "1" : undefined,
+    CLANKIE_CPU_PROFILE_DIR: stored.host.cpuProfileDir,
   };
   let projected = projectedEnvironment.get(env);
   if (projected === undefined) projectedEnvironment.set(env, (projected = new Map()));
@@ -604,6 +605,7 @@ export async function applyLauncherEnvironment(env: NodeJS.ProcessEnv = process.
     "CLANKIE_ACTIVITY_TUNNEL_NAME",
     "CLANKIE_ACTIVITY_TUNNEL_HOSTNAME",
     KEEP_AWAKE_ENV,
+    "CLANKIE_CPU_PROFILE_DIR",
   ]) {
     const current = env[name] ?? "";
     const ours = projected.has(name) && projected.get(name) === current;

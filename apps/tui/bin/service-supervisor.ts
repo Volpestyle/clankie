@@ -244,7 +244,7 @@ function processGroupIsAlive(pid: number): boolean {
   }
 }
 
-function readProcessCommand(pid: number): string {
+export function readProcessCommand(pid: number): string {
   try {
     return execFileSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" }).trim();
   } catch {

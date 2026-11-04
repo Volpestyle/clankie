@@ -186,6 +186,13 @@ export async function runHeadlessCaptainCommand(
       outputJson(stdout, result);
       return 0;
     }
+    if (command === "cpu-profile") {
+      outputJson(
+        stdout,
+        await (await import("../src/command/cpu-profile.ts")).runCpuProfileCommand(rest, options),
+      );
+      return 0;
+    }
     if (command === "awake") {
       outputJson(stdout, await (await import("../src/command/awake.ts")).runAwakeCommand(rest, options));
       return 0;
