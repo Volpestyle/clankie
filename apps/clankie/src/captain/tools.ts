@@ -1013,7 +1013,13 @@ function answerWorkerAskTool(
       const conversationId = authority.owner.conversationId;
       if (input.action === "list") return json({ asks: asks.list({ state: "open", conversationId }) });
       if (input.askId === undefined) throw new Error("Name the askId from the worker's report.");
-      if (input.action === "withdraw") return json(asks.withdraw(input.askId, conversationId));
+      if (input.action === "withdraw")
+        return json(
+          await asks.withdraw(input.askId, {
+            conversationId,
+            authorized: () => assertConversationAuthority(authority),
+          }),
+        );
       if ((input.value === undefined) === (input.text === undefined))
         throw new Error("Supply exactly one of value or text; nothing was sent.");
       return json(

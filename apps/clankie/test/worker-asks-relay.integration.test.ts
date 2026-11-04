@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -16,7 +16,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ControlPlaneDeviceAuthorizer } from "../../relay/src/device-auth.ts";
 import { createOperatorConversationRelayHandler } from "../../relay/src/operator-conversations.ts";
 import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
+import { runConnectorCommand } from "../../tui/src/command/connector.ts";
 import { createWorkerAskService, WorkerAskStore } from "../src/captain/worker-asks.ts";
+import { createWorkerAskRoutes } from "../src/worker-ask-routes.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
 
 // The app answers a worker's ask (#604) from a Take Control device: the real
@@ -45,7 +47,7 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
     recipientCurrent: async () => true,
     deliver,
   });
-  const raised = [randomUUID(), randomUUID()].map((askId) =>
+  const raised = [randomUUID(), randomUUID(), randomUUID()].map((askId) =>
     asks.raise({
       askId,
       seatId: "term_one",
@@ -60,31 +62,7 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
   cleanups.push(() => host.close());
 
   // The relay as production wires it: owner routes go upstream on the device's own bearer.
-  const operator = createOperatorConversationRelayHandler({
-    authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl }),
-    dispatch: async () => {
-      throw new Error("not reached");
-    },
-    roomRequest: (path, method, token, body) =>
-      fetch(new URL(path, host.baseUrl), {
-        method,
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        ...(body === undefined ? {} : { body }),
-        redirect: "error",
-      }),
-  });
-  const relay = createServer((request, response) => {
-    void operator(request, response).then((handled) => {
-      if (!handled) {
-        response.statusCode = 404;
-        response.end();
-      }
-    });
-  });
-  relay.listen(0, "127.0.0.1");
-  await once(relay, "listening");
-  cleanups.push(() => new Promise<void>((done) => relay.close(() => done())));
-  const relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  const relayUrl = await startRelay(host.baseUrl);
 
   const pair = async (terminalControl: boolean) => {
     const offer = await requestPairingOffer({
@@ -111,8 +89,8 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
   };
   const phone = await pair(true);
   const observer = await pair(false);
-  const call = (path: string, authorization?: string, body?: unknown) =>
-    fetch(new URL(path, relayUrl), {
+  const call = (path: string, authorization?: string, body?: unknown, at = relayUrl) =>
+    fetch(new URL(path, at), {
       method: body === undefined ? "GET" : "POST",
       headers: {
         ...(authorization === undefined ? {} : { authorization }),
@@ -168,6 +146,54 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
   expect((await call(workerAskAnswerPath(raised[1]!.askId), observer, { value: "merge" })).status).toBe(403);
   expect((await call("/v1/fleet/asks")).status).toBe(401);
 
+  // A connector's device (Claude signed in through OAuth) reaches none of them.
+  const connector = `Bearer ${await connectorSignIn(host.baseUrl, host.operatorToken)}`;
+  for (const [path, body] of [
+    ["/v1/fleet/asks", undefined],
+    [workerAskAnswerPath(raised[2]!.askId), { value: "merge" }],
+    [workerAskWithdrawPath(raised[2]!.askId), {}],
+  ] as const)
+    expect([401, 403]).toContain((await call(path, connector, body)).status);
+  expect(asks.list({ state: "open" }).map((entry) => entry.askId)).toEqual([raised[2]!.askId]);
+  expect(deliver).toHaveBeenCalledOnce();
+
+  // The relay parses the service's answer strictly on its own: a reply that would
+  // carry a recipient proof is withheld as an upstream failure, not passed through.
+  const leaky = await startRelay(host.baseUrl, async (path) =>
+    Response.json(
+      path.startsWith("/v1/fleet/asks/")
+        ? {
+            outcome: "withdrawn",
+            ask: { ...raised[2]!, recipient: { binding: "binding-one", owner: "null" } },
+          }
+        : {
+            schemaVersion: 1,
+            asks: [{ ...raised[2]!, recipient: { binding: "binding-one", owner: "null" } }],
+          },
+    ),
+  );
+  for (const [path, body] of [
+    ["/v1/fleet/asks", undefined],
+    [workerAskWithdrawPath(raised[2]!.askId), {}],
+  ] as const) {
+    const withheld = await call(path, phone, body, leaky);
+    expect(withheld.status).toBe(502);
+    expect(await withheld.text()).not.toContain("binding-one");
+  }
+
+  // Withdrawing reads the caller's authority again at the write, as answering
+  // does: a door that passed and a grant revoked before the write withdraws nothing.
+  let reads = 0;
+  const routes = createWorkerAskRoutes(async () => (++reads === 1 ? true : "forbidden"), asks);
+  const revoked = await routes.request(workerAskWithdrawPath(raised[2]!.askId), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  expect(await revoked.json()).toMatchObject({ outcome: "refused", reason: "unauthorized" });
+  expect(reads).toBe(2);
+  expect(asks.list({ state: "open" }).map((entry) => entry.askId)).toEqual([raised[2]!.askId]);
+
   // The public gateway and the hosted operator carry exactly these routes to the relay.
   const id = raised[1]!.askId;
   for (const [method, path, target] of [
@@ -185,3 +211,92 @@ it("a Take Control device lists and answers workers' asks through the relay, hel
     expect(hostedOperatorAllows(method, path)).toBe(target !== undefined);
   }
 }, 30_000);
+
+/** The relay handler as `apps/relay` wires it, or with a stand-in upstream. */
+async function startRelay(
+  baseUrl: string,
+  upstream?: (path: string, method: string, token: string, body?: string) => Promise<Response>,
+): Promise<string> {
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice: new ControlPlaneDeviceAuthorizer({ baseUrl }),
+    dispatch: async () => {
+      throw new Error("not reached");
+    },
+    roomRequest:
+      upstream ??
+      ((path, method, token, body) =>
+        fetch(new URL(path, baseUrl), {
+          method,
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          ...(body === undefined ? {} : { body }),
+          redirect: "error",
+        })),
+  });
+  const relay = createServer((request, response) => {
+    void operator(request, response).then((handled) => {
+      if (!handled) {
+        response.statusCode = 404;
+        response.end();
+      }
+    });
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  cleanups.push(() => new Promise<void>((done) => relay.close(() => done())));
+  return `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+}
+
+const CALLBACK = "https://claude.ai/api/mcp/auth_callback";
+
+/** Claude registers, the owner approves the code at the Mac, and Claude trades it for a token. */
+async function connectorSignIn(baseUrl: string, operatorToken: string): Promise<string> {
+  const { client_id: clientId } = (await (
+    await fetch(`${baseUrl}/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_name: "Claude", redirect_uris: [CALLBACK] }),
+    })
+  ).json()) as { client_id: string };
+  const verifier = randomBytes(32).toString("base64url");
+  const page = await (
+    await fetch(
+      `${baseUrl}/oauth/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: CALLBACK,
+        code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+        code_challenge_method: "S256",
+        state: "s",
+        scope: "agents offline_access",
+      })}`,
+    )
+  ).text();
+  const approved = await runConnectorCommand(["approve", /class="code">([A-Z0-9-]+)</u.exec(page)![1]!], {
+    host: baseUrl,
+    env: { ...process.env, CLANKIE_OPERATOR_TOKEN: operatorToken },
+    stdout: { write: () => undefined },
+    stderr: { write: () => undefined },
+  });
+  if (approved !== 0) throw new Error("The owner's approval failed");
+  const decided = (await (
+    await fetch(`${baseUrl}/oauth/authorize/status`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ request: /const id="([^"]+)"/u.exec(page)![1] }),
+    })
+  ).json()) as { redirect: string };
+  const { access_token: accessToken } = (await (
+    await fetch(`${baseUrl}/oauth/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: clientId,
+        redirect_uri: CALLBACK,
+        code: new URL(decided.redirect).searchParams.get("code")!,
+        code_verifier: verifier,
+      }).toString(),
+    })
+  ).json()) as { access_token: string };
+  return accessToken;
+}

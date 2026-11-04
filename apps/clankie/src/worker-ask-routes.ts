@@ -22,6 +22,10 @@ export function createWorkerAskRoutes(
   asks: WorkerAskService | undefined,
 ): Hono {
   const app = new Hono();
+  const stillAuthorized = (request: Request) => async () => {
+    const authority = await authorize(request);
+    if (authority !== true) throw new Error(authority);
+  };
   const gate: MiddlewareHandler = async (context, next) => {
     context.header("cache-control", "no-store");
     const authority = await authorize(context.req.raw);
@@ -49,19 +53,16 @@ export function createWorkerAskRoutes(
     const answer = WorkerAskAnswerSchema.safeParse(await context.req.json().catch(() => undefined));
     if (!askId.success || !answer.success) return context.json({ error: "invalid_request" }, 400);
     // The caller's authority is read again at the send, not only at the door.
-    const request = context.req.raw;
     const result = await asks!.answer(askId.data, answer.data, {
-      authorized: async () => {
-        const authority = await authorize(request);
-        if (authority !== true) throw new Error(authority);
-      },
+      authorized: stillAuthorized(context.req.raw),
     });
     return context.json(result);
   });
   app.post(WORKER_ASK_WITHDRAW_PATH, async (context) => {
     const askId = WorkerAskIdSchema.safeParse(context.req.param("askId"));
     if (!askId.success) return context.json({ error: "invalid_request" }, 400);
-    const result = asks!.withdraw(askId.data);
+    // As with an answer, authority is read again at the write.
+    const result = await asks!.withdraw(askId.data, { authorized: stillAuthorized(context.req.raw) });
     return context.json(result);
   });
   return app;

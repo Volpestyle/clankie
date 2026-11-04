@@ -2702,7 +2702,7 @@ tied to the ask's id; an answer whose delivery is uncertain is kept as
 while that same session holds the seat under the same lead; otherwise it is
 refused with `recipient_changed`, and an answerer whose authority ended before
 the send gets `unauthorized`, both with nothing sent. `asks withdraw` drops an
-unanswered one. Clankie
+unanswered one, with authority read again at the write in the same way. Clankie
 answers with the `answer_worker_ask` tool. The API is `GET /v1/fleet/asks`
 (`?state=open|answering|answered|withdrawn`), `POST /v1/fleet/asks/:askId/answer`
 with `{ value }` or `{ text }`, and `POST /v1/fleet/asks/:askId/withdraw` with `{}`

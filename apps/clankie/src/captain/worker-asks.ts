@@ -120,7 +120,8 @@ export interface WorkerAskService {
   }): readonly WorkerAsk[];
   /** Answers one ask. `conversationId` limits it to that lead's own workers. */
   answer(askId: string, answer: WorkerAskAnswer, answerer?: WorkerAskAnswerer): Promise<WorkerAskResult>;
-  withdraw(askId: string, conversationId?: string): WorkerAskResult;
+  /** Withdraws one unanswered ask, the answerer's authority rechecked just before the write. */
+  withdraw(askId: string, answerer?: WorkerAskAnswerer): Promise<WorkerAskResult>;
 }
 
 export function createWorkerAskService(deps: {
@@ -257,7 +258,8 @@ export function createWorkerAskService(deps: {
         locked.delete(askId);
       }
     },
-    withdraw(askId, conversationId) {
+    async withdraw(askId, answerer) {
+      const conversationId = answerer?.conversationId;
       if (locked.has(askId))
         return { outcome: "refused", reason: "settled", detail: "This ask is being answered right now." };
       // An uncertain answer can be withdrawn from the list; it is still never resent.
@@ -267,9 +269,20 @@ export function createWorkerAskService(deps: {
         (conversationId === undefined || current.conversationId === conversationId);
       const found = uncertain ? current : find(askId, conversationId);
       if ("outcome" in found) return found;
-      const withdrawn = deps.store.put({ ...found, state: "withdrawn", settledAt: now() });
-      deps.changed?.();
-      return { outcome: "withdrawn", ask: visible(withdrawn) };
+      // Held while authority is read, so no answer starts between that check and the write.
+      locked.add(askId);
+      try {
+        try {
+          await answerer?.authorized?.();
+        } catch (error) {
+          return unauthorized(error);
+        }
+        const withdrawn = deps.store.put({ ...found, state: "withdrawn", settledAt: now() });
+        deps.changed?.();
+        return { outcome: "withdrawn", ask: visible(withdrawn) };
+      } finally {
+        locked.delete(askId);
+      }
     },
   };
 }
