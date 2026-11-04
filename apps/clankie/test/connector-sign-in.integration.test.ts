@@ -1257,8 +1257,21 @@ it("keeps an app's name to characters the owner can read, wherever it is shown",
       expect(response.status, JSON.stringify(refused)).toBe(400);
       expect(await response.json()).toMatchObject({ error: "invalid_client_metadata" });
     }
+    // Names that read as the owner, Clankie or a lead are reserved, however they are spelled (#349).
+    for (const reserved of [
+      "the owner",
+      "OWNER",
+      "Clankie",
+      "clankie!",
+      "Clankie on this Mac",
+      "Your Lead",
+    ]) {
+      const response = await register(host.baseUrl, [CALLBACK], reserved);
+      expect(response.status, reserved).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_client_metadata" });
+    }
     // Ordinary names in any language or with an emoji still register, cut to size.
-    for (const accepted of ["Claude Code", "Клод", "クロード", "Grok 🚀"]) {
+    for (const accepted of ["Claude Code", "Клод", "クロード", "Grok 🚀", "Clankiest"]) {
       const response = await register(host.baseUrl, [CALLBACK], accepted);
       expect(response.status).toBe(201);
       expect(await response.json()).toMatchObject({ client_name: accepted });

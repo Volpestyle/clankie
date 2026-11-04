@@ -195,6 +195,14 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         },
         400,
       );
+    if (parsed.data.client_name !== undefined && reservedAppName(parsed.data.client_name))
+      return context.json(
+        {
+          error: "invalid_client_metadata",
+          error_description: "client_name is reserved: an app can't use Clankie's or the owner's name",
+        },
+        400,
+      );
     const redirects = parsed.data.redirect_uris;
     if (!redirects.every(connectorRedirectUriAllowed))
       return context.json(
@@ -815,4 +823,28 @@ function approvalPage(signIn: PendingSignIn, statusUrl: string, nonce: string): 
     `<p id="status"></p>`;
   const script = `<script nonce="${nonce}">(()=>{const id=${JSON.stringify(signIn.id)};const url=${JSON.stringify(statusUrl)};const status=document.getElementById("status");const copy=document.getElementById("copy");copy.addEventListener("click",async()=>{try{await navigator.clipboard.writeText(document.getElementById("command").textContent);copy.textContent="Copied"}catch{copy.textContent="Select and copy it"}});const poll=async()=>{try{const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({request:id})});const b=await r.json();if(b.status==="approved"||b.status==="denied"){status.textContent=b.status==="approved"?"Approved. Returning to the app…":"Declined.";location.replace(b.redirect);return}if(b.status==="expired"){status.textContent="This sign-in expired. Start again from the app.";return}}catch{}setTimeout(poll,2000)};setTimeout(poll,2000)})();</script>`;
   return page(`Connect ${signIn.clientName} to Clankie`, body, script);
+}
+
+/**
+ * Names that read as the owner, Clankie or a lead (#349). An app's sign-in name is shown
+ * wherever its work appears, so it can't take one that stands for someone with authority.
+ */
+const RESERVED_APP_NAMES = new Set([
+  "owner",
+  "the owner",
+  "operator",
+  "the operator",
+  "lead",
+  "the lead",
+  "your lead",
+  "clankie",
+]);
+
+function reservedAppName(name: string): boolean {
+  const plain = name
+    .normalize("NFKC")
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  return RESERVED_APP_NAMES.has(plain) || plain.startsWith("clankie ");
 }
