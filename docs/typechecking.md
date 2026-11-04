@@ -21,9 +21,10 @@ Names must identify projects the default run checks; unknown names fail instead
 of producing an empty successful check. With no arguments, it still checks every
 TypeScript package. This opt-in does not replace `typecheck` or change CI's gates.
 
-Each compiler has a **2,512 MiB old-space ceiling** and a **16 MiB semi-space
+Each tsc process has a **2,512 MiB old-space ceiling** and a **16 MiB semi-space
 ceiling**, giving Node 26 a **2,560 MiB (2.5 GiB) total V8 heap ceiling**. These explicit
-Node arguments take precedence over inherited `NODE_OPTIONS`. This is a heap
+Node arguments take precedence over inherited `NODE_OPTIONS`. They do not cap
+the native TypeScript compiler. This is a heap
 budget, not a process RSS limit: executable code, stacks, native allocations and
 the small supervising process also consume memory.
 
@@ -41,6 +42,21 @@ first check, or one after deleting that directory, is a full one. Pull request
 CI restores the state from that pull request's last run, else from the latest
 push to `main`, which seeds it (ADR 0310); on `apps/clankie` that took a check
 from 292 s cold to 48 s warm.
+
+## Service comparison
+
+The [same-tree service experiment](testing/tsgo-391-eb7e31a32/README.md) on
+2026-11-04 checked identical sets of 1,451 roots with tsc 5.9.3 and native 7.0.2.
+Native median was 4.46 s versus 39.33 s warm tsc mean (212.21 s cold), about
+8.8 times faster than warm tsc. Native peak RSS was about 5.0 GiB versus
+1.2 GiB warm tsc and 2.6 GiB cold tsc. The faster opt-in needs more memory;
+run it through the same resource governor.
+
+Both compilers also reported the same six planted errors, including an unread
+private field and exact optional properties, then passed after the probe was
+removed. This is snapshot evidence, not universal diagnostic equivalence or a
+decision to replace the tsc gate. Commands, measured results and the negative
+fixture are retained with the experiment.
 
 ## Program boundaries
 
