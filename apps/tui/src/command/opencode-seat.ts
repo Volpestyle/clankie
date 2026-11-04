@@ -282,15 +282,20 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
         if (pending !== undefined && pending.sessionId !== body.sessionId)
           throw new Error("Uncertain receipt belongs to another native session");
         sessionId = body.sessionId;
-        writeFileSync(
-          recordPath(env),
-          JSON.stringify({
-            sessionId,
-            cwd: plan.cwd,
-            ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
-          }),
-          { mode: 0o600 },
-        );
+        const record = JSON.stringify({
+          sessionId,
+          cwd: plan.cwd,
+          ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
+        });
+        // A `--new` seat fills an empty resume target but never replaces the owner's.
+        try {
+          writeFileSync(recordPath(env), record, {
+            mode: 0o600,
+            flag: flags.newConversation === true ? "wx" : "w",
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        }
         // The original in-flight turn needs fresh context before its own message
         // appears in history. Only inherited claims require bootstrap reconciliation.
         reply(200, {

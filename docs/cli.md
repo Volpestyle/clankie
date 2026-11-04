@@ -10562,7 +10562,8 @@ goals. Native goal state remains separate from turn activity.
 
 `clankie opencode --conversation ID --dry-run` reviews the native
 launch, installed version, skill selection and required owner steps. Remove
-`--dry-run` to launch; `--resume` uses the exact recorded session and chat.
+`--dry-run` to launch; `--resume` uses the exact recorded session and chat. A
+`--new` seat records itself only when no session is recorded yet.
 Without `--conversation ID`, a fresh launch takes the global chat while no live
 seat holds it and otherwise (or with `--new`) creates a separate workspace chat;
 dry-run creates none. `/opencode`
