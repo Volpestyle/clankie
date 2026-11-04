@@ -17,6 +17,7 @@ import { ClankieSettingsSchema } from "@clankie/settings";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ConversationStore } from "../src/captain/conversations.ts";
+import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { InboundSeatReceipts } from "../src/captain/inbound-seat-receipts.ts";
 import { deliveryFingerprint } from "../src/captain/delivery-fence.ts";
 import { createWorkerReports, type WorkerReportsContext } from "../src/captain/captain-worker-reports.ts";
@@ -127,6 +128,8 @@ async function fixture(
     personas: { ready: async () => undefined },
     deps: {},
     reportSummaries: reports.reportSummaries,
+    // A real watch store with no hires: each report's lead notify state reads from it (#735).
+    herdrWatches: new HerdrWatchStore(join(root, "herdr-watches.json")),
     refreshFleet: async () => [],
     rosterSeats: async () => ({ seats: [] }),
     validateConversationOwner: (owner: { conversationId: string }) =>
