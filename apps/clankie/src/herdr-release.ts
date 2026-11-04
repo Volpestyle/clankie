@@ -62,7 +62,8 @@ async function downloadOnce(
       chunks.push(value);
     }
   } finally {
-    await reader.cancel();
+    // An errored stream's cancel rejects with its stored error; never let cleanup replace the read's.
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
   return Buffer.concat(chunks);

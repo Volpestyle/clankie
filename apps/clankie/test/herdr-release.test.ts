@@ -96,6 +96,37 @@ it("retries a transient release download and names the URL when it gives up (#62
   expect(local).toHaveBeenCalledTimes(3);
 });
 
+it("retries a release download that times out partway through its body (#628)", async () => {
+  const root = await temporary();
+  // The first answer sends its headers and part of the binary, then stalls, as a slow CDN does.
+  const held: import("node:http").ServerResponse[] = [];
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    if (requests > 1) return void response.writeHead(200).end(bytes);
+    response.writeHead(200, { "content-length": String(bytes.length) });
+    response.write(bytes.subarray(0, 4));
+    held.push(response);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  // The real per-attempt timeout is 60 seconds; a shorter one aborts the same body read.
+  const local = vi.fn<typeof fetch>((_url, init) =>
+    fetch(`http://127.0.0.1:${port}/herdr`, {
+      ...init,
+      signal: AbortSignal.any([init!.signal!, AbortSignal.timeout(300)]),
+    }),
+  );
+  try {
+    await installHerdrRelease(join(root, "herdr"), manifest, local, 3, 10);
+    expect(await readFile(join(root, "herdr"))).toEqual(bytes);
+    expect(local).toHaveBeenCalledTimes(2);
+  } finally {
+    for (const response of held) response.destroy();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 it("starts on the last verified release when herdr.dev doesn't answer in time (#609)", async () => {
   const root = await temporary();
   // A release verified on an earlier start, now due for its six-hourly check.
