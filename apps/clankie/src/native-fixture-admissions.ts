@@ -71,6 +71,8 @@ export class NativeFixtureAdmissions {
     bootstrap(callbackOrigin: string, expiresAt: number): Promise<OwnedFixture>;
     processHelper: string;
     stateRoot: string;
+    /** How long an issued fixture holds authority before it expires; 60 seconds by default. */
+    lifetimeMs?: number | undefined;
   };
   constructor(options: NativeFixtureAdmissions["options"]) {
     this.options = options;
@@ -194,7 +196,7 @@ export class NativeFixtureAdmissions {
         // A revoked or expired fixture holds the fence until its child and root are verified gone;
         // refused cleanup keeps it blocked.
         if (tickets.some((ticket) => !ticket.removed)) return refusal("fixture_cleanup_pending", 409);
-        const expiresAt = Date.now() + 60_000;
+        const expiresAt = Date.now() + (this.options.lifetimeMs ?? 60_000);
         const reserved = this.index.reserve({
           ...input,
           issuer: this.issuer,

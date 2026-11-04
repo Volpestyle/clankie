@@ -56,6 +56,9 @@ const close = (server: ReturnType<typeof serve>) =>
   new Promise<void>((resolveClose) => server.close(() => resolveClose()));
 const absent = async (path: string) => expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
 const issue = () => ({ requestId: randomUUID(), receiptId: randomUUID(), assurance: "host-seat/v1" });
+// Long enough for a real bootstrap to finish issuing under load, short enough that expiry
+// cases don't wait out the host's 60-second production lifetime (#383).
+const FIXTURE_LIFETIME_MS = 750;
 /**
  * Sends a fixture read until it reaches the claim. Under load the worker's or
  * host's native caller observation can miss its bound; both refuse before any
@@ -118,6 +121,7 @@ async function host(
     loseReply?: "claim" | "consume";
     bootstrapOrigin?: string;
     plantForeignLink?: string;
+    lifetimeMs?: number;
   } = {},
 ) {
   const proof: ProjectProcessProof = {
@@ -162,6 +166,7 @@ async function host(
   const bootstrap = await createFixtureBootstrap(repoRoot, join(stateRoot, "scratch"));
   const admission = new NativeFixtureAdmissions({
     stateRoot,
+    lifetimeMs: config.lifetimeMs,
     processHelper: fleetProcessHelper(repoRoot),
     verifier,
     bootstrap: async (origin, expiresAt) => {
@@ -425,12 +430,17 @@ it("natural expiry cleanup follows observed child exit; substituted root is refu
   const root = await privateRoot();
   const bootstrap = await createFixtureBootstrap(repoRoot, root);
   let fixture: OwnedFixture | undefined;
+  let next: Promise<OwnedFixture> | undefined;
   try {
-    fixture = await bootstrap("http://127.0.0.1:19999", Date.now() + 1_500);
+    fixture = await bootstrap("http://127.0.0.1:19999", Date.now() + FIXTURE_LIFETIME_MS);
+    // The second, long-lived fixture starts while the first one runs out its lifetime.
+    next = bootstrap("http://127.0.0.1:19999", Date.now() + 60_000);
+    next.catch(() => {});
     await once(fixture.child, "exit");
     await fixture.close();
     await absent(fixture.descriptor.root);
-    fixture = await bootstrap("http://127.0.0.1:19999", Date.now() + 60_000);
+    fixture = await next;
+    next = undefined;
     const original = fixture.descriptor.root,
       moved = `${original}-preserved`;
     await rename(original, moved);
@@ -442,6 +452,7 @@ it("natural expiry cleanup follows observed child exit; substituted root is refu
     expect(fixture.child.exitCode !== null || fixture.child.signalCode !== null).toBe(true);
   } finally {
     if (fixture) await fixture.close().catch(() => {});
+    if (next) await (await next.catch(() => undefined))?.close().catch(() => {});
     // Explicitly owned test-created replacement/moved roots only, after verified exit.
     await rm(root, { recursive: true });
     await appendFile(auditPath, `${JSON.stringify({ event: "test-root-removed", root })}\n`);
@@ -493,7 +504,7 @@ it("strict host index refuses absent/corrupt/alias/public files and never resets
 
 it("host deadline expires authority and removes only the exited owned root while retaining index status", async () => {
   const root = await privateRoot(),
-    h = await host(root);
+    h = await host(root, { lifetimeMs: FIXTURE_LIFETIME_MS });
   try {
     const input = issue(),
       response = await h.request("", input);
@@ -524,7 +535,7 @@ it("host deadline expires authority and removes only the exited owned root while
     await rm(root, { recursive: true });
     await appendFile(auditPath, `${JSON.stringify({ event: "test-root-removed", root })}\n`);
   }
-}, 70_000);
+});
 
 it("host close drains an in-flight owned bootstrap before returning and retains its uncertain ID", async () => {
   const root = await privateRoot();
