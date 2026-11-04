@@ -1305,7 +1305,7 @@ describe("native terminal NDJSON tail", () => {
       authorizeDevice: {
         authorize: async () => {
           authCalls += 1;
-          // Open and the first emission check pass; the per-frame check stalls out.
+          // Both checks at open pass; the emission check after the dispatch stalls out.
           return authCalls <= 2
             ? { authorized: true, device: activeDevice }
             : { authorized: false, denial: "unavailable" };
