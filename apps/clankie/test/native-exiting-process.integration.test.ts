@@ -167,7 +167,7 @@ native(
       await closeNativeProcessObservers();
       await new Promise<void>((resolve) => {
         server.close(() => resolve());
-        server.closeAllConnections();
+        if ("closeAllConnections" in server) server.closeAllConnections();
       });
       await rm(root, { recursive: true, force: true });
     }
