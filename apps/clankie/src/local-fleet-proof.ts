@@ -265,6 +265,7 @@ function createLocalFleetProof(options: LocalFleetProofOptions, admission: boole
                 !event.retry &&
                 (event.reason === "caller_exited" ||
                   event.reason === "ancestor_exited" ||
+                  event.reason === "process_exiting" ||
                   event.reason === "unsupported_pid_namespace")
                   ? event.reason
                   : undefined;
@@ -647,6 +648,7 @@ export function localProjectProof(options: LocalFleetProofOptions) {
         !event.retry &&
         (event.reason === "caller_exited" ||
           event.reason === "ancestor_exited" ||
+          event.reason === "process_exiting" ||
           event.reason === "unsupported_pid_namespace")
           ? event.reason
           : undefined;
