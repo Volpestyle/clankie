@@ -31,6 +31,7 @@ const seatChannelInputs = workerBin(
 const seatHookInputs = workerBin("seat-hook", "link", "codex-tool-catalog", "pane-presence");
 
 export const landingFsInputs = Object.fromEntries([
+  ["apps/clankie/test/build-fleet-proof.integration.test.ts", fleetInputs],
   [
     "apps/clankie/test/fleet-refusal-native.integration.test.ts",
     [...fleetInputs, "integrations/claude-plugin/worker/bin/admission.mjs"],
