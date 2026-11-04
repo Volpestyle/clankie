@@ -24,7 +24,7 @@ already have, and see all of the work in one place.
     <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/assets/clankie-system-phone-dark.svg" />
     <source media="(max-width: 600px)" srcset="docs/assets/clankie-system-phone-light.svg" />
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clankie-system-dark.svg" />
-    <img src="docs/assets/clankie-system-light.svg" width="720" alt="How Clankie fits together. You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and the workers report back. The iPhone and iPad app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account." />
+    <img src="docs/assets/clankie-system-light.svg" width="720" alt="How Clankie fits together. You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and the workers report back. The iPhone, iPad and desktop app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account." />
   </picture>
 </p>
 
@@ -58,10 +58,10 @@ show up beside hired ones. Claude, Claude Code, Codex and Grok connect through
 one remote MCP server, and each sign-in is a device you approve and can revoke
 ([bring your own lead](https://docs.clankie.bot/diy/#bring-your-own-lead)).
 
-**A way to see the work.** The iPhone and iPad app has Sessions, with every agent
-by machine; the Feed, with what needs you and what finished, grouped by project;
-the World, which draws the same agents as a little village; and Terminal, which
-opens the real panes. Reports carry evidence, kept in its own store rather than
+**A way to see the work.** The iPhone, iPad and desktop app has Sessions, with
+every agent by machine; the Feed, with what needs you and what finished, grouped
+by project; the World, which draws the same agents as a little village; and
+Terminal, which opens the real panes. Reports carry evidence, kept in its own store rather than
 your git history ([the app](https://docs.clankie.bot/using-clankie/#the-app),
 [evidence store](docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
 
