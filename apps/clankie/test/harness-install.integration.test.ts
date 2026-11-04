@@ -4,8 +4,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { setTimeout as realDelay } from "node:timers/promises";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   HARNESS_LOGINS_PATH,
   HARNESS_LOGIN_INSTALL_PATH,
@@ -22,7 +23,10 @@ import { HarnessSignIns } from "../src/harness-logins.ts";
 
 const installerScript = resolve(import.meta.dirname, "fixtures", "harness-installer.mjs");
 const cleanups: (() => void)[] = [];
-afterEach(() => cleanups.splice(0).forEach((step) => step()));
+afterEach(() => {
+  vi.useRealTimers();
+  cleanups.splice(0).forEach((step) => step());
+});
 
 async function createFixture(
   options: {
@@ -153,7 +157,7 @@ async function createFixture(
     for (let attempt = 0; attempt < 400; attempt += 1) {
       const { body } = await call(HARNESS_LOGIN_INSTALL_PATH, bearer);
       if (body.ok && body.install.state !== "running") return body.install;
-      await new Promise((done) => setTimeout(done, 25));
+      await realDelay(25);
     }
     throw new Error("The install never finished");
   };
@@ -209,7 +213,7 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
     // While it runs, another install is refused and shown the running one.
     let running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
     for (let attempt = 0; attempt < 200 && running.ok && running.install.progress.length < 2; attempt += 1) {
-      await new Promise((done) => setTimeout(done, 25));
+      await realDelay(25);
       running = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
     }
     // Colour codes and carriage returns never reach the app.
@@ -361,19 +365,47 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
   });
 
   it("ends an installer that ignores its timeout, so the next install is not held busy", async () => {
+    // Keep native process I/O real. Advance only the deadline clock, after the
+    // stand-in has installed its SIGTERM handler and reported its own PID.
     const f = await fixture({ mode: "stuck", timeoutMs: 300 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
       202,
     );
+    const progress = async (prefix: string) => {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        const { body } = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control);
+        if (body.ok) {
+          const line = body.install.progress.find((entry) => entry.startsWith(prefix));
+          if (line) return line;
+        }
+        await realDelay(25);
+      }
+      throw new Error(`No owned installer progress: ${prefix}`);
+    };
+    const pid = Number((await progress("stuck process ")).split(" ").at(-1));
+    expect(pid).toBeGreaterThan(1);
+    let ownedPid: number | undefined = pid;
+    cleanups.push(() => {
+      if (ownedPid === undefined) return;
+      try {
+        process.kill(ownedPid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+      }
+    });
+    await vi.advanceTimersByTimeAsync(299);
+    expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body).toMatchObject({
+      ok: true,
+      install: { state: "running" },
+    });
+    await vi.advanceTimersByTimeAsync(1);
+    await progress("ignoring SIGTERM");
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(() => process.kill(pid, 0)).not.toThrow();
+    await vi.advanceTimersByTimeAsync(1);
     const timedOut = await f.settled();
     expect(timedOut).toMatchObject({ state: "failed", error: "timed_out" });
-    const pid = Number(
-      timedOut.progress
-        .find((line) => line.startsWith("stuck process "))
-        ?.split(" ")
-        .at(-1),
-    );
-    expect(pid).toBeGreaterThan(1);
     let alive = true;
     try {
       process.kill(pid, 0);
@@ -383,6 +415,7 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
     }
     // Always clean up this exact owned stand-in before failing a broken timeout implementation.
     if (alive) process.kill(pid, "SIGKILL");
+    ownedPid = undefined;
     expect(alive).toBe(false);
     f.mode("ok");
     expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "claude" })).status).toBe(
@@ -434,7 +467,7 @@ describe.each(["linux", "win32"] as const)("installer launch policy %s", (platfo
     while (Date.now() < until);
     let read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
     for (let attempt = 0; attempt < 200 && read.ok && read.install.state === "running"; attempt += 1) {
-      await new Promise((done) => setTimeout(done, 25));
+      await realDelay(25);
       read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
     }
     expect(read.ok && read.install.progress).toEqual([

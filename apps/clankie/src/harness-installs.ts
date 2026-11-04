@@ -200,7 +200,7 @@ export class HarnessInstalls {
         {
           env: installerEnv(this.options.env, this.options.platform),
           stdio: joined ? ["ignore", "pipe", "ignore"] : ["ignore", "pipe", "pipe", "ipc"],
-          // Its own process group, so a timeout also stops what the installer started.
+          // POSIX owns a process group; the Windows supervisor forwards stop signals over IPC.
           detached: process.platform !== "win32",
         },
       );
@@ -304,7 +304,7 @@ function installerEnv(
   return { ...allowed, NONINTERACTIVE: "1", NO_COLOR: "1" };
 }
 
-/** SIGTERM to the installer's whole group, then SIGKILL to whatever ignored it. */
+/** Stop the POSIX installer group or the Windows supervisor's vendor, then force a stuck installer. */
 function stop(child: ChildProcess) {
   const signal = (name: NodeJS.Signals) => {
     if (child.exitCode !== null || child.signalCode !== null) return;
