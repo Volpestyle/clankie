@@ -7,6 +7,8 @@ import { join } from "node:path";
 const [bin, harness, mode] = process.argv.slice(2);
 process.stdout.write("Downloading the installer…\n");
 process.stderr.write("\u001b[32mInstalling\u001b[0m 9.9.9\r\n");
+// Shows the names it was given, so a test can see what reached the vendor's code.
+if (mode === "env") process.stdout.write(`env ${Object.keys(process.env).sort().join(",")}\n`);
 if (mode === "stuck") {
   // Ignores the timeout's SIGTERM, as a wedged installer would; only SIGKILL ends it.
   process.on("SIGTERM", () => process.stdout.write("ignoring SIGTERM\n"));

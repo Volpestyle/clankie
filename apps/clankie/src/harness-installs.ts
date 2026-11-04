@@ -172,7 +172,7 @@ export class HarnessInstalls {
     let child: ChildProcess;
     try {
       child = spawn(installer.command, [...installer.args], {
-        env: { ...this.options.env, NONINTERACTIVE: "1", NO_COLOR: "1" },
+        env: installerEnv(this.options.env),
         stdio: ["ignore", "pipe", "pipe"],
         // Its own process group, so a timeout also stops what the installer started.
         detached: process.platform !== "win32",
@@ -228,6 +228,53 @@ export class HarnessInstalls {
           }),
     });
   }
+}
+
+/** What an installer may see of the service's environment: never its provider keys or tokens. */
+const INSTALLER_ENV = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "TMPDIR",
+  ...["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"].flatMap((name) => [name, name.toLowerCase()]),
+]);
+/** What Windows itself needs for PowerShell and npm to start: paths, not secrets. */
+const WINDOWS_ENV = new Set([
+  "SYSTEMROOT",
+  "WINDIR",
+  "COMSPEC",
+  "PATHEXT",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "PROGRAMDATA",
+  "PROGRAMFILES",
+  "TEMP",
+  "TMP",
+]);
+
+/**
+ * A `curl | bash` or an npm lifecycle script runs with this, not the service's
+ * whole environment, so no provider key or token reaches the vendor's code.
+ */
+function installerEnv(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): NodeJS.ProcessEnv {
+  const allowed: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    if (
+      INSTALLER_ENV.has(name) ||
+      name.startsWith("LC_") ||
+      (platform === "win32" && WINDOWS_ENV.has(name.toUpperCase()))
+    )
+      allowed[name] = value;
+  }
+  return { ...allowed, NONINTERACTIVE: "1", NO_COLOR: "1" };
 }
 
 /** SIGTERM to the installer's whole group, then SIGKILL to whatever ignored it. */

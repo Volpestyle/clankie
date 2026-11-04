@@ -52,7 +52,9 @@ subscription is used.
 its vendor's own installer, as the service's user (#737): Claude Code with
 `curl -fsSL https://claude.ai/install.sh | bash` (PowerShell's `install.ps1` on
 Windows), Codex with `brew install --cask codex` on a Mac that has Homebrew, else
-`npm install -g @openai/codex`. It answers 202 with
+`npm install -g @openai/codex`. The installer gets only an allowlisted environment
+(PATH, HOME, user, shell, locale, temp and proxy variables), never the service's
+provider keys or tokens. It answers 202 with
 `{ ok: true, install: { installId, harness, installer, state: "running", progress, ownerApproval, … } }`;
 `GET` reads the latest install. `progress` is the installer's latest 40 output
 lines as plain text. When the installer exits, the sign-in list is read again and

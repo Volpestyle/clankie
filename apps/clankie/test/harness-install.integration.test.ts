@@ -11,7 +11,7 @@ import {
   HARNESS_LOGIN_INSTALL_PATH,
   type HarnessInstallResult,
 } from "@clankie/protocol/harness-logins";
-import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
+import { CONNECTOR_GRANTS, SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
 import { runHarnessLoginCommand } from "../../tui/src/command/harness-login.ts";
 import { createClankieApp } from "../src/app.ts";
@@ -24,7 +24,14 @@ const installerScript = resolve(import.meta.dirname, "fixtures", "harness-instal
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((step) => step()));
 
-async function fixture(options: { mode?: string; realInstaller?: boolean; timeoutMs?: number } = {}) {
+async function fixture(
+  options: {
+    mode?: string;
+    realInstaller?: boolean;
+    timeoutMs?: number;
+    serviceEnv?: NodeJS.ProcessEnv;
+  } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "harness-install-"));
   // PATH is this empty directory alone: no real claude, codex, curl, Homebrew or npm
   // is found, so no vendor installer can ever run. The stand-in runs Node by path.
@@ -34,7 +41,7 @@ async function fixture(options: { mode?: string; realInstaller?: boolean; timeou
   const logins = new HarnessSignIns({ env });
   let mode = options.mode ?? "ok";
   const installs = new HarnessInstalls({
-    env,
+    env: { ...env, ...options.serviceEnv },
     logins,
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     ...(options.realInstaller
@@ -62,8 +69,13 @@ async function fixture(options: { mode?: string; realInstaller?: boolean; timeou
     signer.issue(
       mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 600 }),
     );
-  const events = (["control", "read"] as const).flatMap((deviceId) => {
-    const grants = deviceId === "control" ? TAKE_CONTROL_GRANTS : SUPERVISE_GRANTS;
+  const events = (["control", "read", "connector"] as const).flatMap((deviceId) => {
+    const grants =
+      deviceId === "control"
+        ? TAKE_CONTROL_GRANTS
+        : deviceId === "read"
+          ? SUPERVISE_GRANTS
+          : CONNECTOR_GRANTS;
     const base = {
       occurredAt: new Date(now).toISOString(),
       missionId: `device:${deviceId}`,
@@ -83,6 +95,8 @@ async function fixture(options: { mode?: string; realInstaller?: boolean; timeou
           platform: "ios",
           offeredGrants: grants,
           mintedBy: "local-owner",
+          // An app signed in through the connector (ADR 0301), as its OAuth token route records it.
+          ...(deviceId === "connector" ? { scope: "connector" } : {}),
           pendingExpiresAt: new Date(now + 600_000).toISOString(),
         },
       },
@@ -114,7 +128,12 @@ async function fixture(options: { mode?: string; realInstaller?: boolean; timeou
     logins.close();
     rmSync(root, { recursive: true, force: true });
   });
-  const tokens = { control: token("control"), read: token("read"), operator: "fixture-owner" };
+  const tokens = {
+    control: token("control"),
+    read: token("read"),
+    connector: token("connector"),
+    operator: "fixture-owner",
+  };
   const call = async (path: string, bearer: string, body?: unknown) => {
     const response = await service.app.request(path, {
       method: body === undefined ? "GET" : "POST",
@@ -156,8 +175,12 @@ it("installs Claude Code for a Take Control device, with progress, one install a
   const f = await fixture({ mode: "hold" });
   expect(await f.installed("claude")).toBe(false);
 
-  // A Supervise device and an unknown bearer are refused, and nothing starts.
+  // A Supervise device, a connector app's device and an unknown bearer are refused, and nothing starts.
   expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.read, { harness: "claude" })).status).toBe(403);
+  expect([401, 403]).toContain(
+    (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector, { harness: "claude" })).status,
+  );
+  expect([401, 403]).toContain((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.connector)).status);
   expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, "nobody", { harness: "claude" })).status).toBe(401);
   expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).status).toBe(404);
 
@@ -283,6 +306,33 @@ it("reports a failing installer, one that leaves no command, and a machine with 
   });
   await expect(unguarded.start("claude", "claimed")).rejects.toThrow(/stand-in installer/u);
   expect(unguarded.current()).toEqual({ ok: false, error: "install_not_found" });
+});
+
+it("runs the installer with an allowlisted environment, so no service secret reaches it", async () => {
+  const f = await fixture({
+    mode: "env",
+    serviceEnv: {
+      OPENAI_API_KEY: "sk-fixture-secret-openai",
+      ANTHROPIC_API_KEY: "sk-ant-fixture-secret",
+      GITHUB_TOKEN: "ghp_fixture-secret",
+      CLANKIE_OPERATOR_TOKEN: "fixture-operator-secret",
+      LANG: "en_US.UTF-8",
+      LC_ALL: "C",
+      HTTPS_PROXY: "http://proxy.invalid:3128",
+    },
+  });
+  expect((await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" })).status).toBe(202);
+  const done = await f.settled();
+  const seen = done.progress
+    .find((line) => line.startsWith("env "))!
+    .slice(4)
+    .split(",");
+  expect(seen).toEqual(
+    expect.arrayContaining(["PATH", "HOME", "LANG", "LC_ALL", "HTTPS_PROXY", "NONINTERACTIVE", "NO_COLOR"]),
+  );
+  for (const secret of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN", "CLANKIE_OPERATOR_TOKEN"])
+    expect(seen).not.toContain(secret);
+  expect(JSON.stringify(done)).not.toContain("secret");
 });
 
 it("ends an installer that ignores its timeout, so the next install is not held busy", async () => {
