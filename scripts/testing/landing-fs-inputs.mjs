@@ -68,6 +68,8 @@ export const landingFsInputs = Object.fromEntries([
       "packages/fleet-resources/src/server-cpu.py",
       "packages/fleet-resources/test/fixtures/zombie-server.py",
       "packages/fleet-resources/test/fixtures/unreaped-child.py",
+      "packages/fleet-resources/test/fixtures/exit-proof.py",
+      "packages/fleet-resources/test/fixtures/unreadable-member.py",
     ],
   ],
   [
