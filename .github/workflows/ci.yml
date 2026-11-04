@@ -300,7 +300,7 @@ jobs:
   # Mac. It stays off until the Mac's runner for this repository is registered
   # and the CLANKIE_MAC_RUNNER variable is "true". The `if:` states the intent;
   # the runner's own job-started guard enforces it, since a pull request can
-  # change this file (ADR 0351, docs/mac-runner.md).
+  # change this file (ADR 0352, docs/mac-runner.md).
   mac:
     if: vars.CLANKIE_MAC_RUNNER == 'true' && github.event_name == 'push'
     runs-on: [self-hosted, macOS, james-mac]
@@ -399,7 +399,7 @@ jobs:
   # agent or the app would, every outcome checked through the API, the files and
   # the service's own logs. It runs on main after merges and on request, never per
   # pull request, and never gates a merge (ADR 0347).
-  # The runner-side guard also rejects fork jobs (ADR 0351).
+  # The runner-side guard also rejects fork jobs (ADR 0352).
   real-run:
     if: vars.CLANKIE_MAC_RUNNER == 'true' && github.event_name != 'pull_request'
     runs-on: [self-hosted, macOS, james-mac]

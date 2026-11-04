@@ -1,4 +1,4 @@
-# ADR 0351: Mac runners run as their own user behind a runner-side guard
+# ADR 0352: Mac runners run as their own user behind a runner-side guard
 
 Status: Proposed, 2026-11-02. Amends 0240, 0309, 0310 and 0332 for the Mac jobs.
 
