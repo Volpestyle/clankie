@@ -19,7 +19,11 @@ afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();
 });
 
-type Starter = { kind: "clankie" } | { kind: "app"; name: string } | { kind: "owner" } | { kind: "agent" };
+type Starter =
+  | { kind: "clankie" }
+  | { kind: "app"; name: string }
+  | { kind: "owner" }
+  | { kind: "agent"; name: string };
 
 /**
  * The service on real settings, with Herdr's close and the roster's starters standing in for the
@@ -282,6 +286,7 @@ it("an app named like the owner or Clankie is listed as the app that started a s
     { seatId: "w1:owner-named", hired: true, starter: { kind: "app", name: "the owner" }, status: "idle" },
     { seatId: "w1:clankie-named", hired: true, starter: { kind: "app", name: "Clankie" }, status: "idle" },
     { seatId: "w1:owners", hired: true, starter: { kind: "owner" }, status: "idle" },
+    { seatId: "w1:agent-named", hired: true, starter: { kind: "agent", name: "the owner" }, status: "idle" },
   ]);
   const source = createHerdrSessionSource(
     {
@@ -298,4 +303,5 @@ it("an app named like the owner or Clankie is listed as the app that started a s
   expect(startedBy("w1:owner-named")).toBe('the app "the owner"');
   expect(startedBy("w1:clankie-named")).toBe('the app "Clankie"');
   expect(startedBy("w1:owners")).toBe("the owner");
+  expect(startedBy("w1:agent-named")).toBe('the agent "the owner"');
 });

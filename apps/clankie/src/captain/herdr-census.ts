@@ -20,6 +20,7 @@ import { readLocalCodexRecords, isLocalCodexEndpoint } from "../local-codex-reco
 import { CodexAppServerClient, openCodexSocket } from "./codex-app-server.ts";
 import { observeNativeProcesses, observeCodexServer, nativeProcessReceipt } from "../local-fleet-process.ts";
 import { nativeRequest } from "../herdr-native-request.ts";
+import { quotedLine } from "./quoted-line.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -585,11 +586,12 @@ export function formatHerdrSessionCensus(
     counts.set(entry.status, (counts.get(entry.status) ?? 0) + 1);
     const mark = entry.paneId === herdrPaneId ? "  <- YOU" : "";
     const title = entry.title.length <= 60 ? entry.title : `${entry.title.slice(0, 59)}…`;
-    lines.push(`  ${entry.paneId}  ${entry.agent}  ${entry.status}  ${title}${mark}`);
+    // A title, summary and next step are the agent's own words: each stays one quoted string (#349).
+    lines.push(`  ${entry.paneId}  ${entry.agent}  ${entry.status}  ${quotedLine(title)}${mark}`);
     const written = summaries[entry.paneId];
     if (written) {
-      lines.push(`        summary: ${written.summary}`);
-      if (written.next) lines.push(`        next: ${written.next}`);
+      lines.push(`        summary: ${quotedLine(written.summary)}`);
+      if (written.next) lines.push(`        next: ${quotedLine(written.next)}`);
     }
   }
   if (agents.length > shown.length) lines.push(`  … ${agents.length - shown.length} more agents not listed`);

@@ -19,6 +19,7 @@ import type { HerdrAgentSnapshot } from "./herdr-watch.ts";
 import type { FleetSeatDelivery } from "./fleet-seat.ts";
 import type { PeerSeatAuthority } from "./peer-seat-messages.ts";
 import type { ConversationOwner } from "./conversation-owner.ts";
+import { quotedLine } from "./quoted-line.ts";
 
 /** Settled candidates kept beyond this are pruned oldest first; their patches go with them. */
 const CANDIDATE_LIMIT = 500;
@@ -303,14 +304,14 @@ export class ReviewGate {
     if (!reviewer) {
       await this.options.notifyLead(
         lead,
-        `Review candidate ${candidate.id} (${candidate.issue ?? "no issue"}, patch ${candidate.patchId}) from ${authorSeat.title ?? authorSeat.seatId} is waiting: project ${candidate.projectId} names a reviewer (${"seat" in review ? `seat ${review.seat}` : `role ${review.role}`}), but no live seat other than the author holds it. Hire or seat a reviewer; the author resubmits the same patch to deliver it.`,
+        `Review candidate ${candidate.id} (${candidate.issue ?? "no issue"}, patch ${candidate.patchId}) from ${seatLabel(authorSeat)} is waiting: project ${candidate.projectId} names a reviewer (${"seat" in review ? `seat ${review.seat}` : `role ${review.role}`}), but no live seat other than the author holds it. Hire or seat a reviewer; the author resubmits the same patch to deliver it.`,
       );
       return candidate;
     }
     const prior = candidate.supersedes === undefined ? undefined : this.candidates.get(candidate.supersedes);
     const text = [
       `Review request ${candidate.id} (ADR 0287). You are project ${candidate.projectId}'s standing reviewer: review adversarially and push back with concrete required changes; never approve what you have not read.`,
-      `Author: ${authorSeat.title ?? authorSeat.seatId} (${authorSeat.seatId}, ${authorSeat.harness}).${candidate.issue === undefined ? "" : ` Issue: ${candidate.issue}.`}`,
+      `Author: ${authorSeat.title === undefined ? authorSeat.seatId : `titled ${quotedLine(authorSeat.title)}`} (${authorSeat.seatId}, ${authorSeat.harness}).${candidate.issue === undefined ? "" : ` Issue: ${candidate.issue}.`}`,
       `Patch ${candidate.patchId}: ${candidate.files.length} files, ${candidate.bytes} bytes, ${candidate.base.slice(0, 12)}..${candidate.head.slice(0, 12)}.`,
       `Files:\n${listItems(candidate.files.slice(0, 50))}${candidate.files.length > 50 ? `\n- … ${candidate.files.length - 50} more` : ""}`,
       `Summary:\n${candidate.summary}`,
@@ -425,7 +426,7 @@ export class ReviewGate {
       this.persist(next);
       const word = input.verdict === "approve" ? "APPROVE" : "CHANGES";
       const body = [
-        `Review verdict for ${decided.id}${decided.issue === undefined ? "" : ` (${decided.issue})`}: ${word} from ${seat.title ?? seat.seatId} (${seat.harness}), bound to patch ${decided.patchId}.`,
+        `Review verdict for ${decided.id}${decided.issue === undefined ? "" : ` (${decided.issue})`}: ${word} from ${seatLabel(seat)} (${seat.harness}), bound to patch ${decided.patchId}.`,
         ...(input.summary === undefined ? [] : [input.summary]),
         ...(input.findings.length ? [`Findings:\n${listItems(input.findings)}`] : []),
       ].join("\n\n");
@@ -606,4 +607,9 @@ export class ReviewGate {
       }
     }
   }
+}
+
+/** A seat as a service line names it: its id, and its own title quoted (#349). */
+function seatLabel(seat: { readonly seatId: string; readonly title?: string | undefined }): string {
+  return seat.title === undefined ? seat.seatId : `${seat.seatId} (titled ${quotedLine(seat.title)})`;
 }
