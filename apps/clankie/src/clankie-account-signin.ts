@@ -135,6 +135,12 @@ export function createClankieAccountSignIn(options: {
       pending = undefined;
       throw new ClankieAccountSignInError("code_expired");
     }
+    // Counted before the request leaves, so concurrent completes reach the
+    // account service at most CODE_ATTEMPTS times for one emailed code.
+    if (current.attempts >= CODE_ATTEMPTS) {
+      if (pending === current) pending = undefined;
+      throw new ClankieAccountSignInError("challenge_unknown");
+    }
     current.attempts += 1;
     let credential: OauthCredential;
     try {

@@ -1,8 +1,9 @@
-import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLANKIE_ACCOUNT_PROVIDER_ID, FileCredentialStore } from "@clankie/credential-broker";
@@ -91,6 +92,8 @@ async function fixture() {
   const credentials = new FileCredentialStore(join(dir, "credentials.json"));
   const settings = new SettingsStore(join(dir, "settings.json"));
   const boundary = new LocalCompanionBoundary();
+  // How far the test has moved this sign-in's clock past real time.
+  const clock = { skewMs: 0 };
   const app: ClankieApp = await createClankieApp({
     captain: createStubCaptain(),
     eventLogPath: join(dir, "events.jsonl"),
@@ -116,7 +119,12 @@ async function fixture() {
           },
     authenticateOperator: async (request) =>
       request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
-    clankieAccountSignIn: createClankieAccountSignIn({ credentials, settings, gatewayUrl: account.origin }),
+    clankieAccountSignIn: createClankieAccountSignIn({
+      credentials,
+      settings,
+      gatewayUrl: account.origin,
+      now: () => Date.now() + clock.skewMs,
+    }),
   });
   const server = serve({
     hostname: "127.0.0.1",
@@ -163,6 +171,8 @@ async function fixture() {
   const session = LocalCompanionSessionSchema.parse(redeemed.body);
   return {
     dir,
+    origin,
+    clock,
     account,
     credentials,
     settings,
@@ -210,6 +220,12 @@ describe("this Mac's clankie.bot sign-in from the owner's app (#722)", () => {
     expect(started.status).toBe(200);
     expect(Object.keys(started.body).sort()).toEqual(["challengeId", "expiresAt"]);
     const { challengeId } = started.body as { challengeId: string };
+
+    // Another well-formed id never reaches the account service or disturbs the pending sign-in.
+    expect(
+      await f.call("/v1/clankie-account/complete", { challengeId: randomUUID(), code: "24680" }, f.macApp),
+    ).toEqual({ status: 404, body: { error: "challenge_unknown" } });
+    expect(f.account.targets).toEqual(["AWSCognitoIdentityProviderService.InitiateAuth"]);
 
     expect(await f.call("/v1/clankie-account/complete", { challengeId, code: "11111" }, f.macApp)).toEqual({
       status: 400,
@@ -261,18 +277,119 @@ describe("this Mac's clankie.bot sign-in from the owner's app (#722)", () => {
       for (const body of f.bodies) expect(body).not.toContain(secret);
   });
 
-  it("drops a pending code after five wrong tries", async () => {
+  it("sends at most five codes for one email, even when completes race", async () => {
     const f = await fixture();
     const { challengeId } = (
       await f.call("/v1/clankie-account/start", { email: "owner@example.com" }, f.macApp)
     ).body as { challengeId: string };
-    for (let attempt = 0; attempt < 5; attempt += 1)
-      expect(
-        (await f.call("/v1/clankie-account/complete", { challengeId, code: "00000" }, f.macApp)).status,
-      ).toBe(400);
+    const statuses = await Promise.all(
+      Array.from(
+        { length: 8 },
+        async () =>
+          (await f.call("/v1/clankie-account/complete", { challengeId, code: "00000" }, f.macApp)).status,
+      ),
+    );
+    expect(statuses.sort()).toEqual([400, 400, 400, 400, 400, 404, 404, 404]);
+    const sent = () =>
+      f.account.targets.filter(
+        (target) => target === "AWSCognitoIdentityProviderService.RespondToAuthChallenge",
+      );
+    expect(sent()).toHaveLength(5);
     expect(
       (await f.call("/v1/clankie-account/complete", { challengeId, code: "24680" }, f.macApp)).status,
     ).toBe(404);
+    expect(sent()).toHaveLength(5);
     expect(await f.credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toBeUndefined();
+  });
+
+  it("expires a pending code after ten minutes and drops it", async () => {
+    const f = await fixture();
+    const { challengeId } = (
+      await f.call("/v1/clankie-account/start", { email: "owner@example.com" }, f.macApp)
+    ).body as { challengeId: string };
+    f.clock.skewMs = 10 * 60_000;
+    expect(await f.call("/v1/clankie-account/complete", { challengeId, code: "24680" }, f.macApp)).toEqual({
+      status: 410,
+      body: { error: "code_expired" },
+    });
+    f.clock.skewMs = 0;
+    expect(await f.call("/v1/clankie-account/complete", { challengeId, code: "24680" }, f.macApp)).toEqual({
+      status: 404,
+      body: { error: "challenge_unknown" },
+    });
+    expect(f.account.targets).toEqual(["AWSCognitoIdentityProviderService.InitiateAuth"]);
+    expect(await f.credentials.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toBeUndefined();
+  });
+
+  it("refuses a device on this Mac that was not given Take Control", async () => {
+    const f = await fixture();
+    const offer = await f.call("/v1/pairing/offer", {}, { authorization: "Bearer owner" });
+    const redeemed = await f.call("/v1/pairing/redeem", {
+      code: offer.body.localCode,
+      device: { name: "Observer", platform: "ios" },
+    });
+    const paired = await f.call("/v1/pairing/complete", {
+      completionToken: redeemed.body.completionToken,
+      acceptedGrants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
+    });
+    expect(paired.status).toBe(200);
+    const observer = { authorization: `Bearer ${paired.body.deviceToken}` };
+    expect((await f.call("/v1/devices/self", undefined, observer)).status).toBe(200);
+    expect((await f.call("/v1/clankie-account", undefined, observer)).status).toBe(403);
+    expect((await f.call("/v1/clankie-account/start", { email: "owner@example.com" }, observer)).status).toBe(
+      403,
+    );
+    expect(
+      (await f.call("/v1/clankie-account/complete", { challengeId: randomUUID(), code: "1" }, observer))
+        .status,
+    ).toBe(403);
+    expect(f.account.targets).toEqual([]);
+  });
+});
+
+describe("clankie login", () => {
+  it("stores the email its code proved, through the same sign-in the app uses", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "account-login-")));
+    cleanups.push(() => rm(dir, { recursive: true, force: true }));
+    const account = await fakeAccountService();
+    const credentialsPath = join(dir, "credentials.json");
+    const settingsPath = join(dir, "settings.json");
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, "../../tui/bin/clankie.ts"),
+        "login",
+        "--url",
+        account.origin,
+        "--email",
+        " Owner@Example.com ",
+        "--code-stdin",
+      ],
+      {
+        env: {
+          ...process.env,
+          XDG_CONFIG_HOME: join(dir, "config"),
+          CLANKIE_SETTINGS_FILE: settingsPath,
+          CLANKIE_CREDENTIALS_FILE: credentialsPath,
+          // Nothing reaches a running service; the CLI only stores the sign-in.
+          CLANKIE_CONTROL_PLANE_URL: "http://127.0.0.1:9",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => (stdout += String(chunk)));
+    child.stderr.on("data", (chunk) => (stderr += String(chunk)));
+    child.stdin.end("24680\n");
+    const code = await new Promise<number | null>((done) => child.once("exit", done));
+    expect({ code, stderr }).toMatchObject({ code: 0 });
+    expect(JSON.parse(stdout)).toMatchObject({ ok: true, mode: "remote-access" });
+    expect(await new FileCredentialStore(credentialsPath).get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({
+      type: "oauth",
+      accountId: "account-1",
+      metadata: { email: "owner@example.com" },
+    });
+    expect((await new SettingsStore(settingsPath).load()).publicGateway.url).toBe(account.origin);
   });
 });

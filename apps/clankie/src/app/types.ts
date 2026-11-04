@@ -185,7 +185,7 @@ export interface ClankieAppDependencies {
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** Owner identity proven only by the private same-user Unix mint listener. */
   localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
-  /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
+  /** A native client on this Mac over loopback, not forwarded; picks addresses, and with a Take Control device session admits ownerMacAdmission. */
   isSameMacRequest?: (request: Request) => boolean;
   /**
    * Proves which app on this Mac sent a companion redeem and whether the owner
