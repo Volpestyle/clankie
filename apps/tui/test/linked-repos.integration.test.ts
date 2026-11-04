@@ -272,9 +272,9 @@ it("a linked repo lets a built-in project review and measure another project's c
     const unlinked = await call("save_guided_review", { ...save, idempotencyKey: "before-link" });
     expect(unlinked.status).toBe(422);
     expect(await unlinked.json()).toMatchObject({ error: "tracker_refused" });
-    expect((await measureVelocity(await project("clankie-work"), null, velocityDeps)).churn).toMatchObject({
+    expect((await measureVelocity(await project("clankie-work"), null, velocityDeps)).churn).toEqual({
       state: "unknown",
-      reason: expect.stringContaining("repository unreadable"),
+      reason: `no Git checkout at ${work}; configure a project Git folder to measure churn`,
     });
 
     // Links that would give a project a second owner, or a repo nobody owns, are refused.
