@@ -1,3 +1,4 @@
+import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, readFile, realpath } from "node:fs/promises";
@@ -304,7 +305,7 @@ export async function connectPrimeDaemon(install: PrimeAgentInstall): Promise<Pr
   }
   const child = spawn(install.executable, ["--mode", "daemon", "--daemon-socket", install.socketPath], {
     cwd: process.env.HOME ?? "/",
-    env: { ...process.env, ...install.env },
+    env: { ...process.env, ...install.env, ...RESOURCE_HOLDER_RESET_ENV },
     detached: true,
     stdio: "ignore",
   });
