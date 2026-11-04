@@ -45,6 +45,8 @@ export interface LeaseRecord {
 }
 
 const leaseRecordFile = "leases.jsonl";
+/** Days of permits per file (#599), so wait times can be compared across a change. */
+const leaseRecordMaxBytes = 16 * 1_048_576;
 const machineSampleFile = "samples.jsonl";
 /** About two days of 30-second samples per file. */
 const machineSampleMaxBytes = 4 * 1_048_576;
@@ -73,7 +75,7 @@ export function leaseCommand(command: string, args: readonly string[]): string {
 export async function recordLease(directory: string, record: Omit<LeaseRecord, "atMs" | "load1">) {
   const line = { atMs: Date.now(), ...record, load1: round(loadavg()[0]!) };
   // allow-swallowed-rejection -- history is best effort; the permit it describes must not fail.
-  await appendRecords(directory, leaseRecordFile, [line]).catch(() => undefined);
+  await appendRecords(directory, leaseRecordFile, [line], leaseRecordMaxBytes).catch(() => undefined);
 }
 
 let ticks: { busy: number; total: number } | undefined;
