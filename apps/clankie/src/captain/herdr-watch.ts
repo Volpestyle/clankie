@@ -2657,10 +2657,22 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.attempt(fleet, projectHirePane(fleet, seat.paneId));
   }
-  /** Record this seat's attempt as the one that landed; returns the panes it superseded (#602). */
-  public settleHireAttempt(seat: { readonly paneId: string }): string[] {
-    const fleet = nativeProofLocation(seat.paneId).fleet;
-    return this.projectHires.settleAttempt(fleet, projectHirePane(fleet, seat.paneId));
+  /**
+   * The exact attempt allocation this pane's current occupant holds, captured before a
+   * close releases it (#602). Undefined unless the ledger's occupant is this session.
+   */
+  public hireAttemptRecord(
+    agent: HerdrAgentSnapshot,
+  ): { readonly allocation: string; readonly occupantId: string } | undefined {
+    const attempt = this.hireAttempt(agent);
+    if (attempt?.occupantId === undefined || !agent.session) return undefined;
+    return occupantIdForHerdrSession(agent.session) === attempt.occupantId
+      ? { allocation: attempt.allocation, occupantId: attempt.occupantId }
+      : undefined;
+  }
+  /** Record that captured attempt as the one that landed; returns the panes it superseded (#602). */
+  public settleHireAttempt(record: { readonly allocation: string; readonly occupantId: string }): string[] {
+    return this.projectHires.settleAttempt(record.allocation, record.occupantId);
   }
   /**
    * The project a seat's current occupant was hired into, and the GitHub repository of the

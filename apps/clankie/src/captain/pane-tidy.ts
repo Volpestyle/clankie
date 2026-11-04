@@ -216,10 +216,15 @@ export class PaneTidy {
     mainCheckpoint?(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined>;
     /** Overrides how long a close waits on mainCheckpoint; tests shorten it. */
     checkpointMs?: number;
-    /** Whether this pane is a deliberate attempt whose own commits are all on main (#602). */
-    attemptLanded?(agent: HerdrAgentSnapshot): Promise<boolean>;
-    /** Records a closed attempt that landed as the winner and supersedes its siblings (#602). */
-    attemptSettled?(agent: HerdrAgentSnapshot): void;
+    /**
+     * The exact attempt allocation and occupant in this pane, when its own commits are
+     * all on main (#602); read before the close releases the allocation or prunes the tree.
+     */
+    landedAttempt?(
+      agent: HerdrAgentSnapshot,
+    ): Promise<{ readonly allocation: string; readonly occupantId: string } | undefined>;
+    /** Records that captured attempt as the winner and supersedes its siblings (#602). */
+    attemptSettled?(record: { readonly allocation: string; readonly occupantId: string }): void;
     worktreeHold?(
       agent: HerdrAgentSnapshot,
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
@@ -968,8 +973,9 @@ export class PaneTidy {
       };
       await guard();
       // Read before the close can prune the attempt's worktree.
-      const landedAttempt =
-        !input.nativeOnly && (await this.ports.attemptLanded?.(agent).catch(() => false)) === true;
+      const landedAttempt = input.nativeOnly
+        ? undefined
+        : await this.ports.landedAttempt?.(agent).catch(() => undefined);
       const closeWorktree = input.nativeOnly ? undefined : await this.worktreeForClose(agent);
       const closedAt = this.now();
       entry = EntrySchema.parse({
@@ -1046,7 +1052,7 @@ export class PaneTidy {
       if (!closed) return fail("close_unconfirmed");
       if (landedAttempt)
         try {
-          this.ports.attemptSettled?.(agent);
+          this.ports.attemptSettled?.(landedAttempt);
         } catch {
           /* The pane is closed; a busy hire ledger leaves the attempt unsettled, never reopened. */
         }

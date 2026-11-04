@@ -79,6 +79,8 @@ async function fixture(
     remote?: boolean;
     socket?: boolean;
     projectHire?: boolean;
+    /** The project hire is a deliberate attempt at a deliverable, beside a sibling attempt (#602). */
+    attempt?: boolean;
     missingLaunchProof?: boolean;
     missingHireReceipt?: boolean;
     ordinaryHire?: boolean;
@@ -297,6 +299,7 @@ async function fixture(
       harness,
       title: "Pip",
       workingDirectory: options.cwd ?? root,
+      ...(options.attempt ? { deliverable: "Volpestyle/clankie#602", attempt: true } : {}),
     });
     const allocation = ledger.reserve(settings, "fixture", request);
     ledger.launch(allocation.id, settings);
@@ -529,6 +532,16 @@ async function fixture(
     },
     setHire: (next: () => Promise<OperatorSeatSpawnResult>) => {
       hireResult = next;
+    },
+    /** Another live worker's pane, with its own session, that the census keeps seeing. */
+    rivalPane: () => {
+      others.push({
+        ...pane,
+        pane_id: "w1:p8",
+        terminal_id: "term_888",
+        title: "Rival",
+        agent_session: { ...native, value: "rival-session" },
+      });
     },
     /** Another Herdr pane already running this native session. */
     reopenElsewhere: (unlabelled = false) => {
@@ -946,36 +959,67 @@ it.each([false, true])("closes a proven hire after deploy/re-adoption (remote=%s
   expect(f.tidy.leadHistory()[0]).toMatchObject({ paneId: pane });
   f.watch.close();
 });
-it("a closed attempt whose work landed settles as the winner, and only once the pane really closed (#602)", async () => {
-  const f = await fixture({ socket: true, readopt: true });
-  await f.watch.adoptSeat("term_111", authority);
-  const landed: string[] = [];
-  const settled: string[] = [];
-  const tidy = new PaneTidy(f.path, {
-    ...f.ports,
-    attemptLanded: async (agent) => {
-      landed.push(agent.paneId);
-      return true;
-    },
-    attemptSettled: (agent) => {
-      settled.push(agent.paneId);
-    },
-  });
-  // A refused close settles nothing: the attempt's pane is still running.
-  f.setAnsi(await golden("codex", "draft"));
-  expect(await tidy.close({ pane: "w1:p1", reason: "Landed", reportPath: f.reportPath }, authority)).toMatchObject({
-    outcome: "refused",
-    reason: "unsent_draft",
-  });
-  expect(settled).toEqual([]);
-  f.setAnsi(await golden("codex", "empty"));
-  expect(await tidy.close({ pane: "w1:p1", reason: "Landed", reportPath: f.reportPath }, authority)).toMatchObject({
-    outcome: "closed",
-  });
-  // Read before the close could prune its worktree, settled after the pane closed.
-  expect(landed).toEqual(["w1:p1"]);
-  expect(settled).toEqual(["w1:p1"]);
-  f.watch.close();
+it("a closed attempt that landed settles its own retained allocation as the winner after the real close (#602)", async () => {
+  const f = await fixture({ remote: true, socket: true, projectHire: true, attempt: true });
+  try {
+    const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "fixture", name: "Fixture" }] });
+    // A sibling attempt at the same deliverable, on another harness in its own worktree.
+    const sibling = f.ledger.reserve(
+      settings,
+      "fixture",
+      SpawnOperatorSeatSchema.parse({
+        schemaVersion: 1,
+        fleet: "pc",
+        harness: "claude",
+        title: "Rival",
+        workingDirectory: join(f.root, "rival"),
+        deliverable: "Volpestyle/clankie#602",
+        attempt: true,
+      }),
+    );
+    f.ledger.launch(sibling.id, settings);
+    f.rivalPane();
+    f.ledger.pane(sibling.id, "pc/w1:p8");
+    const winner = f.ledger.retirementCandidate("pc", "pc/w1:p1")!;
+    expect(winner.request.attempt).toBe(true);
+    // The real store captures the record and settles it; only the Git verdict is given.
+    const captured: unknown[] = [];
+    const tidy = new PaneTidy(f.path, {
+      ...f.ports,
+      landedAttempt: async (agent) => {
+        const record = f.watch.hireAttemptRecord(agent);
+        captured.push(record);
+        return record;
+      },
+      attemptSettled: (record) => {
+        f.watch.settleHireAttempt(record);
+      },
+    });
+    const close = () =>
+      tidy.close(
+        {
+          pane: "pc/w1:p1",
+          reason: "Landed",
+          reportPath: f.reportPath,
+          unlandedReason: "Fixture worktree work is evidenced elsewhere",
+        },
+        authority,
+      );
+    // A refused close settles nothing: the attempt is still running.
+    f.setAnsi(await golden("codex", "draft"));
+    expect(await close()).toMatchObject({ outcome: "refused", reason: "unsent_draft" });
+    expect(f.ledger.allocation(winner.id)?.attemptWon).toBeUndefined();
+    f.setAnsi(await golden("codex", "empty"));
+    const closed = await close();
+    expect(closed, JSON.stringify(closed)).toMatchObject({ outcome: "closed" });
+    expect(captured.at(-1)).toEqual({ allocation: winner.id, occupantId: winner.occupantId });
+    // The close released the winner's allocation, and it still records the win.
+    expect(f.ledger.retirementCandidate("pc", "pc/w1:p1")).toBeUndefined();
+    expect(f.ledger.allocation(winner.id)).toMatchObject({ gone: true, attemptWon: expect.any(String) });
+    expect(f.ledger.allocation(sibling.id)).toMatchObject({ gone: false, supersededBy: winner.id });
+  } finally {
+    f.watch.close();
+  }
 });
 it.each([false, true])(
   "re-adoption cannot turn a hand-started pane into a hire (remote=%s)",

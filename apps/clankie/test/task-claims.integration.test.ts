@@ -46,6 +46,7 @@ const hire = (workingDirectory: string, extra: Partial<SpawnOperatorSeat> = {}):
 const running = (ledger: ProjectHires, id: string, pane: string) => {
   ledger.launch(id, settings());
   ledger.pane(id, pane);
+  ledger.observe(id, `seat-${pane}`, `occupant-${pane}`);
   ledger.confirmed(id);
 };
 
@@ -82,10 +83,9 @@ it("refuses a second claim naming its holder, and frees the claim when the holde
   const ledger = new ProjectHires(join(root, "project-hires.json"));
   const first = ledger.reserve(settings(), "game", hire(join(root, "a")));
   running(ledger, first.id, "w1:p1");
-  ledger.observe(first.id, "seat-1", "occupant-1");
   const second = () => ledger.reserve(settings(), "game", hire(join(root, "b"), { harness: "codex" }));
   expect(second).toThrow(
-    /^Deliverable Volpestyle\/clankie#602 is already claimed by claude \(seat seat-1\), allocation .+ in pane w1:p1 \(age \d+s\)\. .*close_worker_pane.*attempt: true/u,
+    /^Deliverable Volpestyle\/clankie#602 is already claimed by claude \(seat seat-w1:p1\), allocation .+ in pane w1:p1 \(age \d+s\)\. .*close_worker_pane.*attempt: true/u,
   );
   // An attempt can't join an ordinary claim either: the holder didn't agree to a race.
   expect(() =>
@@ -123,14 +123,24 @@ it("lets deliberate attempts race different harnesses in their own worktrees, an
   expect(() => ledger.reserve(settings(), "game", hire(join(root, "plain"), { harness: "pi" }))).toThrow(
     "already claimed by an attempt by claude",
   );
-  expect(ledger.attempt("default", "w1:p1")).toEqual({ deliverable: "Volpestyle/clankie#602", superseded: false });
+  expect(ledger.attempt("default", "w1:p1")).toMatchObject({
+    allocation: claude.id,
+    occupantId: "occupant-w1:p1",
+    deliverable: "Volpestyle/clankie#602",
+    superseded: false,
+  });
   expect(ledger.attempt("default", "w9:p9")).toBeUndefined();
 
-  // Codex's work lands first: it wins, Claude's attempt is superseded, and a second
-  // settlement changes nothing.
-  expect(ledger.settleAttempt("default", "w1:p2")).toEqual(["w1:p1"]);
-  expect(ledger.settleAttempt("default", "w1:p1")).toEqual([]);
-  expect(ledger.attempt("default", "w1:p1")).toEqual({ deliverable: "Volpestyle/clankie#602", superseded: true });
+  // A record whose occupant no longer matches settles nothing.
+  expect(ledger.settleAttempt(codex.id, "occupant-replaced")).toEqual([]);
+  // Codex's work lands first and its close released its allocation: the retained record
+  // still wins, Claude's attempt is superseded, and a second settlement changes nothing.
+  ledger.reconcile("default", new Set(["w1:p1"]), new Set(), ledger.inventoryCandidates("default"));
+  expect(ledger.allocation(codex.id)?.gone).toBe(true);
+  expect(ledger.settleAttempt(codex.id, "occupant-w1:p2")).toEqual(["w1:p1"]);
+  expect(ledger.settleAttempt(codex.id, "occupant-w1:p2")).toEqual([]);
+  expect(ledger.settleAttempt(claude.id, "occupant-w1:p1")).toEqual([]);
+  expect(ledger.attempt("default", "w1:p1")).toMatchObject({ superseded: true });
   expect(ledger.allocation(codex.id)).toMatchObject({
     attemptWon: expect.any(String),
     request: { harness: "codex", model: "sol 6.1" },
@@ -138,28 +148,43 @@ it("lets deliberate attempts race different harnesses in their own worktrees, an
   expect(ledger.allocation(claude.id)).toMatchObject({ supersededBy: codex.id });
 });
 
-it("an attempt has landed only once it made commits since its hire and all of them are on main", async () => {
+it("an attempt has landed only once it made its own commits since its hire and all of them are on main", async () => {
   const root = await scratch();
   const git = (cwd: string, ...args: string[]) =>
     exec("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { cwd });
   const origin = join(root, "origin.git");
-  const work = join(root, "work");
+  const seed = join(root, "seed");
   await exec("git", ["init", "-q", "--bare", "-b", "main", origin]);
-  await exec("git", ["clone", "-q", origin, work]);
-  await git(work, "commit", "-q", "--allow-empty", "-m", "base");
-  await git(work, "push", "-q", "origin", "HEAD:main");
-  await git(work, "fetch", "-q", "origin");
-  const start = (await git(work, "rev-parse", "HEAD")).stdout.trim();
+  await exec("git", ["clone", "-q", origin, seed]);
+  await git(seed, "commit", "-q", "--allow-empty", "-m", "base");
+  await git(seed, "push", "-q", "origin", "HEAD:main");
+  // Two attempts start from the same main in their own checkouts.
+  const a = join(root, "attempt-a");
+  const b = join(root, "attempt-b");
+  await exec("git", ["clone", "-q", origin, a]);
+  await exec("git", ["clone", "-q", origin, b]);
+  const start = (await git(a, "rev-parse", "HEAD")).stdout.trim();
   // Nothing made yet.
-  expect(await landedSince(work, start)).toBe(false);
-  await writeFile(join(work, "fix.txt"), "fix\n");
+  expect(await landedSince(a, start)).toBe(false);
+  await writeFile(join(a, "fix.txt"), "fix\n");
   // Uncommitted work hasn't landed.
-  expect(await landedSince(work, start)).toBe(false);
-  await git(work, "add", "fix.txt");
-  await git(work, "commit", "-q", "-m", "fix");
+  expect(await landedSince(a, start)).toBe(false);
+  await git(a, "add", "fix.txt");
+  await git(a, "commit", "-q", "-m", "fix");
   // Committed but not on main.
-  expect(await landedSince(work, start)).toBe(false);
-  await git(work, "push", "-q", "origin", "HEAD:main");
-  await git(work, "fetch", "-q", "origin");
-  expect(await landedSince(work, start)).toBe(true);
+  expect(await landedSince(a, start)).toBe(false);
+  await git(a, "push", "-q", "origin", "HEAD:main");
+  await git(a, "fetch", "-q", "origin");
+  expect(await landedSince(a, start)).toBe(true);
+  // B made nothing; it only pulled A's landed fix. That is not B's win.
+  await git(b, "pull", "-q", "--ff-only", "origin", "main");
+  expect((await git(b, "rev-parse", "HEAD")).stdout.trim()).not.toBe(start);
+  expect(await landedSince(b, start)).toBe(false);
+  // B's own commit, rebased onto main and landed, is B's own.
+  await writeFile(join(b, "more.txt"), "more\n");
+  await git(b, "add", "more.txt");
+  await git(b, "commit", "-q", "-m", "more");
+  await git(b, "push", "-q", "origin", "HEAD:main");
+  await git(b, "fetch", "-q", "origin");
+  expect(await landedSince(b, start)).toBe(true);
 });

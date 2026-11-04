@@ -2901,18 +2901,20 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         original.restoredHire ? { restoredHire: original.restoredHire } : {},
       );
     },
-    // #602: an attempt wins when it made commits since its hire and every one is on main.
-    // Only a local hire records the commit it started from, so a remote attempt never settles here.
-    attemptLanded: async (agent) => {
-      if (herdrWatches.hireAttempt(agent) === undefined || !agent.session) return false;
+    // #602: an attempt wins when it made its own commits since its hire and every one is on
+    // main. Only a local hire records the commit it started from, so a remote attempt never
+    // settles here.
+    landedAttempt: async (agent) => {
+      const record = herdrWatches.hireAttemptRecord(agent);
+      if (record === undefined) return undefined;
       const owner = herdrWatches.tidyProvenance(agent);
-      if (typeof owner !== "object") return false;
-      const baseline = seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner);
-      if (baseline === undefined) return false;
-      return landedSince(baseline.worktreeRoot, baseline.head);
+      if (typeof owner !== "object") return undefined;
+      const baseline = seatEfficiency.readCommitBaseline(record.occupantId, owner);
+      if (baseline === undefined) return undefined;
+      return (await landedSince(baseline.worktreeRoot, baseline.head)) ? record : undefined;
     },
-    attemptSettled: (agent) => {
-      herdrWatches.settleHireAttempt(agent);
+    attemptSettled: (record) => {
+      herdrWatches.settleHireAttempt(record);
     },
     mainCheckpoint: async (agent) => {
       const qualified = splitFleetQualified(agent.paneId);

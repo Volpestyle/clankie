@@ -283,28 +283,41 @@ export class ProjectHires {
       return { ...structuredClone(allocation), reused: false };
     });
   }
-  /** A live hire's attempt state for the fleet view (#602); undefined for an ordinary claim. */
+  /** A live hire's attempt state (#602); undefined for an ordinary claim. */
   public attempt(
     fleet: string,
     pane: string | undefined,
-  ): { readonly deliverable: string; readonly superseded: boolean } | undefined {
+  ):
+    | {
+        readonly allocation: string;
+        readonly occupantId: string | undefined;
+        readonly deliverable: string;
+        readonly superseded: boolean;
+      }
+    | undefined {
     const entry = this.read().allocations.find(
       (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane === pane && a.request.attempt,
     );
     return entry?.request.deliverable === undefined
       ? undefined
-      : { deliverable: entry.request.deliverable, superseded: entry.supersededBy !== undefined };
+      : {
+          allocation: entry.id,
+          occupantId: entry.occupantId,
+          deliverable: entry.request.deliverable,
+          superseded: entry.supersededBy !== undefined,
+        };
   }
   /**
-   * The attempt in this pane landed its work (#602): record it as the winner and mark
-   * every other live attempt at the same deliverable superseded. Advisory: the lead
-   * closes the superseded ones. Returns their panes; nothing when this isn't an attempt
-   * or another attempt already won.
+   * The attempt whose allocation and occupant were captured before its close landed its
+   * work (#602): record that exact allocation as the winner, even though the close has
+   * since released it, and mark every other live attempt at the same deliverable
+   * superseded. Advisory: the lead closes the superseded ones. Returns their panes;
+   * nothing when the record no longer matches or another attempt already won.
    */
-  public settleAttempt(fleet: string, pane: string | undefined): string[] {
+  public settleAttempt(allocation: string, occupantId: string): string[] {
     return this.change((state) => {
       const winner = state.allocations.find(
-        (a) => (a.request.fleet ?? "default") === fleet && a.pane === pane && a.request.attempt && !a.gone,
+        (a) => a.id === allocation && a.occupantId === occupantId && a.request.attempt,
       );
       if (winner === undefined || winner.supersededBy !== undefined || winner.attemptWon) return [];
       winner.attemptWon = new Date().toISOString();
@@ -830,12 +843,26 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** Reflog actions that create a commit in this worktree, as opposed to bringing one in. */
+const OWN_COMMIT =
+  /^[a-f0-9]+ (?:commit(?: \((?:amend|initial)\))?|rebase(?: -i)? \((?:pick|reword|edit|squash|fixup)\)|cherry-pick):/u;
 /**
- * Whether a worktree made commits since `startHead` and every one of them is on
- * main, with nothing left uncommitted: the test an attempt passes to win (#602).
+ * Whether a worktree made its own commits since `startHead` and every commit in it is
+ * on main, with nothing left uncommitted: the test an attempt passes to win (#602).
+ * Its own commits are the ones its HEAD reflog records it creating (commit, amend,
+ * rebase pick, cherry-pick) that HEAD still contains. Commits it only fetched, pulled,
+ * merged or reset onto, such as another attempt's landed work, are not its own.
  */
 export async function landedSince(worktreeRoot: string, startHead: string): Promise<boolean> {
   if ((await reconcileWorktree(worktreeRoot))?.state !== "reconciled") return false;
-  const own = await checkoutGit(worktreeRoot, ["rev-list", "--count", `${startHead}..HEAD`]);
-  return Number(own.trim()) > 0;
+  const reflog = await checkoutGit(worktreeRoot, ["reflog", "show", "--format=%H %gs", "HEAD"]);
+  const made = new Set(
+    reflog
+      .split("\n")
+      .filter((line) => OWN_COMMIT.test(line))
+      .map((line) => line.slice(0, line.indexOf(" "))),
+  );
+  if (made.size === 0) return false;
+  const contained = await checkoutGit(worktreeRoot, ["rev-list", `${startHead}..HEAD`]);
+  return contained.split("\n").some((sha) => made.has(sha.trim()));
 }
