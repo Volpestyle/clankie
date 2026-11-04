@@ -11,7 +11,11 @@ import { FileCredentialStore, mintOperatorToken, setLeadWake } from "@clankie/cr
 import { Hono } from "hono";
 import { afterEach, expect, it, vi } from "vitest";
 import { runUpdateCommand } from "../../tui/src/command/update.ts";
-import { writeRuntimeUpdate, type RuntimeUpdateResult } from "../../tui/bin/runtime-update.ts";
+import {
+  readRuntimeUpdate,
+  writeRuntimeUpdate,
+  type RuntimeUpdateResult,
+} from "../../tui/bin/runtime-update.ts";
 import type { RuntimeUpdater, UpdateAuthority } from "../../tui/bin/runtime-updater.ts";
 import { writePrivateJson } from "../../tui/bin/update-files.ts";
 import { createBearerAuthenticator } from "../src/app/http-auth.ts";
@@ -196,11 +200,14 @@ it("sends a passed canary to nobody while Clankie leads and no lead was named", 
   const canary = f.canary();
   await canary.recover();
   canary.start();
+  const outcome = join(directory, "lead-wake-outcome.json");
   await expect
-    .poll(() => existsSync(join(directory, "lead-wake-outcome.json")), { timeout: 10_000 })
-    .toBe(true);
+    .poll(async () => (existsSync(outcome) ? JSON.parse(await readFile(outcome, "utf8")) : undefined), {
+      timeout: 10_000,
+    })
+    .toBe("none");
+  expect(readRuntimeUpdate(directory).canary?.state).toBe("passed");
   expect(f.received).toEqual([]);
-  expect(await readFile(join(directory, "lead-wake-outcome.json"), "utf8")).toContain("none");
 });
 
 it("routes a failed canary to every stored lead while apps lead, keeps its alert, and sends no error text", async () => {
