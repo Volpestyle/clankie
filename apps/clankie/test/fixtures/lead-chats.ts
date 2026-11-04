@@ -51,13 +51,15 @@ export async function leadChatFixture(
     paneReadFails?: () => boolean;
     /** Herdr detection (ADR 0312). Absent leaves lead rebind off. */
     connectorSessionDetection?: () => boolean;
+    /** The two leads' conversation titles. */
+    titles?: readonly [string, string];
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "lead-messages-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
   const seeded = new ConversationStore(join(root, "conversations"), async () => {});
   const leads: string[] = [];
-  for (const title of ["Global lead", "Clankie Work"]) {
+  for (const title of options.titles ?? ["Global lead", "Clankie Work"]) {
     const created = await seeded.serve({ schemaVersion: 1, op: "create", scope: { kind: "global" }, title });
     if (created.op !== "create") throw new Error("create failed");
     leads.push(created.conversation.conversationId);

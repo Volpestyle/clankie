@@ -378,6 +378,7 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
         };
       let receipt = nextTurnMailboxes.store(seatId, ctx.inboundBinding(agent), message, {
         fromLead: context.fromLead === true,
+        fromPeer: context.source === "peer",
       });
       if (receipt.deliveryStage === "stored" && agent?.agent === "claude")
         receipt = {
