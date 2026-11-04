@@ -75,7 +75,7 @@ export interface WorktreeHoldOptions {
   /** The worktree the host recorded for this hire, read when the worker has removed it (#769). */
   recorded?: RecordedWorktree;
 }
-export interface RecordedWorktree {
+interface RecordedWorktree {
   readonly worktreeRoot: string;
   readonly commonDir: string;
   readonly branchRef: string;
