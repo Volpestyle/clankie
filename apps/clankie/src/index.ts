@@ -2467,6 +2467,15 @@ const clankie = await createClankieApp({
       return "ready";
     },
   },
+  macAccount: {
+    credentials: operatorCredentialStore,
+    // Only a boot builds the connector, so a sign-in opens the doorway the way a cutover does.
+    restartWhenIdle: () => {
+      if (bodyLeaseStore.status("voice") !== undefined || !stopAdmissionWhenIdle()) return false;
+      setTimeout(() => requestShutdown("SIGTERM"), 500);
+      return true;
+    },
+  },
   refreshHarnesses: async (authority) =>
     refreshLinkedHarnesses({
       repoRoot,

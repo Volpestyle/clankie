@@ -211,7 +211,7 @@ async function runWizard(
     flow.setStatus("signing this Mac in…");
     const credential = await completeClankieAccountLogin({ challenge, code });
 
-    await gatewayEnableWithAccount({ gatewayUrl, credential }, services);
+    await gatewayEnableWithAccount({ gatewayUrl, credential, email: challenge.email }, services);
     flow.setStatus("starting remote access…");
     await services.restartGateway?.();
     flow.renderLine("Remote access is ready. Run /pair to connect your phone.", "success");

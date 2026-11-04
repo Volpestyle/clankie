@@ -72,11 +72,14 @@ export {
   derivePublicGatewayHostId,
   discoverPublicGatewayAccount,
   generatePublicGatewayInstallationId,
+  readClankieAccountState,
   refreshClankieAccountCredential,
   revokeClankieAccountCredential,
+  storeClankieAccountSignIn,
   type ClankieAccountAccessToken,
   type ClankieAccountAuthErrorCode,
   type ClankieAccountLoginChallenge,
+  type ClankieAccountState,
   type ClankieAccountTokenProvider,
 } from "./account-credential.ts";
 export {

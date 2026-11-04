@@ -6,7 +6,9 @@ import {
   PUBLIC_GATEWAY_ENCRYPTION_PROVIDER_ID,
   createDefaultCredentialStore,
   derivePublicGatewayHostId,
-  generatePublicGatewayInstallationId,
+  readClankieAccountState,
+  storeClankieAccountSignIn,
+  type ClankieAccountState,
   type CredentialStore,
   type ProviderCredential,
 } from "@clankie/credential-broker";
@@ -58,6 +60,8 @@ export interface GatewayCommandResult {
   readonly publicGateway: PublicGatewaySettings;
   readonly directRoute?: DeviceDirectRoute;
   readonly credentialPresent: boolean;
+  /** This Mac's clankie.bot sign-in, as `GET /v1/mac-account` reports it. */
+  readonly account: { readonly state: ClankieAccountState; readonly email?: string };
   readonly enabled: boolean;
   readonly hostId?: string;
   readonly settingsFile: string;
@@ -102,6 +106,7 @@ async function result(options: GatewayCommandOptions): Promise<GatewayCommandRes
     publicGateway,
     ...(directRoute.success ? { directRoute: directRoute.data } : {}),
     credentialPresent,
+    account: await readClankieAccountState({ publicGateway, credentials }),
     enabled: publicGateway.url !== undefined && credentialPresent,
     ...(hostId === undefined ? {} : { hostId }),
     settingsFile: settings.path,
@@ -193,18 +198,13 @@ export async function gatewayEnableWithAccount(
   input: {
     readonly gatewayUrl: string;
     readonly credential: Extract<ProviderCredential, { type: "oauth" }>;
+    readonly email?: string;
   },
   options: GatewayCommandOptions = {},
 ): Promise<GatewayCommandResult> {
   const { settings, credentials } = stores(options);
-  const current = (await settings.load()).publicGateway;
-  const publicGateway = PublicGatewaySettingsSchema.parse({
-    url: input.gatewayUrl,
-    installationId: current.installationId ?? generatePublicGatewayInstallationId(),
-  });
-  await credentials.set(CLANKIE_ACCOUNT_PROVIDER_ID, input.credential);
-  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
-  return await gatewayConfigure(publicGateway, options);
+  await storeClankieAccountSignIn({ ...input, credentials, settings });
+  return await result(options);
 }
 
 export async function gatewayDisable(options: GatewayCommandOptions = {}): Promise<GatewayCommandResult> {

@@ -186,8 +186,14 @@ export interface ClankieAppDependencies {
   isLocalCompanionRequest?: (request: Request) => boolean;
   /** Owner identity proven only by the private same-user Unix mint listener. */
   localCompanionOwner?: (request: Request) => TrustedOperatorIdentity | undefined;
-  /** A native client on this Mac over loopback, not forwarded by the gateway; picks addresses only. */
+  /** A native client on this Mac over loopback, not forwarded by the gateway. Grants nothing alone. */
   isSameMacRequest?: (request: Request) => boolean;
+  /** The app's sign-in to clankie.bot (#722). Absent on a body that cannot open a doorway. */
+  macAccount?: {
+    readonly credentials: import("@clankie/credential-broker").CredentialStore;
+    /** Starts the restart that opens the doorway; false while he is busy. */
+    readonly restartWhenIdle: () => boolean;
+  };
   /**
    * Proves which app on this Mac sent a companion redeem and whether the owner
    * trusts it (VUH-2604). Absent means no app is trusted: every redeem is refused.
