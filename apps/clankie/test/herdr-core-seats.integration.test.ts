@@ -151,7 +151,7 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
 
 // The desktop app tells its own Mac terminals that Herdr Browser is there; a hire gets the
 // same, only when the browser is installed, and its own run's values still win (#697).
-coreIt.runIf(process.platform === "darwin")(
+it.skipIf(hc === undefined || process.platform !== "darwin")(
   "a Mac hire learns Herdr Browser is there only when it is installed",
   async () => {
     const browserBin = join(cwd, "browser-bin");
