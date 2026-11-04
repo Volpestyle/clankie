@@ -52,7 +52,8 @@ import type {
 // authorization server: Claude registers itself, opens a sign-in page that
 // shows a short code, and the owner approves that code here or in the app.
 // Approval pairs one more device, scoped to `connector`; its session token is
-// the access token. The gateway in front holds none of this state.
+// the access token. The gateway in front holds none of this state, only hashes
+// from these replies that pick a budget lane and grant nothing (ADR 0358).
 
 /** How long a sign-in page waits for the owner. */
 const SIGN_IN_TTL_MS = 10 * 60_000;

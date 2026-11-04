@@ -95,9 +95,18 @@ health route.
   suffix (`/.well-known/oauth-authorization-server/h/{hostId}`,
   `/.well-known/oauth-protected-resource/h/{hostId}/mcp`) reaches the same host.
   Responses keep `www-authenticate` and the sign-in page's content policy.
-  Connector calls are budgeted per host (240 in a burst, 8 a second), because
-  Claude's servers share a few addresses; the sign-in page and its polling are
-  also budgeted per client (60, 2 a second). Refusals are
+  Connector calls spend one of three per-host budgets
+  ([ADR 0358](../../docs/adr/0358-the-doorway-budgets-connector-work-by-what-the-mac-vouched-for.md)):
+  tool calls and refreshes with a credential the Mac issued or accepted (240 in a
+  burst, 8 a second); a sign-in's polling and code exchange (120, 4 a second, and
+  polling also 10, 1 a second per client); and everything else (120, 4 a second,
+  and 60, 2 a second per client). A client is an address, or an IPv6 /64, per
+  host. This is best-effort fairness, not flood resistance. The gateway reads
+  the connector's token, status and sign-in replies to choose the budget, and
+  keeps only in-memory hashes, bounded and dropped when the host disconnects. The
+  token route's form is read before a budget can be chosen, under its own limits
+  on size, time and reads at once; the 128 in-flight cap counts dispatched
+  exchanges, not body reads. Refusals are
   `429 connector_rate_limited` with `Retry-After`. A sign-in also carries a per-host
   hash of its requester's address, an identifier the Mac uses to limit each requester's
   waiting sign-ins. This route lets the gateway

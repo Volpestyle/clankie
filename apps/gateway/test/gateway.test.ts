@@ -306,6 +306,45 @@ describe("public gateway", () => {
     );
   });
 
+  it("remembers connector clients for a bounded number of hosts", async () => {
+    const hostIds = Array.from({ length: 600 }, (_, index) => `mac_churn_${String(index).padStart(8, "0")}`);
+    const { origin } = await startGateway([], {
+      hostTokens: new Map(hostIds.map((id) => [id, hostToken])),
+      trustedProxy: { trusts: () => true, refresh: async () => {} },
+      clock: () => 1_800_000_000_000,
+    });
+    const mcp = (id: string) =>
+      fetch(`${origin}/h/${id}/mcp`, {
+        method: "POST",
+        headers: { authorization: "Bearer connector-token", "x-forwarded-for": "203.0.113.50" },
+        body: "{}",
+      });
+    const drain = async (id: string) => {
+      for (let index = 0; index < 130; index++)
+        await fetch(`${origin}/h/${id}/.well-known/oauth-authorization-server`, {
+          headers: { "x-forwarded-for": `192.0.2.${index}` },
+        });
+    };
+    for (const id of hostIds) {
+      const socket = new WebSocket(
+        `${origin.replace("http", "ws")}${PUBLIC_GATEWAY_HOST_CONNECT_PATH}?hostId=${id}`,
+        { headers: { authorization: `Bearer ${hostToken}` } },
+      );
+      openSockets.push(socket);
+      socket.on("message", (data: Buffer) => {
+        const frame = PublicGatewayTunnelFrameSchema.parse(JSON.parse(data.toString()));
+        if (frame.kind === "request") respond(socket, frame, 200, "{}");
+      });
+      await once(socket, "open");
+      expect((await mcp(id)).status).toBe(200);
+    }
+
+    await drain(hostIds[0]!);
+    expect((await mcp(hostIds[0]!)).status).toBe(429);
+    await drain(hostIds.at(-1)!);
+    expect((await mcp(hostIds.at(-1)!)).status).toBe(200);
+  }, 30_000);
+
   it("rejects short gateway codes, unavailable hosts and private routes", async () => {
     const logs: Array<{ readonly fields: Readonly<Record<string, unknown>>; readonly message: string }> = [];
     const { origin } = await startGateway(logs);
