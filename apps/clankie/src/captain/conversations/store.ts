@@ -92,11 +92,7 @@ import {
   type QuestionRecord,
 } from "../conversation-questions.ts";
 import { ConversationRunStalledError, ConversationServiceRun } from "../conversation-run.ts";
-import type {
-  HerdrSeatTranscript,
-  HerdrTranscriptEntry,
-  HerdrTranscriptMessage,
-} from "../herdr-transcript.ts";
+import type { HerdrSeatTranscript } from "../herdr-transcript.ts";
 import type { HerdrAgentSnapshot } from "../herdr-watch.ts";
 import { type projectOnboarding } from "../project-onboarding.ts";
 import { SeatLinkInterruptedError } from "../seat-outbox.ts";
@@ -112,7 +108,6 @@ import {
   projectChannelNotice,
   provisionFleetProjection,
   resolveProjection,
-  resolveSeatReply,
   submitProjectedMessage,
   upsertChannel,
 } from "./channel-projection.ts";
@@ -135,11 +130,9 @@ import {
 import { ConversationRefusedError, ConversationResetError, QuestionCommitError } from "./errors.ts";
 import {
   directoryBytes,
-  messageKey,
   publicChannel,
   publicConversation,
   sameScope,
-  transcriptEventBody,
   turnFailureSummary,
   workspaceOf,
 } from "./helpers.ts";
@@ -158,7 +151,6 @@ import {
   queueTrackerActivity,
   receiveTrackerActivity,
   retireLinearInbox,
-  saveTrackerEventReceipts,
 } from "./tracker-wakes.ts";
 import {
   attachedConversationForNative,
@@ -167,7 +159,6 @@ import {
   conversationIdForPersona,
   conversationIdForSeat,
   hasNativeSeat,
-  metaForPersona,
   nameRoomConversation,
   nativeAnnotations,
   nativeConversationForSeat,
@@ -208,15 +199,7 @@ import {
   saveQuestionMeta,
   validQuestionState,
 } from "./questions.ts";
-import {
-  completeTranscriptImage,
-  publishImages,
-  publishNamedImages,
-  publishTranscriptImages,
-  queueDeliveredImages,
-  resettle,
-  syncConversationTranscript,
-} from "./transcripts.ts";
+import {} from "./transcripts.ts";
 import {
   type ChannelProjection,
   type ConversationDriver,
@@ -375,8 +358,6 @@ export class ConversationStore {
     projectChats: readonly { projectId: string; conversationId: string }[];
   }>;
   public linearWakeReceiverAvailable?: (id: string) => boolean;
-  /** Provider delivery receipts outlive conversation history and target changes. */
-  private linearEventReceipts: Record<string, number> = {};
   /** Internal turns whose `invoke()` has begun and not yet settled — not merely queued. */
   private readonly internalRuns = new Map<string, number>();
   private readonly activeInvocations = new Map<string, number>();
@@ -409,8 +390,6 @@ export class ConversationStore {
   /** Serializes host file reads so transcript order survives async publication. */
   private readonly deliveredFilePublishes = new Map<string, Promise<void>>();
   private readonly channelProjectionCreates = new Map<string, Promise<void>>();
-  private readonly pendingTranscriptImages = new Set<string>();
-  private readonly transcriptImageAttempts = new Map<string, number>();
   private draftSequence = 0;
   private readonly questionIssuers = new Map<string, QuestionAuthority>();
   private readonly corruptQuestions = new Set<string>();
@@ -785,10 +764,6 @@ export class ConversationStore {
 
   private loadTrackerEventReceipts(): void {
     return loadTrackerEventReceipts(this);
-  }
-
-  private saveTrackerEventReceipts(): void {
-    return saveTrackerEventReceipts(this);
   }
 
   /** Retire the old reading room once; retained IDs still prevent provider replay. */
@@ -1764,10 +1739,6 @@ export class ConversationStore {
     return conversationIdForSeat(this, seatId);
   }
 
-  private metaForPersona(personaId: string): ConversationMeta | undefined {
-    return metaForPersona(this, personaId);
-  }
-
   public conversationIdForPersona(personaId: string): string | undefined {
     return conversationIdForPersona(this, personaId);
   }
@@ -2081,16 +2052,6 @@ export class ConversationStore {
     return syncSeatTranscript(this, seatId, transcript);
   }
 
-  private syncConversationTranscript(
-    conversationId: string | undefined,
-    seatId: string,
-    transcript: HerdrSeatTranscript,
-    agentRole: "agent" | "captain" = "agent",
-    workingDirectory?: string,
-  ): void {
-    return syncConversationTranscript(this, conversationId, seatId, transcript, agentRole, workingDirectory);
-  }
-
   /**
    * A seat's `waiting` is written when its pane's status changes, and a surface
    * reads everything after it as a turn still in progress. A harness flushes
@@ -2098,9 +2059,6 @@ export class ConversationStore {
    * a thread that was settled before them is settled again behind them. While
    * the seat works its last activity is `responding`, and this does nothing.
    */
-  private resettle(meta: ConversationMeta): void {
-    return resettle(this, meta);
-  }
 
   /**
    * A path on the Mac shows the phone nothing (ADR 0174), so an image a seat
@@ -2109,37 +2067,6 @@ export class ConversationStore {
    * path that is not a file, escapes the directory, or is too large — stays
    * prose. Transcript folds never fence operator sends, so no revision moves.
    */
-  private publishTranscriptImages(
-    meta: ConversationMeta,
-    transcript: HerdrSeatTranscript,
-    workingDirectory: string | undefined,
-  ): void {
-    return publishTranscriptImages(this, meta, transcript, workingDirectory);
-  }
-
-  private publishNamedImages(meta: ConversationMeta, text: string, workingDirectory: string): void {
-    return publishNamedImages(this, meta, text, workingDirectory);
-  }
-
-  private queueDeliveredImages(
-    meta: ConversationMeta,
-    paths: readonly string[],
-    workingDirectory: string,
-  ): Promise<boolean> {
-    return queueDeliveredImages(this, meta, paths, workingDirectory);
-  }
-
-  private async publishImages(
-    meta: ConversationMeta,
-    paths: readonly string[],
-    workingDirectory: string,
-  ): Promise<boolean> {
-    return publishImages(this, meta, paths, workingDirectory);
-  }
-
-  private completeTranscriptImage(meta: ConversationMeta, sessionKey: string, entryId: string): void {
-    return completeTranscriptImage(this, meta, sessionKey, entryId);
-  }
 
   /** Queue a host-authored continuation without forging an operator message. */
   public submitInternal(
@@ -3008,10 +2935,6 @@ export class ConversationStore {
    */
   private awaitSeatReply(seatId: string, signal: AbortSignal): Promise<string | undefined> {
     return awaitSeatReply(this, seatId, signal);
-  }
-
-  private resolveSeatReply(seatId: string, text: string): void {
-    return resolveSeatReply(this, seatId, text);
   }
 
   private queueSeatSend(
@@ -3885,73 +3808,6 @@ export class ConversationStore {
     this.journal.rewrite(meta.conversationId, retained);
     this.counts.set(meta.conversationId, retained.length);
     this.saveMeta(meta);
-  }
-
-  private matchesRecentSeatSend(meta: ConversationMeta, message: HerdrTranscriptMessage): boolean {
-    const previous = this.readEvents(meta.conversationId).findLast(
-      (event) => event.type === "message" && event.role === "operator",
-    );
-    if (previous?.type !== "message" || previous.role !== "operator" || previous.text !== message.text) {
-      return false;
-    }
-    const nativeAt = Date.parse(message.occurredAt ?? "");
-    return !Number.isFinite(nativeAt) || Math.abs(Date.parse(previous.occurredAt) - nativeAt) < 60_000;
-  }
-
-  /** One-time migration from the old last-answer projection to the native ordered transcript. */
-  private replaceSeatEntries(meta: ConversationMeta, transcript: readonly HerdrTranscriptEntry[]): void {
-    const events = this.readEvents(meta.conversationId);
-    const covered = new Map<string, number>();
-    for (const message of transcript) {
-      if (message.type !== "message") continue;
-      const key = messageKey(message.role, message.text);
-      covered.set(key, (covered.get(key) ?? 0) + 1);
-    }
-    const preserved = events.flatMap((event) => {
-      if (event.type !== "message") return [];
-      const role = event.role === "agent" ? "agent" : event.role === "operator" ? "operator" : undefined;
-      if (role === undefined) return [];
-      const key = messageKey(role, event.text);
-      const remaining = covered.get(key) ?? 0;
-      if (remaining > 0) {
-        covered.set(key, remaining - 1);
-        return [];
-      }
-      return [
-        {
-          body: { type: "message" as const, role, text: event.text, streaming: false as const },
-          occurredAt: event.occurredAt,
-        },
-      ];
-    });
-    const projected = transcript.flatMap((entry) =>
-      entry.type === "viewed_image"
-        ? []
-        : [
-            {
-              body: transcriptEventBody(entry, "agent"),
-              occurredAt: entry.occurredAt ?? new Date().toISOString(),
-            },
-          ],
-    );
-    const previousSequence = this.eventSequence(meta);
-    let sequence = previousSequence + 1;
-    meta.retainedFromCursor = String(sequence).padStart(CURSOR_WIDTH, "0");
-    const rebuilt = [...preserved, ...projected].map(({ body, occurredAt }) => {
-      sequence += 1;
-      return {
-        schemaVersion: 1 as const,
-        conversationId: meta.conversationId,
-        cursor: String(sequence).padStart(CURSOR_WIDTH, "0"),
-        revision: meta.revision,
-        occurredAt,
-        ...body,
-      } as OperatorConversationStreamEvent;
-    });
-    this.journal.rewrite(meta.conversationId, rebuilt);
-    this.counts.set(meta.conversationId, rebuilt.length);
-    this.sequences.set(meta.conversationId, sequence);
-    this.wakeTails(meta.conversationId);
   }
 
   private readEvents(conversationId: string): readonly OperatorConversationStreamEvent[] {

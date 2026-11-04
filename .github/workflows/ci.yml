@@ -63,6 +63,11 @@ jobs:
       - name: Strict native MCP catalog contracts
         if: github.event_name != 'workflow_dispatch'
         run: pnpm mcp:check
+      # TypeScript 7's native compiler over every package, under a minute (#391).
+      # It runs beside tsc 5.9, which stays in the landing gate until the two agree.
+      - name: TypeScript 7 typecheck
+        if: github.event_name != 'workflow_dispatch'
+        run: pnpm typecheck:ts7
       - name: Real test dependencies (ffmpeg, pinned Herdr)
         if: github.event_name == 'workflow_dispatch'
         run: |

@@ -7,6 +7,7 @@
   "scripts": {
     "build": "turbo run build --filter=@clankie/vox",
     "typecheck": "turbo run typecheck --concurrency=1",
+    "typecheck:ts7": "node scripts/typecheck-ts7.mjs",
     "test": "vitest run --config vitest.config.ts && pnpm --filter @clankie/vox test && pnpm --filter @clankie/vox-client smoke debug",
     "lint": "node scripts/scoped-code-check.mjs lint",
     "deadcode": "knip --include files,dependencies,unlisted,unresolved,exports,types,enumMembers,namespaceMembers",
@@ -56,6 +57,7 @@
     "oxlint": "1.73.0",
     "turbo": "2.10.4",
     "typescript": "catalog:",
+    "typescript7": "npm:typescript@7.0.2",
     "vitest": "4.1.10"
   },
   "engines": {

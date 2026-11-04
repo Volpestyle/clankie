@@ -1,9 +1,27 @@
 import { isDeliveredImagePath, namedImagePaths } from "../../delivered-files.ts";
-import type { HerdrSeatTranscript, HerdrTranscriptEntry } from "../herdr-transcript.ts";
-import { transcriptEventBody, transcriptImageKey } from "./helpers.ts";
+import type { OperatorConversationStreamEvent } from "@clankie/protocol";
+import type {
+  HerdrSeatTranscript,
+  HerdrTranscriptEntry,
+  HerdrTranscriptMessage,
+} from "../herdr-transcript.ts";
+import { CURSOR_WIDTH } from "./constants.ts";
+import { messageKey, transcriptEventBody, transcriptImageKey } from "./helpers.ts";
+import { resolveSeatReply } from "./channel-projection.ts";
 import { noteNativeTranscript } from "./service-handoff.ts";
 import type { ConversationStore } from "./store.ts";
 import { type ConversationMeta } from "./types.ts";
+/** Per store: transcript images being published, and how many times each was tried. */
+const imagePublishes = new WeakMap<
+  ConversationStore,
+  { readonly pending: Set<string>; readonly attempts: Map<string, number> }
+>();
+function transcriptImages(ctx: ConversationStore) {
+  let held = imagePublishes.get(ctx);
+  if (!held) imagePublishes.set(ctx, (held = { pending: new Set(), attempts: new Map() }));
+  return held;
+}
+
 export function syncConversationTranscript(
   ctx: ConversationStore,
   conversationId: string | undefined,
@@ -34,7 +52,7 @@ export function syncConversationTranscript(
     checkpoint === undefined &&
     ctx["retainedEventCount"](meta.conversationId) > 0
   ) {
-    ctx["replaceSeatEntries"](meta, transcript.entries);
+    replaceSeatEntries(ctx, meta, transcript.entries);
     meta.seatTranscript = {
       sessionKey: transcript.sessionKey,
       entryIds: transcript.entries.flatMap((entry) =>
@@ -42,7 +60,7 @@ export function syncConversationTranscript(
       ),
     };
     ctx["saveMeta"](meta);
-    ctx["publishTranscriptImages"](meta, transcript, workingDirectory);
+    publishTranscriptImages(ctx, meta, transcript, workingDirectory);
     return;
   }
 
@@ -69,7 +87,7 @@ export function syncConversationTranscript(
         continue;
       }
       if (workingDirectory === undefined) continue;
-      if (ctx["pendingTranscriptImages"].has(transcriptImageKey(meta, transcript.sessionKey, entry.id))) {
+      if (transcriptImages(ctx).pending.has(transcriptImageKey(meta, transcript.sessionKey, entry.id))) {
         continue;
       }
     }
@@ -81,7 +99,7 @@ export function syncConversationTranscript(
     if (entry.type === "viewed_image") {
       continue;
     }
-    if (entry.type !== "message" || entry.role !== "operator" || !ctx["matchesRecentSeatSend"](meta, entry)) {
+    if (entry.type !== "message" || entry.role !== "operator" || !matchesRecentSeatSend(ctx, meta, entry)) {
       const body = transcriptEventBody(entry, agentRole);
       ctx["append"](
         meta,
@@ -94,18 +112,14 @@ export function syncConversationTranscript(
   }
   if (!advanced) return;
   noteNativeTranscript(meta, ctx["lastCursor"](meta));
-  ctx["resettle"](meta);
+  resettle(ctx, meta);
   const nextCheckpoint = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
   if (room) (meta.roomTranscripts ??= {})[transcript.sessionKey] = nextCheckpoint;
   else meta.seatTranscript = nextCheckpoint;
   meta.updatedAt = room ? (added.at(-1)?.occurredAt ?? meta.updatedAt) : new Date().toISOString();
   ctx["saveMeta"](meta);
-  ctx["publishTranscriptImages"](
-    meta,
-    { sessionKey: transcript.sessionKey, entries: added },
-    workingDirectory,
-  );
-  if (latestAgentReply !== undefined) ctx["resolveSeatReply"](seatId, latestAgentReply);
+  publishTranscriptImages(ctx, meta, { sessionKey: transcript.sessionKey, entries: added }, workingDirectory);
+  if (latestAgentReply !== undefined) resolveSeatReply(ctx, seatId, latestAgentReply);
 }
 
 export function resettle(ctx: ConversationStore, meta: ConversationMeta): void {
@@ -129,19 +143,19 @@ export function publishTranscriptImages(
     if (entry.type === "viewed_image") {
       if (!isDeliveredImagePath(entry.path)) continue;
       const key = transcriptImageKey(meta, transcript.sessionKey, entry.id);
-      if (ctx["pendingTranscriptImages"].has(key)) continue;
-      ctx["pendingTranscriptImages"].add(key);
-      const attempts = (ctx["transcriptImageAttempts"].get(key) ?? 0) + 1;
-      ctx["transcriptImageAttempts"].set(key, attempts);
-      void ctx["queueDeliveredImages"](meta, [entry.path], workingDirectory).then((published) => {
-        ctx["pendingTranscriptImages"].delete(key);
+      if (transcriptImages(ctx).pending.has(key)) continue;
+      transcriptImages(ctx).pending.add(key);
+      const attempts = (transcriptImages(ctx).attempts.get(key) ?? 0) + 1;
+      transcriptImages(ctx).attempts.set(key, attempts);
+      void queueDeliveredImages(ctx, meta, [entry.path], workingDirectory).then((published) => {
+        transcriptImages(ctx).pending.delete(key);
         if (published || attempts >= 2) {
-          ctx["transcriptImageAttempts"].delete(key);
-          ctx["completeTranscriptImage"](meta, transcript.sessionKey, entry.id);
+          transcriptImages(ctx).attempts.delete(key);
+          completeTranscriptImage(ctx, meta, transcript.sessionKey, entry.id);
         }
       });
     } else if (entry.type === "message" && entry.role === "agent") {
-      ctx["publishNamedImages"](meta, entry.text, workingDirectory);
+      publishNamedImages(ctx, meta, entry.text, workingDirectory);
     }
   }
 }
@@ -153,7 +167,7 @@ export function publishNamedImages(
   workingDirectory: string,
 ): void {
   // ponytail: four per message, the visual cap a Discord turn uses; raise it if seats show more at once.
-  void ctx["queueDeliveredImages"](meta, namedImagePaths(text).slice(0, 4), workingDirectory);
+  void queueDeliveredImages(ctx, meta, namedImagePaths(text).slice(0, 4), workingDirectory);
 }
 
 export function queueDeliveredImages(
@@ -165,7 +179,7 @@ export function queueDeliveredImages(
   if (ctx["publishDeliveredFile"] === undefined || paths.length === 0) return Promise.resolve(false);
   const conversationId = meta.conversationId;
   const previous = ctx["deliveredFilePublishes"].get(conversationId) ?? Promise.resolve();
-  const result = previous.then(() => ctx["publishImages"](meta, paths, workingDirectory));
+  const result = previous.then(() => publishImages(ctx, meta, paths, workingDirectory));
   const queued = result.then(() => undefined);
   ctx["deliveredFilePublishes"].set(conversationId, queued);
   void queued.finally(() => {
@@ -199,7 +213,7 @@ export async function publishImages(
         continue;
       }
       ctx["append"](meta, { type: "file", file: { artifactId, filename, mediaType, byteCount, sha256 } });
-      ctx["resettle"](meta);
+      resettle(ctx, meta);
       published = true;
     } catch {
       // Named, but not deliverable from here.
@@ -221,4 +235,79 @@ export function completeTranscriptImage(
   if (entryIds.includes(entryId)) return;
   meta.seatTranscript = { sessionKey, entryIds: [...entryIds, entryId] };
   ctx["saveMeta"](meta);
+}
+
+function matchesRecentSeatSend(
+  ctx: ConversationStore,
+  meta: ConversationMeta,
+  message: HerdrTranscriptMessage,
+): boolean {
+  const previous = ctx["readEvents"](meta.conversationId).findLast(
+    (event) => event.type === "message" && event.role === "operator",
+  );
+  if (previous?.type !== "message" || previous.role !== "operator" || previous.text !== message.text) {
+    return false;
+  }
+  const nativeAt = Date.parse(message.occurredAt ?? "");
+  return !Number.isFinite(nativeAt) || Math.abs(Date.parse(previous.occurredAt) - nativeAt) < 60_000;
+}
+
+/** One-time migration from the old last-answer projection to the native ordered transcript. */
+function replaceSeatEntries(
+  ctx: ConversationStore,
+  meta: ConversationMeta,
+  transcript: readonly HerdrTranscriptEntry[],
+): void {
+  const events = ctx["readEvents"](meta.conversationId);
+  const covered = new Map<string, number>();
+  for (const message of transcript) {
+    if (message.type !== "message") continue;
+    const key = messageKey(message.role, message.text);
+    covered.set(key, (covered.get(key) ?? 0) + 1);
+  }
+  const preserved = events.flatMap((event) => {
+    if (event.type !== "message") return [];
+    const role = event.role === "agent" ? "agent" : event.role === "operator" ? "operator" : undefined;
+    if (role === undefined) return [];
+    const key = messageKey(role, event.text);
+    const remaining = covered.get(key) ?? 0;
+    if (remaining > 0) {
+      covered.set(key, remaining - 1);
+      return [];
+    }
+    return [
+      {
+        body: { type: "message" as const, role, text: event.text, streaming: false as const },
+        occurredAt: event.occurredAt,
+      },
+    ];
+  });
+  const projected = transcript.flatMap((entry) =>
+    entry.type === "viewed_image"
+      ? []
+      : [
+          {
+            body: transcriptEventBody(entry, "agent"),
+            occurredAt: entry.occurredAt ?? new Date().toISOString(),
+          },
+        ],
+  );
+  const previousSequence = ctx["eventSequence"](meta);
+  let sequence = previousSequence + 1;
+  meta.retainedFromCursor = String(sequence).padStart(CURSOR_WIDTH, "0");
+  const rebuilt = [...preserved, ...projected].map(({ body, occurredAt }) => {
+    sequence += 1;
+    return {
+      schemaVersion: 1 as const,
+      conversationId: meta.conversationId,
+      cursor: String(sequence).padStart(CURSOR_WIDTH, "0"),
+      revision: meta.revision,
+      occurredAt,
+      ...body,
+    } as OperatorConversationStreamEvent;
+  });
+  ctx["journal"].rewrite(meta.conversationId, rebuilt);
+  ctx["counts"].set(meta.conversationId, rebuilt.length);
+  ctx["sequences"].set(meta.conversationId, sequence);
+  ctx["wakeTails"](meta.conversationId);
 }

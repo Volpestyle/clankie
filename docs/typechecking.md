@@ -5,6 +5,15 @@ check uses `clankie heavy -- pnpm --filter @clankie/clankie typecheck`.
 The package scripts all use `scripts/typecheck.mjs`; the native Vox task continues
 to use Cargo. Turbo serializes package compilers, including on release runners.
 
+`pnpm typecheck:ts7` runs TypeScript 7's native compiler (pinned as the
+`typescript7` alias of `typescript@7.0.2`) over the same packages, each with its own
+tsconfig, in well under a minute. Every pull request runs it in CI's quick `check`
+job. tsc 5.9 stays the landing gate's compiler until the two agree for a while
+([#391](https://github.com/Volpestyle/clankie/issues/391)). TypeScript 7 doesn't count
+an element access from another module (`ctx["name"]`) as reading a private member.
+State or helpers that only another module uses therefore belong in that module,
+not as private members of the class.
+
 Each compiler has a **2,512 MiB old-space ceiling** and a **16 MiB semi-space
 ceiling**, giving Node 26 a **2,560 MiB (2.5 GiB) total V8 heap ceiling**. These explicit
 Node arguments take precedence over inherited `NODE_OPTIONS`. This is a heap

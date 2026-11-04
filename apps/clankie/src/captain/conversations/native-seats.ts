@@ -12,6 +12,8 @@ import type { HerdrAgentSnapshot } from "../herdr-watch.ts";
 import { publicConversation } from "./helpers.ts";
 import { recoverTrackerActivity } from "./tracker-wakes.ts";
 import type { ConversationStore } from "./store.ts";
+import { resolveSeatReply } from "./channel-projection.ts";
+import { syncConversationTranscript } from "./transcripts.ts";
 import { type ConversationDriver, type ConversationMeta } from "./types.ts";
 
 export function conversationIdForSeat(ctx: ConversationStore, seatId: string): string | undefined {
@@ -26,7 +28,7 @@ export function metaForPersona(ctx: ConversationStore, personaId: string): Conve
 }
 
 export function conversationIdForPersona(ctx: ConversationStore, personaId: string): string | undefined {
-  return ctx["metaForPersona"](personaId)?.conversationId;
+  return metaForPersona(ctx, personaId)?.conversationId;
 }
 
 /**
@@ -39,7 +41,7 @@ export function conversationForPersona(
   ctx: ConversationStore,
   personaId: string,
 ): OperatorConversation | undefined {
-  const meta = ctx["metaForPersona"](personaId);
+  const meta = metaForPersona(ctx, personaId);
   return meta === undefined ? undefined : publicConversation(meta);
 }
 
@@ -104,7 +106,7 @@ export function publishPersonaEvent(
 ): void {
   // Before the seat's own thread, and regardless of whether it has one: a
   // channel round offered this seat a turn and is waiting on exactly this.
-  if (body.type === "message" && body.role === "agent") ctx["resolveSeatReply"](seatId, body.text);
+  if (body.type === "message" && body.role === "agent") resolveSeatReply(ctx, seatId, body.text);
   const conversationId = ctx["conversationIdForPersona"](personaId);
   ctx["publishConversationEvent"](conversationId, body);
 }
@@ -115,7 +117,7 @@ export function publishSeatEvent(
   seatId: string,
   body: OperatorConversationEventBody,
 ): void {
-  if (body.type === "message" && body.role === "agent") ctx["resolveSeatReply"](seatId, body.text);
+  if (body.type === "message" && body.role === "agent") resolveSeatReply(ctx, seatId, body.text);
   ctx["publishConversationEvent"](ctx["conversationIdForSeat"](seatId), body);
 }
 
@@ -400,7 +402,7 @@ export function syncRoomTranscript(
 ): void {
   if (ctx["metas"].get(conversationId)?.scope.kind !== "room")
     throw new Error("Expected a room conversation");
-  ctx["syncConversationTranscript"](conversationId, conversationId, transcript, "captain");
+  syncConversationTranscript(ctx, conversationId, conversationId, transcript, "captain");
 }
 
 export function publishRoomEvent(
@@ -435,7 +437,8 @@ export function syncHeadTranscript(
   transcript: HerdrSeatTranscript,
   workingDirectory?: string,
 ): void {
-  ctx["syncConversationTranscript"](
+  syncConversationTranscript(
+    ctx,
     ctx["defaultGlobalConversationId"](),
     seatId,
     transcript,
@@ -469,7 +472,8 @@ export function syncNativeSeatTranscript(
     (meta.nativeSeatSessions ??= {})[sessionId] = "current";
     ctx["saveMeta"](meta);
   }
-  ctx["syncConversationTranscript"](
+  syncConversationTranscript(
+    ctx,
     conversationId,
     `native:${sessionId}`,
     { sessionKey: `${sessionId.startsWith("ses_") ? "opencode" : "claude"}:${sessionId}`, entries },
@@ -492,7 +496,7 @@ export function syncSeatTranscript(
   seatId: string,
   transcript: HerdrSeatTranscript,
 ): void {
-  ctx["syncConversationTranscript"](ctx["conversationIdForSeat"](seatId), seatId, transcript);
+  syncConversationTranscript(ctx, ctx["conversationIdForSeat"](seatId), seatId, transcript);
 }
 
 /** A native head remains native while its channel is offline. */

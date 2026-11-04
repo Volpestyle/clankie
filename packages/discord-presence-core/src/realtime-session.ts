@@ -326,6 +326,10 @@ export const VOICE_CONVERSATION_TOOLS = [
   ...SELF_TOOLS,
 ] as const;
 
+function arrayBacked(view: Uint8Array): view is Uint8Array<ArrayBuffer> {
+  return view.buffer instanceof ArrayBuffer;
+}
+
 /** Minimal transport seam. Production wraps a WebSocket; tests inject a fake. */
 export interface RealtimeSocket {
   send(data: string | Uint8Array): void;
@@ -548,7 +552,8 @@ export const openRealtimeWebSocket: RealtimeSocketFactory = (url, headers, signa
       () => {
         resolve({
           send: (data) => {
-            socket.send(data);
+            // WebSocket sends only ArrayBuffer-backed bytes; copy a view over shared memory.
+            socket.send(typeof data === "string" || arrayBacked(data) ? data : new Uint8Array(data));
           },
           close: () => {
             socket.close();
