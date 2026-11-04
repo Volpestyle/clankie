@@ -77,6 +77,7 @@ describe("Clankie account credential", () => {
       expires: 1,
       accountId: "account-1",
       clientId: "client123",
+      metadata: { email: "owner@example.com" },
     });
     const access = jwt({ sub: "account-1", client_id: "client123", token_use: "access" });
     let refreshes = 0;
@@ -97,7 +98,11 @@ describe("Clankie account credential", () => {
     expect(first).toEqual(second);
     expect(first.accountId).toBe("account-1");
     expect(refreshes).toBe(1);
-    expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({ refresh: "refresh-2" });
+    // The sign-in's proven email outlives the refresh in the stored credential.
+    expect(await store.get(CLANKIE_ACCOUNT_PROVIDER_ID)).toMatchObject({
+      refresh: "refresh-2",
+      metadata: { email: "owner@example.com" },
+    });
   });
 
   it.each(["transport", "body"])(
