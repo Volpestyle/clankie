@@ -37,9 +37,10 @@ it("shared Codex startup reaches the remote executable with host holder identiti
       // Execute the generated remote launch script against a real owned executable.
       // Stop after capture, before forwarding/RPC: the real PC hire is a deploy check.
       shell: async (command) => {
-        await exec("/bin/sh", ["-c", command], {
+        const { stdout } = await exec("/bin/sh", ["-c", command], {
           env: { ...process.env, ...inherited, HOME: root, PATH: `${bin}:${process.env.PATH}` },
         });
+        const launched = JSON.parse(stdout) as { pid: number; log: string };
         // Wait for the executable's receipt, not a fixed 2 s: a loaded host can take that
         // long just to start Node (#320). The deadline is only a hang detector.
         for (const deadline = Date.now() + 20_000; Date.now() < deadline;) {
@@ -51,7 +52,19 @@ it("shared Codex startup reaches the remote executable with host holder identiti
           }
           await new Promise((resolve) => setTimeout(resolve, 10));
         }
-        throw new Error("Remote executable did not write its environment");
+        // Say why: a CI failure here once carried nothing but the deadline (#650).
+        let alive: boolean | string;
+        try {
+          alive = process.kill(launched.pid, 0);
+        } catch (error) {
+          alive = (error as NodeJS.ErrnoException).code ?? String(error);
+        }
+        const log = await readFile(launched.log, "utf8").catch(
+          (error: Error) => `unreadable: ${error.message}`,
+        );
+        throw new Error(
+          `Remote executable did not write its environment; pid ${launched.pid} alive: ${String(alive)}; log:\n${log.slice(-4_000)}`,
+        );
       },
     });
     await expect(
