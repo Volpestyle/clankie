@@ -7,6 +7,7 @@
     "dev": "node ../../scripts/build-fleet-proof.mjs && tsx src/index.ts",
     "start": "node ../../scripts/build-fleet-proof.mjs && tsx src/index.ts",
     "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",
+    "typecheck:ts7": "node ../../scripts/typecheck-ts7.mjs apps/clankie",
     "test": "vitest run --passWithNoTests",
     "free-play-live": "tsx scripts/free-play-live.ts",
     "minecraft:smoke": "tsx scripts/minecraft-smoke.ts",
