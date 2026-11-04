@@ -79,7 +79,12 @@ golden replay does not claim to force their occurrence on every machine.
 while eight loops start short-lived account processes, each with a long-lived
 process started in a fresh directory as the census runs. Before #650 most of
 those censuses refused as `process_census_changed` then `attempts_exhausted`;
-each must now settle and name the newborn's directory.
+each must now settle and name the newborn's directory. The
+`native-proof-churn/cwd-reuse.c` fixture runs the production helper with two
+real children and gives the first one's PID the second's live records from the
+closing listing on: the census must read the replacement's directory, and must
+refuse when that instance is unreadable. The #708 draft, which skipped a listed
+PID it had read on the PID alone, failed both.
 
 The same file runs 150 real cwd censuses
 while four loops exec the setuid `/bin/ps`. A listed account process that becomes

@@ -101,3 +101,10 @@ APIs remain real. Reservations are bounded at 1024; retained allocator buffers
 at 32 MiB; a five-second alarm and parent timeout bound execution. Child exit
 releases all mappings. An Intel execution environment is required; no Rosetta
 installation or host memory exhaustion is performed.
+
+`cwd-reuse.c` runs the production `--cwds` census with two owned children, each
+working in its own directory, for at most 10 s. The second child is never
+listed. From the census's closing listing on, the first child's PID answers with
+the second child's live libproc records, as a PID reused between listings;
+`denied` makes that instance unreadable. `process-working-directories.integration.test.ts`
+compiles it and requires the replacement's directory, or a refusal.

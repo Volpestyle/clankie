@@ -803,10 +803,11 @@ static int read_cwd(pid_t pid, int required, struct cwd_record *record) {
  * the entire observation, never authorizes deletion.
  *
  * The census settles on the first account listing in which every live process
- * has been read. An account process born during the scan is read in the next
- * listing, not a reason to discard every completed read: a busy account (a
- * build, a parallel test run) starts processes faster than one 600 ms attempt
- * could otherwise finish (#650, as ADR 0348 does for the Linux socket census). */
+ * instance (PID, birth and user) has been read. An account process born during
+ * the scan, or a PID reused since its read, is read in the next listing rather
+ * than discarding every completed read: a busy account (a build, a parallel
+ * test run) starts processes faster than one 600 ms attempt could otherwise
+ * finish (#650, as ADR 0348 does for the Linux socket census). */
 static int prove_cwds(int argc) {
   if (argc != 2) return refuse_at("arguments", "invalid_arguments", 0);
   pid_t all[MAX_PIDS], account[MAX_PIDS], after[MAX_PIDS];
@@ -836,12 +837,29 @@ static int prove_cwds(int argc) {
     for (int i = 0; result == 0 && i < after_count; ++i) {
       pid_t pid = after[i];
       if (pid <= 1) continue;
+      /* A listed PID counts as read only when its live instance is one already
+       * read: same PID, birth and user. A PID reused since its read is another
+       * instance, and one whose identity cannot be observed refuses. */
+      struct identity now;
+      int observed = observe(pid, &now);
+      if (observed == 0) continue;
+      if (observed != 1) {
+        int error = errno;
+        if (left_account(pid, error)) {
+          diagnostic("census", "process_census_changed", error, 1);
+          result = 2;
+        } else {
+          int retry = error == ESRCH || error == ENOENT || error == EINTR || error == EAGAIN;
+          diagnostic("census", "process_census_unavailable", error, retry);
+          result = retry ? 2 : refuse();
+        }
+        break;
+      }
       const pid_t *found = bsearch(&pid, all, (size_t)count, sizeof(pid), compare_pid);
-      if (found != NULL && records[found - all].process.pid == pid &&
-          records[found - all].process.uid == getuid()) continue;
-      int read = 0;
-      for (int j = 0; !read && j < born_count; ++j) read = born[j].process.pid == pid;
-      if (read || exited(pid)) continue;
+      int read = found != NULL && same_lifetime(&records[found - all].process, &now) &&
+                 now.uid == getuid();
+      for (int j = 0; !read && j < born_count; ++j) read = same_lifetime(&born[j].process, &now);
+      if (read) continue;
       if (born_count >= MAX_PIDS) {
         result = refuse_at("census", "process_census_unavailable", EOVERFLOW);
         break;
