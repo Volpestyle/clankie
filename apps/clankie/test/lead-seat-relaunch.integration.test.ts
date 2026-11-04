@@ -8,6 +8,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import type { OperatorServiceNotice } from "@clankie/protocol";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { HerdrWatchStore } from "../src/captain/herdr-watch.ts";
 import { createNativePaneGone } from "../src/captain/native-pane-gone.ts";
@@ -67,6 +68,7 @@ async function fixture(
   const launched: (readonly string[])[] = [];
   const briefs: string[] = [];
   const notices: string[] = [];
+  const tags: OperatorServiceNotice[] = [];
   let session = "old-session";
   const relaunch = createLeadSeatRelaunch({
     journalPath: join(root, "lead-seat-relaunches.json"),
@@ -104,14 +106,19 @@ async function fixture(
       briefs.push(text);
       return true;
     },
-    notice: options.notice ?? ((_id, text) => notices.push(text)),
+    notice:
+      options.notice ??
+      ((_id, text, tag) => {
+        notices.push(text);
+        tags.push(tag);
+      }),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, Math.min(ms, 50))),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.watching === undefined ? {} : { watching: options.watching }),
     exitTimeoutMs: 1_500,
     bindTimeoutMs: 1_500,
   });
-  return { root, relaunch, launched, briefs, notices, alive: () => alive };
+  return { root, relaunch, launched, briefs, notices, tags, alive: () => alive };
 }
 
 const restart: RelaunchLeadSeatInput = {
@@ -191,6 +198,7 @@ it("relaunches the same command in the same pane, delivers the brief and keeps t
   expect(f.briefs).toEqual([restart.handoffBrief]);
   expect(f.notices).toHaveLength(1);
   expect(f.notices[0]).toContain("old-session → new-session");
+  expect(f.tags).toEqual([{ kind: "lead_seat_restarted", attention: "none" }]);
   // Without an observable launcher, the last relaunch is still known for fail-back.
   expect(await f.relaunch.leadSeatLaunch("global-default")).toEqual({
     harness: "claude",
@@ -296,6 +304,7 @@ it("keeps a due restart's refused wait across a service restart, tells the owner
   await refuse(drafted);
   expect(drafted.notices).toHaveLength(1);
   expect(drafted.notices[0]).toContain("since 2026-10-25T12:00:00.000Z, 120 minutes");
+  expect(drafted.tags).toEqual([{ kind: "lead_seat_restart_waiting", attention: "owner" }]);
   expect(drafted.notices[0]).toContain(
     "The latest: draft (the pane held an unsent draft). All refusals: draft ×3.",
   );

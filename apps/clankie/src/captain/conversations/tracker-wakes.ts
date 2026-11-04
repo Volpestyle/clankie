@@ -356,6 +356,7 @@ function holdLinearActivity(ctx: ConversationStore, id: string): void {
     ctx.recordServiceNotice(
       ctx.defaultGlobalConversationId(),
       `Linear receiver unavailable: ${id} (${meta.title}). Undelivered activity is being resolved against the current lead route. If the lead receiver is also unavailable, it stays queued until that receiver polls; no failed-turn retry loop.`,
+      { kind: "linear_receiver_held", attention: "none" },
     );
     meta.linearWakeBlocked = { since, originalTitle: meta.title };
     if (id !== ctx.defaultGlobalConversationId()) meta.title = `${meta.title.slice(0, 240)} (inactive)`;

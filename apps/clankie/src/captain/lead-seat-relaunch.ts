@@ -18,7 +18,12 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute } from "node:path";
-import { LeadRestartStatusSchema, type LeadRestartStatus, type LeadRestartWait } from "@clankie/protocol";
+import {
+  LeadRestartStatusSchema,
+  type LeadRestartStatus,
+  type LeadRestartWait,
+  type OperatorServiceNotice,
+} from "@clankie/protocol";
 import { z } from "zod";
 import type { HerdrForegroundProcess } from "./codex-seat.ts";
 import { paneInputLine } from "./pane-draft.ts";
@@ -110,7 +115,7 @@ export interface LeadSeatRelaunchDeps {
    * native binding; true once that exact session took it.
    */
   readonly deliverBrief: (conversationId: string, text: string, binding: string) => Promise<boolean>;
-  readonly notice: (conversationId: string, text: string) => void;
+  readonly notice: (conversationId: string, text: string, notice: OperatorServiceNotice) => void;
   readonly signal?: (pid: number, signal: NodeJS.Signals) => void;
   /** Watch (ADR 0308): while Clankie only watches, no lead session is ended or launched. */
   readonly watching?: () => Promise<boolean>;
@@ -127,6 +132,8 @@ const POLL_MS = 500;
 const EXIT_TIMEOUT_MS = 30_000;
 const BIND_TIMEOUT_MS = 120_000;
 const RESTART_NOTICE_AFTER_MS = 2 * 60 * 60_000;
+/** A fresh restart that went through asks nothing of the owner. */
+const RESTARTED: OperatorServiceNotice = { kind: "lead_seat_restarted", attention: "none" };
 /** What each refusal of a due restart means, in the owner's notice. */
 const RESTART_REFUSALS: Readonly<Record<string, string>> = {
   busy: "the seat was in a turn",
@@ -307,7 +314,10 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
     }
     writeWaits({ ...waits, [conversationId]: wait });
     if (wait.pendingNotice === undefined) return;
-    deps.notice(conversationId, wait.pendingNotice);
+    deps.notice(conversationId, wait.pendingNotice, {
+      kind: "lead_seat_restart_waiting",
+      attention: "owner",
+    });
     const { pendingNotice: _sent, ...noticed } = wait;
     writeWaits({ ...waits, [conversationId]: { ...noticed, noticedAt: at } });
   }
@@ -397,7 +407,7 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
         : "undelivered";
       keepHandoff(receiptId, { state: outcome });
     }
-    deps.notice(receipt.conversationId, restartNotice(receipt, sessionId, outcome));
+    deps.notice(receipt.conversationId, restartNotice(receipt, sessionId, outcome), RESTARTED);
   }
   function drop(receiptId: string): void {
     const journal = read();
@@ -744,7 +754,11 @@ export function createLeadSeatRelaunch(deps: LeadSeatRelaunchDeps) {
       const receipt = read().receipts.find((entry) => entry.receiptId === receiptId);
       if (receipt !== undefined && readHandoffs()[receiptId] === undefined) {
         keepHandoff(receiptId, { state: "unavailable" });
-        deps.notice(receipt.conversationId, restartNotice(receipt, result.sessionId, "unavailable"));
+        deps.notice(
+          receipt.conversationId,
+          restartNotice(receipt, result.sessionId, "unavailable"),
+          RESTARTED,
+        );
       }
       return result;
     },

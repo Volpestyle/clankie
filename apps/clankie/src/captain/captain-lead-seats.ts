@@ -138,7 +138,7 @@ export function createLeadSeats(ctx: LeadSeatsContext) {
           signal: shutdown.signal,
         })
       ).outcome === "delivered",
-    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
+    notice: (conversationId, text, notice) => conversations.recordServiceNotice(conversationId, text, notice),
   });
   // VUH-2860: the stored source names the session a relaunch ended, so the new
   // session in that terminal attaches only by that relaunch's receipt.
@@ -166,7 +166,7 @@ export function createLeadSeats(ctx: LeadSeatsContext) {
     launcher: leadSeats,
     accounts: () => readWorkerAccounts(undefined, ["claude", "codex"]),
     released: (conversationId) => seatOutboxes.get(conversationId)?.clearUsageLimit(),
-    notice: (conversationId, text) => conversations.recordServiceNotice(conversationId, text),
+    notice: (conversationId, text, notice) => conversations.recordServiceNotice(conversationId, text, notice),
   });
   const stopLeadFailbacks = startFleetRounds(
     () =>
@@ -278,6 +278,7 @@ export function createLeadSeats(ctx: LeadSeatsContext) {
       conversations.recordServiceNotice(
         conversationId,
         `Clankie's seat restart is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
+        { kind: "lead_seat_restart_unconfirmed", attention: "owner" },
       );
   }, options.leadRestartCheckMs ?? LEAD_RESTART_CHECK_MS);
   const hiredSeatRestarts = createHiredSeatRestarts({

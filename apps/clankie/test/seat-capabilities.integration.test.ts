@@ -217,7 +217,9 @@ it.each(["legacy", "modern"])(
             (event) =>
               event.type === "message" &&
               event.role === "external" &&
-              event.text.includes("seat needs a reconnect: /mcp"),
+              event.text.includes("seat needs a reconnect: /mcp") &&
+              event.notice?.kind === "seat_reconnect_needed" &&
+              event.notice.attention === "owner",
           ),
         ).toHaveLength(1);
       }

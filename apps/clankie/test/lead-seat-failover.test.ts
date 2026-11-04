@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import type { OperatorServiceNotice } from "@clankie/protocol";
 import type { MachineWorkerAccounts, WorkerAccountStatus } from "../src/captain/harness-accounts.ts";
 import { createLeadSeatFailover } from "../src/captain/lead-seat-failover.ts";
 import type {
@@ -41,6 +42,7 @@ function fixture(
   const calls: RelaunchLeadSeatInput[] = [];
   const results: RelaunchLeadSeatResult[] = [];
   const notices: string[] = [];
+  const tags: OperatorServiceNotice[] = [];
   const released: string[] = [];
   const report: MachineWorkerAccounts = {
     machine: "local",
@@ -67,7 +69,10 @@ function fixture(
     },
     accounts: async () => report,
     released: (id) => released.push(id),
-    notice: (_id, text) => notices.push(text),
+    notice: (_id, text, tag) => {
+      notices.push(text);
+      tags.push(tag);
+    },
     now: () => now,
   });
   return {
@@ -75,6 +80,7 @@ function fixture(
     calls,
     results,
     notices,
+    tags,
     released,
     root,
     setNow: (iso: string) => {
@@ -105,6 +111,7 @@ it("moves a limited lead seat to the other Claude account with the most room, th
   ]);
   expect(f.released).toEqual(["global-default"]);
   expect(f.notices.at(-1)).toContain("moved it to claude (james) in the same pane");
+  expect(f.tags.at(-1)).toEqual({ kind: "lead_seat_limited", attention: "none" });
   expect(f.failover.status("global-default")).toEqual({
     from: "claude",
     to: "claude (james)",
@@ -171,4 +178,5 @@ it("never retries an unconfirmed move", async () => {
   await f.failover.failBack();
   expect(f.calls).toHaveLength(1);
   expect(f.notices.at(-1)).toContain("never retried automatically");
+  expect(f.tags.at(-1)).toEqual({ kind: "lead_seat_move_unconfirmed", attention: "owner" });
 });
