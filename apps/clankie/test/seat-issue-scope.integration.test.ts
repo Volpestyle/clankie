@@ -127,6 +127,11 @@ it("settles only the current verified hire scope across close, exit, collisions 
         workingDirectory: join(path, `${pane}-${sequence}`),
         harness: "codex",
         deliverable: key,
+        // This keeper-only fixture deliberately overlaps same-issue hires and
+        // retains allocations after bookkeeping-only closes. Distinct synthetic
+        // models and worktrees admit them as explicit attempts through #602.
+        attempt: true,
+        model: `fixture-${pane}-${sequence}`,
       });
       ledger.launch(allocation.id, settings);
       ledger.pane(allocation.id, pane);

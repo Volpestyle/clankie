@@ -411,7 +411,7 @@ async function autoFixture(
       return { ...result, seat: adopted };
     },
   ).find((candidate) => candidate.name === "hire_agent")!;
-  const hire = (directory = workingDirectory, projectId = "clankie-work") =>
+  const hire = (directory = workingDirectory, projectId = "clankie-work", deliverable = "LOCAL-VUH-4") =>
     tool.execute(
       "LOCAL-VUH-4",
       {
@@ -420,7 +420,7 @@ async function autoFixture(
         role: "builder",
         workingDirectory: directory,
         harness: "opencode",
-        deliverable: "LOCAL-VUH-4",
+        deliverable,
         effort: "medium",
         effortReason: "Resource admission and native launch boundaries need integration checks.",
         brief: "Read LOCAL-VUH-4 without changing accounts or credentials.",
@@ -524,6 +524,11 @@ it("LOCAL-VUH-6: starts one Full Auto hire through native admission, then enforc
   expect((await f.journal()).filter((row) => row.kind === "request")).toHaveLength(1);
   expect((await f.hire()).details).toMatchObject({
     outcome: "failed",
+    detail: expect.stringContaining("already claimed"),
+  });
+  // A different deliverable reaches the cap instead of the earlier claim gate.
+  expect((await f.hire(undefined, undefined, "LOCAL-VUH-5")).details).toMatchObject({
+    outcome: "failed",
     detail: expect.stringContaining("allows 1 running agents"),
   });
   expect(f.launches()).toBe(1);
@@ -551,6 +556,11 @@ it("LOCAL-VUH-7: the configured Work lead hires into its primary folder despite 
     nativeHireProject(projects, "replaced-agent", proof, lookup, undefined, "clankie-work"),
   ).rejects.toThrow("original agent has changed");
   expect((await f.hire()).details).toMatchObject({
+    outcome: "failed",
+    detail: expect.stringContaining("already claimed"),
+  });
+  // A different deliverable reaches the cap instead of the earlier claim gate.
+  expect((await f.hire(undefined, undefined, "LOCAL-VUH-5")).details).toMatchObject({
     outcome: "failed",
     detail: expect.stringContaining("allows 1 running agents"),
   });
