@@ -56,9 +56,10 @@ const close = (server: ReturnType<typeof serve>) =>
   new Promise<void>((resolveClose) => server.close(() => resolveClose()));
 const absent = async (path: string) => expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
 const issue = () => ({ requestId: randomUUID(), receiptId: randomUUID(), assurance: "host-seat/v1" });
-// Long enough for a real bootstrap to finish issuing under load, short enough that expiry
-// cases don't wait out the host's 60-second production lifetime (#383).
-const FIXTURE_LIFETIME_MS = 750;
+// A fixture must outlive its own bootstrap, which takes over 750 ms on the CI Mac
+// runner; 1.5 s has held there. Expiry cases still skip the host's 60-second production
+// lifetime (#383).
+const FIXTURE_LIFETIME_MS = 1_500;
 /**
  * Sends a fixture read until it reaches the claim. Under load the worker's or
  * host's native caller observation can miss its bound; both refuse before any
