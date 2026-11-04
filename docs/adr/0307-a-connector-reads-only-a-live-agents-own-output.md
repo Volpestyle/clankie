@@ -148,8 +148,8 @@ agent showed.
   earlier ones.
 - Lines held back by their text also drop an agent line that repeats that text
   exactly (a banner or a border).
-- For Claude Code and Codex in a Herdr pane, the transcript read (#328)
-  closes the gaps below: the suspend case, a launch inside a longer command or
+- For Claude Code and Codex in a Herdr pane, or in the desktop app's terminals
+  (#530), the transcript read (#328) closes the gaps below: the suspend case, a launch inside a longer command or
   multiline block, reprinted or reflowed lines and a hired session resumed by
   hand, including while the agent waits on input. (As first merged, the
   waiting rows came from the screen through the cut, and a suspend, shell
@@ -163,8 +163,20 @@ agent showed.
   Claude Code or Codex agent whose transcript can't be found is now
   unreadable instead of read from its screen, and when it isn't waiting on
   input a read shows only what it wrote to its session, not its live screen.
-  The gaps below remain for other harnesses and for the desktop app's
-  terminals.
+  The gaps below remain for other harnesses.
+- An owner-started Claude Code or Codex agent in the desktop app's terminals
+  is read from the session its harness's own files tie to its process (#530).
+  Those files are only as trustworthy as the owner's account that writes them:
+  - Anything running as the owner could write a Claude Code
+    `sessions/<pid>.json` for a live Claude process, with a matching
+    `procStart` and a session id of its choosing. For Codex it could open a
+    rollout in that process's place only by being that process.
+  - A forged record can only point the read at another transcript that the
+    harness's own lookup finds in the owner's Claude homes. It can't point the
+    read at the owner's shell or screen, or at a file outside those homes.
+  - This is the same trust Herdr panes place in a session their hook reports.
+    It is accepted because a writer with the owner's account can already read
+    those transcripts directly.
 - One case still shows the owner's own shell work. An agent suspended
   (Ctrl-Z), with shell commands run and then brought back with `fg`, keeps its
   process and session, so its anchor holds and the shell work in between is
