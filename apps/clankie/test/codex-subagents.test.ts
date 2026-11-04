@@ -449,4 +449,27 @@ describe("Codex children on the existing seat subagents path", async () => {
     vi.setSystemTime(new Date(now.getTime() + 2_000));
     expect((await readCodexSubagents(session))?.running).toBe(2);
   });
+
+  it("a forced native census discovers a late child before the display cache expires", async () => {
+    const { session, root } = setup();
+    const historical = join(root, "sessions", "2020", "01", "01");
+    mkdirSync(historical, { recursive: true });
+    writeFileSync(join(historical, "rollout-unrelated.jsonl"), line(fixture.parent));
+    expect(await readCodexSubagents(session)).toEqual(running);
+    const child = join(historical, "rollout-forced-child.jsonl");
+    writeFileSync(
+      child,
+      line({
+        ...fixture.child,
+        payload: {
+          ...fixture.child.payload,
+          id: "00000000-0000-7000-8000-000000000099",
+          agent_path: "/root/forced",
+        },
+      }),
+    );
+    fresh(child);
+    expect(await readCodexSubagents(session)).toEqual(running);
+    expect((await readCodexSubagents(session, { freshDiscovery: true }))?.running).toBe(2);
+  });
 });
