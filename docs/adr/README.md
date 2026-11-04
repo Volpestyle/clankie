@@ -18,6 +18,14 @@ record's status paragraph names its successor. Read the
 - When a decision retires guidance that agents or users read, add the retired
   phrasing to [retired-claims.json](retired-claims.json). `pnpm docs:check` then
   fails wherever live code, skills or guides still repeat it.
+- Shipped skill rules link the decision that explains them; direct owner choices
+  are marked as owner preferences. Vendor syntax and tool facts are not policy.
+  The per-call captain prompt stays lean; its companion `instructions-adrs.md`
+  carries the map.
+- Decisions based on changing measurements, model or tool capabilities, usage
+  limits or machine resources include evidence, its limits, and a **Revisit when**
+  section with concrete triggers. Missing raw data is a stated gap, not a new
+  benchmark. Record stale reasons on the owning issue before changing policy.
 - Link ADRs by stable filename, not by number alone. Accepted ADRs are never
   renumbered, except once to end the four historical collisions below.
 - Allocate the next unused number after checking fetched main. `pnpm docs:check` and
@@ -376,5 +384,8 @@ superseded or retired record in its own status paragraph, starting with
 - [0356: The app signs this Mac in](0356-the-app-signs-this-mac-in.md) — Proposed, 2026-11-04, for #722.
 - [0357: A merged pull request settles an attempt](0357-a-merged-pull-request-settles-an-attempt.md) — Proposed, 2026-11-04, for #703.
 - [0358: The doorway budgets connector work by what the Mac vouched for](0358-the-doorway-budgets-connector-work-by-what-the-mac-vouched-for.md) — Proposed, 2026-11-04, for the doorway connector rate limits.
+- [0359: Owned runtime work shares one account governor](0359-owned-runtime-work-shares-one-account-governor.md) — Recorded existing practice for #344 (2026-11-04); no runtime or authority change.
+- [0360: Temporary views stay private to the owner](0360-temporary-views-stay-private-to-the-owner.md) — Recorded existing practice for #344 (2026-11-04); no sharing authority added.
+- [0361: A play sitting has a bounded model budget](0361-a-play-sitting-has-a-bounded-model-budget.md) — Recorded existing practice for #344 (2026-11-04); no play policy changed.
 
 <!-- adr-index:end -->

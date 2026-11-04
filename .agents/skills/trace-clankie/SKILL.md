@@ -6,7 +6,8 @@ description: Use when tracing what Clankie said, did, or observed after the fact
 # Trace Clankie
 
 Start from the owning conversation and its source references. Read durable
-journals and receipts; never alter runtime state files to repair a missing trail.
+journals and receipts; never alter runtime state files to repair a missing trail
+([ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md): preserve uncertainty rather than fabricating a receipt).
 A snapshot or presence card describes an observation, not completion evidence.
 Exact Codex message watches poll retained turn IDs/statuses, then verify against
 a fresh full-history response when those change or after 30 seconds unchanged.

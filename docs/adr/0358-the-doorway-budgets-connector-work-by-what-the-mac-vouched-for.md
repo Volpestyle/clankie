@@ -57,3 +57,11 @@ page. Volumetric protection belongs in front of the gateway.
 A host can now take more connector calls in total than the single budget allowed,
 because the lanes add up. The established lane keeps the old limit, so signed-in
 work loses nothing.
+
+## Evidence and limits
+
+This remains a proposal. Its three-second held-read deadline and 80-read split are bounded design choices, not measured flood resistance or a throughput promise. The gateway source and connector contract named above are the implementation context; this record has no retained load experiment proving that these are optimal thresholds.
+
+## Revisit when
+
+Real connector traffic shows legitimate refresh/sign-in starvation, gateway resource use changes, or host-authentication replies change shape. Measure per-lane completion and rejected/expired reads before tuning the split, and preserve the rule that gateway classification never grants Mac authority.

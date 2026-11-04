@@ -8,7 +8,8 @@ Traps that cost real time when reading play journals, screenshots and hosted wor
   world confirms departure. Restart recovery uses the exact saved world
   session; `unauthenticated`, a missing receipt, and a timeout keep ownership
   uncertain. The private session journal contains transport state and must
-  never be copied into issue evidence or public status.
+  never be copied into issue evidence or public status
+  ([ADR 0258](../../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md): publish selected evidence, not private transport state).
 
 - **An empty play transcript receipt does not prove a broken wire.** Older
   `play_transcript_delivery` receipts include idle room input with

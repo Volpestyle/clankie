@@ -7,6 +7,7 @@ description: "Run heavy commands and lease simulators in Clankie's local native 
 
 Every agent on this machine shares one service-owned resource registry. The
 rules that matter on most turns:
+([ADR 0359](../../../docs/adr/0359-owned-runtime-work-shares-one-account-governor.md)).
 
 1. Run builds, typechecks, test suites, installs and owned runtimes through
    `clankie heavy --`. Keep the whole runtime and its children inside the

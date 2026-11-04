@@ -13,7 +13,7 @@ Use the installed `clankie skin` commands and the shared
    pitch is a proposal; correct it using explicit pitch, origin and grid size.
    Keep the character's native proportions. Never squash it into a shorter cell.
 2. Show the base and key poses beside their references. **Wait for owner pose
-   approval before animating.** Reuse the approved palette for subsequent poses;
+   approval before animating.** This is an owner preference. Reuse the approved palette for subsequent poses;
    sampling or compilation never counts as that approval.
 3. Compile the approved source grids with `clankie skin compile SOURCE
 --out NEW_DIRECTORY`. The output is JSON, immutable PNG data and paginated

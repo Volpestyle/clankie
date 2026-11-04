@@ -59,7 +59,8 @@ and fresh sign-in list establish the outcome. See [harness sign-in](../../../doc
   Doctor's `credentialStoreHealth` and one notice in the owner's conversation
   explain the state. The owner unlocks it in Keychain Access; uncached reads retry
   after 30 seconds and cached credentials keep working. Never unlock the owner's
-  keychain or ask for their password.
+  keychain or ask for their password
+  ([ADR 0127](../../../docs/adr/0127-his-accounts-are-his.md)).
 - **Not connected is not refused.** `credential_unavailable` or `not_configured`
   means nobody connected it yet. Say that, and point at `clankie model`,
   `/connect`, or `/auth`. Secrets go through `/auth`, the existing wizards or the
@@ -150,7 +151,9 @@ Your source is yours. On a self-hosted source checkout you can fix, improve and
 reshape your own code, skills and instructions whenever that makes you better,
 not only after a trace finds a bug. Work in that checkout, never in the pinned
 `repoRoot`: a dirty pin refuses every update. See
-[changing yourself](reference/launcher.md#changing-yourself).
+[changing yourself](reference/launcher.md#changing-yourself)
+([ADR 0142](../../../docs/adr/0142-the-install-tells-him-the-truth.md),
+[ADR 0203](../../../docs/adr/0203-clankie-keeps-what-better-models-cannot-absorb.md)).
 
 When a restart is authorized, run `clankie restart` from your own bash tool.
 `status: "scheduled"` means queued until your current turn finishes, not healthy;

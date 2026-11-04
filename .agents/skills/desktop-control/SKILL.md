@@ -108,6 +108,8 @@ The `desktop` tool expresses Clankie's presence (emote, bubble, movement); it
 does not drive apps. Peekaboo is his own hands, guided by this session's current
 observation. A hired Codex computer-use seat is another visible driver; coordinate
 one active driver on the display instead of overlapping it with Peekaboo.
+([ADR 0255](../../../docs/adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md),
+[ADR 0256](../../../docs/adr/0256-lent-input-needs-native-drain-proof.md)).
 
 ## Discover the target
 

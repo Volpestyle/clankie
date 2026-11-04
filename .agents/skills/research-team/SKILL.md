@@ -10,6 +10,9 @@ description: >-
 
 # Research team
 
+The research and coordination workflow here is an owner preference. The proof
+standard follows [ADR 0221](../../../docs/adr/0221-tests-prove-the-product-and-its-boundaries.md).
+
 Hold both questions: are the results trustworthy, and are we pursuing the right
 approach? A model can score well on the wrong data; a careful experiment can
 answer a question that no longer matters; a well-executed task can serve the

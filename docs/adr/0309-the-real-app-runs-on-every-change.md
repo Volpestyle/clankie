@@ -62,3 +62,11 @@ pairing and gateway encryption), published contracts, and the fast tests.
 - A new owner-facing flow adds a flow to the run rather than a new mocked test.
 - The run cannot yet launch a worker or exercise Watch mode; each is added when the
   run can reach it.
+
+## Evidence and limits
+
+The context records about two minutes of tests in a twelve-minute landing gate and explains which live flows the run could not yet reach. These are rollout observations, not a current end-to-end performance guarantee. The [test-pruning review](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-adr/test-pruning-review.md) is private evidence; it does not belong in the public repo. ADR 0347 now owns when the run executes.
+
+## Revisit when
+
+The runner becomes able to exercise a previously unreachable flow, or measured runtime/flakiness makes the checkpoint slow or uninformative. Compare coverage and owner-visible regressions before pruning tests; trust-boundary proofs remain separately required, and changing the schedule is not permission to run evals.

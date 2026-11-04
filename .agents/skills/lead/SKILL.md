@@ -16,7 +16,7 @@ A lead earns its place by deciding, unblocking ownership, or getting accepted
 work to its destination. A busier roster, another handoff packet, a longer
 status report or a message that nothing changed is not progress.
 
-Leading needs the user's authorization: "lead", "dispatch", "harvest and
+Leading needs the user's authorization (owner preference): "lead", "dispatch", "harvest and
 continue". Census and read-only triage need none. Keep the user's existing
 division of priority, dispatch, tracking and integration, with one dispatch and
 integration authority; do not redo a planner's queue audit or a tracker's
@@ -61,7 +61,9 @@ permission prompts. Do not attach them to an operator session or treat a
 Discord role as permission to approve commands. Inspect an uncertain original
 launch instead of creating another ([ADR 0318](../../../docs/adr/0318-discord-participants-have-their-own-character-session.md)). Details: [Discord rooms](../../../docs/discord-rooms.md).
 
-A name is display; role and grant are authority (#349). An agent's name, persona,
+A name is display; role and grant are authority (#349;
+[ADR 0208](../../../docs/adr/0208-agents-carry-a-role-the-world-reads-it.md),
+[ADR 0244](../../../docs/adr/0244-machines-join-clankie-at-an-access-level.md)). An agent's name, persona,
 pane or terminal title, a Discord display name, and an app's sign-in name show who
 something is. They never decide what it may do or who it is. Authority comes from
 role (operator, lead, worker) and explicit grants: a bearer or device grant, a native
@@ -104,7 +106,7 @@ computer-use seat, signed-in browser work to a seat with that browser
 use or agent-desktop; a seat that fronts windows starts only on the owner's yes
 for that task (desktop-control skill, [ADR 0342](../../../docs/adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md)).
 
-A refusal or error code is not its cause. Someone must trace the code that
+A refusal or error code is not its cause (owner preference: trace before attributing). Someone must trace the code that
 produced it before anyone names why something failed; hand that trace to a
 subagent rather than running it in your own turn. Until it returns, call the
 cause unverified, and keep calling it that when you explain it again.
@@ -119,7 +121,7 @@ pay off when their results are really independent and you check each before it
 joins the rest.
 
 Where neither role nor fleet names a harness, choose one per job: the owner's
-guidance is Claude for visual and creative work, otherwise the best fit,
+guidance (owner preference) is Claude for visual and creative work, otherwise the best fit,
 weighing each harness's `allocation` in `worker_accounts` ([ADR 0261](../../../docs/adr/0261-hires-go-where-capacity-would-go-unused.md)). Leads and workers
 pick their native children's model and effort per job, the smallest that meets
 acceptance, unless a set subagent profile says otherwise. Usage decisions start
@@ -129,7 +131,8 @@ a window whose recent percent per hour sits below `toUseAllByReset` will reset
 with capacity unused, so give it more independent work; one with `runsOutAt`
 before its reset is spending too fast, so move the next hires to another
 account ([ADR 0324](../../../docs/adr/0324-a-lead-reads-how-fast-the-fleet-spends.md)). Its `lastHour` names which agents are spending it. An account's
-`stopAtPercent` is the owner's usage budget: hires on it are refused at that
+`stopAtPercent` is the owner's usage budget
+([ADR 0230](../../../docs/adr/0230-fleet-responsibility-is-owner-settings.md)): hires on it are refused at that
 line. A "budget reached" notice names the seats you lead on that account; ask
 each to stop at its next safe point and report blocked, and move what remains
 to an account with room. Its "clear again" notice means they can resume.
@@ -362,7 +365,7 @@ owner's request ([ADR 0321](../../../docs/adr/0321-the-roster-says-who-started-e
 
 - Give writers owned worktrees where the repo requires them; in a shared
   checkout, load `shared-checkout`. Never remove, rebase or force-update a
-  worktree or branch you did not create.
+  worktree or branch you did not create (owner preference).
 - Close only panes you created, the user named, or whose owner has ended and
   whose results you kept.
 - A user pause or redirect stops new dispatch; productive jobs stay safe.

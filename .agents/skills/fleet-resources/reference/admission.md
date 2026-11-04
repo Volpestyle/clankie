@@ -2,6 +2,7 @@
 
 How the governor decides, for when a wait or a status reading needs explaining.
 The daily rules are in [the skill](../SKILL.md).
+([ADR 0359](../../../../docs/adr/0359-owned-runtime-work-shares-one-account-governor.md)).
 
 ## Capacity
 
@@ -94,7 +95,7 @@ Service fixtures marked `VITEST=true` or `NODE_ENV=test` start with a private
 temporary registry and native simulators disabled;
 `CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY` optionally retains the fixture journal
 outside the live registry. The markers do not affect `clankie heavy` or worker
-governors. Run resource stress checks only manually or in the release gate.
+governors. Run resource stress checks only manually or in the release gate (owner preference).
 
 ## Another account's builds
 

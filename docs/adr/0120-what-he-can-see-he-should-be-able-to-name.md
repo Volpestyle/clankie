@@ -106,3 +106,11 @@ flowchart LR
   the grid. It needs the same overlay server-side, or raw frames across the
   protocol. Until then the world path keeps the plain picture, and the 66-turn
   failure this ADR is named for remains reachable there.
+
+## Evidence and limits
+
+The context and consequences retain a 66-turn failure and offsets measured against two overworld frames with known positions. Two frames do not establish the camera geometry of a third body, another scale or a moving camera. The raw frames are not linked in this record; the stated sample limits the claim.
+
+## Revisit when
+
+A new body, camera policy, frame dimension or rendering scale is used. Calibrate against known positions again and refuse unknown geometry rather than inheriting offsets because another body once matched them.

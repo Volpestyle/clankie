@@ -44,7 +44,7 @@ Reuse valid proof for unchanged inputs: a rebase, ticket split or doc edit alone
 does not justify another build, suite or recording. A real failure needs
 investigation. Waived or deferred verification stays labelled and is never a
 pass. When the user authorizes partial closure, close the accepted slice and
-keep what is missing in a focused follow-up.
+keep what is missing in a focused follow-up (owner preference).
 
 ## Landing
 
@@ -91,13 +91,15 @@ and the operator seat keep their harness permissions. Preferences and account
 context are not same-user shell isolation. See
 [worker access](../../../../docs/worker-access.md#work-repositories). Do not
 apply one work project's restrictions to social/play lanes or other repos.
+([ADR 0181](../../../../docs/adr/0181-clankie-is-independent-of-his-connections.md),
+[ADR 0239](../../../../docs/adr/0239-worker-harnesses-sign-in-with-their-own-logins.md)).
 
 ## Ownership while delivering
 
 Use the existing task and claim tooling for ownership, and the real scheduler
 or lease for shared editors and capture. Do not invent a parallel registry; a
 remembered paragraph is not a lock. Repair a demonstrated gap in the tool
-instead of adding warnings.
+instead of adding warnings (owner preference).
 
 Keep one owned worktree per deliverable; its native slices and reviews share it
 under distinct paths ([ADR 0223](../../../../docs/adr/0223-hires-use-repo-workspaces-and-pipeline-tabs.md)). After landing, keep needed reports and evidence, verify
@@ -111,4 +113,4 @@ they should never have to relay messages between workers.
 Native subagents of one seat share that seat's scratchpad directory. Give each
 brief its own scratch subdirectory (for example `scratchpad/<deliverable>/`) and
 owned output paths, so one child's helper scripts or captures never overwrite
-another's.
+another's (owner preference).

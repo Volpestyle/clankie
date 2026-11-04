@@ -59,3 +59,11 @@ Nothing here becomes a default the product imposes.
 - The repos' agent guides, the lead guide, the quality-gates guide and the
   `codex-review` skill say merges wait on the fast checks only. No GitHub
   ruleset requires a check on these repos, so no repository setting changes.
+
+## Evidence and limits
+
+The context records completed changes waiting for hours and a roughly ten-minute gate. The owner’s stated workflow choice is the authority for this repo; the timings explain it but do not impose it on other projects. The record contains no linked latency distribution, and ADR 0347 later narrows which checks gate a merge.
+
+## Revisit when
+
+Measured regressions or repair cost outweigh the saved landing time, the quick check ceases to be quick, or the owner changes this repo’s review pipeline. Evaluate lead time and escaped findings together; do not turn these personal-repo defaults into another project’s policy.
