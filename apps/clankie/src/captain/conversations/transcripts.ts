@@ -70,8 +70,9 @@ export function syncConversationTranscript(
   // Native IDs are unique across sessions. Captain history keeps their IDs when
   // a seat resumes or both the native hook and Herdr observe the same record.
   const captainThread = meta.scope.kind === "global" || meta.scope.kind === "workspace";
+  const index = captainThread ? ctx["transcriptCheckpoint"](meta, transcript.sessionKey) : undefined;
   const seen = new Set(
-    captainThread || checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : [],
+    index === undefined && checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : [],
   );
   let latestAgentReply: string | undefined;
   const added: HerdrTranscriptEntry[] = [];
@@ -79,7 +80,7 @@ export function syncConversationTranscript(
   // this the checkpoint would be rewritten to disk on every quiet pass.
   let advanced = false;
   for (const entry of transcript.entries) {
-    if (seen.has(entry.id)) continue;
+    if (seen.has(entry.id) || index?.has(entry.id)) continue;
     if (entry.type === "viewed_image") {
       if (!isDeliveredImagePath(entry.path)) {
         advanced = true;
@@ -113,7 +114,11 @@ export function syncConversationTranscript(
   if (!advanced) return;
   noteNativeTranscript(meta, ctx["lastCursor"](meta));
   resettle(ctx, meta);
-  const nextCheckpoint = { sessionKey: transcript.sessionKey, entryIds: [...seen] };
+  index?.add(seen);
+  const nextCheckpoint = {
+    sessionKey: transcript.sessionKey,
+    ...(index === undefined ? { entryIds: [...seen] } : { index: "sqlite-v1" as const }),
+  };
   if (room) (meta.roomTranscripts ??= {})[transcript.sessionKey] = nextCheckpoint;
   else meta.seatTranscript = nextCheckpoint;
   meta.updatedAt = room ? (added.at(-1)?.occurredAt ?? meta.updatedAt) : new Date().toISOString();
@@ -229,6 +234,10 @@ function completeTranscriptImage(
   entryId: string,
 ): void {
   if (ctx["metas"].get(meta.conversationId) !== meta || meta.seatTranscript?.sessionKey !== sessionKey) {
+    return;
+  }
+  if (meta.seatTranscript.index !== undefined) {
+    ctx["transcriptCheckpoint"](meta, sessionKey).add([entryId]);
     return;
   }
   const entryIds = meta.seatTranscript.entryIds ?? meta.seatTranscript.messageIds ?? [];

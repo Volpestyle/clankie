@@ -67,6 +67,7 @@ import { type StoredOwnerAttachment } from "../../delivered-files.ts";
 import type { TrackerActivity } from "../tracker-activity.ts";
 import { CHANNEL_ROUND_INTERRUPTED_NOTICE, type ChannelTranscriptEntry } from "../channel-turns.ts";
 import { ConversationJournal } from "../conversation-journal.ts";
+import { TranscriptCheckpointIndex } from "./transcript-checkpoint.ts";
 import {
   claimServiceHandoff,
   noteCompactionSummary,
@@ -368,6 +369,34 @@ export class ConversationStore {
   private readonly root: string;
   private readonly ownerUpdates: OwnerUpdates;
   private readonly journal: ConversationJournal;
+  private readonly transcriptIndexes = new Map<string, TranscriptCheckpointIndex>();
+
+  private transcriptCheckpoint(meta: ConversationMeta, sessionKey: string): TranscriptCheckpointIndex {
+    const checkpoint = meta.seatTranscript;
+    if (checkpoint?.index !== undefined && checkpoint.index !== "sqlite-v1")
+      throw new Error("Unsupported native transcript checkpoint reference");
+    let index = this.transcriptIndexes.get(meta.conversationId);
+    if (!index) {
+      index = new TranscriptCheckpointIndex(
+        join(this.root, meta.conversationId, "transcript-checkpoint.sqlite"),
+        checkpoint?.index !== undefined,
+      );
+      this.transcriptIndexes.set(meta.conversationId, index);
+    }
+    if (checkpoint?.index === undefined) {
+      // The old set stays in metadata until all its IDs have committed. A crash
+      // before the reference save retries this migration without losing an ID.
+      index.add(checkpoint?.entryIds ?? checkpoint?.messageIds ?? []);
+      meta.seatTranscript = { sessionKey: checkpoint?.sessionKey ?? sessionKey, index: "sqlite-v1" };
+      this.saveMeta(meta);
+    }
+    return index;
+  }
+
+  private closeTranscriptIndex(conversationId: string): void {
+    this.transcriptIndexes.get(conversationId)?.close();
+    this.transcriptIndexes.delete(conversationId);
+  }
   private readonly runner: ConversationRunner;
   private readonly onPrune: ((conversationId: string, scope: OperatorConversationScope) => void) | undefined;
   private readonly sendToSeat: SeatSender | undefined;
@@ -2418,6 +2447,7 @@ export class ConversationStore {
         ...this.deliveredFilePublishes.values(),
       ]);
     } while (this.linearHookTimers.size > 0 || this.linearHookFlushes.size > 0);
+    for (const id of this.transcriptIndexes.keys()) this.closeTranscriptIndex(id);
   }
 
   private create(
@@ -4233,6 +4263,7 @@ export class ConversationStore {
         this.questionIssuers.delete(record.question.requestId);
     this.corruptQuestions.delete(meta.conversationId);
     this.discardProjection(meta.channelDiscord);
+    this.closeTranscriptIndex(meta.conversationId);
     rmSync(join(this.root, meta.conversationId), { recursive: true, force: true });
     this.inboundReportStores.delete(join(this.root, meta.conversationId));
     this.writtenMetadata.delete(join(this.root, meta.conversationId));
@@ -4304,6 +4335,7 @@ export class ConversationStore {
     };
     mkdirSync(staging, { recursive: true, mode: 0o700 });
     this.persistMeta(fresh, staging, true);
+    this.closeTranscriptIndex(conversationId);
     renameSync(live, archive);
     try {
       this.onPrune?.(conversationId, meta.scope);

@@ -295,6 +295,17 @@ therefore render one current seats/personas/channels moment without polling or
 persisting a second world projection
 ([ADR 0150](adr/0150-the-fleet-is-a-live-cursor.md)).
 
+Head and workspace transcript projections keep exact native entry membership in
+`transcript-checkpoint.sqlite` beside their event journal. `meta.json` holds only
+a versioned reference and the current session key, so saving a long conversation
+does not rewrite every ID it ever projected. The paged index retains IDs across
+session resumes and hook/Herdr observations, including entries older than the
+readable event log. Its disk use grows with unique IDs; ordinary inserts change
+only affected SQLite pages. Legacy inline checkpoints migrate before the
+reference is saved; a missing or unreadable referenced index refuses projection.
+Reset archives the index with the old conversation. Room and persona checkpoints
+keep their existing layout.
+
 ```mermaid
 flowchart LR
   Lead["Lead conversation<br/>pi or native head"] -->|"hire_agent · message_seat"| Adapter["Harness adapter<br/>Claude · Codex · Pi · OpenCode · Grok"]
