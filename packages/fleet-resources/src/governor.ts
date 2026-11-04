@@ -1,25 +1,9 @@
 import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
-import {
-  chargeHolders,
-  loadRetryAfterMs,
-  observeProcessTable,
-  topConsumers,
-  type HolderGroup,
-} from "./consumers.ts";
 import { randomUUID } from "node:crypto";
-import { readFile, rename, writeFile } from "node:fs/promises";
+import { statfs } from "node:fs/promises";
 import { constants, userInfo } from "node:os";
 import { basename, join } from "node:path";
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
@@ -29,10 +13,7 @@ import {
   type FleetResourcePolicy,
   type HeavyLease,
   type HeavyRunOptions,
-  type HeavyArbitration,
   type ProcessIdentity,
-  type ResourcePressure,
-  type ResourcePressureInput,
   type ResourceSnapshot,
   type ResourceState,
   type ResourceWaitOptions,
@@ -49,16 +30,9 @@ import {
   resourceNativeHelperPath,
   resourcePython,
 } from "./process.ts";
-import {
-  baseHeavySlots,
-  heavyAdmission,
-  heavyJobSettleMs,
-  resourceCapacity,
-  ResourcePressureSampler,
-  simulatorBootSettleMs,
-} from "./pressure.ts";
+import { baseHeavySlots, resourceCapacity, simulatorBootSettleMs } from "./sizing.ts";
 import { ResourceStore } from "./store.ts";
-import { appendRecords, leaseCommand, recordLease, recordMachineSample } from "./records.ts";
+import { appendRecords, leaseCommand, recordLease } from "./records.ts";
 import { proveRestartResources } from "./restart-guard.ts";
 import {
   heavyJobArgs,
@@ -218,29 +192,13 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 const PEEK_MS = 500;
 /** How often a waiter takes the lock anyway, so dead holders are reconciled. */
 const FULL_PASS_MS = 5_000;
-/**
- * How long an arbiter heartbeat stays authoritative. While one is fresh,
- * waiters take the arbiter's judgment instead of their own (VUH-2080).
- */
-const ARBITER_FRESH_MS = 5_000;
-/** An unqueued grant marker younger than this may belong to a waiter still enqueueing. */
-const GRANT_MARKER_GRACE_MS = 600_000;
-const readdirSyncSafe = (path: string) => {
-  try {
-    return readdirSync(path);
-  } catch {
-    return [];
-  }
-};
 /** Spread waiters so they do not wake together. */
 const jittered = (ms: number) => Math.round(ms * (0.6 + Math.random() * 0.8));
 /** One canonical machine registry; runtime/worktree environment cannot increase capacity. */
 export function createResourceGovernor(
   options: {
     directory?: string;
-    probe?: () => Promise<ResourcePressureInput>;
     simulatorBootSettleMs?: number;
-    heavyJobSettleMs?: number;
     /** Host-owned original native registrations may connect detached harness servers to their seat. Never caller labels. */
     nativeSimulatorOwner?: (
       owner: SimulatorReservation,
@@ -249,7 +207,6 @@ export function createResourceGovernor(
   } = {},
 ): FleetResourceGovernor {
   const bootSettleMs = options.simulatorBootSettleMs ?? simulatorBootSettleMs;
-  const jobSettleMs = options.heavyJobSettleMs ?? heavyJobSettleMs;
   const directory = options.directory ?? join(userInfo().homedir, ".clankie/fleet-resources");
   // A disposable local hint, never lease authority. Ordinary Claude hooks can
   // skip Node and HTTP entirely when their pane has no root lease.
@@ -288,7 +245,6 @@ export function createResourceGovernor(
   const mainStore = store;
   const laneStore = (lane: HeavyJobLane) =>
     lane === "server" ? serverStore : lane === "light" ? lightStore : store;
-  const pressure = new ResourcePressureSampler(options.probe);
   const shutdown = new AbortController();
   const active = new Set<Promise<unknown>>();
   // Heavy leases whose runner is proven dead while group members survive.
@@ -450,43 +406,12 @@ export function createResourceGovernor(
     const usage = state.leases.some((lease) => lease.kind === "simulator" && lease.deviceId)
       ? await observeSimulatorUsage()
       : new Map();
-    const sampledPressure = await pressure.sample(state.policy);
-    // Each permit is charged its runner's process group; under pressure the heaviest
-    // processes are named, leased or not (#332). One cached census, only when needed.
-    const groups: HolderGroup[] = (
-      [
-        { lane: "full", from: state },
-        { lane: "light", from: light },
-        { lane: "server", from: server },
-      ] as const
-    ).flatMap(({ lane, from }) =>
-      from.leases.flatMap((lease) =>
-        lease.kind === "heavy" && lease.runner
-          ? [
-              {
-                id: lease.id,
-                pgid: lease.runner.pgid,
-                lane,
-                ...(lease.seatId ? { seatId: lease.seatId } : {}),
-                ...(lease.holderId ? { holderId: lease.holderId } : {}),
-                executable: lease.executable,
-              },
-            ]
-          : [],
-      ),
-    );
-    const table =
-      groups.length || !sampledPressure.healthy
-        ? await observeProcessTable().catch(() => undefined)
-        : undefined;
-    const charged = table ? chargeHolders(table, groups) : new Map();
-    const processUsage = (id: string) => (charged.has(id) ? { processUsage: charged.get(id)! } : {});
-    const consumers =
-      table && !sampledPressure.healthy ? topConsumers(table, groups, { exclude: [process.pid] }) : [];
-    const retryAfterMs =
-      sampledPressure.reason === "load"
-        ? loadRetryAfterMs(sampledPressure.loadRatio, state.policy.maxLoadRatio)
-        : undefined;
+    // allow-swallowed-rejection -- an unreadable volume leaves the disk reading out; nothing gates on it.
+    const volume = await statfs(directory).catch(() => undefined);
+    const disk = volume && {
+      freeDiskGb: (volume.bavail * volume.bsize) / 1024 ** 3,
+      totalDiskGb: (volume.blocks * volume.bsize) / 1024 ** 3,
+    };
     return {
       schemaVersion: 1,
       policy: state.policy,
@@ -501,9 +426,16 @@ export function createResourceGovernor(
         serverUsed: server.leases.length,
         serverCpuCores: serverCapacity.cpuCores,
       },
-      pressure: sampledPressure,
-      ...(consumers.length ? { consumers } : {}),
-      ...(retryAfterMs === undefined ? {} : { loadRetryAfterMs: retryAfterMs }),
+      ...(disk && disk.totalDiskGb > 0
+        ? {
+            disk: {
+              ...disk,
+              warning:
+                disk.freeDiskGb < state.policy.warnFreeDiskGb ||
+                (disk.freeDiskGb / disk.totalDiskGb) * 100 < state.policy.warnFreeDiskPercent,
+            },
+          }
+        : {}),
       serverLeases: server.leases.flatMap((lease) =>
         lease.kind === "heavy"
           ? [
@@ -521,7 +453,6 @@ export function createResourceGovernor(
                 cpuCores: serverCapacity.jobCpuCores,
                 ...serverCpuStatus(serverStore.directory, lease),
                 ...(lease.runner ? { pid: lease.runner.pid } : {}),
-                ...processUsage(lease.id),
               },
             ]
           : [],
@@ -581,7 +512,6 @@ export function createResourceGovernor(
         createdAtMs: lease.createdAtMs,
         lastUsedAtMs: lease.lastUsedAtMs,
         ...(lease.kind === "heavy" && lease.runner ? { pid: lease.runner.pid } : {}),
-        ...processUsage(lease.id),
       })),
       lightLeases: light.leases.flatMap((lease) =>
         lease.kind === "heavy"
@@ -594,7 +524,6 @@ export function createResourceGovernor(
                 executable: lease.executable,
                 createdAtMs: lease.createdAtMs,
                 ...(lease.runner ? { pid: lease.runner.pid } : {}),
-                ...processUsage(lease.id),
               },
             ]
           : [],
@@ -629,23 +558,21 @@ export function createResourceGovernor(
                   .slice(0, index + 1)
                   .filter((entry) => entry.simulator && sameQueue(entry.simulator, simulator)).length,
                 // Idle-timeout heuristic, not a promised release: heartbeats can extend it.
-                estimatedWaitMs: sampledPressure.healthy
-                  ? (() => {
-                      const leases = state.leases.filter(
-                        (lease): lease is SimulatorReservation => lease.kind === "simulator",
-                      );
-                      const held = leases.find((lease) => lease.deviceId === simulator.targetDeviceId);
-                      const ahead = state.queue
-                        .slice(0, index)
-                        .filter((entry) => entry.simulator && sameQueue(entry.simulator, simulator)).length;
-                      if (held)
-                        return (
-                          Math.max(0, held.lastUsedAtMs + state.policy.simulatorIdleMs - Date.now()) +
-                          ahead * state.policy.simulatorIdleMs
-                        );
-                      return leases.length < state.policy.simulatorSlots && !ahead ? 0 : null;
-                    })()
-                  : null,
+                estimatedWaitMs: (() => {
+                  const leases = state.leases.filter(
+                    (lease): lease is SimulatorReservation => lease.kind === "simulator",
+                  );
+                  const held = leases.find((lease) => lease.deviceId === simulator.targetDeviceId);
+                  const ahead = state.queue
+                    .slice(0, index)
+                    .filter((entry) => entry.simulator && sameQueue(entry.simulator, simulator)).length;
+                  if (held)
+                    return (
+                      Math.max(0, held.lastUsedAtMs + state.policy.simulatorIdleMs - Date.now()) +
+                      ahead * state.policy.simulatorIdleMs
+                    );
+                  return leases.length < state.policy.simulatorSlots && !ahead ? 0 : null;
+                })(),
               }
             : {}),
         }),
@@ -664,81 +591,13 @@ export function createResourceGovernor(
   async function snapshot() {
     return project(await reconciled(store), await reconciled(lightStore), await reconciled(serverStore));
   }
-  const arbiterPath = join(directory, "arbiter.json");
-  /**
-   * Waiters that take up grants say so here, one empty file per ticket. A
-   * waiter from before VUH-2080 never looks for a grant, so the arbiter must
-   * not admit it: its slot would sit unused until that waiter exited.
-   */
-  const grantsDirectory = join(directory, "grants");
-  const grantable = (id: string) => existsSync(join(grantsDirectory, id));
-  /** Whether a live arbiter is judging admission; waiters then never judge it themselves. */
-  async function arbiterFresh(lane: HeavyJobLane): Promise<boolean> {
-    try {
-      const { at, lanes } = JSON.parse(await readFile(arbiterPath, "utf8")) as {
-        at?: unknown;
-        lanes?: unknown;
-      };
-      // An installed service predating this lane cannot grant its tickets.
-      // Keep full/light compatibility, and let server waiters judge for
-      // themselves until a lane-aware arbiter advertises support.
-      if (lane === "server" && (!Array.isArray(lanes) || !lanes.includes("server"))) return false;
-      return typeof at === "number" && Math.abs(Date.now() - at) < ARBITER_FRESH_MS;
-    } catch {
-      return false;
-    }
-  }
-  async function heartbeat(): Promise<void> {
-    const next = `${arbiterPath}.${randomUUID()}`;
-    await writeFile(
-      next,
-      JSON.stringify({ pid: process.pid, at: Date.now(), lanes: ["full", "light", "server"] }),
-      { mode: 0o600 },
-    );
-    await rename(next, arbiterPath);
-  }
   function heavyHead(state: ResourceState) {
     return state.queue.find((entry) => entry.kind === "heavy");
   }
-  /**
-   * Light requests this process queued for its own bulk removal (`holdLight`),
-   * the work that frees disk, so the disk floor must not hold it. Only this
-   * process's waiter and arbiter consult the set; nothing in the journal or a
-   * caller's label claims it, and slots and the memory floor still bind. Another
-   * process arbitrating the light lane would not know it; the service arbitrates.
-   */
-  const freesDisk = new Set<string>();
-  /**
-   * The ticket that leads this lane under one sample. Below the disk floor every
-   * light entry waits except one that frees disk, so the first of those leads
-   * instead of queueing behind checks the floor holds anyway.
-   */
-  function laneHead(lane: HeavyJobLane, state: ResourceState, sampled: ResourcePressure) {
-    if (lane === "light" && sampled.reason === "disk") {
-      const freeing = state.queue.find((entry) => entry.kind === "heavy" && freesDisk.has(entry.id));
-      if (freeing) return freeing;
-    }
-    return heavyHead(state);
-  }
-  /** Whether `ticket`, this lane's `laneHead`, may start under one sample. */
-  function headAdmits(
-    lane: HeavyJobLane,
-    state: ResourceState,
-    policy: FleetResourcePolicy,
-    sampled: ResourcePressure,
-    ticket: string,
-  ): boolean {
-    const held = state.leases.filter((lease) => lease.kind === "heavy");
-    if (lane === "server") return held.length < serverLaneCapacity().slots && sampled.healthy;
-    if (held.length >= (lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy))) return false;
-    // A light job is small and capped, so only the memory floor holds it;
-    // load already holds the full gates it runs beside (VUH-2023). A full
-    // job above the base slots needs measured room (VUH-2054).
-    return lane === "light"
-      ? sampled.reason !== "probe-unavailable" &&
-          (sampled.reason !== "disk" || freesDisk.has(ticket)) &&
-          sampled.availableMemoryMb >= policy.minAvailableMemoryMb
-      : heavyAdmission(policy, sampled, held, Date.now(), jobSettleMs) === "admit";
+  /** Each lane is a FIFO of this many permits: the owner's heavy slots, light slots, server slots. */
+  function laneSlots(lane: HeavyJobLane, policy: FleetResourcePolicy): number {
+    if (lane === "server") return serverLaneCapacity().slots;
+    return lane === "light" ? baseHeavySlots(policy) : resourceCapacity(policy);
   }
   /** A lease for a queued request, carrying that waiter's own identity and token. */
   function grant(state: ResourceState, entry: ResourceQueueEntry): HeavyLease {
@@ -760,100 +619,16 @@ export function createResourceGovernor(
     return lease;
   }
   /**
-   * One arbiter pass (VUH-2080): admit queue heads in FIFO order under this
-   * process's single view of pressure, on behalf of their waiters. Idle passes
-   * read without the lock; the sample and process census come before it.
+   * Waits in this lane's FIFO and takes a permit when this ticket is the head
+   * and a slot is free (#599). No machine reading gates it; dead holders are
+   * reconciled on every locked pass, so their slots come back.
    */
-  let arbiterPassAt = 0;
-  let lastArbitration: HeavyArbitration | undefined;
-  async function arbitrate(): Promise<number> {
-    lastArbitration = undefined;
-    const policy = (await mainStore.read()).policy;
-    const lanes = [
-      { lane: "full" as HeavyJobLane, from: mainStore },
-      { lane: "light" as HeavyJobLane, from: lightStore },
-      { lane: "server" as HeavyJobLane, from: serverStore },
-    ];
-    const peeks = await Promise.all(lanes.map(({ from }) => from.read()));
-    if (peeks.every((state) => !state.queue.some((entry) => entry.kind === "heavy"))) {
-      await heartbeat();
-      lastArbitration = { atMs: Date.now(), heads: [] };
-      return 0;
-    }
-    const sampled = await pressure.sample(policy);
-    // An arbiter that cannot observe the machine stops judging; waiters fall back.
-    if (sampled.reason === "probe-unavailable") return 0;
-    await heartbeat();
-    const due = Date.now() - arbiterPassAt >= FULL_PASS_MS;
-    let granted = 0;
-    const heads: HeavyArbitration["heads"] = [];
-    const recordHead = (lane: HeavyJobLane, state: ResourceState) => {
-      const head = laneHead(lane, state, sampled);
-      if (!head) return;
-      heads.push({
-        lane,
-        ticketId: head.id,
-        ...(head.seatId ? { seatId: head.seatId } : {}),
-        ...(head.holderId ? { holderId: head.holderId } : {}),
-        pid: head.owner.pid,
-        queuedAtMs: head.queuedAtMs,
-        marked: grantable(head.id),
-        admits: headAdmits(lane, state, policy, sampled, head.id),
-      });
-    };
-    for (const [index, { lane, from }] of lanes.entries()) {
-      const peek = peeks[index]!;
-      if (!peek.queue.some((entry) => entry.kind === "heavy")) continue;
-      const peekHead = laneHead(lane, peek, sampled);
-      if (!due && (!peekHead || !headAdmits(lane, peek, policy, sampled, peekHead.id))) {
-        recordHead(lane, peek);
-        continue;
-      }
-      const seen = await look(from);
-      granted += await from.transaction(async (state) => {
-        await reconcile(state, seen, from.directory);
-        let count = 0;
-        for (;;) {
-          const head = laneHead(lane, state, sampled);
-          // An older waiter at the head judges for itself; FIFO waits on it.
-          if (!head || !grantable(head.id) || !headAdmits(lane, state, policy, sampled, head.id)) {
-            recordHead(lane, state);
-            return count;
-          }
-          grant(state, head);
-          count++;
-        }
-      });
-    }
-    if (due) {
-      arbiterPassAt = Date.now();
-      const live = new Set(
-        (await Promise.all(lanes.map(({ from }) => from.read()))).flatMap((state) =>
-          state.queue.map((entry) => entry.id),
-        ),
-      );
-      // A waiter marks its ticket before it can enqueue, which may wait on the
-      // lock for seconds: only a marker that old and still unqueued is stale.
-      for (const name of readdirSyncSafe(grantsDirectory)) {
-        if (live.has(name)) continue;
-        const path = join(grantsDirectory, name);
-        try {
-          if (Date.now() - statSync(path).mtimeMs >= GRANT_MARKER_GRACE_MS) rmSync(path, { force: true });
-        } catch {
-          // Removed by its waiter meanwhile.
-        }
-      }
-    }
-    lastArbitration = { atMs: Date.now(), heads };
-    return granted;
-  }
   async function acquire(
     options: ResourceWaitOptions & {
       seatId?: string;
       holderId?: string;
       executable: string;
       lane: HeavyJobLane;
-      freesDisk?: boolean;
     },
   ): Promise<HeavyLease> {
     const store = laneStore(options.lane);
@@ -867,10 +642,6 @@ export function createResourceGovernor(
       throw new Error("Invalid fleet holder identity");
     const id = randomUUID(),
       token = randomUUID();
-    if (options.freesDisk) freesDisk.add(id);
-    // Before the ticket exists, so an arbiter never sees it unmarked.
-    mkdirSync(grantsDirectory, { recursive: true, mode: 0o700 });
-    writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
     const seen = await look(store);
     await store.transaction(
       async (state) => {
@@ -890,22 +661,20 @@ export function createResourceGovernor(
       { signal },
     );
     let admitted = false;
-    // The owner's policy lives in the main journal for both lanes.
+    // The owner's policy lives in the main journal for every lane.
     const policyFor = async (state: ResourceState) =>
       options.lane !== "full" ? (await mainStore.read()).policy : state.policy;
-    const admits = (state: ResourceState, policy: FleetResourcePolicy, sampled: ResourcePressure) =>
-      laneHead(options.lane, state, sampled)?.id === id &&
-      headAdmits(options.lane, state, policy, sampled, id);
-    // A disk-freeing ticket may lead under the disk floor, which only a sample shows.
-    const isHead = (state: ResourceState) => heavyHead(state)?.id === id || freesDisk.has(id);
-    /** A lease granted to this request, by an arbiter or by this waiter. */
+    const admits = (state: ResourceState, policy: FleetResourcePolicy) =>
+      heavyHead(state)?.id === id &&
+      state.leases.filter((lease) => lease.kind === "heavy").length < laneSlots(options.lane, policy);
+    /** A lease granted to this request, by this waiter or, before #599, by a service arbiter. */
     const mine = (state: ResourceState) =>
       state.leases.find(
         (lease): lease is HeavyLease => lease.kind === "heavy" && lease.id === id && lease.token === token,
       );
     let fullPassAt = Date.now() + jittered(FULL_PASS_MS);
     let reportedAt = 0;
-    const report = async (state: ResourceState, arbiter = false) => {
+    const report = async (state: ResourceState) => {
       if (!options.onWait || Date.now() - reportedAt < FULL_PASS_MS) return;
       reportedAt = Date.now();
       options.onWait(
@@ -914,7 +683,6 @@ export function createResourceGovernor(
           : options.lane === "light"
             ? await project(await mainStore.read(), state)
             : await project(state),
-        { arbiter },
       );
     };
     try {
@@ -926,52 +694,26 @@ export function createResourceGovernor(
           admitted = true;
           return structuredClone(granted);
         }
-        // A live arbiter judges admission from one view; this waiter only
-        // waits for its grant, so its own view cannot hold the FIFO (VUH-2080).
-        if (peek && (await arbiterFresh(options.lane))) {
-          // Re-assert this ticket's marker: without it the arbiter treats this
-          // waiter as an older client and the FIFO stalls behind it.
-          if (!grantable(id)) writeFileSync(join(grantsDirectory, id), "", { mode: 0o600 });
-          await report(peek, true);
-          await wait(jittered(PEEK_MS), signal);
-          continue;
-        }
         // Waiters take the registry lock only when they could be admitted, or
         // on a jittered full pass that reconciles dead holders (VUH-2053).
         const due = Date.now() >= fullPassAt;
-        let sampled: ResourcePressure | undefined;
-        if (peek && !due) {
-          if (!isHead(peek)) {
-            await report(peek);
-            await wait(jittered(PEEK_MS), signal);
-            continue;
-          }
-          const policy = await policyFor(peek);
-          sampled = await pressure.sample(policy);
-          if (!admits(peek, policy, sampled)) {
-            await report(peek);
-            await wait(jittered(PEEK_MS), signal);
-            continue;
-          }
+        if (peek && !due && !admits(peek, await policyFor(peek))) {
+          await report(peek);
+          await wait(jittered(PEEK_MS), signal);
+          continue;
         }
         if (due) fullPassAt = Date.now() + jittered(FULL_PASS_MS);
-        if (!sampled && peek) sampled = await pressure.sample(await policyFor(peek));
         const seen = await look(store);
         let advisory: ResourceState | undefined;
         const lease = await store.transaction(
           async (state) => {
             await reconcile(state, seen, store.directory);
-            const blocked = () => {
-              advisory = structuredClone(state);
-              return undefined;
-            };
-            // Granted by an arbiter between the peek and the lock.
             const already = mine(state);
             if (already) return structuredClone(already);
-            const policy = await policyFor(state);
-            // Sampled before the lock when the peek ran; the sampler caches a
-            // fresh reading, so the full pass's sample forks nothing here.
-            if (!admits(state, policy, sampled ?? (await pressure.sample(policy)))) return blocked();
+            if (!admits(state, await policyFor(state))) {
+              advisory = structuredClone(state);
+              return undefined;
+            }
             if (signal.aborted) throw abort();
             const head = state.queue.find((entry) => entry.id === id)!;
             return structuredClone(grant(state, head));
@@ -988,8 +730,6 @@ export function createResourceGovernor(
         await wait(jittered(PEEK_MS), signal);
       }
     } finally {
-      freesDisk.delete(id);
-      rmSync(join(grantsDirectory, id), { force: true });
       if (!admitted)
         await store.transaction((state) => {
           state.queue = state.queue.filter((entry) => entry.id !== id || entry.token !== token);
@@ -1255,7 +995,6 @@ export function createResourceGovernor(
       holderId: options.holderId,
       executable: options.operation.slice(0, 128),
       lane: "light",
-      freesDisk: true,
     });
     const record = {
       leaseId: lease.id,
@@ -1284,10 +1023,6 @@ export function createResourceGovernor(
     }
   }
   return {
-    arbitrate,
-    /** One machine sample into `samples.jsonl` beside the journal (VUH-2933). */
-    recordMachineSample: () => recordMachineSample(directory),
-    arbitration: () => (lastArbitration === undefined ? undefined : structuredClone(lastArbitration)),
     async configure(policy: FleetResourcePolicy) {
       const parsed = FleetResourcePolicySchema.parse(policy);
       const state = await store.transaction((current) => {
@@ -1299,28 +1034,6 @@ export function createResourceGovernor(
     snapshot,
     restartGuard: (owner) =>
       proveRestartResources(owner, () => Promise.all([store.read(), lightStore.read(), serverStore.read()])),
-    async admitBuilder() {
-      const state = await store.read(),
-        sample = await pressure.sample(state.policy);
-      if (sample.reason === "probe-unavailable")
-        return { allowed: false, reason: "probe-unavailable" as const, pressure: sample };
-      // A hire is admitted on memory alone. Its heavy steps queue on load
-      // through their own permits, so load only marks that queue (VUH-2011).
-      if (sample.availableMemoryMb < state.policy.minAvailableMemoryMb)
-        return {
-          allowed: false,
-          reason: "pressure" as const,
-          pressure: sample,
-          minAvailableMemoryMb: state.policy.minAvailableMemoryMb,
-        };
-      return {
-        allowed: true,
-        pressure: sample,
-        ...(sample.loadRatio > state.policy.maxLoadRatio
-          ? { heavyQueued: { maxLoadRatio: state.policy.maxLoadRatio } }
-          : {}),
-      };
-    },
     runHeavy(command, args, options) {
       const job = runHeavy(command, args, options);
       active.add(job);
@@ -1400,8 +1113,6 @@ export function createResourceGovernor(
       if (shutdown.signal.aborted) throw abort();
       let refusal: { reason: SimulatorBlock; state: ResourceState } | undefined;
       const seen = await look(store);
-      // Sampled before the lock, like the process facts (VUH-2053).
-      const sampled = await pressure.sample((await store.read()).policy);
       const lease = await store.transaction(async (state) => {
         await reconcile(state, seen);
         if (state.policy.simulatorSlots === 0) throw new SimulatorsDisabledError();
@@ -1460,7 +1171,6 @@ export function createResourceGovernor(
           state.policy.simulatorSlots
         )
           return blocked("simulator_capacity");
-        if (!sampled.healthy) return blocked("pressure");
         const at = Date.now();
         // A boot's CPU burst outruns the one-minute load average; two at once
         // drove this Mac to load 340 (VUH-1988).

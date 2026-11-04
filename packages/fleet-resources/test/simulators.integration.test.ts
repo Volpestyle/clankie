@@ -10,7 +10,7 @@ import { afterEach, expect, it } from "vitest";
 import { FleetResourceSnapshotSchema } from "../../protocol/src/fleet-resources.ts";
 import { ResourceStore } from "../src/store.ts";
 import { createResourceGovernor } from "../src/governor.ts";
-import { baseHeavySlots } from "../src/pressure.ts";
+import { baseHeavySlots } from "../src/sizing.ts";
 import { defaultResourcePolicy } from "../src/model.ts";
 import { processIdentity } from "../src/process.ts";
 import { createSimctlAdapter } from "../src/simctl.ts";
@@ -65,15 +65,9 @@ async function fixture(
     pane: "w1:p1",
     processes: [{ pid: observedProcess.pid, startTime: observedProcess.startTime }],
   } satisfies SimulatorOwner;
-  let loadRatio = 0;
   const governorOptions = {
     directory: join(directory, "governor"),
-    // A measured CPU window and settled jobs: these cases test budgets, not
-    // admission pacing, so a small machine's single base slot doesn't hold the
-    // second heavy job (VUH-2054; a 3-core CI runner has one base slot).
-    probe: async () => ({ loadRatio, cpuRatio: 0, availableMemoryMb: 32768 }),
     simulatorBootSettleMs: settings.bootSettleMs ?? 0,
-    heavyJobSettleMs: 0,
   };
   let governor = createResourceGovernor(governorOptions);
   await governor.configure({
@@ -203,9 +197,6 @@ async function fixture(
   });
   return {
     directory,
-    setLoad: (value: number) => {
-      loadRatio = value;
-    },
     setCpu: (deviceId: string, percent: number) => {
       cpu.set(deviceId.toUpperCase(), percent);
     },
@@ -314,7 +305,7 @@ it("crosses real HTTP, durable admission and child-process simctl boundaries; he
   expect(commands.filter((args) => args[0] === "delete")).toEqual([]);
 });
 
-it("with two slots, a second simulator waits on pressure until the first boot settles", async () => {
+it("with two slots, a second simulator waits until the first boot settles", async () => {
   const f = await fixture({ bootSettleMs: 60_000 });
   await f.governor.configure({ ...defaultResourcePolicy(), simulatorSlots: 2, minAvailableMemoryMb: 0 });
   const first = lease(await f.manager.acquire(f.request));
@@ -402,72 +393,6 @@ it("explicit touch renews idle use; unverified working hints do not", async () =
   await f.manager.observeSeatState(f.owner, "working");
   expect(await f.governor.simulatorReservations()).toHaveLength(0);
   expect((await f.commands()).filter((args) => args[0] === "shutdown")).toHaveLength(1);
-});
-
-it("shuts down only an untouched, settled device that keeps exhausting the host, and records why each lease ended", async () => {
-  const f = await fixture({ bootSettleMs: 180_000 });
-  const settled = async () =>
-    (await readFile(join(f.directory, "governor", "simulator-settled.jsonl"), "utf8").catch(() => ""))
-      .trim()
-      .split("\n")
-      .filter(Boolean)
-      .map((row) => JSON.parse(row) as { leaseId: string; reason: string; deviceId?: string });
-  // Fifteen-second ticks keep the case quick under a loaded gate; every
-  // boundary below is a multiple of one.
-  const run = async (ms: number) => {
-    for (let at = 0; at < ms; at += 15_000) {
-      f.advance(15_000);
-      await f.manager.tick();
-    }
-  };
-  const shutdowns = async () => (await f.commands()).filter((args) => args[0] === "shutdown").length;
-  const first = lease(await f.manager.acquire(f.request));
-  // The measured cold-boot bursts: fifteen cores on a loaded host stay protected.
-  f.setCpu(first.deviceId!, 1500);
-  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
-  await run(180_000);
-  // Settled and hot for 90s, then touched: its holder's next 105s is spared.
-  await run(90_000);
-  await f.manager.touch(first.id, f.owner);
-  await run(105_000);
-  expect(await f.governor.simulatorReservations()).toHaveLength(1);
-  // Untouched and hot on a healthy host: the machine is not exhausted.
-  f.setLoad(0);
-  await run(150_000);
-  expect(await f.governor.simulatorReservations()).toHaveLength(1);
-  // A calm sample restarts the window, as an unknown one would.
-  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
-  await run(60_000);
-  f.setCpu(first.deviceId!, 50);
-  await run(15_000);
-  f.setCpu(first.deviceId!, 1500);
-  // Hot from the first sample at +15s: 105s by the end, one tick short.
-  await run(120_000);
-  expect(await f.governor.simulatorReservations()).toHaveLength(1);
-  expect(await shutdowns()).toBe(0);
-  await run(15_000);
-  expect(await f.governor.simulatorReservations()).toHaveLength(0);
-  expect(await shutdowns()).toBe(1);
-  expect((await f.read()).devices[runtime]!.find((row) => row.udid === first.deviceId)!.state).toBe(
-    "Shutdown",
-  );
-  expect(await f.manager.touch(first.id, f.owner)).toEqual({
-    outcome: "rejected",
-    reason: "lease_unavailable",
-    detail: expect.stringContaining("four cores for two minutes"),
-  });
-
-  f.setLoad(0);
-  const second = lease(await f.manager.acquire(f.request));
-  expect(await f.manager.release(second.id, f.owner)).toEqual({ outcome: "released" });
-  const third = lease(await f.manager.acquire(f.request));
-  await run(defaultResourcePolicy().simulatorIdleMs + 15_000);
-  expect(await f.governor.simulatorReservations()).toHaveLength(0);
-  expect(await settled()).toEqual([
-    expect.objectContaining({ leaseId: first.id, reason: "runaway", deviceId: first.deviceId }),
-    expect.objectContaining({ leaseId: second.id, reason: "released", deviceId: second.deviceId }),
-    expect.objectContaining({ leaseId: third.id, reason: "idle", deviceId: third.deviceId }),
-  ]);
 });
 
 it("observer close and missing-seat hints preserve leases; independently proven native exit stops and retains its exact created device", async () => {
@@ -1091,36 +1016,6 @@ it("two real heavy runners and a simulator use independent budgets in either adm
   } finally {
     cancel.abort();
     await Promise.allSettled(jobs);
-  }
-});
-
-it("load at the full-job progress cap gates both independent budgets with concurrent requests", async () => {
-  const f = await fixture();
-  // VUH-2103 permits an empty full lane below twice the load ceiling. At the
-  // cap both budgets still refuse; simulator admission has no such exception.
-  f.setLoad(2 * defaultResourcePolicy().maxLoadRatio);
-  const marker = join(f.directory, "pressure-build");
-  const cancel = new AbortController();
-  const heavy = f.governor.runHeavy(
-    process.execPath,
-    ["-e", "require('node:fs').writeFileSync(process.argv[1],'ok')", marker],
-    { signal: cancel.signal },
-  );
-  try {
-    const refused = await f.http("/acquire", f.request);
-    expect(refused).toMatchObject({
-      outcome: "waiting",
-      reason: "pressure",
-      blockers: { pressure: { reason: "load" } },
-    });
-    expect(await readFile(marker).catch(() => undefined)).toBeUndefined();
-    expect((await f.governor.snapshot()).capacity).toMatchObject({ used: 0, simulatorUsed: 0 });
-    f.setLoad(0);
-    expect(await heavy).toBe(0);
-    expect((await f.http("/acquire", f.request)).outcome).toBe("acquired");
-  } finally {
-    cancel.abort();
-    await heavy;
   }
 });
 

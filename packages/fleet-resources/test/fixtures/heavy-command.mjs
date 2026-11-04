@@ -13,10 +13,8 @@ await writeFile(
 );
 await rename(`${receipt}.writing`, receipt);
 if (mode === "nested" || mode === "nested-other-holder") {
-  // Nested ownership and permit reuse have no host-pressure precondition.
   const governor = createResourceGovernor({
     directory,
-    probe: async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 }),
   });
   try {
     const cancelled = new AbortController();

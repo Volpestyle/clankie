@@ -11,9 +11,8 @@ it("queued heavy commands leave the registry lock to the holders that can act (V
   const root = await mkdtemp(join(tmpdir(), "clankie-lock-traffic-"));
   const directory = join(root, "registry");
   const releasePath = join(root, "release");
-  const probe = async () => ({ loadRatio: 0.1, availableMemoryMb: 64_000 });
   // Every client is its own governor, as separate `clankie heavy` processes are.
-  const clients = Array.from({ length: 9 }, () => createResourceGovernor({ directory, probe }));
+  const clients = Array.from({ length: 9 }, () => createResourceGovernor({ directory }));
   await clients[0]!.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
   const held = `const {existsSync}=require("node:fs");const w=()=>existsSync(${JSON.stringify(releasePath)})?process.exit(0):setTimeout(w,50);w();`;
   const stop = new AbortController();

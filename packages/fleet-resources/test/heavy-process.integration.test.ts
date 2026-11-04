@@ -28,7 +28,6 @@ afterEach(async () => {
 
 const driver = join(import.meta.dirname, "fixtures/heavy-driver.mjs");
 /** Ownership tests must not wait on how busy the host is; pressure has its own suites. */
-const calmPressure = async () => ({ loadRatio: 0, availableMemoryMb: 1_000_000 });
 // The recorded name is the kernel's command name: Node 26 on Linux renames its
 // main thread, so `ps comm` reads node-MainThread there and node on macOS (#510).
 const nodeName = expect.stringMatching(/^node(-MainThread)?$/u);
@@ -68,7 +67,7 @@ async function fixture() {
   const lifetime = fixtureWork();
   return lifetime.run(async () => {
     const directory = await mkdtemp(join(tmpdir(), "clankie-heavy-integration-"));
-    const rawGovernor = createResourceGovernor({ directory, probe: calmPressure });
+    const rawGovernor = createResourceGovernor({ directory });
     const governor = lifetime.wrap(rawGovernor);
     await governor.configure({
       ...defaultResourcePolicy(),

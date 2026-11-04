@@ -144,7 +144,7 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       const inherited = Object.fromEntries(["CLANKIE_RESOURCE_HOLDER", "CLANKIE_SEAT_HARNESS", "CLANKIE_SEAT_SESSION_ID", "CLANKIE_SEAT_PARENT_ARGV", "CODEX_THREAD_ID", "CLAUDE_SESSION_ID", "CLAUDE_AGENT_ID"].map(k => [k, process.env[k]]));
       // Native protocol fixture supplies its own executing thread, as Codex does.
       process.env.CODEX_THREAD_ID = "hired-worker-thread";
-      const governor = createResourceGovernor({ directory: ${JSON.stringify(holderRegistry)}, probe: async () => ({loadRatio: 0, availableMemoryMb: 1000000}) });
+      const governor = createResourceGovernor({ directory: ${JSON.stringify(holderRegistry)} });
       await writeFile(${JSON.stringify(holderProof)}, JSON.stringify(inherited));
       try {
         const code = await runHeavyCommand(["--", process.execPath, "-e", ${JSON.stringify("const fs=require('node:fs');fs.writeFileSync(process.argv[1],'ready');const timer=setInterval(()=>{if(fs.existsSync(process.argv[2]))clearInterval(timer)},20)")}, ${JSON.stringify(holderReady)}, ${JSON.stringify(holderRelease)}], {governor});

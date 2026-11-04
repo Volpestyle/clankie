@@ -24,7 +24,6 @@ const lines = async (path: string) =>
 async function governorIn(registry: string) {
   const governor = createResourceGovernor({
     directory: registry,
-    probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 64_000 }),
   });
   await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
   return governor;

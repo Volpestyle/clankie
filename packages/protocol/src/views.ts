@@ -33,7 +33,7 @@ const text = (max: number) =>
 export const ViewIdSchema = z.string().regex(/^view_[a-z0-9]{12}$/u);
 export const ViewSourceIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/u);
 
-/** Heavy and simulator capacity, leases, queue and pressure: what `clankie fleet resources` reads. */
+/** Heavy and simulator capacity, leases, queue and free disk: what `clankie fleet resources` reads. */
 export const ViewFleetResourcesSourceSchema = z.strictObject({ kind: z.literal("fleet_resources") });
 
 /** A filtered issue list through the repo's own tracker (`clankie work list`). */

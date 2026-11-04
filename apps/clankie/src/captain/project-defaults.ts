@@ -116,8 +116,8 @@ export async function inferProjectDefaults(
     /* An unversioned workspace stays small. */
   }
   const desired = sourceCount >= 1000 && activity >= 50 ? 4 : 2;
-  const available =
-    resources?.pressure.healthy === true ? Math.max(0, Math.floor(resources.capacity.heavySlots)) : 0;
+  // Heavy slots queue work rather than refuse it, so their count sizes the team (#599).
+  const available = resources ? Math.max(0, Math.floor(resources.capacity.heavySlots)) : 0;
   const workerCap = Math.min(desired, available);
   // A test suite is the builder's own check, not a separate station (ADR 0208).
   const roleReasons = [
@@ -173,7 +173,7 @@ export async function inferProjectDefaults(
                 : "No tracker detected; use local work records.")
             }`,
         ...roleReasons,
-        `at most ${workerCap} workers; ${sourceCount} source files, ${activity} commits in 14 days; ${resources === undefined ? "resource governor unavailable" : resources.pressure.healthy ? `governor capacity ${available}` : "resource pressure blocks hires"}.`,
+        `at most ${workerCap} workers; ${sourceCount} source files, ${activity} commits in 14 days; ${resources === undefined ? "resource governor unavailable" : `governor capacity ${available}`}.`,
       ],
     }),
   };

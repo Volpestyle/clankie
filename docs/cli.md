@@ -4615,8 +4615,8 @@ reason), never paths, arguments or tokens.
 `heavy` sizes each command itself. A focused check — Vitest naming up to eight
 test files, `tsc` without `--build`, or `pnpm --filter ONE typecheck` — runs in
 the light lane: its own journal under `light/`, as many slots as the base heavy slots,
-two cores per job (the same variables capped at two), held only by the memory
-floor, so it starts beside full gates even at high load.
+two cores per job (the same variables capped at two), so it starts beside full
+gates.
 File-scoped Oxfmt and Oxlint runs also use the light lane (up to 64 existing
 files). Use `clankie heavy -- pnpm exec oxfmt --check FILE...`,
 `clankie heavy -- pnpm exec oxlint --deny-warnings FILE...`, or the root
@@ -4642,39 +4642,28 @@ doctor displays "CPU limit not enforced", with a warning after one minute. The
 supervisor also warns after one minute and then every five minutes, retaining
 the server permit and restoring progress throughout.
 Detached or privileged children are outside this process-group contract.
-Servers still wait on machine load, memory and FIFO in their own journal under
-`server/`; they hold no build/check slots. Stop them when finished. A server
+Servers wait in their own FIFO journal under `server/`; they hold no
+build/check slots. Stop them when finished. A server
 inside a bounded job gets its own permit rather than borrowing the parent's.
 Verified nested servers under a server parent reuse its governed permit.
-An older installed arbiter does not govern this lane; new server waiters judge
-its admission themselves until the service advertises server-lane support.
 Brief registry-lock contention waits internally without discarding the queue
 ticket. Actual native failures identify their cause; see the
 [resource governor reference](../packages/fleet-resources/README.md).
 
-`fleet resources` returns current capacity, pressure, holders and queue as JSON.
-The service alerts when a lane head remains queued over 60 seconds despite
-consecutive sampled verdicts permitting admission. The alert names the ticket,
-owner seat, holder and PID, including an absent grant marker. Pressure and
-capacity waits do not alert; unavailable observations do not prove recovery.
-Opening and recovery notices are durably deduplicated. No automatic repair,
-requeue or registry edit is performed. Granted-but-not-started leases are outside
-this queue-head detector.
-`capacity.used` counts heavy leases against `heavySlots`; `simulatorUsed` counts
-simulator reservations against `simulatorSlots`; `lightUsed` counts light-lane
-jobs against `lightSlots`, whose holders and waiters are `lightLeases` and
-`lightQueue`. When no full lease is held, the FIFO head may start despite a
-load-only refusal if native observation is valid, memory meets the owner floor,
-and load stays below twice `maxLoadRatio`. At or above that cap it still waits.
-Between the normal load guard and the cap, exactly one full job at a time can
-make progress; starting, running and cleanup full leases count as held. Light
-and server jobs use separate budgets and do not count. Low memory and unavailable
-observations still refuse admission. Simulator cold-boot guards remain unchanged.
-`heavySlots` is a ceiling: one job per four cores runs on the
-load guard (each job started in the last minute counts four cores of load), and more start only while measured CPU and load stay under 70% of
-the cores (a waiting `clankie heavy` says `busy`). Simulator status also reports
-external active devices against the simulator budget. The budgets are independent;
-load and available-memory guards gate both.
+`fleet resources` returns current capacity, holders and queue as JSON.
+Each lane is a FIFO with a fixed number of permits (#599): the queue head
+starts when a slot is free, and nothing else holds it. No machine reading
+(load, memory or disk) gates admission, and there is no service arbiter: every
+waiter judges its own turn under the registry lock, and each locked pass
+reconciles dead holders so their slots come back. `capacity.used` counts heavy
+leases against `heavySlots`; `simulatorUsed` counts simulator reservations
+against `simulatorSlots`; `lightUsed` counts light-lane jobs against
+`lightSlots`, whose holders and waiters are `lightLeases` and `lightQueue`.
+Starting, running and cleanup full leases count as held; light and server jobs
+use separate budgets. `disk` reports free space on the registry's volume and
+whether it is below the owner's warning; it never gates. Simulator status also
+reports external active devices against the simulator budget, and simulator
+cold boots still start one at a time.
 Server status adds `capacity.serverSlots`, `serverUsed`, `serverCpuCores`,
 `serverLeases` (with each holder's `cpuCores`) and `serverQueue`. `holderAlerts`
 identifies governed servers and build/check permits held over 15 minutes by
@@ -4701,40 +4690,26 @@ The owner sets `fleet.resources` with these flags or the TUI `/fleet resources`:
 
 | Flag                                      | Default | Meaning                                                                               |
 | ----------------------------------------- | ------- | ------------------------------------------------------------------------------------- |
-| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy ceiling, 1–64; auto is min(floor(cores/2), floor(RAM GiB/12)), at least one     |
+| `--heavy-slots auto` or `--heavy-slots N` | `auto`  | Heavy slots, 1–64; auto is min(floor(cores/4), floor(RAM GiB/24)), at least one       |
 | `--simulator-slots auto` or `N`           | `auto`  | Simulator ceiling, 0–64; auto is min(floor(cores/4), floor(RAM GiB/68)), at least one |
 | `--simulator-idle-seconds N`              | `600`   | Lease heartbeat timeout, 1–86400 seconds                                              |
-| `--max-load-ratio N`                      | `1.5`   | Maximum load average per core, greater than zero and at most 16                       |
-| `--minimum-free-memory-mb N`              | `4096`  | Minimum OS available memory, 0–1048576 MiB                                            |
 
-Free disk is sampled on the working-directory and OS-account home volumes.
-Doctor and the lead's fleet round warn below either 200 GiB or 10% free.
-All new heavy jobs (full, light and server lanes) wait below 20 GiB free;
-existing jobs keep running. An unavailable disk observation refuses admission.
-Set `minFreeDiskGb`, `warnFreeDiskGb` and `warnFreeDiskPercent` through the
-revision-guarded fleet settings API, `/fleet resources`, or
-`clankie fleet set --minimum-free-disk-gb N --warn-free-disk-gb N --warn-free-disk-percent N`.
-Values are in GiB despite the CLI's `-gb` spelling. These guards also apply to
-simulator admission, but do not stop existing leases or deny low-load social turns.
-
-Available memory on macOS is the smaller of the kernel's
-`kern.memorystatus_level` percentage of RAM and free plus file-backed resident
-pages, excluding speculative pages already counted as free. Anonymous and
-compressed pages are not counted as immediately reclaimable headroom. File
-cache may require disk I/O to reclaim, so this remains an estimate. The native
-boundary reads both directly and shares a one-second cache across
-pressure samplers; a failed refresh or invalid observation refuses admission. Linux
-retains `MemAvailable`, and other platforms retain free memory.
+Doctor and the lead's fleet round warn when the registry's volume is below
+either 200 GiB or 10% free. Set `warnFreeDiskGb` and `warnFreeDiskPercent`
+through the revision-guarded fleet settings API, `/fleet resources`, or
+`clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N` (GiB
+despite the `-gb` spelling). The retired load, memory and disk floors
+(`--max-load-ratio`, `--minimum-free-memory-mb`, `--minimum-free-disk-gb`) are
+refused; saved values still parse and gate nothing.
 
 CLI edits update the journal immediately; API edits are reconciled by the body
-within its five-second refresh. High load or low memory delays queued heavy work
-and simulator leases. A new local hire is refused, with a reason, only when
-available memory is below its floor; at high load it starts, and its receipt's
-`resourceNotice` says its heavy work will queue. Existing accepted agents keep running. Missing
-Python 3, helper or pressure observations refuse resource admission while the
-body remains available. The canonical registry is the OS user's
-`~/.clankie/fleet-resources`; worker environment and settings-path overrides do
-not create independent capacity. See the [shipped skill](../.agents/skills/fleet-resources/SKILL.md).
+within its five-second refresh. A new local hire is never refused or delayed by
+machine load; its heavy work queues for slots like any other. Existing accepted
+agents keep running. Missing Python 3 or the native helper still refuses
+resource admission while the body remains available. The canonical registry is
+the OS user's `~/.clankie/fleet-resources`; worker environment and
+settings-path overrides do not create independent capacity. See the
+[shipped skill](../.agents/skills/fleet-resources/SKILL.md).
 
 `simulator acquire JSON [--wait SECONDS]` accepts `seatId`, optional `fleet`, and
 a stable task `holderId` (automatically supplied by supported native harnesses),
@@ -4752,7 +4727,7 @@ model requests resolve an existing target rather than creating a replacement.
 The ticket survives service restarts and records the proven seat/occupant/holder,
 selection, exact flag and creation time. `fleet resources` shows its target,
 per-device position, expiry and `estimatedWaitMs`: an idle-budget heuristic that
-heartbeats can extend, or null under pressure/unknown conditions. Other device
+heartbeats can extend, or null when unknown. Other device
 queues and heavy admission remain independent.
 
 The seat is proved live on every request; nothing is stored that a restart could
@@ -9139,8 +9114,8 @@ Each role has a one-line reason in the proposal evidence.
 
 The default numeric worker cap is two. Repos with at least 1,000 source files
 and 50 commits in the last 14 days can propose four. The numeric worker cap never
-exceeds the observed resource governor's heavy capacity; pressure or missing
-observations propose zero workers. These are
+exceeds the observed resource governor's heavy capacity; a missing observation
+proposes zero workers. These are
 reviewed defaults, not resource permits; the live governor still admits hires.
 
 `project_proposal_get` returns the single proposal object and its exact target.

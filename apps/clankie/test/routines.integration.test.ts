@@ -34,7 +34,6 @@ function fixture(start: string) {
   const resources = join(root, "fleet-resources");
   const governor = createResourceGovernor({
     directory: resources,
-    probe: async () => ({ loadRatio: 0, availableMemoryMb: 65_536 }),
   });
   cleanup.push(() => governor.close());
   const leases = () =>

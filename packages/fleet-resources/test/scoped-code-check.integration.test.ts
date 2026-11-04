@@ -32,13 +32,9 @@ it("real file format and lint finish while a full permit is held and its followe
   const started = join(root, "gate-started");
   const source = join(root, "answer.ts");
   const untouched = join(root, "untouched.ts");
-  // This proof saturates the full permit budget, not the host's CPU/memory
-  // guard. Shared CI pressure must not prevent its required holder from starting.
-  // All runners, formatter/linter children, journals and queue reads stay real.
-  const governor = createResourceGovernor({
-    directory: join(root, "registry"),
-    probe: async () => ({ loadRatio: 0, cpuRatio: 0, availableMemoryMb: 65_536 }),
-  });
+  // This proof saturates the full permit budget. All runners, formatter/linter
+  // children, journals and queue reads stay real.
+  const governor = createResourceGovernor({ directory: join(root, "registry") });
   const stopFollower = new AbortController();
   const jobs: Promise<number>[] = [];
   try {
@@ -81,8 +77,6 @@ it("real file format and lint finish while a full permit is held and its followe
       elapsedMs: number;
       fullHeld: number;
       fullQueued: number;
-      loadRatio: number;
-      availableMemoryMb: number;
     }[] = [];
     // Real binary and actual root script forms. Formatting the selected file
     // must not silently traverse '.' or the unselected unformatted sibling.
@@ -104,8 +98,6 @@ it("real file format and lint finish while a full permit is held and its followe
         elapsedMs: performance.now() - at,
         fullHeld: status.capacity.used,
         fullQueued: status.queue.length,
-        loadRatio: status.pressure.loadRatio,
-        availableMemoryMb: status.pressure.availableMemoryMb,
       });
     }
     expect(await readFile(source, "utf8")).toBe("export const answer = { value: 42 };\n");

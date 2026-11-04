@@ -214,10 +214,13 @@ export const FleetCapacitySchema = z
           queued: z.number().int().nonnegative(),
           lightSlots: knownCount,
           lightUsed: knownCount,
-          healthy: z.boolean(),
-          loadRatio: z.number().finite().nonnegative(),
-          availableMemoryMb: z.number().finite().nonnegative(),
-          pressureReason: z.union([z.enum(["load", "memory", "disk", "probe-unavailable"]), unknown]),
+          // Machine pressure, from services before #599, which gated admission on it.
+          healthy: z.boolean().optional(),
+          loadRatio: z.number().finite().nonnegative().optional(),
+          availableMemoryMb: z.number().finite().nonnegative().optional(),
+          pressureReason: z
+            .union([z.enum(["load", "memory", "disk", "probe-unavailable"]), unknown])
+            .optional(),
         })
         .strict(),
       unknown,

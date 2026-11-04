@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
 import { expect, it } from "vitest";
 import { createResourceGovernor } from "../src/governor.ts";
-import { defaultResourcePolicy, type ResourcePressureInput, type ResourceSnapshot } from "../src/model.ts";
+import { defaultResourcePolicy, type ResourceSnapshot } from "../src/model.ts";
 import { heavyJobLane } from "../src/parallelism.ts";
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, timeout = 45_000) {
@@ -42,8 +42,7 @@ wait();
     await writeFile(join(bin, name), script);
     await chmod(join(bin, name), 0o755);
   }
-  let pressure: ResourcePressureInput = { loadRatio: 0.1, availableMemoryMb: 64_000 };
-  const governor = createResourceGovernor({ directory: join(root, "registry"), probe: async () => pressure });
+  const governor = createResourceGovernor({ directory: join(root, "registry") });
   await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
   const runs: Promise<number>[] = [];
   const run = (
@@ -74,9 +73,6 @@ wait();
     run,
     caps,
     release,
-    pressure: (value: ResourcePressureInput) => {
-      pressure = value;
-    },
     async close() {
       await Promise.all([release("vitest"), release("gate")]);
       // Close first: it cancels a wait that can never be admitted, so a failed
@@ -94,8 +90,6 @@ it("a one-file test starts beside a full gate holding every slot at high load, c
     // A full gate takes the only heavy slot.
     const gate = f.run("gate", ["check:landing"]);
     await until(() => f.caps("gate"), Boolean);
-    // The machine is now loaded well past the heavy limit.
-    f.pressure({ loadRatio: 5, availableMemoryMb: 64_000 });
 
     // Another full job waits: the full lane keeps its admission.
     const waits: ResourceSnapshot[] = [];
@@ -171,56 +165,6 @@ it("a one-file test starts beside a full gate holding every slot at high load, c
   }
 }, 120_000);
 
-it("records what the machine was doing beside the journal", async () => {
-  const f = await fixture();
-  try {
-    await f.governor.recordMachineSample!();
-    await delay(300);
-    await f.governor.recordMachineSample!();
-    const samples = (await readFile(join(f.registry, "samples.jsonl"), "utf8"))
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line) as Record<string, unknown>);
-    expect(samples).toHaveLength(2);
-    expect(samples[1]).toEqual({
-      atMs: expect.any(Number),
-      load: [expect.any(Number), expect.any(Number), expect.any(Number)],
-      cores: expect.any(Number),
-      cpuRatio: expect.any(Number),
-      freeDiskGb: expect.any(Number),
-      top: expect.any(Array),
-    });
-    const top = samples[1]!.top as { pid: number; cpu: number; command: string }[];
-    expect(top.length).toBeGreaterThan(0);
-    expect(top.length).toBeLessThanOrEqual(5);
-    expect(top.map((process) => process.cpu)).toEqual(
-      top.map((process) => process.cpu).sort((a, b) => b - a),
-    );
-  } finally {
-    await f.close();
-  }
-});
-
-it("the light lane still holds below the memory floor and lists its waiter", async () => {
-  const f = await fixture();
-  try {
-    f.pressure({ loadRatio: 0.1, availableMemoryMb: 1_024 });
-    const stop = new AbortController();
-    const focused = f.run("vitest", ["run", "a.test.ts"], { signal: stop.signal });
-    const status = await until(
-      () => f.governor.snapshot(),
-      (snapshot) => snapshot.lightQueue.length === 1,
-    );
-    expect(status.lightQueue[0]).toMatchObject({ holderId: "light-lane-vitest", executable: "vitest" });
-    expect(await f.caps("vitest")).toBeUndefined();
-    stop.abort();
-    expect(await focused).toBe(130);
-  } finally {
-    await f.close();
-  }
-}, 30_000);
-
-// The service's prune and cache reclaim used to run outside admission (VUH-2933).
 it("the service's own bulk work holds a light slot, and a holder that dies frees it", async () => {
   const f = await fixture();
   let holder: ReturnType<typeof spawn> | undefined;
@@ -268,8 +212,7 @@ it("the service's own bulk work holds a light slot, and a holder that dies frees
         `const { createResourceGovernor } = await import(${JSON.stringify(
           new URL("../src/governor.ts", import.meta.url).href,
         )});
-        const governor = createResourceGovernor({ directory: process.argv[1],
-          probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 64000 }) });
+        const governor = createResourceGovernor({ directory: process.argv[1] });
         // An unsettled promise alone lets Node exit, and the governor then rightly
         // reaps the lease as claim_owner_exited (#510): keep the holder alive
         // until the test kills it.

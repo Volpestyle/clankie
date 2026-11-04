@@ -140,19 +140,16 @@ describe("native process observation uncertainty", () => {
       await writeFile(
         driver,
         `import {nativeBoundaryAvailable,processIdentity} from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src/process.ts")).href)};
-import {ResourcePressureSampler} from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src/pressure.ts")).href)};
 Object.defineProperty(process,'pid',{value:1});
 const available=await nativeBoundaryAvailable();
 const pidOneAuthorized=Boolean(await processIdentity(1));
-const pressure=await new ResourcePressureSampler().sample({heavySlots:1,simulatorSlots:1,simulatorIdleMs:600000,maxLoadRatio:16,minAvailableMemoryMb:0});
-console.log(JSON.stringify({available,pidOneAuthorized,pressureObserved:pressure.reason!=="probe-unavailable"}));
+console.log(JSON.stringify({available,pidOneAuthorized}));
 `,
       );
       const { stdout } = await execute(process.execPath, [driver], { timeout: 8_000 });
       expect(JSON.parse(stdout)).toEqual({
         available: true,
         pidOneAuthorized: false,
-        pressureObserved: true,
       });
       await expect(
         execute(resourcePython, ["-I", resourceNativeHelperPath(), "available", "--unexpected"]),
@@ -232,7 +229,6 @@ console.log(JSON.stringify({available,pidOneAuthorized,pressureObserved:pressure
     // Cancellation owns the admission precondition, not the host's pressure.
     const governor = createResourceGovernor({
       directory,
-      probe: async () => ({ loadRatio: 0, availableMemoryMb: 65_536 }),
     });
     const receipt = join(directory, "command-submitted"),
       result = join(directory, "result.json"),
@@ -248,7 +244,7 @@ console.log(JSON.stringify({available,pidOneAuthorized,pressureObserved:pressure
         driver,
         `import {createResourceGovernor} from ${JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src/governor.ts")).href)};
 import {writeFile} from 'node:fs/promises';
-const governor=createResourceGovernor({directory:${JSON.stringify(directory)},probe:async()=>({loadRatio:0,availableMemoryMb:65536})});
+const governor=createResourceGovernor({directory:${JSON.stringify(directory)}});
 const controller=new AbortController();
 controller.abort();
 const before=await governor.snapshot();

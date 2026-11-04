@@ -21,7 +21,6 @@
     "check:landing": "node scripts/check-landing.mjs",
     "extensions:check": "node scripts/check-extension-boundary.mjs",
     "hooks:install": "git config core.hooksPath .githooks",
-    "check:fleet-test-pressure": "node scripts/check-fleet-test-pressure.mjs && vitest run packages/fleet-resources/test/fixture-pressure-policy.integration.test.ts packages/fleet-resources/test/full-progress.integration.test.ts -t 'fleet pressure policy|empty-lane exception still refuses|empty full lane still refuses'",
     "check:resources": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-resource-burst.ts",
     "check:load": "pnpm --filter @clankie/clankie exec tsx scripts/fleet-load.ts",
     "doctor": "node scripts/doctor.mjs",

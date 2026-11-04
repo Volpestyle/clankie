@@ -109,7 +109,6 @@ async function fixture(
   const resources = await createFleetResourceRuntime({
     governor: createResourceGovernor({
       directory,
-      probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 32768 }),
     }),
     policy: async () => ({ ...defaultResourcePolicy(), heavySlots: 2 }),
     proofRetryMs: 50,

@@ -1,10 +1,6 @@
-import { execFile } from "node:child_process";
-import { appendFile, rename, stat, statfs } from "node:fs/promises";
-import { cpus, loadavg } from "node:os";
+import { appendFile, rename, stat } from "node:fs/promises";
+import { loadavg } from "node:os";
 import { basename, join } from "node:path";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
 
 /**
  * Append-only history beside the journal (VUH-2933): what was admitted and
@@ -45,9 +41,8 @@ export interface LeaseRecord {
 }
 
 const leaseRecordFile = "leases.jsonl";
-const machineSampleFile = "samples.jsonl";
-/** About two days of 30-second samples per file. */
-const machineSampleMaxBytes = 4 * 1_048_576;
+/** Days of permits per file (#599), so wait times can be compared across a change. */
+const leaseRecordMaxBytes = 16 * 1_048_576;
 
 // `-c`/`-e` take a whole shell or interpreter script, which can carry any secret. Case
 // matters: `-C dir` (pnpm, git), `-E` and `-U` are ordinary arguments worth keeping.
@@ -73,74 +68,7 @@ export function leaseCommand(command: string, args: readonly string[]): string {
 export async function recordLease(directory: string, record: Omit<LeaseRecord, "atMs" | "load1">) {
   const line = { atMs: Date.now(), ...record, load1: round(loadavg()[0]!) };
   // allow-swallowed-rejection -- history is best effort; the permit it describes must not fail.
-  await appendRecords(directory, leaseRecordFile, [line]).catch(() => undefined);
-}
-
-let ticks: { busy: number; total: number } | undefined;
-function cpuRatio(): number | undefined {
-  let busy = 0;
-  let total = 0;
-  for (const { times } of cpus()) {
-    const used = times.user + times.nice + times.sys + times.irq;
-    busy += used;
-    total += used + times.idle;
-  }
-  const previous = ticks;
-  ticks = { busy, total };
-  return previous && total > previous.total
-    ? round((busy - previous.busy) / (total - previous.total))
-    : undefined;
-}
-
-/** The busiest processes by the kernel's recent CPU share, from one `ps` read. */
-async function topProcesses(count: number) {
-  const { stdout } = await run("ps", ["-A", "-o", "pid=,pcpu=,rss=,comm="], { maxBuffer: 8 * 1_048_576 });
-  return stdout
-    .split("\n")
-    .flatMap((line) => {
-      const match = /^\s*(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/u.exec(line);
-      return match
-        ? [
-            {
-              pid: Number(match[1]),
-              cpu: Number(match[2]),
-              rssMb: Math.round(Number(match[3]) / 1024),
-              command: basename(match[4]!.trim()).slice(0, 64),
-            },
-          ]
-        : [];
-    })
-    .sort((a, b) => b.cpu - a.cpu)
-    .slice(0, count);
-}
-
-/**
- * One machine sample: load, the share of all cores busy since the previous
- * sample, free disk under `directory`, and the five busiest processes.
- * A part that cannot be read is left out rather than failing the sample.
- */
-export async function recordMachineSample(directory: string): Promise<void> {
-  const [load1, load5, load15] = loadavg().map(round) as [number, number, number];
-  const ratio = cpuRatio();
-  // allow-swallowed-rejection -- an unreadable part is left out of the sample, as documented above.
-  const disk = await statfs(directory).catch(() => undefined);
-  // allow-swallowed-rejection -- an unreadable part is left out of the sample, as documented above.
-  const top = await topProcesses(5).catch(() => undefined);
-  await appendRecords(
-    directory,
-    machineSampleFile,
-    [
-      {
-        atMs: Date.now(),
-        load: [load1, load5, load15],
-        cores: cpus().length,
-        ...(ratio === undefined ? {} : { cpuRatio: ratio }),
-        ...(disk ? { freeDiskGb: round((disk.bavail * disk.bsize) / 1024 ** 3) } : {}),
-        ...(top ? { top } : {}),
-      },
-    ],
-    machineSampleMaxBytes,
-  );
+  await appendRecords(directory, leaseRecordFile, [line], leaseRecordMaxBytes).catch(() => undefined);
 }
 
 function round(value: number): number {

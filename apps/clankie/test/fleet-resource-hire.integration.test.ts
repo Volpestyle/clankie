@@ -7,12 +7,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
-import {
-  createResourceGovernor,
-  defaultResourcePolicy,
-  processIdentity,
-  type ResourcePressureInput,
-} from "@clankie/fleet-resources";
+import { createResourceGovernor, defaultResourcePolicy, processIdentity } from "@clankie/fleet-resources";
 import type {
   HarnessSeatAdapter,
   PreparedSeatLaunch,
@@ -59,20 +54,10 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     executable,
     await readFile(new URL("./helpers/native-process-transport/fixture.mjs", import.meta.url)),
   );
-  let sample: ResourcePressureInput = { loadRatio: 0.1, availableMemoryMb: 8192 };
-  let probeFailure = false;
-  let probes = 0;
   let prepareAction = async () => {};
-  let probeAction = async () => {};
   const policy = { ...defaultResourcePolicy(), heavySlots: 1 };
   const governor = createResourceGovernor({
     directory: join(root, "governor"),
-    probe: async () => {
-      probes++;
-      await probeAction();
-      if (probeFailure) throw new Error("sensor unavailable");
-      return { ...sample };
-    },
   });
   const resources = await createFleetResourceRuntime({ policy: async () => policy, governor });
   let child: ChildProcessWithoutNullStreams | undefined;
@@ -224,19 +209,9 @@ async function fixture(projectHirePolicy?: ProjectHirePolicy) {
     store,
     admissions,
     journal,
-    pressure: (value: ResourcePressureInput) => {
-      sample = value;
-    },
-    failProbe: () => {
-      probeFailure = true;
-    },
     onPrepare: (action: () => Promise<void>) => {
       prepareAction = action;
     },
-    onProbe: (action: () => Promise<void>) => {
-      probeAction = action;
-    },
-    probes: () => probes,
     launches: () => launches,
     disposed: () => disposed,
     current,
@@ -527,11 +502,6 @@ it("LOCAL-VUH-6: preserves owner policy, project cap and resource refusals", asy
     detail: expect.stringContaining("allows 0 running agents"),
   });
   await f.project({ workerCap: 1 });
-  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
-  expect((await f.hire()).details).toMatchObject({
-    outcome: "failed",
-    detail: expect.stringContaining("Local hire refused"),
-  });
   expect(f.launches()).toBe(0);
 });
 
@@ -665,63 +635,6 @@ it.each(["project-off", "autonomy-down", "master-off", "route-revoked"] as const
   },
 );
 
-it.each(["pressure", "probe-unavailable"] as const)(
-  "refuses %s before a real native launch",
-  async (reason) => {
-    const f = await fixture();
-    if (reason === "pressure") f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
-    else f.failProbe();
-    expect(await f.hire()).toMatchObject({
-      outcome: "failed",
-      reason: "not_ready",
-      detail: expect.stringContaining("Local hire refused"),
-    });
-    expect(f.admissions).toEqual(["request"]);
-    expect(f.launches()).toBe(0);
-    expect(await f.journal()).toEqual([]);
-  },
-);
-
-it.each(["pressure", "probe-unavailable"] as const)(
-  "rechecks %s after prepare, before the initial native command",
-  async (reason) => {
-    const f = await fixture();
-    f.onPrepare(async () => {
-      if (reason === "pressure") f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
-      else f.failProbe();
-    });
-    expect(await f.hire("Work on the fixture")).toMatchObject({
-      outcome: "failed",
-      reason: "not_ready",
-      detail: expect.stringContaining("Local hire refused"),
-    });
-    expect(f.admissions).toEqual(["request", "launch"]);
-    expect(f.launches()).toBe(0);
-    expect(f.disposed()).toBe(1);
-    expect(await f.journal()).toEqual([]);
-  },
-);
-
-it("admits a hire at high load above the memory floor and says its heavy work will queue", async () => {
-  const f = await fixture();
-  f.pressure({ loadRatio: 3, availableMemoryMb: 8192 });
-  const result = await f.hire("Work on the fixture");
-  expect(result).toMatchObject({
-    outcome: "spawned",
-    resourceNotice: expect.stringContaining("will queue until load drops"),
-  });
-  expect(f.admissions).toEqual(["request", "launch"]);
-  expect(f.launches()).toBe(1);
-  expect(f.current()).toBeDefined();
-});
-
-it("a hire at normal load carries no queue notice", async () => {
-  const f = await fixture();
-  const result = await f.hire("Work on the fixture");
-  expect(result.outcome).toBe("spawned");
-  expect(result).not.toHaveProperty("resourceNotice");
-});
-
 it("delivers resource instructions once without a user brief and retains the accepted native lifetime", async () => {
   const f = await fixture();
   expect(await f.hire()).toMatchObject({ outcome: "spawned" });
@@ -736,62 +649,10 @@ it("delivers resource instructions once without a user brief and retains the acc
   expect(brief).toContain("The owner's screen is theirs");
   expect(brief).toContain("herdr-browser do browser.open --profile agent");
   expect(brief.match(/Machine resource safety:/gu)).toHaveLength(1);
-  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
-  await expect(f.resources.admitHire({})).rejects.toThrow("Local hire refused");
   expect(f.current()).toBeDefined();
   f.store.close();
   await f.resources.close();
   expect(f.current()).toBeDefined();
-});
-
-it("a grant revoked during the final real pressure observation cannot launch a native process", async () => {
-  const f = await fixture();
-  let admitted = true;
-  f.onPrepare(async () => {
-    f.onProbe(async () => {
-      admitted = false;
-    });
-  });
-  const result = await f.hire("Owned fixture task", {
-    owner: { conversationId: "global-default" },
-    current: () => admitted,
-    authorize: async () => admitted,
-  });
-  expect(result).toMatchObject({
-    outcome: "failed",
-    detail: expect.stringContaining("authority is unavailable"),
-  });
-  expect(f.launches()).toBe(0);
-  expect(f.disposed()).toBe(1);
-  expect(await f.journal()).toEqual([]);
-});
-
-it("uses actual local-host classification and keeps cached metadata reads off pressure probes", async () => {
-  const f = await fixture();
-  f.pressure({ loadRatio: 0.1, availableMemoryMb: 1024 });
-  const before = f.probes();
-  await expect(f.resources.admitHire({ fleet: "named-local" })).rejects.toThrow("Local hire refused");
-  const afterLocal = f.probes();
-  expect(afterLocal).toBeGreaterThan(before);
-  await f.resources.admitHire({ fleet: "confirmed-remote" });
-  for (let i = 0; i < 100; i++) expect(f.resources.status()).toBeDefined();
-  expect(f.probes()).toBe(afterLocal);
-});
-
-it("refreshes readings without waking an idle fleet and publishes pressure boundary changes", async () => {
-  const f = await fixture();
-  let changes = 0;
-  const unsubscribe = f.resources.onChange(() => {
-    changes++;
-  });
-  f.pressure({ loadRatio: 0.2, availableMemoryMb: 7000 });
-  await f.resources.refresh();
-  expect(f.resources.status()?.pressure.loadRatio).toBe(0.2);
-  expect(changes).toBe(0);
-  f.pressure({ loadRatio: 3, availableMemoryMb: 7000 });
-  await f.resources.refresh();
-  expect(changes).toBe(1);
-  unsubscribe();
 });
 
 it("an installed façade missing its real native helper remains constructible and refuses local admission", async () => {
@@ -842,15 +703,13 @@ await runtime.close();
   const result = JSON.parse(
     (await execute(process.execPath, [probe], { cwd: root, timeout: 10_000 })).stdout,
   );
-  // An empty registry reads without the helper, so status is honest rather
-  // than absent: the pressure probe is reported unavailable.
+  // An empty registry reads without the helper, so status is honest rather than absent.
   expect(result).toMatchObject({
     constructed: true,
-    status: { leases: [], pressure: { healthy: false, reason: "probe-unavailable" } },
+    status: { leases: [] },
     errors: 0,
     admission: {
       allowed: false,
-      reason: "probe-unavailable",
       message: expect.stringContaining("Local hire refused"),
     },
   });

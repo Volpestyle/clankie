@@ -282,10 +282,6 @@ function projectHeavy(value: unknown): FleetCapacity["heavy"] {
     queued: snapshot.queue.filter((entry) => entry.kind === "heavy").length,
     lightSlots: lightSlots === undefined ? "unknown" : lightSlots,
     lightUsed: lightUsed === undefined ? "unknown" : lightUsed,
-    healthy: snapshot.pressure.healthy,
-    loadRatio: snapshot.pressure.loadRatio,
-    availableMemoryMb: snapshot.pressure.availableMemoryMb,
-    pressureReason: snapshot.pressure.reason ?? "unknown",
   };
 }
 

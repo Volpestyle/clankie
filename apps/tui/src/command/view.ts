@@ -234,16 +234,18 @@ function fleetLines(
   const kind = (entry: { kind: "heavy" | "simulator" }) =>
     panel.resource === undefined || entry.kind === panel.resource;
   if (panel.show === "capacity") {
-    const { capacity, pressure } = snapshot;
+    const { capacity, disk } = snapshot;
     const simulatorUsed = capacity.simulatorUsed ?? 0;
     const waiting = snapshot.queue.filter(kind).length;
     return [
       `heavy       ${bar(capacity.used, capacity.heavySlots)}  ${String(capacity.used)}/${String(capacity.heavySlots)} in use`,
       `simulators  ${bar(simulatorUsed, capacity.simulatorSlots)}  ${String(simulatorUsed)}/${String(capacity.simulatorSlots)} in use`,
       `queue       ${waiting === 0 ? style.dim("empty") : `${String(waiting)} waiting`}`,
-      `pressure    ${
-        pressure.healthy ? "ok" : style.yellow(`high (${terminalText(pressure.reason ?? "unknown")})`)
-      }  load ${pressure.loadRatio.toFixed(2)} · ${(pressure.availableMemoryMb / 1024).toFixed(1)} GB free`,
+      ...(disk
+        ? [
+            `disk        ${disk.warning ? style.yellow("low") : "ok"}  ${disk.freeDiskGb.toFixed(1)} GiB free of ${disk.totalDiskGb.toFixed(0)} GiB`,
+          ]
+        : []),
     ];
   }
   if (panel.show === "queue") {

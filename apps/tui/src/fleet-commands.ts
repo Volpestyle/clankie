@@ -162,30 +162,7 @@ async function editFleetResources(shell: ClankieFaceShell, services: FleetComman
     });
     if (idle === undefined) return;
     resources.simulatorIdleMs = Number(idle) * 1000;
-    const load = await flow.readText({
-      message: "Fleet — load limit per core (0–16, greater than zero)",
-      defaultValue: String(resources.maxLoadRatio),
-      allowBack: true,
-      validate: (value: string) =>
-        Number.isFinite(Number(value)) && Number(value) > 0 && Number(value) <= 16
-          ? undefined
-          : "Use a positive number up to 16.",
-    });
-    if (load === undefined) return;
-    resources.maxLoadRatio = Number(load);
-    const memory = await flow.readText({
-      message: "Fleet — minimum available memory in MiB",
-      defaultValue: String(resources.minAvailableMemoryMb),
-      allowBack: true,
-      validate: (value: string) =>
-        /^\d+$/u.test(value) && Number(value) >= 0 && Number(value) <= 1048576
-          ? undefined
-          : "Use an integer from 0 to 1048576.",
-    });
-    if (memory === undefined) return;
-    resources.minAvailableMemoryMb = Number(memory);
     for (const [key, label, max] of [
-      ["minFreeDiskGb", "minimum free disk in GiB", 1048576],
       ["warnFreeDiskGb", "low disk warning in GiB", 1048576],
       ["warnFreeDiskPercent", "low disk warning percent", 100],
     ] as const) {

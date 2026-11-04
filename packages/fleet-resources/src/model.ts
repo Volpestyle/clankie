@@ -7,6 +7,9 @@ export const FleetResourcePolicySchema = z
     heavySlots: z.number().int().min(1).max(64).nullable().default(null),
     simulatorSlots: z.number().int().min(0).max(64).default(1),
     simulatorIdleMs: z.number().int().min(1_000).max(86_400_000).default(600_000),
+    // Retired pressure floors (#599): still accepted, so a journal an older
+    // install wrote, or one it reads back, keeps parsing; nothing gates on them.
+    // The two disk warning levels still name low disk in status.
     maxLoadRatio: z.number().positive().max(16).default(1.5),
     minAvailableMemoryMb: z.number().int().min(0).max(1_048_576).default(4096),
     minFreeDiskGb: z.number().finite().nonnegative().max(1_048_576).default(20),
@@ -16,20 +19,6 @@ export const FleetResourcePolicySchema = z
   .strict();
 export type FleetResourcePolicy = z.infer<typeof FleetResourcePolicySchema>;
 export const defaultResourcePolicy = (): FleetResourcePolicy => FleetResourcePolicySchema.parse({});
-export interface ResourcePressureInput {
-  loadRatio: number;
-  /** Share of all cores busy over the last sample window; absent from injected probes. */
-  cpuRatio?: number;
-  availableMemoryMb: number;
-  freeDiskGb?: number;
-  totalDiskGb?: number;
-  diskWarning?: boolean;
-}
-export interface ResourcePressure extends ResourcePressureInput {
-  sampledAtMs: number;
-  healthy: boolean;
-  reason?: "load" | "memory" | "disk" | "probe-unavailable";
-}
 export interface ProcessIdentity {
   pid: number;
   startTime: string;
@@ -254,11 +243,8 @@ export interface ResourceSnapshot {
     /** Aggregate sampled CPU budget for all server slots, in cores. */
     serverCpuCores?: number;
   };
-  pressure: ResourcePressure;
-  /** Under pressure, the heaviest processes now, each charged to its permit or unleased (#332). */
-  consumers?: import("./consumers.ts").ResourceConsumer[];
-  /** Under load pressure, how long the load average takes to reach the limit once the load stops. */
-  loadRetryAfterMs?: number;
+  /** Free space on the registry's volume against the owner's warning; informational, never gates (#599). */
+  disk?: { freeDiskGb: number; totalDiskGb: number; warning: boolean };
   leases: {
     id: string;
     kind: "heavy" | "simulator";
@@ -271,8 +257,6 @@ export interface ResourceSnapshot {
     deviceId?: string;
     usage?: SimulatorUsage;
     pid?: number;
-    /** A heavy permit's process group: CPU (100 = one core), resident memory, process count. */
-    processUsage?: import("./consumers.ts").ProcessGroupUsage;
   }[];
   queue: {
     id: string;
@@ -298,7 +282,6 @@ export interface ResourceSnapshot {
     executable: string;
     createdAtMs: number;
     pid?: number;
-    processUsage?: import("./consumers.ts").ProcessGroupUsage;
   }[];
   lightQueue: {
     id: string;
@@ -325,24 +308,9 @@ export interface ResourceSnapshot {
     pid?: number;
   }[];
 }
-/** Admission facts captured by the service's existing arbiter pass, never inferred from free slots. */
-export interface HeavyArbitration {
-  atMs: number;
-  heads: {
-    lane: "full" | "light" | "server";
-    ticketId: string;
-    seatId?: string;
-    holderId?: string;
-    pid: number;
-    queuedAtMs: number;
-    marked: boolean;
-    admits: boolean;
-  }[];
-}
 export interface ResourceWaitOptions {
   signal?: AbortSignal;
-  /** `arbiter`: the service is judging admission for this waiter (VUH-2080). */
-  onWait?: (snapshot: ResourceSnapshot, detail?: { arbiter: boolean }) => void;
+  onWait?: (snapshot: ResourceSnapshot) => void;
 }
 export interface SimulatorAcquireOptions {
   seatId: string;
@@ -367,36 +335,17 @@ export type SimulatorAdmission =
       snapshot: ResourceSnapshot;
     };
 export interface FleetResourceGovernor {
-  /**
-   * One arbiter pass: admits queue heads in FIFO order under this process's
-   * view of pressure and refreshes the heartbeat waiters defer to (VUH-2080).
-   * Returns how many requests it admitted.
-   */
-  arbitrate(): Promise<number>;
-  /** Last completed sampled verdict; undefined when observation is unavailable. */
-  arbitration(): HeavyArbitration | undefined;
   configure(policy: FleetResourcePolicy): Promise<ResourceSnapshot>;
   snapshot(): Promise<ResourceSnapshot>;
   /** Fresh private registry + native birth/ancestry proof; never invert a positive liveness predicate. */
   restartGuard?(
     owner: import("./simulators.ts").SimulatorOwner,
   ): Promise<import("./restart-guard.ts").RestartResourceGuard>;
-  /** Hire admission: refuses only on low available memory or an unverifiable probe. */
-  admitBuilder(): Promise<{
-    allowed: boolean;
-    reason?: "pressure" | "probe-unavailable";
-    pressure: ResourcePressure;
-    /** The memory floor a `pressure` refusal fell below. */
-    minAvailableMemoryMb?: number;
-    /** Load is above the heavy-permit limit, so the seat's heavy work will queue. */
-    heavyQueued?: { maxLoadRatio: number };
-  }>;
   runHeavy(command: string, args: readonly string[], options?: HeavyRunOptions): Promise<number>;
   /**
    * The service's own bulk work (prune, cache reclaim) under a light permit held
    * by this process, with no child command. It queues and counts like any light
-   * job except that low disk never holds it, since it frees disk. It is reaped if
-   * this process dies holding it (VUH-2933).
+   * job. It is reaped if this process dies holding it (VUH-2933).
    */
   holdLight<T>(
     options: ResourceWaitOptions & { holderId: string; operation: string },
@@ -420,7 +369,5 @@ export interface FleetResourceGovernor {
   releaseSimulator(id: string, token: string): Promise<void>;
   /** Append-only `simulator-settled.jsonl`; a lease's record is gone once released. */
   recordSimulatorSettled(receipt: SimulatorSettledReceipt): Promise<void>;
-  /** One machine sample into `samples.jsonl` beside the journal (VUH-2933). */
-  recordMachineSample?(): Promise<void>;
   close(): Promise<void>;
 }

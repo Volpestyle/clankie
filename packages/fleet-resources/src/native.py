@@ -81,55 +81,6 @@ def identity(pid, census=False):
         raise RuntimeError("Process identity unavailable")
 
 
-def darwin_memory():
-    """The compressor-aware free percentage reported by memory_pressure -Q."""
-    if sys.platform != "darwin":
-        raise RuntimeError("Darwin memory observation unavailable")
-    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
-    library.sysctlbyname.argtypes = [ctypes.c_char_p, ctypes.c_void_p,
-                                    ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p, ctypes.c_size_t]
-    library.sysctlbyname.restype = ctypes.c_int
-    percent = ctypes.c_uint32()
-    total = ctypes.c_uint64()
-    for name, value in ((b"kern.memorystatus_level", percent), (b"hw.memsize", total)):
-        size = ctypes.c_size_t(ctypes.sizeof(value))
-        if library.sysctlbyname(name, ctypes.byref(value), ctypes.byref(size), None, 0) != 0 or \
-                size.value != ctypes.sizeof(value):
-            raise RuntimeError("Darwin memory observation unavailable")
-    if percent.value > 100 or total.value == 0:
-        raise RuntimeError("Darwin memory observation invalid")
-    # Stable HOST_VM_INFO64 rev1 prefix (SDK mach/vm_statistics.h). Reclaiming
-    # anonymous/compressed pages needs more compression or swap; do not advertise
-    # all of those pages as immediate headroom for another simulator boot.
-    class VmStatistics(ctypes.Structure):
-        _fields_ = [(name, ctypes.c_uint32) for name in ("free", "active", "inactive", "wired")] + [
-            (name, ctypes.c_uint64) for name in ("zero", "reactivations", "pageins", "pageouts",
-                "faults", "cow", "lookups", "hits", "purges")
-        ] + [(name, ctypes.c_uint32) for name in ("purgeable", "speculative")] + [
-            (name, ctypes.c_uint64) for name in ("decompressions", "compressions", "swapins", "swapouts")
-        ] + [(name, ctypes.c_uint32) for name in ("compressor", "throttled", "external", "internal")] + [
-            ("uncompressed", ctypes.c_uint64)]
-    if ctypes.sizeof(VmStatistics) != 152 or VmStatistics.external.offset != 136:
-        raise RuntimeError("Unsupported memory ABI")
-    library.mach_host_self.restype = ctypes.c_uint32
-    library.host_statistics64.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_void_p,
-                                         ctypes.POINTER(ctypes.c_uint32)]
-    info = VmStatistics()
-    count = ctypes.c_uint32(38)
-    host = library.mach_host_self()
-    try:
-        if library.host_statistics64(host, 4, ctypes.byref(info), ctypes.byref(count)) != 0 or count.value != 38:
-            raise RuntimeError("Darwin page observation unavailable")
-    finally:
-        library.mach_task_self.restype = ctypes.c_uint32
-        library.mach_port_deallocate(library.mach_task_self(), host)
-    # Speculative pages are included in free_count and can also be file-backed.
-    reclaimable_bytes = (max(0, info.free - info.speculative) + info.external) * os.sysconf("SC_PAGE_SIZE")
-    available_bytes = min(total.value * percent.value // 100, reclaimable_bytes)
-    return {"schemaVersion": 1, "availablePercent": percent.value, "totalMemoryBytes": total.value,
-            "availableMemoryBytes": available_bytes}
-
-
 def snapshot():
     if sys.platform == "darwin":
         rows = subprocess.run(["/bin/ps", "-axo", "pid=,uid="], capture_output=True, timeout=2, check=True)
@@ -963,8 +914,6 @@ def serve():
                 if type(pgid) is not int or pgid < 2:
                     raise RuntimeError("Process group request unavailable")
                 reply["result"] = group_occupied(pgid)
-            elif op == "memory":
-                reply["result"] = darwin_memory()
             elif op == "ancestry":
                 reply["result"] = ancestry()
             elif op == "snapshot":
@@ -1110,10 +1059,6 @@ if __name__ == "__main__":
             if len(sys.argv) != 2 or identity(os.getpid()) is None:
                 raise RuntimeError("Native observer unavailable")
             print("true")
-        elif mode == "memory":
-            if len(sys.argv) != 2:
-                raise RuntimeError("Memory observation request unavailable")
-            print(json.dumps(darwin_memory(), separators=(",", ":")))
         elif mode == "snapshot":
             print(json.dumps(snapshot()))
         elif mode == "operator-seats":

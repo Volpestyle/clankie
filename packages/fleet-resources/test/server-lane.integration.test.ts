@@ -36,12 +36,8 @@ const get = async (port: number, path = "/") => {
 it("servers hold only server slots; bounded builds start, waiters see holders, and aged jobs remain alive", async () => {
   const root = await mkdtemp(join(tmpdir(), "clankie-server-lane-"));
   const directory = join(root, "registry");
-  // Isolate lane admission from concurrent fleet pressure; the commands,
-  // listeners, process groups, runner, journals and CPU supervisor are real.
-  const governor = createResourceGovernor({
-    directory,
-    probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
-  });
+  // The commands, listeners, process groups, runner, journals and CPU supervisor are real.
+  const governor = createResourceGovernor({ directory });
   const jobs: Promise<number>[] = [];
   const stop = new AbortController();
   let legacyHeartbeat: ReturnType<typeof setInterval> | undefined;
@@ -158,10 +154,7 @@ it.each([true, false])(
   async (serverParent) => {
     const root = await mkdtemp(join(tmpdir(), "clankie-nested-servers-"));
     const directory = join(root, "registry");
-    const governor = createResourceGovernor({
-      directory,
-      probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
-    });
+    const governor = createResourceGovernor({ directory });
     const stop = new AbortController();
     const jobs: Promise<number>[] = [];
     try {
@@ -230,10 +223,7 @@ it.skipIf(process.platform !== "darwin")(
   async () => {
     const root = await mkdtemp(join(tmpdir(), "clankie-zombie-server-"));
     const path = join(root, "zombie.json");
-    const governor = createResourceGovernor({
-      directory: join(root, "registry"),
-      probe: async () => ({ loadRatio: 0, availableMemoryMb: 64_000 }),
-    });
+    const governor = createResourceGovernor({ directory: join(root, "registry") });
     try {
       const code = await governor.runHeavy(
         resourcePython,
@@ -370,37 +360,3 @@ it("routes dev and watch commands to servers while bounded commands retain their
   expect(heavyJobLane("tsc", ["--noEmit"])).toBe("light");
   expect(heavyJobLane("sh", ["-c", "pnpm dev"])).toBe("full");
 });
-
-it("the lane-aware arbiter holds servers on load and memory, then grants their independent ticket", async () => {
-  const root = await mkdtemp(join(tmpdir(), "clankie-server-arbiter-"));
-  let pressure = { loadRatio: 0, availableMemoryMb: 1024 };
-  const governor = createResourceGovernor({ directory: root, probe: async () => pressure });
-  const controller = new AbortController();
-  const path = join(root, "server.json");
-  const job = governor.runHeavy(process.execPath, [serverCommand, path], {
-    server: true,
-    holderId: "arbiter-server",
-    signal: controller.signal,
-  });
-  try {
-    await until(
-      () => governor.snapshot(),
-      (snapshot) => snapshot.serverQueue?.length === 1,
-    );
-    expect(await governor.arbitrate()).toBe(0);
-    pressure = { loadRatio: 10, availableMemoryMb: 64000 };
-    expect(await governor.arbitrate()).toBe(0);
-    expect(await receipt(path)).toBeUndefined();
-    pressure = { loadRatio: 0, availableMemoryMb: 64000 };
-    expect(await governor.arbitrate()).toBe(1);
-    const started = (await until(() => receipt(path), Boolean))!;
-    expect((await governor.snapshot()).capacity).toMatchObject({ used: 0, serverUsed: 1 });
-    await get(started.port, "/stop");
-    expect(await job).toBe(7);
-  } finally {
-    controller.abort();
-    await governor.close();
-    await job;
-    await rm(root, { recursive: true, force: true });
-  }
-}, 120_000);
