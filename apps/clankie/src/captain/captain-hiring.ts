@@ -1,4 +1,4 @@
-import { verifyRemoteHireCheckout } from "./checkout-freshness.ts";
+import { hireWorktreeLaunch, verifyRemoteHireCheckout } from "./checkout-freshness.ts";
 import { verifyHireCheckout, projectPathContains, type HireCheckoutFreshness } from "@clankie/settings";
 import {
   HireWorktrees,
@@ -14,7 +14,7 @@ import { autoHireAuthority } from "./auto-hire-policy.ts";
 import { effectiveFleetAutonomy } from "@clankie/settings";
 import type { ProjectHirePolicy } from "./herdr-watch.ts";
 import { SeatEfficiencyStore } from "./seat-efficiency.ts";
-import { readGithubOriginSlug, readSeatCommitBaseline } from "./seat-telemetry.ts";
+import { readGithubOriginSlug, readSeatCommitBaseline, type HireLaunchRecord } from "./seat-telemetry.ts";
 import { briefDeliverable } from "../work-item-holders.ts";
 import { type OperatorFleetSeat } from "@clankie/protocol";
 import { SettingsStore, type ClankieSettings } from "@clankie/settings";
@@ -199,6 +199,8 @@ export function createHiring(ctx: HiringContext) {
         };
       }
     }
+    // A remote hire's own worktree, as its machine reported it before launch (#703).
+    let remoteLaunch: HireLaunchRecord | undefined;
     // A read-only hire only looks around (ADR 0320): its folder is never fetched,
     // fast-forwarded or moved to a worktree, so the owner's home stays as it is.
     if (resume === undefined && request.readOnly !== true) {
@@ -333,6 +335,7 @@ export function createHiring(ctx: HiringContext) {
           .join("\n\n");
       if (freshness.outcome === "worktree") {
         // The start checkout keeps its own work; the hire runs in the new worktree.
+        if (remote) remoteLaunch = hireWorktreeLaunch(freshness);
         if (!retained)
           hireWorktrees.record(
             retryScope,
@@ -434,6 +437,7 @@ export function createHiring(ctx: HiringContext) {
         seatEfficiency.assign(seat.occupantId, {
           owner: authority.owner,
           ...(commitBaseline === undefined ? {} : { commitBaseline }),
+          ...(remoteLaunch === undefined ? {} : { launch: remoteLaunch }),
           ...(deliverable === undefined ? {} : { deliverable }),
           ...(request.model === undefined ? {} : { model: request.model }),
           ...(request.effort === undefined ? {} : { effort: request.effort }),

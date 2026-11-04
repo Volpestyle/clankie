@@ -209,6 +209,19 @@ export const SeatCommitBaselineSchema = z
   })
   .strict();
 export type SeatCommitBaseline = z.infer<typeof SeatCommitBaselineSchema>;
+/**
+ * What a hire recorded before its native harness launched (#602, #703): the branch it
+ * starts on, the commit it starts from, and when. A local hire's commit baseline holds
+ * it; a remote hire records only this, since its worktree's paths are on another machine.
+ */
+export const HireLaunchRecordSchema = z
+  .object({
+    branchRef: SeatCommitBaselineSchema.shape.branchRef,
+    head: SeatCommitBaselineSchema.shape.head,
+    capturedAt: SeatCommitBaselineSchema.shape.capturedAt,
+  })
+  .strict();
+export type HireLaunchRecord = z.infer<typeof HireLaunchRecordSchema>;
 export type SeatCommitClaim = Pick<SeatCommitBaseline, "worktreeRoot" | "gitDir" | "commonDir" | "branchRef">;
 const gitEnvironment = () => {
   const {

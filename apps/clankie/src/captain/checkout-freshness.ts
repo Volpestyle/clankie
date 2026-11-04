@@ -1,6 +1,7 @@
 import { remoteProgramCommand, type HerdrFleet, type FleetShellRun } from "../herdr-fleet.ts";
 import { hireWorktreeSlug, hireWorktreeStart, type HireCheckoutFreshness } from "@clankie/settings";
 import { redactSensitiveText } from "@clankie/observability";
+import { HireLaunchRecordSchema, type HireLaunchRecord } from "./seat-telemetry.ts";
 
 function diagnostic(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
@@ -165,4 +166,22 @@ export async function verifyRemoteHireCheckout(
       reason: `Remote checkout freshness unavailable; no hire was started: ${diagnostic(error)}`,
     };
   }
+}
+
+/**
+ * A remote hire's launch record (#703): the branch the hire's own fresh worktree was made
+ * on and the origin/main commit it starts from, taken from the machine's answer before the
+ * harness launches. Only a worktree the hire made counts; a hire in place has no branch of its own.
+ */
+export function hireWorktreeLaunch(
+  freshness: HireCheckoutFreshness,
+  capturedAt = new Date().toISOString(),
+): HireLaunchRecord | undefined {
+  if (freshness.outcome !== "worktree" || !freshness.branch) return undefined;
+  const parsed = HireLaunchRecordSchema.safeParse({
+    branchRef: `refs/heads/${freshness.branch}`,
+    head: freshness.head,
+    capturedAt,
+  });
+  return parsed.success ? parsed.data : undefined;
 }
