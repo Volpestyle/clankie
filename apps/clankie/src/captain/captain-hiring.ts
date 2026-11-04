@@ -280,6 +280,25 @@ export function createHiring(ctx: HiringContext) {
           harness: request.harness,
         });
       const inPlace = admitting || fenced;
+      // New work moves on, but the exact brief a settled original already started here is a
+      // possible duplicate (#730): refuse it rather than start it again in a fresh worktree.
+      if (
+        !inPlace &&
+        retained === undefined &&
+        leadBrief !== undefined &&
+        herdrWatches.hireResent({
+          fleet: request.fleet,
+          workingDirectory: request.workingDirectory,
+          harness: request.harness,
+          leadFingerprint: deliveryFingerprint(leadBrief),
+        })
+      )
+        return {
+          outcome: "failed",
+          reason: "not_ready",
+          detail:
+            "That brief already started a hire in this folder, and that hire was settled; no agent was started. New work here needs a different brief.",
+        };
       // Canonicalize remote cwd aliases on that machine, never against Mac paths.
       // allow-swallowed-rejection -- moved unchanged from the captain (ADR 0325); a hire step that can't be read leaves the hire to its own fence.
       const remoteDirectories = remote ? await paneDirectories().catch(() => null) : null;
@@ -450,6 +469,7 @@ export function createHiring(ctx: HiringContext) {
       },
       () => personas.flushProjectRoles(),
       taskBrief,
+      leadBrief === undefined ? undefined : deliveryFingerprint(leadBrief),
     );
     if (result.outcome !== "spawned") return result;
     if (adopted === undefined) throw new Error("Hired seat was not finalized under its admitted authority");

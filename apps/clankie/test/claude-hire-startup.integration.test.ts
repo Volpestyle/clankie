@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stat } from "node:fs/promises";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createClaudeWorkerSeatAdapter, SeatHookLog } from "../src/captain/claude-worker-seat.ts";
 import {
   createHerdrWatchRunner,
@@ -471,12 +471,21 @@ it("a new hire settles an earlier stuck hire whose agent is gone, and leaves a r
     effort: "medium" as const,
     effortReason: "Verify a stuck hire whose agent is gone frees its place.",
   };
+  // The journal itself is real; this only records what each hire began it with.
+  const begin = vi.spyOn(DeliveryFence.prototype, "begin");
+  const begun = begin.mock.calls;
   const hire = () =>
-    store.spawnSeat(request, undefined, "new brief", undefined, {
-      owner,
-      current: () => true,
-      authorize: async () => true,
-    });
+    store.spawnSeat(
+      request,
+      undefined,
+      "new brief",
+      undefined,
+      { owner, current: () => true, authorize: async () => true },
+      undefined,
+      undefined,
+      true,
+      deliveryFingerprint("the lead's own brief"),
+    );
   // Its harness still runs in the recorded terminal: the place stays fenced, nothing starts.
   expect(await hire()).toMatchObject({ outcome: "failed", receiptId: original.messageId });
   expect(tabs).toBe(0);
@@ -490,6 +499,16 @@ it("a new hire settles an earlier stuck hire whose agent is gone, and leaves a r
     journal: "local-host-inventory",
     pane: { paneId: pane, present: false },
   });
+  // The new hire began its receipt with its lead brief's fingerprint beside the final brief's
+  // (#730), so a later exact resend can be told from new work once recovery settles it.
+  expect(begun).toContainEqual([
+    key,
+    expect.objectContaining({
+      fingerprint: deliveryFingerprint("new brief"),
+      leadFingerprint: deliveryFingerprint("the lead's own brief"),
+    }),
+  ]);
+  begin.mockRestore();
 });
 
 it("does not count a startup file reference, a truncated file or changed contents as brief acceptance", async () => {

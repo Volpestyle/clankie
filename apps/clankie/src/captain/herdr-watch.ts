@@ -2635,6 +2635,24 @@ export class HerdrWatchStore implements HerdrWatchPort {
     );
   }
 
+  /**
+   * Whether this exact lead brief already started a hire in this folder that recovery then
+   * settled (#730). Resending it is a possible duplicate, so it is refused rather than moved
+   * to a fresh worktree. Receipts from before the lead fingerprint was kept never match.
+   */
+  public hireResent(input: {
+    readonly fleet?: string | undefined;
+    readonly workingDirectory: string;
+    readonly harness?: string | undefined;
+    readonly leadFingerprint: string;
+  }): boolean {
+    return this.launchHeld(
+      input,
+      (key) => this.hireReceipts.settled(key)?.leadFingerprint === input.leadFingerprint,
+      false,
+    );
+  }
+
   private launchHeld(
     input: {
       readonly fleet?: string | undefined;
@@ -2642,13 +2660,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
       readonly harness?: string | undefined;
     },
     held: (key: string) => boolean,
+    /** Whether an unresolved project hire or an unreadable journal holds the folder too. */
+    conservative = true,
   ): boolean {
-    if (this.projectHires.unresolved(input)) return true;
+    if (conservative && this.projectHires.unresolved(input)) return true;
     let receipts: ReturnType<DeliveryFence["all"]>;
     try {
       receipts = this.hireReceipts.all();
     } catch {
-      return true;
+      return conservative;
     }
     return receipts.some(([key]) => {
       let parts: unknown;
@@ -2801,6 +2821,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     flushAdoption?: () => Promise<void>,
     /** The caller captures task intent before adding service-owned standing context. */
     taskBrief = brief !== undefined,
+    /** The lead brief's fingerprint before that context, kept on the hire receipt (#730). */
+    leadFingerprint?: string,
   ): Promise<HerdrSeatSpawnResult> {
     const work =
       taskBrief ||
@@ -2864,6 +2886,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         adopt,
         flushAdoption,
         work,
+        leadFingerprint,
       ).then((result) =>
         result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
       );
@@ -2903,6 +2926,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           adopt,
           flushAdoption,
           work,
+          leadFingerprint,
         ).then((result) =>
           result.outcome === "spawned" ? { ...result, profile: effectiveHireProfile(seat) } : result,
         );
@@ -2991,6 +3015,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         adopt,
         flushAdoption,
         work,
+        leadFingerprint,
       );
       if (result.outcome === "spawned") this.projectHires.confirmed(allocation);
       else this.projectHires.failed(allocation);
@@ -3205,6 +3230,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     adopt?: AdoptHire,
     flushAdoption?: () => Promise<void>,
     work = false,
+    leadFingerprint?: string,
   ): Promise<HerdrSeatSpawnResult> {
     try {
       const refusal = await this.hireRefusal?.(input);
@@ -3261,7 +3287,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       authority = { ...authority, intentId: this.hireOwners.intent(authority.owner, startedBy) };
     }
     if (resume === undefined)
-      return this.performSpawnSeat(input, subjectOverride, brief, resume, authority, adopt, flushAdoption);
+      return this.performSpawnSeat(
+        input,
+        subjectOverride,
+        brief,
+        resume,
+        authority,
+        adopt,
+        flushAdoption,
+        leadFingerprint,
+      );
     // Serialize starts only inside the existing hire path. Herdr remains the
     // durable owner of the seat; there is no parallel run/lock store.
     const key = JSON.stringify([
@@ -3284,6 +3319,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         authority,
         adopt,
         flushAdoption,
+        leadFingerprint,
       );
     } finally {
       release();
@@ -3299,6 +3335,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     authority?: HireAuthority,
     adopt?: AdoptHire,
     flushAdoption?: () => Promise<void>,
+    leadFingerprint?: string,
   ): Promise<HerdrSeatSpawnResult> {
     if (authority !== undefined) await assertConversationAuthority(authority);
     if (input.resume !== undefined && resume === undefined)
@@ -3579,6 +3616,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     try {
       receipt = this.hireReceipts.begin(receiptKey, {
         fingerprint: deliveryFingerprint(brief ?? ""),
+        ...(leadFingerprint === undefined ? {} : { leadFingerprint }),
         beganAt: Date.now(),
         ...(fresh ? { freshHire: fresh.metadata } : {}),
         ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
