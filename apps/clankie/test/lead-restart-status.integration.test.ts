@@ -41,9 +41,15 @@ it.each([
   { tokens: 250_000, ageMs: 1_000, due: true },
   { tokens: 50_000, ageMs: 12 * 3_600_000, due: true },
 ])("checks the accepted lead budget at $tokens tokens / $ageMs ms", async ({ tokens, ageMs, due }) => {
-  vi.useFakeTimers({ toFake: ["Date"] });
+  // Mock Date alone: expect.poll advances an installed fake-timer clock on each retry,
+  // even when its toFake list contains only Date. Keep the one-millisecond boundary fixed.
   vi.setSystemTime("2026-10-26T12:00:00Z");
+  const frozenAt = Date.now();
+  let inventoryReads = 0;
   const f = await leadChatFixture(false, cleanup, {
+    inventory: async () => {
+      inventoryReads++;
+    },
     nativeSourceProof: true,
     defaultLead: true,
     leadRestartCheckMs: 25,
@@ -64,6 +70,11 @@ it.each([
   await expect
     .poll(() => f.captain.leadRestartStatus!())
     .toMatchObject({ check: { contextTokens: tokens, due } });
+  // Require another real native-source observation after the accepted check. This poll
+  // retries while I/O and real timers run, without advancing the budget's wall clock.
+  const observedInventoryReads = inventoryReads;
+  await expect.poll(() => inventoryReads).toBeGreaterThan(observedInventoryReads);
+  expect(Date.now()).toBe(frozenAt);
   const response = await statusReader(f.captain)();
   const previousRead = parseProtocolResponse(PreviousLeadRestartStatusSchema, response);
   expect(previousRead.check).toMatchObject({ contextTokens: tokens, due });
