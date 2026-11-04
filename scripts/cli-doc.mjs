@@ -6,10 +6,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { commandHelp } from "../apps/tui/src/command/registry.ts";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const path = join(root, "docs", "cli.md");
-const { commandHelp } = await import(join(root, "apps/tui/src/command/registry.ts"));
 
 const START = "<!-- command-reference:start -->";
 const END = "<!-- command-reference:end -->";
