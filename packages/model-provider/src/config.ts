@@ -192,6 +192,24 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<LoadC
   return { config, sources, issues };
 }
 
+/**
+ * The owner's global file and the repository's file, unmerged. A layer is
+ * undefined when it is absent or unreadable. Global config is the owner's; any
+ * worker in the repository can write the other.
+ */
+export async function loadConfigLayers(
+  options: LoadConfigOptions = {},
+): Promise<{ readonly global: ClankieConfig | undefined; readonly repo: ClankieConfig | undefined }> {
+  const globalPath = globalConfigPath(options.env ?? process.env);
+  const repoPath = findRepoConfigPath(options.cwd ?? process.cwd());
+  const issues: ConfigIssue[] = [];
+  return {
+    global: await readConfigLayer(globalPath, issues),
+    repo:
+      repoPath === undefined || repoPath === globalPath ? undefined : await readConfigLayer(repoPath, issues),
+  };
+}
+
 async function readConfigLayer(path: string, issues: ConfigIssue[]): Promise<ClankieConfig | undefined> {
   let raw: string;
   try {
@@ -236,7 +254,7 @@ function deepMerge(base: unknown, patch: unknown): unknown {
   return merged;
 }
 
-function mergeConfigLayers(base: ClankieConfig, patch: ClankieConfig): ClankieConfig {
+export function mergeConfigLayers(base: ClankieConfig, patch: ClankieConfig): ClankieConfig {
   return ClankieConfigSchema.parse(deepMerge(base, patch));
 }
 

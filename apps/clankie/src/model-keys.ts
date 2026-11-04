@@ -70,7 +70,7 @@ export interface ModelKeysPort {
   /** Proves a local model answers, then declares its endpoint and selects it. */
   addLocalEndpoint?(
     input: LocalEndpointAddRequest,
-    guard?: () => Promise<boolean>,
+    authority: Pick<ModelSignInAuthority, "commit">,
   ): Promise<LocalEndpointAddResult>;
 }
 
@@ -192,7 +192,7 @@ export function createModelKeys(options: {
   const proveModel = async (
     models: ModelRuntime,
     model: NonNullable<ReturnType<typeof piModelFor>>,
-    proof: { readonly timeoutMs: number; readonly apiKey?: string },
+    proof: { readonly timeoutMs: number; readonly apiKey?: string; readonly fetch?: typeof fetch },
   ): Promise<"ok" | "validation_failed" | "validation_timeout"> => {
     const signal = AbortSignal.timeout(proof.timeoutMs);
     try {
@@ -203,6 +203,7 @@ export function createModelKeys(options: {
         },
         {
           ...(proof.apiKey === undefined ? {} : { apiKey: proof.apiKey }),
+          ...(proof.fetch === undefined ? {} : { fetch: proof.fetch }),
           maxTokens: 16,
           maxRetries: 0,
           timeoutMs: proof.timeoutMs,
@@ -284,6 +285,43 @@ export function createModelKeys(options: {
           throw Error("principal_revoked");
       }),
   });
+  const selectModel = async (model: string): Promise<ModelKeyResult> => {
+    const ref = parseModelRef(model);
+    // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
+    const providerId = ref?.providerId ?? "";
+    try {
+      const state = await snapshot();
+      if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId)) {
+        report("model-selected", "unsupported_provider", providerId);
+        return { ok: false, error: "unsupported_provider" };
+      }
+      if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
+        return { ok: false, error: "unsupported_model" };
+      // Selection from every caller, including the compatibility endpoint,
+      // obeys the same availability and hosted mapping as the settings API.
+      const settings = await port.settings!();
+      if (!settings.choices.some((choice) => choice.ref === model && choice.available)) {
+        report("model-selected", "unsupported_model", providerId, ref.modelId);
+        return { ok: false, error: "unsupported_model" };
+      }
+      try {
+        resolvePiModelSelection({ ...state.config, model }, state.models, {
+          catalog: state.catalog,
+          hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
+        });
+      } catch {
+        report("model-selected", "unsupported_model", providerId, ref.modelId);
+        return { ok: false, error: "unsupported_model" };
+      }
+      await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
+      await options.onModelChanged?.();
+      if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
+      return { ok: true };
+    } catch (error) {
+      report("model-selected", "unavailable", providerId, ref?.modelId);
+      throw error;
+    }
+  };
   const port: ModelKeysPort = {
     close: () => signIns.close(),
     async subscriptionMethods() {
@@ -482,7 +520,7 @@ export function createModelKeys(options: {
       );
       return { endpoints: found.flat() };
     },
-    async addLocalEndpoint({ runtime: providerId, modelId }, guard) {
+    async addLocalEndpoint({ runtime: providerId, modelId }, authority) {
       if (!modelCredentialAllowed(providerId, undefined, { env }))
         return { ok: false, error: "managed_credits_only" };
       const local = localRuntimes.find((entry) => entry.id === providerId);
@@ -513,32 +551,39 @@ export function createModelKeys(options: {
       registerConfiguredPiProviders(trialModels, trial.config, trial.catalog);
       const model = piModelFor(trialModels, providerId, modelId, trial);
       if (model === undefined) return { ok: false, error: "unsupported_model" };
-      const proved = await proveModel(trialModels, model, { timeoutMs: LOCAL_VALIDATION_TIMEOUT_MS });
-      if (proved !== "ok") return { ok: false, error: proved };
-      const refused = await mutate(async () => {
-        if (guard && !(await guard())) return "forbidden" as const;
-        // The proof above can take most of a minute; the config may have moved.
-        const { config } = await loadConfig({
-          ...(options.env === undefined ? {} : { env: options.env }),
-          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-        });
-        if (localProviderConflict(config, providerId, local.baseURL)) return "provider_conflict" as const;
-        await declareLocalProvider({
-          providerId,
-          baseURL: local.baseURL,
-          models,
-          ...(options.env === undefined ? {} : { env: options.env }),
-        });
-        return undefined;
+      const proved = await proveModel(trialModels, model, {
+        timeoutMs: LOCAL_VALIDATION_TIMEOUT_MS,
+        // As in the listing: the proof reaches this address or fails.
+        fetch: (url, init) => fetch(url, { ...init, redirect: "error" }),
       });
-      if (refused !== undefined) return { ok: false, error: refused };
+      if (proved !== "ok") return { ok: false, error: proved };
       const ref = `${providerId}/${modelId}`;
-      const selected = await port.select(ref);
-      if (selected.ok) return { ok: true, model: ref };
-      return {
-        ok: false,
-        error: selected.error === "key_missing" ? "unavailable" : selected.error,
-      };
+      // Both writes sit inside the commit, so a revocation lands before them or after them.
+      return mutate(async () => {
+        let result: LocalEndpointAddResult = { ok: false, error: "unavailable" };
+        const committed = await authority.commit(async () => {
+          // The proof above can take most of a minute; the config may have moved.
+          const { config } = await loadConfig({
+            ...(options.env === undefined ? {} : { env: options.env }),
+            ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+          });
+          if (localProviderConflict(config, providerId, local.baseURL)) {
+            result = { ok: false, error: "provider_conflict" };
+            return;
+          }
+          await declareLocalProvider({
+            providerId,
+            baseURL: local.baseURL,
+            models,
+            ...(options.env === undefined ? {} : { env: options.env }),
+          });
+          const selected = await selectModel(ref);
+          result = selected.ok
+            ? { ok: true, model: ref }
+            : { ok: false, error: selected.error === "key_missing" ? "unavailable" : selected.error };
+        });
+        return committed ? result : { ok: false, error: "forbidden" };
+      });
     },
     async setEffort(effort) {
       const selection = await running(await snapshot());
@@ -607,45 +652,7 @@ export function createModelKeys(options: {
       report("key-validated", result, providerId);
       return result === "ok" ? { ok: true } : { ok: false, error: result };
     },
-    async select(model) {
-      return mutate(async () => {
-        const ref = parseModelRef(model);
-        // Unknown input is never an identifier in telemetry: report() checks the bundled catalog.
-        const providerId = ref?.providerId ?? "";
-        try {
-          const state = await snapshot();
-          if (ref === undefined || !state.providers.some((provider) => provider.id === ref.providerId)) {
-            report("model-selected", "unsupported_provider", providerId);
-            return { ok: false, error: "unsupported_provider" };
-          }
-          if (!modelCredentialAllowed(providerId, await store.get(providerId), { env }))
-            return { ok: false, error: "unsupported_model" };
-          // Selection from every caller, including the compatibility endpoint,
-          // obeys the same availability and hosted mapping as the settings API.
-          const settings = await port.settings!();
-          if (!settings.choices.some((choice) => choice.ref === model && choice.available)) {
-            report("model-selected", "unsupported_model", providerId, ref.modelId);
-            return { ok: false, error: "unsupported_model" };
-          }
-          try {
-            resolvePiModelSelection({ ...state.config, model }, state.models, {
-              catalog: state.catalog,
-              hasCodexSubscription: (await store.get(CODEX_PROVIDER_ID)) !== undefined,
-            });
-          } catch {
-            report("model-selected", "unsupported_model", providerId, ref.modelId);
-            return { ok: false, error: "unsupported_model" };
-          }
-          await setCaptainModel(model, options.env === undefined ? {} : { env: options.env });
-          await options.onModelChanged?.();
-          if (state.config.model !== model) report("model-selected", "ok", providerId, ref.modelId);
-          return { ok: true };
-        } catch (error) {
-          report("model-selected", "unavailable", providerId, ref?.modelId);
-          throw error;
-        }
-      });
-    },
+    select: (model) => mutate(() => selectModel(model)),
     async remove(providerId) {
       try {
         if ((await apiProvider(providerId)) === undefined) {

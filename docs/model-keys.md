@@ -223,9 +223,10 @@ POST names a listed runtime and model. **It never takes a URL**, which keeps
 these routes from being aimed at another host; `clankie model add-local` remains
 the way to declare any other address, from this Mac. The service lists the
 models again, sends one bounded completion to the chosen model and discards the
-reply. Only then does it repeat authorization, declare the endpoint and select
-the model through the same config as `clankie model set`. A failed attempt writes
-nothing. The result is `{ "ok": true, "model": "ollama/qwen3:8b" }`, and the model
+reply. Only then does it repeat authorization and, inside the device's revoke
+lock, declare the endpoint and select the model through the same config as
+`clankie model set`. A revocation lands before both writes or after both. A
+failed proof writes nothing. Both the listing and the proof refuse a redirect. The result is `{ "ok": true, "model": "ollama/qwen3:8b" }`, and the model
 serves the next turn without a restart, and `usableProviders` includes its
 provider. Adding an endpoint that is already declared refreshes its model list.
 

@@ -4112,9 +4112,10 @@ Captain model and every config-declared provider. JSON:
 ```
 
 `ok` is false and exit 1 when `clankie.json` has load issues (`issues` is then
-present). `model` and `effort` are `null` when unset. The running service reads
-the model and declared providers on each turn; `clankie restart captain` is only
-needed for the rest of `clankie.json`.
+present). `model` and `effort` are `null` when unset. The running service picks up
+the model and any provider declared in the global `clankie.json` on the next turn.
+Changes to a repository's `.clankie.json` providers still need
+`clankie restart captain`, as does the rest of the config.
 
 The JSON `display` array gives plain provider/model, funding, automatic routing and explicit unavailable-rate information from the same API. Restore a prior eligible preference with `model set provider/model`; input/output/cache credit rates remain unavailable while their policy is open.
 

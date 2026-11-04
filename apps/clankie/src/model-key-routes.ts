@@ -178,10 +178,10 @@ export function createModelKeyRoutes(
       if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
       if (models!.addLocalEndpoint === undefined)
         return context.json({ ok: false, error: "unavailable" }, 503);
-      // Validation can outlast a revocation, so authority is asked again at the write.
-      const safe = LocalEndpointAddResultSchema.parse(
-        await models!.addLocalEndpoint(parsed.data, async () => (await authorize(context.req.raw)) === true),
-      );
+      // Validation can outlast a revocation; the commit re-checks inside the device's revoke lock.
+      const authority = await setup.signInAuthority?.(context.req.raw);
+      if (!authority) return context.json({ ok: false, error: "forbidden" }, 403);
+      const safe = LocalEndpointAddResultSchema.parse(await models!.addLocalEndpoint(parsed.data, authority));
       if (safe.ok) return context.json(safe);
       const status = ["forbidden", "managed_credits_only"].includes(safe.error)
         ? 403

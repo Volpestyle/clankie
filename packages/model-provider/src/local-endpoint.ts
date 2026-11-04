@@ -71,13 +71,15 @@ export function normalizeLocalBaseUrl(value: string): string {
  * Lists an OpenAI-compatible endpoint's models (`GET {baseURL}/models`).
  * Local runtimes are unknown to models.dev, so the endpoint itself is the catalog.
  * A model Ollama says only embeds is left out: it cannot chat, and listed
- * newest first it was the one setup preselected (VUH-2626).
+ * newest first it was the one setup preselected (VUH-2626). A redirect is
+ * refused, so whatever holds the port cannot point the probe at another address.
  */
 export async function probeLocalModels(
   baseURL: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<readonly ProbedLocalModel[]> {
   const response = await fetchImpl(`${normalizeLocalBaseUrl(baseURL)}/models`, {
+    redirect: "error",
     signal: AbortSignal.timeout(3_000),
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -118,6 +120,7 @@ async function probeOllamaShow(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model }),
+      redirect: "error",
       signal: AbortSignal.timeout(3_000),
     });
     if (!response.ok) return undefined;

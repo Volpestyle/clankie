@@ -1497,7 +1497,7 @@ paths:
         gateway calls require the encrypted envelope. The request names a
         runtime, never a URL: the service reaches only that runtime's fixed
         loopback address. It sends one bounded completion before writing
-        anything, repeats authorization at the write, then declares the endpoint
+        anything, repeats authorization inside the device's revoke lock, then declares the endpoint
         and selects the model through the same config as `clankie model set`.
         The choice applies on the next turn without a restart. Cache-Control no-store.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]

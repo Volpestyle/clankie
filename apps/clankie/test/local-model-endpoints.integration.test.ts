@@ -7,7 +7,13 @@ import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
-import { declareLocalProvider, loadConfig, updateGlobalConfig } from "@clankie/model-provider";
+import * as modelProvider from "@clankie/model-provider";
+import {
+  declareLocalProvider,
+  loadConfig,
+  setCaptainModel,
+  updateGlobalConfig,
+} from "@clankie/model-provider";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS } from "@clankie/protocol";
 import {
   LocalEndpointAddResultSchema,
@@ -108,7 +114,23 @@ async function closedPort(): Promise<string> {
   return `http://127.0.0.1:${port}/v1`;
 }
 
-async function fixture(local: readonly LocalRuntimeAddress[]) {
+async function redirectingRuntime(to: string): Promise<string> {
+  const server = createServer((_request, response) => {
+    response.writeHead(307, { location: to }).end();
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  cleanup.push(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  return `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+}
+
+async function fixture(local: readonly LocalRuntimeAddress[], onModelChanged?: () => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "local-endpoints-"));
   cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const env = {
@@ -123,6 +145,7 @@ async function fixture(local: readonly LocalRuntimeAddress[]) {
     env,
     cwd: dir,
     localRuntimes: local,
+    ...(onModelChanged === undefined ? {} : { onModelChanged }),
   });
   const operatorToken = "clankie_op_" + "a".repeat(43);
   const app = await createClankieApp({
@@ -415,6 +438,92 @@ describe("adding a local model from a device", () => {
   });
 });
 
+describe("a device revoked while its add commits", () => {
+  it.each(["declaring", "selecting"])(
+    "waits for both writes when the revoke arrives while %s",
+    async (phase) => {
+      const ollama = await stubRuntime([{ id: "qwen3:8b" }]);
+      const order: string[] = [];
+      let revoke = () => {};
+      const { call, pair, config } = await fixture(
+        [{ id: "ollama", name: "Ollama", baseURL: ollama.baseURL }],
+        async () => {
+          if (phase === "selecting") revoke();
+          // Time for a revocation to land here if the lock did not hold it back.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          order.push("selected");
+        },
+      );
+      const { deviceId, deviceToken } = await pair(TAKE_CONTROL_GRANTS);
+      let revoked: Promise<Response> | undefined;
+      revoke = () => {
+        revoked = call(`/v1/devices/${deviceId}/revoke`, {}).then((response) => {
+          order.push("revoked");
+          return response;
+        });
+      };
+      const declare = modelProvider.declareLocalProvider;
+      const spy = vi.spyOn(modelProvider, "declareLocalProvider").mockImplementation(async (input) => {
+        if (phase === "declaring") revoke();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const declared = await declare(input);
+        order.push("declared");
+        return declared;
+      });
+      cleanup.push(() => spy.mockRestore());
+
+      const response = await call(MODEL_LOCAL_ENDPOINT_ADD_PATH, add("ollama", "qwen3:8b"), deviceToken);
+      expect(response.status).toBe(200);
+      expect((await revoked!).ok).toBe(true);
+      expect(order).toEqual(["declared", "selected", "revoked"]);
+      expect((await config()).model).toBe("ollama/qwen3:8b");
+      expect((await call(MODEL_LOCAL_ENDPOINTS_PATH, undefined, deviceToken)).status).toBe(401);
+    },
+  );
+});
+
+describe("a default port that redirects", () => {
+  it("cannot point discovery or an add at another address", async () => {
+    const target = await stubRuntime([{ id: "bait" }]);
+    const baseURL = await redirectingRuntime(`${target.baseURL}/models`);
+    const { call, config } = await fixture([{ id: "ollama", name: "Ollama", baseURL }]);
+    expect(await (await call(MODEL_LOCAL_ENDPOINTS_PATH)).json()).toEqual({ endpoints: [] });
+    const refused = await call(MODEL_LOCAL_ENDPOINT_ADD_PATH, add("ollama", "bait"));
+    expect(await refused.json()).toEqual({ ok: false, error: "endpoint_unavailable" });
+    expect(target.requests).toEqual([]);
+    expect((await config()).provider).toBeUndefined();
+  });
+});
+
+describe("a runtime that lists honestly but redirects its completions", () => {
+  it("fails the proof without reaching the other address", async () => {
+    const target = await stubRuntime([{ id: "bait" }]);
+    const server = createServer((request, response) => {
+      if (request.url === "/v1/models") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ data: [{ id: "bait" }] }));
+        return;
+      }
+      response.writeHead(307, { location: `${target.baseURL}/chat/completions` }).end();
+    });
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    cleanup.push(
+      () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    );
+    const baseURL = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+    const { call, config } = await fixture([{ id: "ollama", name: "Ollama", baseURL }]);
+    const response = await call(MODEL_LOCAL_ENDPOINT_ADD_PATH, add("ollama", "bait"));
+    expect(await response.json()).toEqual({ ok: false, error: "validation_failed" });
+    expect(target.requests).toEqual([]);
+    expect((await config()).provider).toBeUndefined();
+  });
+});
+
 describe("the running captain", () => {
   it("resolves an endpoint added after boot, with no restart", async () => {
     const ollama = await stubRuntime([{ id: "qwen3:8b" }]);
@@ -434,12 +543,69 @@ describe("the running captain", () => {
       cwd: dir,
       localRuntimes: [{ id: "ollama", name: "Ollama", baseURL: ollama.baseURL }],
     });
-    await expect(models.addLocalEndpoint!({ runtime: "ollama", modelId: "qwen3:8b" })).resolves.toEqual({
+    const owner = {
+      commit: async (operation: () => Promise<void>) => {
+        await operation();
+        return true;
+      },
+    };
+    await expect(
+      models.addLocalEndpoint!({ runtime: "ollama", modelId: "qwen3:8b" }, owner),
+    ).resolves.toEqual({
       ok: true,
       model: "ollama/qwen3:8b",
     });
     const selection = await captain.resolveSelection();
     expect(selection.ref).toBe("ollama/qwen3:8b");
     expect(selection.model.baseUrl).toBe(ollama.baseURL);
+  });
+
+  it("leaves a repository's provider change waiting for a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "local-captain-repo-"));
+    cleanup.push(() => rm(dir, { recursive: true, force: true }));
+    vi.stubEnv("XDG_CONFIG_HOME", dir);
+    vi.stubEnv("CLANKIE_CREDENTIALS_FILE", join(dir, "credentials.json"));
+    vi.stubEnv("CLANKIE_MODELS_PATH", join(dir, "catalog.json"));
+    vi.stubEnv("CLANKIE_DISABLE_MODELS_FETCH", "1");
+    await writeFile(join(dir, "catalog.json"), "{}");
+    const repoConfig = (baseURL: string) =>
+      writeFile(
+        join(dir, ".clankie.json"),
+        JSON.stringify({
+          provider: {
+            repo: {
+              name: "Repo",
+              npm: "@ai-sdk/openai-compatible",
+              options: { baseURL },
+              models: { served: { limit: { context: 64_000, output: 512 } } },
+            },
+          },
+        }),
+      );
+    const booted = "http://127.0.0.1:9/booted/v1";
+    const edited = "http://127.0.0.1:9/edited/v1";
+    await repoConfig(booted);
+    await setCaptainModel("repo/served");
+    const captain = await createCaptainModelRuntime(dir);
+    expect((await captain.resolveSelection()).model.baseUrl).toBe(booted);
+
+    await repoConfig(edited);
+    expect((await captain.resolveSelection()).model.baseUrl).toBe(booted);
+
+    // An owner change registers live, and must not carry the repository's edit in with it.
+    const ollama = await stubRuntime([{ id: "qwen3:8b" }]);
+    await declareLocalProvider({
+      providerId: "ollama",
+      baseURL: ollama.baseURL,
+      models: [{ id: "qwen3:8b" }],
+    });
+    expect((await captain.resolveSelection()).model.baseUrl).toBe(booted);
+    await setCaptainModel("ollama/qwen3:8b");
+    expect((await captain.resolveSelection()).model.baseUrl).toBe(ollama.baseURL);
+    await setCaptainModel("repo/served");
+    expect((await captain.resolveSelection()).model.baseUrl).toBe(booted);
+
+    const restarted = await createCaptainModelRuntime(dir);
+    expect((await restarted.resolveSelection()).model.baseUrl).toBe(edited);
   });
 });
