@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { z } from "zod";
 import { logger } from "../app/log.ts";
 import type { OperatorConversationServiceResult } from "@clankie/protocol";
+import type { WorkerNotify } from "@clankie/protocol/connector";
+import type { StartFinishedEvent } from "../lead-wakes.ts";
 
 type StartResult = Extract<OperatorConversationServiceResult, { op: "start_agent" }>;
 type Start = {
@@ -37,15 +39,24 @@ const ReceiptsSchema = z.strictObject({
  * Service-owned starts outlive HTTP requests. Status reads never dispatch a hire or brief.
  * Receipts outlive the service too (#735), so a restart can't turn a finished hire into an
  * unavailable receipt; the brief itself is never kept, so nothing can be replayed from here.
+ * A start that answered pending tells its notify lead how it settled (#725).
  */
 export class ConnectorStarts {
   private readonly starts = new Map<string, Start>();
   private readonly path: string | undefined;
   private readonly hired: (seatId: string) => boolean;
+  private readonly finished: ((notify: WorkerNotify, event: StartFinishedEvent) => void) | undefined;
 
-  public constructor(options: { path?: string; hired?: (seatId: string) => boolean } = {}) {
+  public constructor(
+    options: {
+      path?: string;
+      hired?: (seatId: string) => boolean;
+      finished?: (notify: WorkerNotify, event: StartFinishedEvent) => void;
+    } = {},
+  ) {
     this.path = options.path;
     this.hired = options.hired ?? (() => false);
+    this.finished = options.finished;
     if (this.path === undefined || !existsSync(this.path)) return;
     try {
       for (const { startId, caller, paneId, result } of ReceiptsSchema.parse(
@@ -172,6 +183,7 @@ export class ConnectorStarts {
   public async start(
     caller: string,
     run: (pane: (id: string) => void) => Promise<StartResult>,
+    notify?: WorkerNotify,
   ): Promise<StartResult> {
     // Bound retained status without evicting a start still delivering its brief.
     if (this.starts.size >= 256) {
@@ -255,8 +267,25 @@ export class ConnectorStarts {
       timer = setTimeout(resolve, 5_000);
     });
     try {
-      const result = await Promise.race([done, pane, budget]);
-      return result ?? this.read(startId, caller);
+      const result = (await Promise.race([done, pane, budget])) ?? this.read(startId, caller);
+      // A caller holding a pending receipt would otherwise poll it; one that has the
+      // outcome already needs no wake.
+      if (result.status === "pending" && notify !== undefined && this.finished !== undefined) {
+        const finished = this.finished;
+        void done.then((settled) =>
+          finished(notify, {
+            startId,
+            ref: notify.ref,
+            outcome: settled.status === "started" ? "started" : "refused",
+            ...(settled.seatId === undefined ? {} : { agent: `herdr:${settled.seatId}` }),
+            ...(settled.status === "started" || settled.detail === undefined
+              ? {}
+              : { reason: settled.detail }),
+            at: new Date().toISOString(),
+          }),
+        );
+      }
+      return result;
     } finally {
       clearTimeout(timer);
     }

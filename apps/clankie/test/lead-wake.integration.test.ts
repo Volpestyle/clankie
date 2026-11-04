@@ -287,6 +287,7 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
     // A hire may answer pending with its receipt; reading the receipt never repeats the hire.
     let hired = JSON.parse(textOf(hire)) as { status: string; startId?: string; agent?: string };
     expect(hired.agent).toBe("herdr:term_report");
+    const answeredPending = hired.status === "pending";
     await expect
       .poll(async () => {
         if (hired.status === "pending")
@@ -298,6 +299,22 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
       .toBe("started");
     const agent = hired.agent;
     expect(agent).toBe("herdr:term_report");
+    // A hire that answered pending wakes its lead once it settles, so the lead needn't poll (#725).
+    const startWakes = () => received.filter((fire) => fire.body.kind === "start_finished");
+    await expect.poll(() => startWakes().length).toBe(answeredPending ? 1 : 0);
+    if (answeredPending) {
+      const [finished] = startWakes();
+      expect(finished).toMatchObject({
+        authorization: `Bearer ${key}`,
+        body: { kind: "start_finished", lead: "duet", from: "clankie" },
+      });
+      expect(finished!.body.text).toContain(
+        `start=${hired.startId} ref=thread:proof-250 outcome=started agent=${agent} time=`,
+      );
+      expect(JSON.stringify(finished)).not.toContain("Report the result.");
+      // The report wakes below count from here.
+      received.splice(received.indexOf(finished!), 1);
+    }
     const journal = await readFile(join(root, "herdr-watches.json.owners.json"), "utf8");
     expect(journal).toContain('"deviceId"');
     expect(journal).toContain("thread:proof-250");
