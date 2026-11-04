@@ -1541,30 +1541,40 @@ is needed; a hired worker's backend may share the service's process lifetime.
 New service processes clear inherited pnpm lifecycle and Pi session markers, so
 a restart launched from a running package script starts a fresh lifecycle.
 
-For CPU attribution on the next planned service start, set
-`CLANKIE_CPU_PROFILE_DIR` in that launcher's environment. For example, when a
-restart is already planned:
+<a id="cpu-profile"></a>
+
+### `cpu-profile [status]` / `cpu-profile on DIRECTORY` / `cpu-profile off`
+
+For CPU attribution, turn the service's profiler on:
 
 ```sh
-CLANKIE_CPU_PROFILE_DIR="$PWD/.local/cpu-profiles" clankie restart clankie
+clankie cpu-profile on "$PWD/.local/cpu-profiles"
 ```
 
-The directory is created if absent; relative paths resolve against the runtime
-checkout or install root. Only the Clankie service receives Node's `--cpu-prof`
-flags, checkout or release alike; the launcher's fleet proof build, bridges and
-launcher helpers are unaffected.
-Existing `NODE_OPTIONS` remain intact. Profiling is off when the variable is
-unset or empty and opens no inspector port. Node writes a uniquely named
-`.cpuprofile` there when the service exits normally, including its graceful
-SIGTERM shutdown; forced termination may leave no profile. Read it in Chrome
-DevTools or another CPU profile viewer. Keep profiles private because stacks and
-paths can contain owner context.
+It applies at the service's next start and stays on across every `clankie
+restart`, `clankie update` and recovery until `clankie cpu-profile off`. It never
+restarts anything itself, so no extra restart is needed to prepare it. A relative
+directory resolves against where you run the command, and is created if absent.
 
-This variable does not instrument an already running service. Prefixing
-`clankie update` with it does not forward it into the live service's update
-helper: the environment must reach the actual launcher that starts the next
-runtime. Arrange it with the operator for the next planned deployment; no extra
-restart is required merely to prepare the setting.
+`cpu-profile status`, and `cpuProfile` in `clankie status`, report `running` and
+`directory` from the running service's own command line, plus `configured`, what
+later starts will use. `running` is null when a service is up that the launcher
+did not start, so it has no process to read. Until `directory` and `configured`
+agree, `cpu-profile` also reports `appliesAt`.
+
+Only the Clankie service receives Node's `--cpu-prof` flags, checkout or release
+alike; the launcher's fleet proof build, bridges and launcher helpers are
+unaffected. Existing `NODE_OPTIONS` remain intact, and no inspector port opens.
+Node writes a uniquely named `.cpuprofile` there when the service exits normally,
+including its graceful SIGTERM shutdown, so a restart leaves one behind; forced
+termination may leave none. Read it in Chrome DevTools or another CPU profile
+viewer. Keep profiles private because stacks and paths can contain owner context.
+
+For a single start, set `CLANKIE_CPU_PROFILE_DIR` in the environment of the
+launcher that starts the service. It wins over the setting for that start only,
+and a relative path resolves against the runtime checkout or install root.
+Prefixing `clankie update` with it does not reach the live service's update
+helper; use the setting for that.
 
 ### `start [service]` / `stop [service]`
 

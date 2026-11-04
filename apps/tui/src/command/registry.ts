@@ -257,6 +257,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["cpu-profile"],
+    lines: [
+      "  cpu-profile [status]     Whether the service is profiling, and where its profile goes",
+      "  cpu-profile on DIRECTORY | off",
+      "                           Keep the service's CPU profiler on across restarts, or stop",
+    ],
+  },
+  {
     nouns: ["awake"],
     lines: [
       "  awake [status|on|off]    Keep this Mac awake while plugged in (launcher-supervised caffeinate; JSON)",

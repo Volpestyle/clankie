@@ -75,12 +75,14 @@ export type RelaySettings = z.infer<typeof RelaySettingsSchema>;
  * the default, which is on for a self-hosted Mac (owner decision, 2026-10-17,
  * VUH-2393); a stored `true` or `false` is the owner's choice and is kept.
  * `autoUpdate` lets a self-run hosted body install official releases while idle
- * (ADR 0237); managed bodies always do.
+ * (ADR 0237); managed bodies always do. `cpuProfileDir` keeps the service's CPU
+ * profiler on across restarts, writing there, until the owner turns it off.
  */
 export const HostSettingsSchema = z
   .object({
     keepAwake: z.boolean().optional(),
     autoUpdate: z.boolean().default(true),
+    cpuProfileDir: z.string().min(1).max(1024).optional(),
   })
   .strict();
 export type HostSettings = z.infer<typeof HostSettingsSchema>;

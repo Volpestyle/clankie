@@ -199,6 +199,7 @@ and render original Clankie. This does not change World/chat lead art.
 | Share diagnostics (account default; per-device override) | ops `/fleet/v1/settings/diagnostics`; device override | —                    | —    | ✓ device override | ✓ account default     | Single: account default lives on the account |
 | Support access grants                                    | `/v1/support/grants`                                  | ✓                    | ✓    | ✓ Support         | ✓                     | Advanced                                     |
 | Browser session recording, desktop quiet hours           | none                                                  | file                 | file | —                 | —                     | Advanced                                     |
+| Service CPU profiling                                    | none                                                  | ✓ `cpu-profile`      | —    | —                 | —                     | Advanced                                     |
 
 ### 10. Play
 
