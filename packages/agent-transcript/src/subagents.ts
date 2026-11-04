@@ -1112,18 +1112,21 @@ async function codexChildrenAsync(
       .reverse()
       .slice(0, MAX_CALLS),
   ].sort();
-  const stamps = relevant.map((path) => {
-    // Adjacent date directories usually do not exist. Check without creating
-    // an async ENOENT for each parent on every roster read; keep lstat's
-    // symlink identity in the fingerprint when the entry does exist.
-    let stats: Stats | undefined;
-    try {
-      stats = lstatSync(path, { throwIfNoEntry: false });
-    } catch {
-      // An unreadable entry still invalidates discovery, as the async probe did.
-    }
-    return `${path}:${stats === undefined ? "missing" : fingerprint(stats)}`;
-  });
+  const knownDirectories = index.directories;
+  const stamps = await Promise.all(
+    relevant.map(async (path) => {
+      // Adjacent date directories usually do not exist. Probe those without
+      // constructing an async ENOENT per parent; keep known directories async
+      // and lstat's symlink identity for every entry that does exist.
+      let stats: Stats | undefined;
+      try {
+        stats = knownDirectories.has(path) ? await lstat(path) : lstatSync(path, { throwIfNoEntry: false });
+      } catch {
+        // Unreadable or concurrently removed entries retain the missing stamp.
+      }
+      return `${path}:${stats === undefined ? "missing" : fingerprint(stats)}`;
+    }),
+  );
   const current = `${fingerprint(parentStats)}\n${stamps.join("\n")}`;
   const now = Date.now();
   const fresh =
