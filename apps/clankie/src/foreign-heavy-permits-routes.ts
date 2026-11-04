@@ -32,6 +32,7 @@ export function createForeignHeavyPermitsRoutes(
   app.post(FOREIGN_HEAVY_PERMITS_PATH, bodyLimit({ maxSize: 512 }), async (context) => {
     if (!permits) return context.json({ error: "fleet_resources_unavailable" }, 503);
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
+    // allow-swallowed-rejection -- a body that is not JSON is malformed, answered 400 below.
     const input = UpdateForeignHeavyPermitsSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     let updated: ClankieSettings;

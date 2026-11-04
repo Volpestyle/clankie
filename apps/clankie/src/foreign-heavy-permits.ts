@@ -97,7 +97,12 @@ export function createForeignHeavyPermits(options: {
     for (const socket of sockets) socket.end();
     for (const socket of sockets) socket.destroy();
     if (closing) await new Promise<void>((resolve) => closing.close(() => resolve()));
-    await removeOwnSocket(socketPath).catch(() => undefined);
+    await removeOwnSocket(socketPath).catch((error: unknown) =>
+      logger.warn(
+        { event: "foreign_permits.socket_cleanup_failed", err: error },
+        "Foreign permit socket not removed",
+      ),
+    );
   }
 
   async function start(next: ForeignHeavyPermitsSettings): Promise<void> {
@@ -121,6 +126,7 @@ export function createForeignHeavyPermits(options: {
       await chmodNoFollow(socketPath, "0702");
     } catch (error) {
       await new Promise<void>((resolve) => listening.close(() => resolve()));
+      // allow-swallowed-rejection -- the setup error rethrown below is the failure to report; stop() retries the removal.
       await removeOwnSocket(socketPath).catch(() => undefined);
       throw error;
     }

@@ -2844,7 +2844,14 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   playAbort.abort(signal);
   hostPower.stop();
   stopDeployHoldExpiry();
-  void foreignHeavyPermits?.close().catch(() => undefined);
+  void foreignHeavyPermits
+    ?.close()
+    .catch((error: unknown) =>
+      logger.warn(
+        { event: "foreign_permits.close_failed", err: error },
+        "Foreign heavy permits did not close",
+      ),
+    );
   void fleetResources
     .close()
     .catch(() =>
