@@ -33,6 +33,7 @@ export function createMaximumTrustModeRoutes(
     return {
       schemaVersion: 1,
       enabled,
+      seatsScope: "local",
       ...(seats === undefined
         ? {}
         : { seatsOnOtherMode: seats.filter((seat) => seat.maximumTrust !== enabled).slice(0, 256) }),

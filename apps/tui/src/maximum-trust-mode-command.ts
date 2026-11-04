@@ -11,6 +11,7 @@ function describeMaximumTrustMode(result: MaximumTrustModeResult): string {
   return [
     `${MAXIMUM_TRUST_MODE_WORDING.title}: ${onOff(result.enabled)}. ${result.description}`,
     ...(result.warning === undefined ? [] : [`Warning: ${result.warning}`]),
+    `Live seat status: this machine only; remote machines are not listed${result.seatsOnOtherMode === undefined ? "; local observation unavailable" : ""}.`,
     ...(seats.length === 0
       ? []
       : [

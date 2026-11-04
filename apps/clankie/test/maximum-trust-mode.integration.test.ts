@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { runMaximumTrustModeCommand } from "../../tui/src/command/maximum-trust-mode.ts";
 import { SettingsStore } from "@clankie/settings";
 import { MAXIMUM_TRUST_MODE_PATH, MaximumTrustModeSnapshotSchema } from "@clankie/protocol/owner-settings";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
@@ -84,6 +85,7 @@ it("names the live seats still on the other mode after a switch", async () => {
           )
         ).json(),
       );
+    expect((await post(true)).seatsScope).toBe("local");
     expect((await post(true)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_lead"]);
     expect((await post(false)).seatsOnOtherMode?.map((seat) => seat.seatId)).toEqual(["term_kh2"]);
   } finally {
@@ -135,4 +137,26 @@ it("reads a seat's launch mode from the flags Herdr reports for its pane", async
       runCommand: async () => ({ stdout: processInfo(claude).replace("w47:p2D", "w1:p1"), stderr: "" }),
     }),
   ).toBeUndefined();
+});
+
+it("the owner API and CLI name local-only coverage even when observation is unavailable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "maximum-trust-status-"));
+  try {
+    const settings = new SettingsStore(join(root, "settings.json"));
+    const app = createMaximumTrustModeRoutes(async () => true, settings);
+    const result = await runMaximumTrustModeCommand(["status"], {
+      ownerFetcher: { fetch: (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)) },
+    });
+    expect(result).toEqual({
+      ok: true,
+      enabled: false,
+      seatsScope: "local",
+      description:
+        "Off: Clankie adds no bypass override; each coding agent keeps its own permission behavior.",
+    });
+    expect(result.seatsOnOtherMode).toBeUndefined();
+    expect((await settings.load()).maximumTrustMode).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
