@@ -39,18 +39,20 @@ def cpu_reader():
             _fields_ = [("start", ctypes.c_byte * 16), ("vmspace", ctypes.c_void_p),
                         ("sigacts", ctypes.c_void_p), ("flags", ctypes.c_int),
                         ("status", ctypes.c_byte), ("pid", ctypes.c_int)]
-        def zombie(pid):
+        def exiting(pid):
             if ctypes.sizeof(ctypes.c_void_p) != 8 or ProcStatus.status.offset != 36:
                 return False
-            # libproc excludes zombies, but kern.proc.pid includes them. Never
-            # turn a failed query or a PID race into an exit/ownership proof.
+            # libproc refuses a process from the moment it starts exiting and
+            # excludes zombies, but kern.proc.pid still reports both: P_WEXIT
+            # from exit1() on, then SZOMB. Neither runs user code again (#364).
+            # Never turn a failed query or a PID race into an exit proof.
             mib = (ctypes.c_int * 4)(1, 14, 1, pid)  # CTL_KERN/KERN_PROC/PID
             data = ctypes.create_string_buffer(4096)
             size = ctypes.c_size_t(ctypes.sizeof(data))
             if system.sysctl(mib, 4, data, ctypes.byref(size), None, 0) or size.value < ctypes.sizeof(ProcStatus):
                 return False
             status = ProcStatus.from_buffer(data)
-            return status.pid == pid and status.status == 5  # SZOMB
+            return status.pid == pid and (status.status == 5 or bool(status.flags & 0x2000))  # SZOMB, P_WEXIT
         class Timebase(ctypes.Structure):
             _fields_ = [("numer", ctypes.c_uint32), ("denom", ctypes.c_uint32)]
         timebase = Timebase()
@@ -67,7 +69,7 @@ def cpu_reader():
             if library.proc_pid_rusage(pid, 2, ctypes.byref(usage)):
                 raise RuntimeError("Server CPU observation unavailable")
             return (usage.user + usage.system + usage.child_user + usage.child_system) * timebase.numer / timebase.denom / 1e9
-        return members, cpu, zombie
+        return members, cpu, exiting
     if sys.platform.startswith("linux"):
         ticks = os.sysconf("SC_CLK_TCK")
         def fields(pid):
@@ -96,7 +98,7 @@ def cpu_reader():
 def wait(child, runner, cores, identity, born_since, signal_bound, reader, status_path):
     if not 0 < cores <= 64:
         raise RuntimeError("Invalid server CPU budget")
-    members, cpu, zombie = reader
+    members, cpu, exiting = reader
     previous = {}
     stopped = {}
     balance = 0.0
@@ -130,7 +132,9 @@ def wait(child, runner, cores, identity, born_since, signal_bound, reader, statu
         try:
             return identity(pid)
         except RuntimeError:
-            if zombie(pid):
+            # Only a kernel exit proof skips an unreadable member; anything
+            # else stays unknown and degrades enforcement.
+            if exiting(pid):
                 return None
             raise
     def record_degraded():
