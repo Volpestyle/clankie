@@ -380,3 +380,23 @@ it("the CLI installs with the operator credential, asking the owner to approve, 
   });
   expect(told).toEqual(["Downloading the installer…", "Installing 9.9.9", "codex installed"]);
 });
+
+it("keeps the installer's output in the order it wrote it, even when the service is busy", async () => {
+  const f = await fixture();
+  const started = await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control, { harness: "codex" });
+  expect(started.status).toBe(202);
+  // Busy here, the service reads nothing while the installer writes to stdout and
+  // stderr. The first read then finds everything already written.
+  const until = Date.now() + 1_500;
+  while (Date.now() < until);
+  let read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+  for (let attempt = 0; attempt < 200 && read.ok && read.install.state === "running"; attempt += 1) {
+    await new Promise((done) => setTimeout(done, 25));
+    read = (await f.call(HARNESS_LOGIN_INSTALL_PATH, f.tokens.control)).body;
+  }
+  expect(read.ok && read.install.progress).toEqual([
+    "Downloading the installer…",
+    "Installing 9.9.9",
+    "codex installed",
+  ]);
+});
