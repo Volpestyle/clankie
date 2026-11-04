@@ -91,3 +91,20 @@ outside this change.
 - Expanding `CODEX_SUBSCRIPTION_MODEL_IDS` also expands what the redirect
   captures, so the streamed probe
   (`pnpm --filter @clankie/model-provider codex-probe`) gates both.
+
+## Evidence and limits
+
+The record links no measurement. The decision rests on provider policy and backend
+behaviour as of the 2026-10-02 correction: OpenAI's linked Sign in with ChatGPT
+policy requires paid or hosted offerings to request access, Anthropic's linked
+guidance prohibits third-party Claude.ai login, and the Codex backend answers
+`gpt-5.6` as `gpt-5.6-sol`. The record quotes the narrower context (1.05M →
+272k input) without a linked probe run.
+
+## Revisit when
+
+- OpenAI approves ChatGPT sign-in for hosted use or changes the linked policy.
+- Anthropic's guidance permits third-party applications to offer Claude
+  subscription login.
+- The Codex backend renames a model slug or changes its context window, or
+  `codex-probe` fails for a model in `CODEX_SUBSCRIPTION_MODEL_IDS`.

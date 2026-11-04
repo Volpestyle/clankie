@@ -78,3 +78,18 @@ contracts.
 - Live readiness probes the selected provider's listener and engaged agent.
 - Adding another realtime provider means implementing this shared port once,
   not changing either Discord body.
+
+## Evidence and limits
+
+This record links no measurement. The provider split rests on xAI's linked Speech to
+Speech and streaming Speech to Text contracts as read at ratification: binary
+PCM STT with no model parameter, no documented text-only response modality, and
+no documented OpenAI-style truncation controls. The `grok-voice-think-fast-2.0`
+default carries no recorded comparison.
+
+## Revisit when
+
+- xAI documents a text-only response modality, which would let ElevenLabs pair
+  with Grok.
+- xAI documents truncation controls or a model parameter for streaming STT.
+- xAI changes its STT framing or events, or retires the pinned default model.

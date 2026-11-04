@@ -154,3 +154,16 @@ logged-in profile when it does not.
 - His identity depends on a Google account whose recovery path is his person's
   phone. That is the honest shape of an agent's accounts today, not a property
   of this design.
+
+## Evidence and limits
+
+This record links no measurement. Reaching X through the logged-in profile rests on the
+judgement that its official API costs more than the capability is worth; the
+record keeps no price. Signing up by hand rests on Google, X and YouTube
+prohibiting automated account creation.
+
+## Revisit when
+
+- X's API pricing changes so that reading a timeline is worth paying for.
+- A site offers a sanctioned agent signup or API path that replaces browser
+  signup.

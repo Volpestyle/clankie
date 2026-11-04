@@ -97,3 +97,17 @@ authority from the Activity.
   [activity operating guide](../../apps/discord-activity/README.md); launch and
   voice configuration belong in the
   [bridge operating guide](../../apps/discord-bridge/README.md).
+
+## Evidence and limits
+
+The transport choice rests on the implementation evidence quoted above: a
+FireRed frame compressed to about 3.2 KB and encoded in about 1.68 ms. The
+record links no measurement file. The activity route also
+rests on Discord blocking bot accounts from Go Live video, with no committed
+path to bot video support at ratification.
+
+## Revisit when
+
+- Frames grow, or encoding time approaches the frame interval, so per-frame
+  PNG no longer keeps hardware rate.
+- Discord lets bot accounts publish Go Live video.

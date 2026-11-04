@@ -92,3 +92,13 @@ button over adapting to the game.
   controls and checkpoints this ADR assumed are retired by
   [ADR 0145](0145-the-world-is-the-only-body.md); other harnesses reach the
   world through PokeAgents' own MCP, CLI, and skill.
+
+## Revisit when
+
+- A mind choosing actions without a separate standing objective matches the
+  measured split (about 1.8 accepted actions per new tile and 50%
+  follow-through in the cited run).
+- Repeated runs show scratchpad or frame-upscaling effects larger than
+  run-to-run variance.
+- A coherence metric stops punishing correct adaptation, which would reopen
+  gating runs on it.

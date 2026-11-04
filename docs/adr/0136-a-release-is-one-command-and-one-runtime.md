@@ -227,3 +227,25 @@ holds before updater admission. A waiting or accepted deploy fences new batches;
 interrupted approved requests recover once with remote-ref reconciliation and a
 lead notice. The hold registry and canary behavior stay shared. The integration
 contract and rationale are amended in [ADR 0240](0240-changes-land-directly-on-main.md#integration-batches-protect-their-own-runtime-vuh-2534-2026-10-20).
+
+## Evidence and limits
+
+The [passive investigation](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-05-health-latency/README.md)
+records the idle fetch pool delaying dispatch by roughly 500 ms while the
+handler stayed below 1 ms. The CPU and pressure amendments quote canary
+history without a linked archive: the 10% CPU budget failed every canary from
+`72c1571a` to `c72c3d02` at 13–21% mean CPU with health p95 under 30 ms, and on
+2026-10-16 a runtime with 20–40% CPU and about 1 ms health stayed pending for
+nearly two hours with 0 samples. This record retains no measurement behind the
+250 ms health budget itself.
+
+## Revisit when
+
+- Health p95 on healthy runtimes approaches the 250 ms budget, or a healthy
+  update fails its canary on latency alone.
+- A CPU regression reaches the owner that the advisory CPU figure showed but
+  the canary passed.
+- Pressure extensions often reach their one-hour bound on runtimes that later
+  prove healthy.
+- The installed Node client changes its idle connection behaviour, so fresh
+  probe connections are no longer needed.

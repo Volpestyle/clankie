@@ -105,3 +105,17 @@ fetching images for up to fifty prior messages on every turn.
 - Egress from the service includes the Discord CDN and image proxy. This is a
   network dependency on the turn path, bounded by the allowlist and timeout
   above, and it is the reason the fetch lives in exactly one auditable module.
+
+## Evidence and limits
+
+The record cites no measurement. Sampling video into PNG frames rests on the captain
+model accepting images rather than video at ratification. The image types are
+the stated intersection of what Discord serves and what vision models accept.
+
+## Revisit when
+
+- The selected captain models accept video input directly.
+- Vision models in use accept more media types or larger images than the
+  current intersection.
+- Discord changes its per-message attachment limit or the media types its CDN
+  serves.

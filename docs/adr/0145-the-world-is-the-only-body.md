@@ -108,3 +108,20 @@ continues to use PokeAgents' own player/session authority.
 - Coverage moved rather than shrank: the local round-trip suite is superseded
   by the hosted one in `apps/clankie/test/play-world.test.ts`, which runs the
   whole loop against a fake world body.
+
+## Evidence and limits
+
+The decision cites the journals and logs on disk at ratification: all eleven
+journals carrying body provenance, 2026-08-17 through 2026-08-19, record
+`body: "world"`; the local checkpoint store last wrote on 2026-08-15; and the
+service log held no `embodiment boot refused` or `environment_unavailable`
+line. It also rests on PokeAgents hosting real GBA cores and, with
+`WORLD_PERSIST_PROGRESS=1`, persisting the cartridge save with exact volatile
+state. No snapshot of those journals is linked.
+
+## Revisit when
+
+- A local PokeAgents world cannot be started for solo play, so play requests
+  routinely refuse `world_unreachable`.
+- PokeAgents stops persisting exact volatile state, or a supported game needs a
+  body the world does not host.

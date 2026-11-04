@@ -162,3 +162,16 @@ Observation neither accepts input nor implies control authority.
 - One service process owns at most 64 active native observer sessions. If real
   use reaches that ceiling, observer sharing or admission by device replaces
   the current per-surface model.
+
+## Evidence and limits
+
+This record links no measurement. The design rests on Herdr 0.8.x behaviour read at
+ratification: `terminal session observe` emits NDJSON with a full ANSI redraw
+then monotonic base64 diffs, and a recent read is bounded to 1,000 rows. The
+64-observer ceiling is a chosen bound, not a measured one.
+
+## Revisit when
+
+- Herdr changes the `terminal session observe` frame format or its read row
+  bound.
+- Real use reaches 64 active observer sessions.
