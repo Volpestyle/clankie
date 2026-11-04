@@ -140,12 +140,42 @@ export async function storeClankieAccountSignIn<
   const { credential, credentials, email, gatewayUrl, settings } = input;
   const current = (await settings.load()).publicGateway;
   const installationId = current.installationId ?? generatePublicGatewayInstallationId();
-  await credentials.set(
-    CLANKIE_ACCOUNT_PROVIDER_ID,
-    email === undefined ? credential : { ...credential, metadata: { ...credential.metadata, email } },
+  // The emailed code is spent by now, so outwait any live holder of the lock
+  // rather than send the owner back for another code (#791).
+  const deadline = Date.now() + SIGN_IN_STORE_PATIENCE_MS;
+  await pastLiveLock(deadline, () =>
+    credentials.set(
+      CLANKIE_ACCOUNT_PROVIDER_ID,
+      email === undefined ? credential : { ...credential, metadata: { ...credential.metadata, email } },
+    ),
   );
-  await credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
+  await pastLiveLock(deadline, () => credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID));
   await settings.update((next) => ({ ...next, publicGateway: { url: gatewayUrl, installationId } }));
+}
+
+/**
+ * One lock attempt gives up after about 26 seconds, but a refresh holds the
+ * credential lock across its network recovery (REFRESH_RECOVERY_WINDOW_MS plus
+ * discovery), and a dead holder's lock only goes stale after 60 seconds. This
+ * outlasts both.
+ */
+const SIGN_IN_STORE_PATIENCE_MS = 2 * 60_000;
+
+async function pastLiveLock<T>(deadline: number, write: () => Promise<T>): Promise<T> {
+  for (;;) {
+    try {
+      return await write();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ELOCKED") throw error;
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "Signed in, but this Mac's credential store stayed busy, so the sign-in was not saved. Sign in again.",
+          { cause: error },
+        );
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
 }
 
 export function generatePublicGatewayInstallationId(): string {

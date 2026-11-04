@@ -10136,7 +10136,9 @@ clankie remote-access off
 `login` is the one account sign-in (email code). It signs **this Mac** in for
 remote access, which is also how a signed-out Mac signs back in; restart the
 captain afterwards (the JSON output says so). Headless sign-in needs
-`--email EMAIL --code-stdin`. `--url ORIGIN` selects a compatible deployment
+`--email EMAIL --code-stdin`. If the running service is refreshing the account token
+when the code is accepted, sign-in waits up to two minutes to save; if it still
+cannot, it says nothing was saved and exits non-zero. `--url ORIGIN` selects a compatible deployment
 (HTTPS, or loopback HTTP for development). Account credentials exist only
 during login; the broker keeps the doorway's host credential and encryption
 material. `whoami` always reports **This Mac**. `logout` and `disconnect` change

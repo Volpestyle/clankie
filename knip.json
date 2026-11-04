@@ -159,7 +159,8 @@
         "bin/runtime-update-helper.mjs",
         "bin/release-update-helper.ts",
         "bin/mac-app-install.ts",
-        "bin/remote-lead-mcp.ts"
+        "bin/remote-lead-mcp.ts",
+        "test/fixtures/account-refresh.ts"
       ]
     },
     "packages/vec3": {
