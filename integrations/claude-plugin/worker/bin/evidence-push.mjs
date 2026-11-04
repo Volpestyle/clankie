@@ -48,6 +48,21 @@ const RAW_TYPES = {
 };
 const SHA256 = /^[0-9a-f]{64}$/u;
 
+/** Only the service's public failure fields cross into a worker's receipt. */
+class EvidenceHttpError extends Error {
+  constructor(what, response, body) {
+    const error = typeof body?.error === "string" ? body.error : `HTTP ${response.status}`;
+    const observation = typeof body?.observation === "string" ? body.observation : undefined;
+    super(`${what} failed: ${error}${observation === undefined ? "" : ` (${observation})`}`);
+    this.failure = {
+      status: response.status,
+      error,
+      ...(observation === undefined ? {} : { observation }),
+      ...(typeof body?.retryable === "boolean" ? { retryable: body.retryable } : {}),
+    };
+  }
+}
+
 const execFileAsync = promisify(execFile);
 
 async function git(cwd, args) {
@@ -335,7 +350,11 @@ export async function pushEvidence(input, { cwd = process.cwd(), client, issueKe
       entries.set(path, { path, size: candidate.size, sha256, url });
       pushed.push({ file: candidate.file, path, sha256 });
     } catch (error) {
-      failures.push({ path, reason: error instanceof Error ? error.message : String(error) });
+      failures.push({
+        path,
+        reason: error instanceof Error ? error.message : String(error),
+        ...(error instanceof EvidenceHttpError ? error.failure : {}),
+      });
     }
   }
 
@@ -462,7 +481,16 @@ export async function callEvidencePush(args, client) {
       },
       { cwd: dirname(args.path), client },
     );
-    return text(result, !result.ok);
+    return text(
+      result.ok
+        ? result
+        : {
+            ...result,
+            // The MCP display summary reads detail; failures alone rendered "Tool: failed.".
+            detail: result.failures.map(({ path, reason }) => `${reason} (${path})`).join("\n"),
+          },
+      !result.ok,
+    );
   } catch (error) {
     return text(error instanceof Error ? error.message : String(error), true);
   }
@@ -486,8 +514,7 @@ export function linkEvidenceClient({ origin, request, headers = {}, fetchImpl = 
       body = undefined;
     }
     if (!response.ok) {
-      const code = typeof body?.error === "string" ? body.error : `HTTP ${String(response.status)}`;
-      throw new Error(`${what} failed: ${code}`);
+      throw new EvidenceHttpError(what, response, body);
     }
     return body;
   };
@@ -530,9 +557,7 @@ export function linkEvidenceClient({ origin, request, headers = {}, fetchImpl = 
         body = undefined;
       }
       if (response.status !== 200 && response.status !== 422)
-        throw new Error(
-          `Blob upload failed: ${typeof body?.error === "string" ? body.error : `HTTP ${response.status}`}`,
-        );
+        throw new EvidenceHttpError("Blob upload", response, body);
       return evidenceReceiptOf(body, body?.sha256);
     },
   };

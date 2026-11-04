@@ -143,6 +143,11 @@ evidence gaps, logs or review records ([ADR 0299](../../../docs/adr/0299-the-own
    printed `clankie://evidence/sha256/...` links. A tracker upload may display a
    screenshot, but the evidence-store copy is the record ([ADR 0258](../../../docs/adr/0258-evidence-lives-in-the-evidence-store.md)). Listing, key inference
    and backfill: `docs/cli.md` under `evidence push|fetch`.
+   `evidence_push` failures retain each file's cause and public HTTP admission
+   observation. If fleet admission is unavailable, resolve that cause and keep
+   the same path, issue and caption when recovering; a refused receipt lookup
+   does not prove the earlier upload failed. The installed operator CLI uses a
+   different authorization path, so its success does not prove worker admission.
    Local storage remains the default. Self-hosted S3 keeps its SDK credential
    chain. Managed evidence has only a default-off scoped broker/provider seam;
    its private injected issuer is unmounted, with no production transport or
