@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { globSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { bundledSkills } from "@clankie/settings";
@@ -23,6 +23,7 @@ import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { writeResumeRecord } from "./seat-record.ts";
 import { bindLaunchedHarness, mintBridgeNonce, type SeatBinding } from "./seat-binding.ts";
 import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol/owner-settings";
 import { readSeatMaximumTrust, type SeatCommandOptions, type SeatPlan } from "./seat.ts";
@@ -171,9 +172,9 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
   let pump: Promise<void> | undefined;
   let transcriptPump: Promise<void> | undefined;
   let active = true;
+  let holdsRecord = flags.newConversation !== true;
   const persist = async () => {
-    await mkdir(join(recordPath(env), ".."), { recursive: true, mode: 0o700 });
-    await writeFile(
+    holdsRecord = writeResumeRecord(
       recordPath(env),
       JSON.stringify({
         sessionId: plan.sessionId,
@@ -182,7 +183,7 @@ export async function runGrokSeat(flags: Flags, options: SeatCommandOptions): Pr
         grokHome: plan.grokHome,
         active,
       } satisfies Record),
-      { mode: 0o600 },
+      !holdsRecord,
     );
   };
   try {

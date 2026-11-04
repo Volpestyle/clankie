@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bundledSkills } from "@clankie/settings";
 import { resolveOperatorCredential } from "@clankie/credential-broker";
@@ -17,6 +17,7 @@ import { commandHost, outputJson } from "./io.ts";
 import { fetchLaneText } from "./prompt.ts";
 import { connectLaneUpstream, pumpSeatEvents } from "./mcp.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { writeResumeRecord } from "./seat-record.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
 
 /**
@@ -171,9 +172,9 @@ export async function runPrimeSeat(flags: Flags, options: SeatCommandOptions): P
   let pump: Promise<void> | undefined;
   let transcriptPump: Promise<void> | undefined;
   let record: Record | undefined;
+  let holdsRecord = flags.newConversation !== true;
   const persist = async () => {
-    await mkdir(join(recordPath(env), ".."), { recursive: true, mode: 0o700 });
-    await writeFile(recordPath(env), JSON.stringify(record), { mode: 0o600 });
+    holdsRecord = writeResumeRecord(recordPath(env), JSON.stringify(record), !holdsRecord);
   };
   try {
     const model = plan.model?.split("/");

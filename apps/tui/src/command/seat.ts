@@ -11,7 +11,7 @@ import { bundledSkills, projectSkillPlugin } from "@clankie/settings";
  */
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -26,6 +26,7 @@ import {
 } from "@clankie/protocol/owner-settings";
 import { outputJson, type Writable } from "./io.ts";
 import { ownerSettingsApi } from "./owner-settings-api.ts";
+import { writeResumeRecord } from "./seat-record.ts";
 import { resolveSeatContext, type NewSeatConversation } from "./seat-context.ts";
 import { planExplicitResume } from "./seat-resume.ts";
 import { claudeTrackerDenyRules } from "../../../clankie/src/captain/tracker-isolation.ts";
@@ -315,16 +316,7 @@ function writeSeatRecord(
   command: string,
   keepExisting: boolean,
 ): void {
-  const path = seatRecordPath(env, command);
-  mkdirSync(join(path, ".."), { recursive: true });
-  try {
-    writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, {
-      mode: 0o600,
-      flag: keepExisting ? "wx" : "w",
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  }
+  writeResumeRecord(seatRecordPath(env, command), `${JSON.stringify(record, null, 2)}\n`, keepExisting);
 }
 
 /** Numbered account commands may be aliases or functions in the owner's shell. */
@@ -698,7 +690,6 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
         ...(plan.conversationId === undefined ? {} : { conversationId: plan.conversationId }),
       },
       plan.command,
-      // A `--new` seat fills an empty resume target but never replaces the owner's.
       flags.newConversation === true,
     );
   }

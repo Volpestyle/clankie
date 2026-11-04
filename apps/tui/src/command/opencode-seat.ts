@@ -22,6 +22,7 @@ import {
 } from "./seat-binding.ts";
 import type { SeatCommandOptions, SeatPlan } from "./seat.ts";
 import { resolveSeatContext } from "./seat-context.ts";
+import { writeResumeRecord } from "./seat-record.ts";
 import { releaseAtLeast } from "../../../clankie/src/captain/native-release.ts";
 
 const exec = promisify(execCallback);
@@ -287,15 +288,7 @@ export async function runOpenCodeSeat(flags: Flags, options: SeatCommandOptions)
           cwd: plan.cwd,
           ...(plan.conversationId ? { conversationId: plan.conversationId } : {}),
         });
-        // A `--new` seat fills an empty resume target but never replaces the owner's.
-        try {
-          writeFileSync(recordPath(env), record, {
-            mode: 0o600,
-            flag: flags.newConversation === true ? "wx" : "w",
-          });
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-        }
+        writeResumeRecord(recordPath(env), record, flags.newConversation === true);
         // The original in-flight turn needs fresh context before its own message
         // appears in history. Only inherited claims require bootstrap reconciliation.
         reply(200, {
