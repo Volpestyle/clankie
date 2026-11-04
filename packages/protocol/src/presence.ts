@@ -121,7 +121,7 @@ export const OperatorPresenceSnapshotSchema = z
     beats: z.array(OperatorPresenceBeatSchema).max(2).optional(),
     activities: z.array(OperatorPresenceActivitySchema).max(3).optional(),
     currentActivity: OperatorCurrentActivitySchema.optional(),
-    /** The owner's quiet hours are in effect. Present only on an `includeQuiet` read. */
+    /** The owner's quiet hours are in effect. Present only on an owner's `includeQuiet` read. */
     quiet: z.boolean().optional(),
     /** When they end, present only while `quiet` is true and the end is known. */
     quietUntil: z.string().datetime().optional(),
@@ -143,7 +143,10 @@ export const OperatorPresenceRequestSchema = z
     includeCurrentActivity: z.boolean().optional(),
     /** Include typed tool activity; legacy strict readers receive only speech/questions. */
     includeToolActivity: z.boolean().optional(),
-    /** Opt in to the owner's quiet hours; strict legacy readers receive no new field. */
+    /**
+     * Opt in to the owner's quiet hours. Answered only for the operator or a Take
+     * Control device; any other reader gets presence without the fields, and no error.
+     */
     includeQuiet: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),
   })

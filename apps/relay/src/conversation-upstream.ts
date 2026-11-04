@@ -162,8 +162,8 @@ export function createDeviceConversationDispatch(options: {
     // The owner's own device sets Clankie's switch; reads stay on the relay's route (ADR 0350).
     if (request.op === "lead" && request.command.action !== "set")
       throw new Error("Only the switch itself rides the device's identity");
-    if (request.op === "presence" && request.includeCurrentActivity !== true)
-      throw new Error("Private presence requires the current-activity opt-in");
+    if (request.op === "presence" && request.includeCurrentActivity !== true && request.includeQuiet !== true)
+      throw new Error("Private presence requires a private opt-in");
     // A note is posted only by a connector app on the relay's own route; devices only read.
     if (request.op === "app_notes" && request.action !== "read")
       throw new Error("Only a connector app posts a note");

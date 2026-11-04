@@ -10677,9 +10677,11 @@ A client deciding whether to play an attention-grabbing alert may request
 [quiet hours](#desktop-quiet-hours) are in
 effect, and `quietUntil` while quiet. `quietUntil` is omitted if its end can't be
 found. Both join the cursor, so a parked read wakes within half a second of
-either edge. A device needs no extra grant beyond reading presence, so these
-readers can learn when the owner's quiet hours fall. Legacy requests omit the
-fields and keep their existing cursor. `clankie status` opts in for the owner.
+either edge. Only this machine's operator or the owner's own Take Control device
+receives them, because they show when the owner sleeps. Any other reader,
+including a connector app, a support session or a Supervise device, gets ordinary
+presence with neither field and no error. Legacy requests omit the fields and
+keep their existing cursor. `clankie status` opts in for the owner.
 
 ## Computer body
 
