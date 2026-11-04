@@ -1,8 +1,8 @@
 # Customize Clankie
 
-Make him yours: a name he answers to, a character you enjoy, a voice that
-sounds right, and habits that fit your life. Models and connections can come
-after.
+Choose your leads and connect your services, and shape the built-in lead: a name
+he answers to, a character you enjoy, a voice that sounds right, and habits that
+fit your life.
 
 New installation? Follow [Get started](/get-started/#diy-install-on-your-own-machine).
 Everything here works from the console, and most of it from the [CLI](/cli/)
@@ -199,7 +199,9 @@ separately enabled personal-lab body.
 
 ## Then the plumbing
 
-### Choose his models
+<a id="choose-his-models"></a>
+
+### Choose models
 
 `/setup` asks you to choose Off, Low, High or Full autonomy explicitly, then
 gets the first model working. Then `/model` changes it, `/auth`
@@ -215,9 +217,10 @@ explains provider resolution.
 
 ### Bring your own team
 
-“Implement this feature with Codex and have a second agent review it.” Clankie
-himself runs on [pi](https://pi.dev); his workers can be Claude Code, Codex, Pi,
-OpenCode, or Grok Build. Install and sign in to the ones you want on the machine
+“Implement this feature with Codex and have a second agent review it.” The
+built-in lead runs on [pi](https://pi.dev); its workers can be Claude Code, Codex,
+Pi, OpenCode, Grok Build, or Prime Agent, within each harness's limits. A connected
+app starts Claude Code or Codex. Install and sign in to the ones you want on the machine
 that runs them. [Herdr](https://herdr.dev) holds their real terminals, and
 Clankie messages them through each harness's own channel, never by typing into
 the pane.
@@ -238,15 +241,38 @@ preference. See the
 [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md)
 for each harness's support and limits.
 
-You can also sit in Clankie's seat from another harness: `clankie claude`,
-`clankie codex`, `clankie opencode`, or `clankie grok` opens that tool as
-Clankie, with his memory and tools ([seat commands](/cli/#seat-commands)).
+### Bring your own lead
+
+A lead doesn't have to be the built-in one.
+
+**Open a seat.** `clankie claude`, `clankie codex`, `clankie opencode`, or
+`clankie grok` opens that tool on your own plan, with the built-in lead's memory
+and tools ([seat commands](/cli/#seat-commands)).
+
+**Connect an app.** Claude, Claude Code, Codex and Grok connect through one remote
+MCP server. Turn on remote access, run `clankie connector` for the URL, add it in
+the app, and approve the code its sign-in shows with `clankie connector approve
+CODE`. Your machine is the authorization server, so the app signs in to it rather
+than to a Clankie account; remote access is what needs one. Each app is a device
+you can revoke. A connected app can list, read, message, start and close agents,
+work with your issues and leave notes on a shared board. Answering prompts and
+pressing keys are off until you turn them on for that app
+([connector reference](/cli/#connector-status-json-connector-approve-code-connector-deny-code-connector-prompts-on-off-app-connector-detect-on-off-herdr-connector-serve-on-off-app-connector-lead-clankie-apps-connector-wake-list-set-lead-clear-lead-send-lead-text)).
+
+**Wake a lead that waits for jobs.** A lead such as Grok Bot can take work at its
+own webhook: `clankie connector wake set LEAD` stores the address and key, and
+the lead answers on the notes board.
+
+**Hand over the lead.** `clankie connector lead apps` switches the built-in lead
+off: worker traffic waits for the connected apps, and only you can switch it back,
+from the CLI or your own paired device.
 
 ### Connect your services
 
 `/connect` links GitHub, Linear, and Google. Gmail and Calendar are read-only;
 Drive reads only the files you pick. [`clankie accounts`](/cli/#account-setup)
-shows what is connected. His mailbox is his own address, not your inbox. The
+shows what is connected. Mail is an address on your own IMAP/SMTP server, set up
+with `/connect email`, not your inbox. The
 [credential guide](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)
 covers storage and identity.
 
@@ -277,5 +303,5 @@ configuration and authorized tools to scripts and other agents. Start at the
 [reference shelf](/reference/) and the
 [architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md).
 
-The service is Apache-2.0, except the AGPL Discord media executable; the app and
-public gateway are private ([license](https://github.com/Volpestyle/clankie#license)).
+The service and the gateway's source are Apache-2.0, except the AGPL Discord media
+executable; the app and the gateway's deployment are private ([license](https://github.com/Volpestyle/clankie#license)).

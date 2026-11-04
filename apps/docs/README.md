@@ -3,15 +3,14 @@
 This app builds [docs.clankie.bot](https://docs.clankie.bot), the shared field
 guide for people running Clankie on their own machines. The
 [repository README](../../README.md) speaks directly to DIY users. The landing
-page at [clankie.bot](https://clankie.bot) leads with everyday usefulness and
-owns app availability, privacy, and support.
+page at [clankie.bot](https://clankie.bot) owns app availability, privacy, and support.
 
 ## Reader paths and voice
 
-Lead with what a person wants to do: talk, remember, make something, or finish a
-larger job. Technical readers should find models, skills, agent runtimes, and
-APIs quickly. Keep those paths connected without requiring agent terminology
-before the first conversation.
+Lead with the platform: always-on leads you talk to, workers across your machines,
+and a view of the work ([ADR 0354](../../docs/adr/0354-clankie-is-a-platform-for-leads.md)).
+Technical readers should find models, skills, agent runtimes, and APIs quickly.
+The built-in lead's persona belongs on the pages about it.
 
 The visual language comes from Clankie's existing identity: the sprout robot,
 pixel art, garden greens, warm cream and gold, readable serif headings, and
@@ -31,7 +30,7 @@ prices, release channels, or full command catalogs into those guides.
 | `/`               | `site/index.html`, hand-authored                                                                                                                        |
 | `/get-started/`   | `content/get-started.md`: installation, setup and pairing                                                                                               |
 | `/using-clankie/` | `content/using-clankie.md`: everyday use, memory, making things, and the app                                                                            |
-| `/diy/`           | `content/diy.md`: models, skills, agents, integrations, and extension points                                                                            |
+| `/diy/`           | `content/diy.md`: leads, models, skills, agents, integrations, and extension points                                                                     |
 | `/reference/`     | `content/reference.md`: links by task into the canonical library                                                                                        |
 | `/how-it-works/`  | `content/how-it-works.md`, a product-depth digest of [`docs/architecture.md`](../../docs/architecture.md)                                               |
 | `/console/`       | `content/console.md` plus the slash-command literals in `apps/tui/src` and the Workspaces and Operator behavior sections of the TUI README              |

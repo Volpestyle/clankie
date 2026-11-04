@@ -371,5 +371,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0350: The owner switches Clankie on and off from his app](0350-the-owner-switches-clankie-on-and-off-from-his-app.md) — Proposed, 2026-11-03, from James's ask, relayed by his lead, to switch Clankie's own main agent on and off from the Clankie iPhone app and see in the Message Clankie box when he's off.
 - [0351: Clankie proposes a setting change and the owner's tap applies it](0351-clankie-proposes-a-setting-and-the-owner-taps-it.md) — Proposed, 2026-11-03, from James's approval ("Add it") of an "Ask Clankie" row in the app's Settings, relayed by his lead.
 - [0353: Workers raise structured asks in their reports](0353-workers-raise-structured-asks-in-their-reports.md) — Proposed, 2026-11-03, for #604.
+- [0354: Clankie is a platform for leads](0354-clankie-is-a-platform-for-leads.md) — Accepted, 2026-11-03, on James's positioning brief relayed by his lead: Clankie is "no longer a lead agent" but an open-source, self-hosted "super agent" platform.
 
 <!-- adr-index:end -->

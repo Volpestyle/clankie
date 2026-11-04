@@ -53,9 +53,11 @@ redrawn later to match today's system.
 - Every human-read string says **Clankie**, never "captain". Identifiers,
   routes such as `/v1/captain/...`, and `captain.*` event types keep the old
   name; prose around them does not.
-- Lead with Clankie, the persistent agent with a personality. The app is half
-  the product and gets its own first-class section, never a co-equal "two ways
-  in" identity (ADR 0156).
+- Lead with the platform: an open-source, self-hosted super agent platform that
+  runs always-on leads, the workers they hire, and the views that show the work
+  (ADR 0354). The persona belongs to the built-in lead, on the pages about it. The
+  app is half the product and gets its own first-class section, never a co-equal
+  "two ways in" identity (ADR 0156).
 - Retired systems stay out of current-tense prose: missions, the doctrine
   contract, the control plane/runner split, Swarm coordination (ADR 0213), terminal-delivered agent briefs (ADR 0207), the in-repo emulator and mGBA core
   (ADR 0145), and the app's canvas view. ADRs and dated test records may keep

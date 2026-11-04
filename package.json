@@ -2,7 +2,7 @@
   "name": "clankie",
   "version": "0.4.11",
   "private": true,
-  "description": "Clankie: a persistent agent who codes, leads herdr fleets, plays games, and hangs out in Discord.",
+  "description": "Clankie: an open-source, self-hosted super agent platform for always-on leads and the workers they hire.",
   "type": "module",
   "scripts": {
     "build": "turbo run build --filter=@clankie/vox",

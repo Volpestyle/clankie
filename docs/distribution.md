@@ -254,7 +254,7 @@ development lane and is not required by an App Store client.
 
 Public documentation lives in [`apps/docs`](../apps/docs/README.md) and
 deploys to [`docs.clankie.bot`](https://docs.clankie.bot) from `main`: setup,
-how he works, and the console, CLI, HTTP API, and network references rendered
+how it works, and the console, CLI, HTTP API, and network references rendered
 from this repository's canonical files at build time. It links the landing
 site's canonical App Store privacy and support pages. The docs site is separate
 from the Mac release and reuses its existing private S3 and CloudFront hosting.

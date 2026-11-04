@@ -1,16 +1,18 @@
 # Architecture
 
-Clankie is a persistent agent with a personality, implemented as one service
-plus the clients and connections around it. The service owns his built-in pi runtime,
-conversations, Auto, memory, tools, credentials, and authority. The React Native
+Clankie is a self-hosted platform for always-on leads and the workers they hire
+([ADR 0354](adr/0354-clankie-is-a-platform-for-leads.md)), implemented as one
+service plus the clients and connections around it. The service owns the built-in
+lead's pi runtime, conversations, Auto, memory, tools, credentials, and authority. The React Native
 app in the private `clankie-app` repository reaches this service through the
 public gateway in `apps/gateway`, which private `clankie-ops` deploys beside the
 accounts ([ADR 0311](adr/0311-the-doorway-source-is-public.md)). The service runs only on
 machines the owner controls: their Mac, or a Linux host they run themselves
 ([ADR 0300](adr/0300-clankie-runs-only-on-the-owners-machine.md)). The app and
-console are clients of that service; a worker runtime and a work tracker are independent connections.
+console are clients of that service; a connected lead, a worker runtime and a work
+tracker are independent connections.
 
-For a product overview, read [How he works](https://docs.clankie.bot/how-it-works/).
+For a product overview, read [How it works](https://docs.clankie.bot/how-it-works/).
 For source setup and the subsystem map, use [Contributing](../CONTRIBUTING.md)
 and the [library index](README.md). This document owns the current system shape
 and cross-component request flows. Historical diagrams remain in the ADR archive.
@@ -21,6 +23,7 @@ flowchart LR
     App["Clankie app<br/>iPhone · iPad · Mac"]
     Console["TUI / CLI"]
     Head["Optional native head<br/>Claude · Codex seat"]
+    Apps["Connected leads<br/>Claude · Codex · Grok"]
   end
   Gateway["Public gateway<br/>api.clankie.bot"]
   subgraph Host["One host: owner Mac or owner-run Linux"]
@@ -34,6 +37,7 @@ flowchart LR
   App <-->|"encrypted device envelope"| Gateway
   Gateway <-->|"outbound connection the host holds"| Relay
   App <-.->|"optional direct route"| Relay
+  Apps -->|"OAuth + remote MCP"| Gateway
   Relay -->|"granted requests"| Service
   Console --> Service
   Head -->|"clankie mcp: lane tools + channel"| Service
@@ -53,6 +57,27 @@ The [Linux guide](../infra/hosted/README.md) owns that deployment's capability
 set; the [agent-host guide](../packages/agent-hosts/README.md) owns native
 worker support. [ADR 0181](adr/0181-clankie-is-independent-of-his-connections.md)
 records the separation between Clankie and his connections.
+
+## Leads
+
+A lead talks to the owner and hires workers. Several can share a fleet:
+`GET /v1/fleet/leads` lists the built-in lead and each connected app, and none
+outranks another ([ADR 0346](adr/0346-the-fleet-says-who-is-leading.md)).
+
+- The built-in lead runs on pi in the service; a native seat opens another harness
+  on its lane tools ([native operator seats](#native-operator-seats)).
+- A connected app reaches the relay's `/mcp` through the gateway. The host is the
+  OAuth authorization server, and an approved sign-in is a device with
+  `scope: "connector"`
+  ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)). The
+  direct device doorway serves no OAuth route, so the public connector URL needs
+  remote access.
+- A connected lead can be woken at its own webhook
+  ([ADR 0336](adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)).
+- One owner setting says whether the built-in lead takes its own turns or holds them
+  for the connected apps
+  ([ADR 0304](adr/0304-the-owner-hands-the-lead-to-connected-apps.md),
+  [ADR 0350](adr/0350-the-owner-switches-clankie-on-and-off-from-his-app.md)).
 
 ## Support authority
 

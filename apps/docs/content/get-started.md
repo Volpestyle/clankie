@@ -1,14 +1,15 @@
 # Get started
 
-Clankie is an agent lead with a memory and a personality: he plans the work,
-leads a team to do it, and owns it until it lands. Start on your Mac or Linux
-machine with your own agent subscriptions, models and tools. The desktop pet is the front door;
-the TUI, CLI and phone app reach the same lead.
+Clankie is an open-source, self-hosted super agent platform: it runs always-on
+leads on your own machines, and those leads hire coding workers and report back.
+Start on your Mac or Linux machine with your own agent subscriptions, models and
+tools, then add leads and machines as you need them. The console, CLI, desktop
+pet and phone app all reach the same service.
 
-The software and Clankie accounts are free. Clankie leads the agents in your
-Herdr sessions and joins Discord through a bot you make yourself. An account
-adds pairing and phone steering while your Mac is awake. Model providers
-and connected services may charge. Check [clankie.bot](https://clankie.bot) for
+The software and Clankie accounts are free. An account is needed only for the
+public gateway, which lets the app and connected apps reach your machine from
+anywhere while it is awake; on your own network the app pairs with no account.
+Model providers and connected services may charge. Check [clankie.bot](https://clankie.bot) for
 current account signup and app install availability; a source capability does
 not establish that a public install or account signup is open.
 
@@ -24,7 +25,7 @@ curl -fsSL https://clankie.bot/install | sh
 ```
 
 It installs on Apple silicon Macs and on arm64 or x64 Linux. A Windows PC joins
-an existing Clankie as a fleet machine until it can install him itself.
+an existing Clankie as a fleet machine until it can install Clankie itself.
 
 ### macOS
 
@@ -65,8 +66,8 @@ remains available separately.
 ### Windows
 
 The installer doesn't run on Windows yet. A Windows PC joins a Clankie running
-on your Mac or Linux machine as a fleet machine: he reaches it over SSH and hires
-agents into its Herdr sessions.
+on your Mac or Linux machine as a fleet machine: the service reaches it over SSH
+and leads hire agents into its Herdr sessions.
 
 ```sh
 clankie machines add pc --ssh my-pc --shell powershell
@@ -75,25 +76,30 @@ clankie machines add pc --ssh my-pc --shell powershell
 See [machines](/cli/#machines-list-discover-json) for discovery and the access
 each machine gets.
 
-### Set him up
+<a id="set-him-up"></a>
+
+### Set it up
 
 Open a new terminal, run `clankie`, and choose **Run Clankie on this
-computer**. The launcher starts his service and opens the console, and `/setup`
+computer**. The launcher starts the service and opens the console, and `/setup`
 walks you through the rest:
 
 1. **A model.** Connect a subscription, API key, or local provider, then pick a
    model. Sign-ins and keys go into the credential broker. Claude subscriptions
-   aren't offered here: to talk to Clankie on your Claude plan, run
-   `clankie claude`, which opens Claude Code as him under its own sign-in
+   aren't offered here: to lead from your Claude plan, run `clankie claude`,
+   which opens Claude Code as a seat under its own sign-in
    ([seat commands](/cli/#seat-commands)). The model you pick still runs the
-   console, app, Discord and his own work.
+   built-in lead in the console, app and Discord.
 2. **Your phone.** Setup signs this machine in for remote access and shows a
    pairing QR. Install the app, scan it, and accept.
 3. **Services and a first agent.** Connect accounts with `/connect`, then give a
    first agent a folder and a task. Clankie handles the hire.
 
-Run `clankie update` later to move to the latest release; Clankie can update
-himself the same way.
+Run `clankie update` later to move to the latest release; a lead can update the
+install the same way.
+
+To lead from something other than the built-in lead, see
+[bring your own lead](/diy/#bring-your-own-lead).
 
 Everything after the model is optional. Escape or `/cancel` leaves setup;
 `/setup` resumes from the actual device and agent state, and `/setup rooms`
@@ -112,7 +118,7 @@ to run from source.
 1. **Pick a route.** `/remote-access` signs the Mac in with an emailed code so
    the app can reach it from anywhere. `clankie gateway direct` instead
    advertises a route on a network your phone can reach, with no account.
-2. **Keep him running.** `clankie autostart enable` starts him at login. The Mac
+2. **Keep it running.** `clankie autostart enable` starts the service at login. The Mac
    stays awake while plugged in by default; [`clankie awake off`](/cli/#awake)
    lets it sleep.
 3. **Pair.** Run `clankie pair`, then scan the QR or paste the complete secure
@@ -129,24 +135,26 @@ cannot be reached. Pairing does not move your Clankie anywhere.
 
 ## Move your Clankie to another body
 
-`clankie transfer` moves the same Clankie to another body, that you already have access to,
-and back. One body holds him at a time: the old one freezes before anything is
-copied, and it serves only a note saying where he went. His identity, memory,
+`clankie transfer` moves your Clankie to another machine you already have access
+to, and back. One machine holds it at a time: the old one freezes before anything
+is copied, and it serves only a note saying where it went. Identity, memory,
 conversations, projects and tracker move. Credentials, model and harness
 sign-ins and paired devices stay where they are: pair your devices with the
-new body and connect accounts there. Your Mac can then join the new body as a
-machine, so his workers still run on it
+new machine and connect accounts there. Your Mac can then join it as a fleet
+machine, so workers still run on it
 ([ADR 0286](https://github.com/Volpestyle/clankie/blob/main/docs/adr/0286-one-body-holds-clankie-at-a-time.md)).
 
 ## Your first conversation
 
 Try: “Help me turn this idea into a plan, and remember that I prefer short,
-practical answers.” For bigger work, ask him to explain his plan first and show
-you the result.
+practical answers.” For bigger work, ask your lead to explain its plan first and
+show you the result.
 
-Next: [using Clankie](/using-clankie/), or [customize him](/diy/).
+Next: [using Clankie](/using-clankie/), or [customize it](/diy/).
 
-## If you cannot reach him
+<a id="if-you-cannot-reach-him"></a>
+
+## If you cannot reach your machine
 
 | What you see                  | Where to start                                                             |
 | ----------------------------- | -------------------------------------------------------------------------- |

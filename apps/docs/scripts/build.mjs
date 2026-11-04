@@ -43,7 +43,7 @@ const NAV = [
   { href: "/get-started/", label: "Start" },
   { href: "/using-clankie/", label: "Using Clankie", optional: true },
   { href: "/diy/", label: "DIY" },
-  { href: "/how-it-works/", label: "How he works", optional: true },
+  { href: "/how-it-works/", label: "How it works", optional: true },
   { href: "/reference/", label: "Reference" },
   { href: "https://clankie.bot/support/", label: "Support", optional: true },
 ];
@@ -52,19 +52,20 @@ const NAV = [
 const PAGES = [
   {
     path: "/",
-    title: "Clankie field guide",
-    description: "Everyday help, a free setup on your own Mac or Linux machine, and phone pairing.",
+    title: "Clankie docs",
+    description:
+      "The self-hosted super agent platform: always-on leads, workers across your machines, and a view of the work.",
   },
   {
     path: "/get-started/",
     title: "Get started",
-    description: "Install Clankie on your Mac or Linux machine and pair your phone with a free account.",
+    description: "Install Clankie on your Mac or Linux machine and pair your phone.",
   },
   {
     path: "/faq/",
     title: "Questions",
     description:
-      "What Clankie is, whether he is a Discord bot, what he costs, where he runs, and his license.",
+      "What Clankie is, how it differs from a ticket board, what it costs, where it runs, and its license.",
   },
   {
     path: "/using-clankie/",
@@ -84,7 +85,7 @@ const PAGES = [
   },
   {
     path: "/how-it-works/",
-    title: "How he works",
+    title: "How it works",
     description: "One persistent service, its conversations, memory, models, tools, and connections.",
   },
   {
@@ -1636,9 +1637,9 @@ function structuredData(pagePath) {
       "@type": "SoftwareApplication",
       "@id": "https://clankie.bot/#software",
       name: "Clankie",
-      alternateName: "Clankie AI assistant",
+      alternateName: "Clankie super agent platform",
       description:
-        "A personal AI assistant with a personality. He remembers you, plans your work, leads coding agents, chats and talks in Discord, and plays games on stream.",
+        "An open-source, self-hosted super agent platform. Run always-on leads on your own machines, hire coding workers across them, and see the work in one place.",
       url: "https://clankie.bot/",
       applicationCategory: "ProductivityApplication",
       operatingSystem: "macOS, Linux, iOS, iPadOS",
@@ -1693,11 +1694,11 @@ function llmsIndex() {
   return [
     "# Clankie",
     "",
-    "> Clankie is a personal AI assistant with a personality, from clankie.bot. He runs on your own Mac or Linux machine, remembers you, plans your work, leads coding agents like Claude Code and Codex in your Herdr sessions, and owns the work until it lands. The software is free and open source; he uses your own agent subscriptions and joins Discord through a bot you create. A free account lets the iPhone and iPad app reach your machine through the clankie.bot gateway while it is awake; check clankie.bot for current account and install availability.",
+    "> Clankie is an open-source, self-hosted super agent platform, from clankie.bot. It runs always-on leads on your own Mac or Linux machine: Grok Bot, Claude Code, Codex, or the built-in lead on pi. Leads hire coding workers, such as Claude Code or Codex in Herdr terminals, across your machines, and the Feed and the iPhone and iPad app show the work. The software is free and open source and uses your own agent subscriptions. On your own network the app pairs with no account; a free account lets the app and connected apps reach your machine through the clankie.bot gateway while it is awake. Check clankie.bot for current account and install availability.",
     "",
-    "In more detail: Clankie is a persistent agent lead with a personality and memory. He plans work, delegates it to coding agents, owns it until it lands, and decides as much as his owner allows. He also helps with everyday and creative work. He runs only on machines you own: Apple silicon Macs and arm64 or x64 Linux, with Windows PCs joining as fleet machines; there is no hosted Clankie. The desktop pet is the front door; the TUI, CLI and iPhone and iPad app reach that same service. Discord runs on your own bot. Clankie (clankie.bot) is not affiliated with clankie.com. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
+    "In more detail: a lead is an agent you talk to directly, which is what separates Clankie from ticket-board tools. The built-in lead, also called Clankie, has a personality and memory; a seat opens Claude Code, Codex, OpenCode or Grok Build with its tools; connected apps join through a remote MCP connector. Clankie runs only on machines you own: Apple silicon Macs and arm64 or x64 Linux, with Windows PCs joining as fleet machines; there is no hosted Clankie. The desktop pet, TUI, CLI and iPhone and iPad app reach that same service. Discord runs on your own bot. Clankie (clankie.bot) is not affiliated with clankie.com. The open-source DIY setup adds configurable models, skills, coding harnesses, Discord, voice, and play; capabilities depend on the host and connected services.",
     "",
-    "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, projects, memory, tools, and access. Clankie's built-in runtime is pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Account and install availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
+    "The service (`apps/clankie`, HTTP on `127.0.0.1:4310` on its host) owns conversations, projects, memory, tools, and access. The built-in lead runs on pi. Native harness channels carry agent messages; Herdr supplies the worker terminals. The CLI, API, and MCP projection serve technical users. The CLI reference documents JSON output and its exceptions. Account and install availability live on clankie.bot; this library does not infer shipping support from a source-code capability.",
     "",
     "## Docs",
     "",
