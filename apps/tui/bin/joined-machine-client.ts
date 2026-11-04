@@ -369,12 +369,12 @@ export async function runJoinedMachineChannel(
   let currentScreen = false;
   let currentWorkers = false;
   let policyAt = 0;
-  let resourcePolicyAt = 0;
+  let resourcePolicyAt: number | undefined;
   const ports = options.ports ?? { shell: joinedMachineShell };
   const freshScreen = () => !signal.aborted && currentScreen && performance.now() - policyAt < 2000;
   const staleTimer = setInterval(() => {
     ports.screenPolicy?.(freshScreen());
-    if (performance.now() - resourcePolicyAt >= 2000)
+    if (resourcePolicyAt === undefined || performance.now() - resourcePolicyAt >= 2000)
       for (const task of active.values()) if (task.request.operation.kind === "resources") task.abort.abort();
     // Observe a separate "join leave" even during a network timeout or backoff.
     void credentialCurrent().catch(() => localStop.abort());
@@ -403,7 +403,7 @@ export async function runJoinedMachineChannel(
       } catch (error) {
         if (!(error instanceof JoinedMachineRevoked)) {
           if (signal.aborted) throw error;
-          resourcePolicyAt = 0;
+          resourcePolicyAt = undefined;
           // Resent results settle at most once at the home; unknown ones are ignored.
           results = [...outgoing, ...results];
           if (retryMs === 0) options.onDisconnected?.();
@@ -478,7 +478,9 @@ export async function runJoinedMachineChannel(
               signal.aborted ||
               abort.signal.aborted ||
               (request.operation.kind === "resources"
-                ? !currentWorkers || performance.now() - resourcePolicyAt >= 2000
+                ? !currentWorkers ||
+                  resourcePolicyAt === undefined ||
+                  performance.now() - resourcePolicyAt >= 2000
                 : !freshScreen())
             )
               throw Error("join_policy_unavailable");

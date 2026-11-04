@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { SettingsStore } from "@clankie/settings";
 import { MachineJoinLeaseSchema, MachineJoinStatusSchema } from "@clankie/protocol/machine-join";
@@ -1496,6 +1496,8 @@ test.runIf(nativeResourcesSupported)(
   "a join outage invalidates policy before a waiting resource write can commit",
   async () => {
     const f = await fixture();
+    // Early process uptime: zero cannot serve as an expired-policy sentinel.
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
     const credential = await f.approve();
     await saveJoinedMachineCredential(f.store, credential);
     const directory = join(f.root, "outage-resources");
@@ -1561,6 +1563,7 @@ test.runIf(nativeResourcesSupported)(
       await locking;
       store.close();
       await governor.close();
+      clock.mockRestore();
       await f.close();
     }
   },
