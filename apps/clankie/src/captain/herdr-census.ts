@@ -126,7 +126,7 @@ export function occupantIdForHerdrSession(session: {
 }
 
 /** Stable fallback identity for an unnamed agent while its Herdr pane exists. */
-function subjectForHerdrPane(paneId: string): string {
+export function subjectForHerdrPane(paneId: string): string {
   return `adhoc-${createHash("sha256").update(paneId).digest("hex").slice(0, 20)}`;
 }
 

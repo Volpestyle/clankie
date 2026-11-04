@@ -43,7 +43,7 @@ import {
   type UpdateOperatorAgentPersona,
 } from "@clankie/protocol";
 import { z } from "zod";
-import { subjectForHerdrName, type ObservedFleetSeat } from "./herdr-census.ts";
+import { subjectForHerdrName, subjectForHerdrPane, type ObservedFleetSeat } from "./herdr-census.ts";
 import { adoptedName, herdrAgentName } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
@@ -96,6 +96,15 @@ const PersonaMarkersSchema = z
   })
   .strict();
 
+/**
+ * The pane each subject's occupant was last seen in, kept in its own file so that neither the
+ * persona file nor the markers change shape for a rolled-back runtime. Missing or unreadable reads
+ * as empty, which only keeps a character from moving by name (#349).
+ */
+const PersonaPanesSchema = z
+  .object({ schemaVersion: z.literal(1), panes: z.record(z.string(), z.string().min(1).max(512)) })
+  .strict();
+
 const PendingRoleSchema = z
   .object({
     id: z.string().uuid(),
@@ -111,15 +120,20 @@ export type PersonaRoleWrite = { outcome: "pending"; operationId: string } | { o
 type PersonaBinding = z.infer<typeof PersonaBindingSchema> & {
   /** Clankie minted this subject when it hired this occupant (PersonaMarkersSchema). */
   readonly hired?: true;
+  /** The pane this occupant was last seen in (PersonaPanesSchema). */
+  readonly paneId?: string;
 };
 
 /** Host-owned fleet characters. Herdr seats are only their current locations. */
 export class PersonaStore {
   private readonly path: string;
   private readonly markersPath: string;
+  private readonly panesPath: string;
   private readonly avatarDir: string;
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
+  /** Personas holding a project role in any project: the characters a name alone can't move (#349). */
+  private roleHolders = new Set<string>();
   private readonly ownerNamed = new Set<string>();
   private unreadable = false;
   private loadedSource: string | undefined;
@@ -139,6 +153,7 @@ export class PersonaStore {
   public constructor(stateDir: string) {
     this.path = join(stateDir, "personas.json");
     this.markersPath = join(stateDir, "personas.markers.json");
+    this.panesPath = join(stateDir, "personas.panes.json");
     this.avatarDir = join(stateDir, "persona-avatars");
     mkdirSync(stateDir, { recursive: true });
     mkdirSync(this.avatarDir, { recursive: true });
@@ -171,6 +186,10 @@ export class PersonaStore {
         }
         for (const personaId of markers.ownerNamed)
           if (this.records.has(personaId)) this.ownerNamed.add(personaId);
+      }
+      for (const [subject, paneId] of Object.entries(this.readPanes())) {
+        const binding = this.bindings.get(subject);
+        if (binding !== undefined) this.bindings.set(subject, { ...binding, paneId });
       }
     } catch {
       this.unreadable = true;
@@ -296,6 +315,11 @@ export class PersonaStore {
   }
 
   private projectRoles(projects: Parameters<typeof projectRoleForPersona>[0]): void {
+    this.roleHolders = new Set(
+      projects.assignments.flatMap((assignment) =>
+        assignment.role === undefined ? [] : [assignment.personaId],
+      ),
+    );
     for (const [id, persona] of this.records) {
       const { role: _legacy, ...identity } = persona;
       const role = projectRoleForPersona(projects, id);
@@ -452,6 +476,8 @@ export class PersonaStore {
         (subject) =>
           this.bindings.get(subject)?.hired === true ||
           (title !== undefined && mintedFrom(title, subject, observed.paneId)),
+        // The hire ledger names this pane's occupant under this very subject.
+        title !== undefined && mintedFrom(title, observed.subject, observed.paneId),
       );
       changed ||= bound.changed;
       return bound.seat;
@@ -499,6 +525,7 @@ export class PersonaStore {
       (subject) =>
         this.bindings.get(subject)?.hired === true ||
         (hired && subject === observed.subject && !isPaneSubject(subject)),
+      true,
     );
     const current = this.records.get(seat.personaId);
     if (current === undefined) throw new Error("Agent persona binding did not create a character");
@@ -755,6 +782,8 @@ export class PersonaStore {
   private bindSeat(
     observed: ObservedFleetSeat,
     minted: (subject: string) => boolean,
+    /** The service's own record (its hire, its move, or this seat's hire title) proves this subject. */
+    proven: boolean,
   ): { readonly seat: OperatorFleetSeat; readonly binding: PersonaBinding; changed: boolean } {
     let changed = false;
     // The key this seat is bound under: its observed subject, or its hire's when Herdr lost the name.
@@ -803,12 +832,29 @@ export class PersonaStore {
       this.bindings.set(subject, binding);
       changed = true;
     } else if (binding.occupantId !== observed.occupantId) {
+      // A character that carries authority, a hire or a project role, moves to a new occupant
+      // only in its own pane or through the service's own hire or move record. Its name alone
+      // never moves it (#349). Another pane taking that name is filed under its own pane.
+      const authority =
+        binding.hired === true ||
+        this.roleHolders.has(binding.personaId) ||
+        this.records.get(binding.personaId)?.role !== undefined;
+      const own = subjectForHerdrPane(observed.paneId);
+      if (authority && !proven && binding.paneId !== observed.paneId && own !== observed.subject) {
+        const { renamed: _renamed, ...unnamed } = observed;
+        return this.bindSeat({ ...unnamed, subject: own }, minted, false);
+      }
       binding = {
         subject: binding.subject,
         personaId: binding.personaId,
         occupantId: observed.occupantId,
         ...(binding.hired ? { hired: binding.hired } : {}),
       };
+      this.bindings.set(subject, binding);
+      changed = true;
+    }
+    if (binding.paneId !== observed.paneId) {
+      binding = { ...binding, paneId: observed.paneId };
       this.bindings.set(subject, binding);
       changed = true;
     }
@@ -920,6 +966,15 @@ export class PersonaStore {
     };
   }
 
+  private readPanes(): Record<string, string> {
+    try {
+      if (!existsSync(this.panesPath)) return {};
+      return PersonaPanesSchema.parse(JSON.parse(readFileSync(this.panesPath, "utf8"))).panes;
+    } catch {
+      return {};
+    }
+  }
+
   private writeAvatar(personaId: string, revision: string, image: Buffer): void {
     const path = join(this.avatarDir, `${encodeURIComponent(personaId)}-${revision}.png`);
     const temporary = `${path}.tmp`;
@@ -938,6 +993,14 @@ export class PersonaStore {
       hired: [...this.bindings.values()].filter((binding) => binding.hired).map((binding) => binding.subject),
       ownerNamed: [...this.ownerNamed],
     });
+    durableJson(this.panesPath, {
+      schemaVersion: 1,
+      panes: Object.fromEntries(
+        [...this.bindings.values()].flatMap((binding) =>
+          binding.paneId === undefined ? [] : [[binding.subject, binding.paneId]],
+        ),
+      ),
+    });
     durableJson(this.path, {
       schemaVersion: 2,
       personas: [...this.records.values()].map((persona) => {
@@ -945,7 +1008,7 @@ export class PersonaStore {
         const { role: _role, ...identity } = persona;
         return identity;
       }),
-      bindings: [...this.bindings.values()].map(({ hired: _hired, ...binding }) => binding),
+      bindings: [...this.bindings.values()].map(({ hired: _hired, paneId: _paneId, ...binding }) => binding),
     });
   }
 }

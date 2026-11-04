@@ -395,6 +395,37 @@ describe("PersonaStore", () => {
     });
   });
 
+  it("moves a hired or role-holding character only within its own pane or by the hire record; a casual one still recovers by name (#349)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-authority-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const hired = store.adoptSpawn(observed("term-1"), "Atlas");
+    const lead = store.reconcile([observed("term-2", OCCUPANT_ONE, "vega")])[0]!;
+    store.setRole({ schemaVersion: 1, personaId: lead.personaId, role: "lead" });
+    const casual = store.reconcile([observed("term-3", OCCUPANT_ONE, "orion")])[0]!;
+
+    // Each one's agent ends; another pane is renamed to take each name.
+    const restarted = new PersonaStore(root);
+    const [takeHire, takeLead, takeCasual] = restarted.reconcile([
+      observed("term-7", OCCUPANT_TWO, "atlas-ab12"),
+      observed("term-8", OCCUPANT_TWO, "vega"),
+      observed("term-9", OCCUPANT_TWO, "orion"),
+    ]);
+    expect(takeHire!.personaId).not.toBe(hired.personaId);
+    expect(takeLead!.personaId).not.toBe(lead.personaId);
+    expect(takeCasual!.personaId).toBe(casual.personaId);
+    const personas = restarted.all([], () => undefined);
+    expect(personas.find((entry) => entry.personaId === takeHire!.personaId)?.name).not.toBe("Atlas");
+    expect(personas.find((entry) => entry.personaId === takeLead!.personaId)?.role).toBeUndefined();
+
+    // The hired character's own pane restarting keeps it, and the hire ledger can move it.
+    const again = new PersonaStore(root);
+    expect(again.reconcile([observed("term-1", OCCUPANT_TWO)])[0]!.personaId).toBe(hired.personaId);
+    expect(again.adoptMoved(observed("term-4", `session-${"c".repeat(64)}`), "Atlas").personaId).toBe(
+      hired.personaId,
+    );
+  });
+
   it("rejects malformed image bytes without replacing the current identity", () => {
     const root = mkdtempSync(join(tmpdir(), "clankie-personas-"));
     roots.push(root);
