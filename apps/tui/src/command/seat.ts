@@ -309,10 +309,22 @@ function readSeatRecord(env: NodeJS.ProcessEnv, command: string): SeatRecord | u
   }
 }
 
-function writeSeatRecord(env: NodeJS.ProcessEnv, record: SeatRecord, command: string): void {
+function writeSeatRecord(
+  env: NodeJS.ProcessEnv,
+  record: SeatRecord,
+  command: string,
+  keepExisting: boolean,
+): void {
   const path = seatRecordPath(env, command);
   mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
+  try {
+    writeFileSync(path, `${JSON.stringify(record, null, 2)}\n`, {
+      mode: 0o600,
+      flag: keepExisting ? "wx" : "w",
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
 }
 
 /** Numbered account commands may be aliases or functions in the owner's shell. */
@@ -686,6 +698,8 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
         ...(plan.conversationId === undefined ? {} : { conversationId: plan.conversationId }),
       },
       plan.command,
+      // A `--new` seat fills an empty resume target but never replaces the owner's.
+      flags.newConversation === true,
     );
   }
   const execFile = options.execFileImpl ?? defaultExecFile;

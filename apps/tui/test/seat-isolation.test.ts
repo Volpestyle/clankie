@@ -156,12 +156,8 @@ it.each([
         });
         expect(replay).toMatchObject({ result: { events: [{ type: "message", text: `seat ${index}` }] } });
       }
-      const saved = JSON.parse(
-        await readFile(
-          join(root, harness === "claude" ? "clankie/seat.json" : "clankie/opencode-seat.json"),
-          "utf8",
-        ),
-      );
+      const record = join(root, harness === "claude" ? "clankie/seat.json" : "clankie/opencode-seat.json");
+      const saved = JSON.parse(await readFile(record, "utf8"));
       await runSeatCommand([...seatArgs, "--resume"], options);
       expect(launches.at(-1)).toEqual({
         conversationId: saved.conversationId,
@@ -190,6 +186,15 @@ it.each([
       expect(conversations.conversation(launches.at(-1)!.conversationId)?.scope).toEqual({
         kind: "workspace",
         workspaceId: process.cwd(),
+      });
+      // A throwaway `--new` seat leaves the resume target where it was.
+      expect(launches.at(-1)?.sessionId).not.toBe(saved.sessionId);
+      expect(JSON.parse(await readFile(record, "utf8"))).toEqual(saved);
+      await runSeatCommand([...seatArgs, "--resume"], options);
+      expect(launches.at(-1)).toEqual({
+        conversationId: saved.conversationId,
+        sessionId: saved.sessionId,
+        cwd: saved.cwd,
       });
       const beforeFailure = launches.length;
       await expect(
