@@ -251,7 +251,7 @@ export function createForeignHeavyPermits(options: {
   async function hold(permit: Permit, limits: ForeignHeavyPermitsSettings): Promise<void> {
     const { socket, abort, label } = permit;
     let granted = false;
-    let lastReason: string | undefined;
+    let waitingSent = false;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     const holderOutput = new LineSink((line) => {
       if (line !== "granted" || granted) return;
@@ -270,11 +270,11 @@ export function createForeignHeavyPermits(options: {
         signal: abort.signal,
         stdout: holderOutput,
         env: { PATH: "/usr/bin:/bin" },
-        onWait: (state) => {
-          const reason = state.pressure.reason ?? "queued";
-          if (reason === lastReason) return;
-          lastReason = reason;
-          reply(socket, { state: "waiting", reason });
+        // Heavy admission is a slot queue (#599): waiting means every slot is held.
+        onWait: () => {
+          if (waitingSent) return;
+          waitingSent = true;
+          reply(socket, { state: "waiting", reason: "slots" });
         },
       });
     } catch (error) {

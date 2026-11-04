@@ -36,17 +36,8 @@ afterEach(async () => {
 async function fixture(options: { minuteMs?: number } = {}) {
   // Short: a unix socket path must fit in 104 bytes.
   const root = await realpath(await mkdtemp(join(tmpdir(), "fhp-")));
-  const governor = createResourceGovernor({
-    directory: join(root, "registry"),
-    probe: async () => ({ loadRatio: 0.1, availableMemoryMb: 64_000 }),
-    heavyJobSettleMs: 0,
-  });
-  await governor.configure({
-    ...defaultResourcePolicy(),
-    heavySlots: 1,
-    minAvailableMemoryMb: 0,
-    minFreeDiskGb: 0,
-  });
+  const governor = createResourceGovernor({ directory: join(root, "registry") });
+  await governor.configure({ ...defaultResourcePolicy(), heavySlots: 1 });
   const directory = join(root, "permits");
   const permits = createForeignHeavyPermits({
     governor,

@@ -11012,7 +11012,7 @@ A client sends one line, at most 1 KiB, within 5 seconds:
 `{"op":"acquire","lane":"full","label":"NAME"}`. `full` is the only lane. The
 label is reduced to letters, digits and `._:/ -`, 64 characters at most, and
 becomes holder `ci-permit:NAME`. Replies are lines of `{"state":...}`:
-`waiting` (with `reason`), `granted`, `lost` (`max_hold`, `holder_exited`,
+`waiting` (`reason`: `slots` when every heavy slot is held, `foreign_cap` when this account's own permits are all in use), `granted`, `lost` (`max_hold`, `holder_exited`,
 `disabled`) and `refused` (`peer_not_permitted`, `request_deadline`,
 `request_too_large`, `malformed`, `lane_not_allowed`, `queue_full`). The
 permit is held until the client closes the connection, at most
