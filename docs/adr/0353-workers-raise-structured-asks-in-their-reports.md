@@ -77,7 +77,9 @@ the ask confirms one.
 ## Consequences
 
 - Leads and apps can show an ask as a card and answer it with one tap; the app's
-  card is built in the app on this API.
+  card is built in the app on this API. The relay and public gateway carry these
+  routes to a Take Control device, matching an ask's route only by its UUID and
+  the list only bare or with one known `state`.
 - A worker that writes malformed JSON sends an ordinary report: the lead still
   reads it, and nothing is lost.
 - A joined native worker's report carries the block as text

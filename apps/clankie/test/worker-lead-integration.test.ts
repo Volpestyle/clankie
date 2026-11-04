@@ -462,7 +462,7 @@ it("a worker's structured ask reaches its lead as options, stays listed, and its
     // eslint-disable-next-line no-control-regex -- asserting none survive.
     /[\u0000-\u0009\u000b-\u001f\u202e]/u,
   );
-  expect(f.captain.workerAsks!.withdraw(hostile.id)).toMatchObject({ outcome: "withdrawn" });
+  expect(await f.captain.workerAsks!.withdraw(hostile.id)).toMatchObject({ outcome: "withdrawn" });
   const listed = await cli(["list"]);
   expect(listed).toMatchObject({
     asks: [
@@ -513,7 +513,10 @@ it("a worker's structured ask reaches its lead as options, stays listed, and its
   await f.captain.close();
   const reopened = f.open();
   expect(reopened.workerAsks!.list({ state: "answered" })).toMatchObject([{ askId: receipt.id }]);
-  expect(reopened.workerAsks!.withdraw(receipt.id)).toMatchObject({ outcome: "refused", reason: "settled" });
+  expect(await reopened.workerAsks!.withdraw(receipt.id)).toMatchObject({
+    outcome: "refused",
+    reason: "settled",
+  });
 });
 
 it("a local worker's report is stored while a configured remote machine's census never answers (VUH-2244)", async () => {
