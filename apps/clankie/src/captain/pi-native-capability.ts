@@ -1,9 +1,10 @@
+import { findExecutable } from "../find-executable.ts";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants, existsSync } from "node:fs";
-import { access, open, readFile, realpath, stat } from "node:fs/promises";
+import { open, readFile, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { createLocalAgentHost, piSessionRoots, type SeatLaunch } from "@clankie/agent-hosts";
 import { findAgentSession } from "@clankie/agent-transcript";
 import { z } from "zod";
@@ -105,16 +106,8 @@ async function executableOnPath(
   name: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<string> {
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
-    try {
-      const path = await realpath(join(directory, name));
-      await access(path, constants.X_OK);
-      return path;
-    } catch {
-      /* Continue executable lookup, without invoking candidate scripts. */
-    }
-  }
+  const found = await findExecutable(name, env);
+  if (found) return found.resolved;
   throw new Error(`Native ${name} executable unavailable`);
 }
 

@@ -1,9 +1,9 @@
+import { findExecutable } from "../find-executable.ts";
 import { OpenCodeProfiles, type OpenCodeWorkerProfile } from "../opencode-profiles.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { constants } from "node:fs";
-import { access, cp, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { cp, mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { randomInt, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -147,15 +147,9 @@ export async function probeOpenCodeVersion(
 async function discover(launch: SeatLaunch): Promise<{ executable: string; version: string }> {
   if (process.platform !== "darwin") throw new Error("Native OpenCode workers currently require macOS");
   const env = { ...process.env, ...launch.env };
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
-    let executable: string;
-    try {
-      executable = await realpath(join(directory, "opencode"));
-      await access(executable, constants.X_OK);
-    } catch {
-      continue;
-    }
+  const found = await findExecutable("opencode", env);
+  if (found) {
+    const executable = found.resolved;
     const handle = await open(executable, "r");
     const bytes = Buffer.alloc(2);
     try {

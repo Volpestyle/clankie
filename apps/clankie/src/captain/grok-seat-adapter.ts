@@ -1,8 +1,8 @@
+import { findExecutable } from "../find-executable.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { constants } from "node:fs";
-import { access, mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import type {
@@ -62,21 +62,15 @@ export async function discoverGrok(
 ): Promise<{ executable: string; version: string }> {
   if (process.platform !== "darwin")
     throw new Error("Native Grok control is currently verified on macOS only");
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
-    let executable: string;
-    try {
-      executable = await realpath(join(directory, "grok"));
-      await access(executable, constants.X_OK);
-    } catch {
-      continue;
-    }
+  const found = await findExecutable("grok", env);
+  if (found) {
+    const executable = found.resolved;
     const result = await exec(executable, ["--version"], { env, timeout: 5000, maxBuffer: 4096 });
     const reported = /^grok (\S+) \(/u.exec(result.stdout.trim())?.[1] ?? result.stdout.trim();
     const version = admitGrokRelease(reported);
     // Preserve the harness entry point so Herdr recognizes `grok`; the native
     // process proof still compares its canonical executable, including versioned symlinks.
-    return { executable: join(directory, "grok"), version };
+    return { executable: found.path, version };
   }
   throw new Error("Grok Build is unavailable; install and sign in to Grok yourself before hiring");
 }

@@ -1,10 +1,11 @@
 import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
+import { findExecutable } from "../find-executable.ts";
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, readFile, realpath } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { z } from "zod";
@@ -46,16 +47,9 @@ function primeDaemonSocket(env: NodeJS.ProcessEnv): string {
 export async function discoverPrimeAgent(env: NodeJS.ProcessEnv = process.env): Promise<PrimeAgentInstall> {
   if (process.platform !== "darwin" && process.platform !== "linux")
     throw new Error("Prime Agent control is supported on macOS and Linux only");
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!isAbsolute(directory)) continue;
-    const launcher = join(directory, "prime-agent");
-    let resolved: string;
-    try {
-      resolved = await realpath(launcher);
-      await access(resolved, constants.X_OK);
-    } catch {
-      continue;
-    }
+  const found = await findExecutable("prime-agent", env);
+  if (found) {
+    const { path: launcher, resolved } = found;
     const head = await readFile(resolved).then((bytes) => bytes.subarray(0, 2).toString("latin1"));
     // The curl installer writes a shell launcher that execs the binary beside it.
     const executable =

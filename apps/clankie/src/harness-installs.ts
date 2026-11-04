@@ -1,3 +1,4 @@
+import { findExecutable } from "./find-executable.ts";
 /**
  * Install a worker harness with its vendor's own installer (#737), as the
  * body's user, so the owner's app can offer one Install button in place of a
@@ -6,8 +7,6 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, constants } from "node:fs/promises";
-import { delimiter, join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type {
   HarnessInstall,
@@ -31,16 +30,7 @@ const KILL_GRACE_MS = 5_000;
 const DRAIN_MS = 2_000;
 
 async function onPath(name: string, env: NodeJS.ProcessEnv): Promise<boolean> {
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    if (!directory) continue;
-    try {
-      await access(join(directory, name), constants.X_OK);
-      return true;
-    } catch {
-      /* Not in this PATH entry. */
-    }
-  }
-  return false;
+  return (await findExecutable(name, env)) !== undefined;
 }
 
 /**

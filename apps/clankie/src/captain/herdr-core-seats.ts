@@ -1,6 +1,4 @@
-import { constants } from "node:fs";
-import { access } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { findExecutable } from "../find-executable.ts";
 import { HerdrCoreError, SEAT_LABEL, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core.ts";
 
 // Where Clankie's hires start in the Herdr desktop app (ADR 0319): a terminal in
@@ -46,14 +44,9 @@ const INHERITED_COLOR_OPT_OUTS = ["NO_COLOR", "FORCE_COLOR"] as const;
  */
 async function herdrBrowserEnv(env: NodeJS.ProcessEnv): Promise<Record<string, string>> {
   if (process.platform !== "darwin") return {};
-  for (const dir of (env.PATH ?? "").split(delimiter)) {
-    if (!dir) continue;
-    try {
-      await access(join(dir, "herdr-browser-open"), constants.X_OK);
-      return { HERDR_BROWSER: "1", BROWSER: "herdr-browser-open" };
-    } catch {}
-  }
-  return {};
+  return (await findExecutable("herdr-browser-open", env))
+    ? { HERDR_BROWSER: "1", BROWSER: "herdr-browser-open" }
+    : {};
 }
 
 interface HerdrCoreSeatStart {
