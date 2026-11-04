@@ -1416,6 +1416,17 @@ hire at that place on that machine settles such an original itself, with the
 same census (ADR 0331). That hire then answers `not_ready` naming the
 `freshIntent` (`id` and `afterReceiptId`) new work there takes with its own brief.
 
+For an ordinary remote project hire, this check runs before checkout and project
+capacity fences. Its allocation is released only when a persisted, unique link
+names that exact sealed native receipt, the current conversation resolves to the
+same project, and two complete runner inventories still show no pane or worker
+in the directory. Authority is rechecked and the allocation must be unchanged
+under its lock. A legacy allocation without that link stays held for operator
+recovery; so do active, fresh-intent, observed or possibly dispatched starts.
+Neither a timeout nor an empty inventory alone releases a place. The original
+receipt remains settled and cannot be replayed; different work needs its own
+brief and intent.
+
 Legacy receipts without that recorded window, already allocated panes, attempted
 launches, incomplete census, changed connection or revoked authority are refused.
 Current absence cannot reconstruct history. Receipts and evidence are retained;

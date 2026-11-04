@@ -2909,6 +2909,16 @@ export class HerdrWatchStore implements HerdrWatchPort {
       const projectId = await this.projectPolicy.project(input, settings, authority);
       if (input.projectId !== undefined && input.projectId !== projectId)
         throw new Error("The selected project does not match this hiring conversation or workspace.");
+      if (input.fleet !== undefined && resume === undefined) {
+        await this.retireUnsentRemoteAt(
+          input,
+          async () => {
+            if (authority !== undefined) await assertConversationAuthority(authority);
+          },
+          projectId,
+        );
+        if (authority !== undefined) await assertConversationAuthority(authority);
+      }
       if (projectId === undefined) {
         if (input.delegation === "native-first")
           throw new Error("Native-first hiring requires a verified project and stable deliverable key.");
@@ -3623,6 +3633,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         ...(resume === undefined ? {} : { sessionId: resume.sessionId }),
         ...(resume === undefined ? { beforeIds: [] } : {}),
       });
+      const allocation = this.projectAllocations.get(input);
+      if (
+        allocation &&
+        input.fleet !== undefined &&
+        !thisMachineReceiptFleet(input.fleet) &&
+        resume === undefined &&
+        !fresh
+      )
+        this.projectHires.bindNativeReceipt(allocation, { id: receipt.messageId, key: receiptKey });
     } catch (error) {
       return { outcome: "failed", reason: "not_ready", detail: reasonDetail(error) };
     }
@@ -3975,6 +3994,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
       | "abandoned"
       | "abandoned-unknown"
       | "release-allocation" = "not-launched",
+    expectedAllocation?: NonNullable<ReturnType<ProjectHires["recoveryCandidate"]>>,
   ): Promise<HireReceiptSettlement> {
     const refused = (detail: string): HireReceiptSettlement => ({ state: "refused", receiptId, detail });
     if (!guard) return refused("Operator settlement authority is required; nothing settled.");
@@ -3985,6 +4005,8 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
     if (disposition === "release-allocation") {
       const candidate = this.projectHires.recoveryCandidate(receiptId);
+      if (expectedAllocation && !isDeepStrictEqual(candidate, expectedAllocation))
+        return refused("Original allocation changed before automatic retirement; nothing released.");
       const released = (): HireReceiptSettlement => ({
         state: "allocation-released",
         receiptId,
@@ -4046,7 +4068,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
           return refused(
             "The original pane or a worker in its directory is still present. Retain its handoff and retire it explicitly before releasing the allocation.",
           );
-        this.projectHires.release(candidate, inventory);
+        this.projectHires.release(candidate, inventory, expectedAllocation?.nativeReceipt);
         return released();
       } catch (error) {
         return refused(`Allocation recovery unavailable: ${reasonDetail(error)}. Nothing released.`);
@@ -4194,6 +4216,74 @@ export class HerdrWatchStore implements HerdrWatchPort {
             ? {}
             : { allocationId: settled.allocationId, allocation: settled.detail }),
         });
+    }
+  }
+
+  /**
+   * Retire only a remote attempt sealed as never launched. Run before checkout or
+   * project-allocation fences, since those can otherwise hide the existing seal.
+   * A causal receipt link and the operator's double census protect the allocation.
+   */
+  public async retireUnsentRemoteAt(
+    input: { fleet?: string | undefined; workingDirectory: string; harness?: string | undefined },
+    guard: () => Promise<void>,
+    projectId?: string,
+  ): Promise<void> {
+    if (thisMachineReceiptFleet(input.fleet ?? "local") || this.closed) return;
+    try {
+      const matches = (key: string) => {
+        const [fleet, harness, cwd, session] = JSON.parse(key) as unknown[];
+        return (
+          fleet === input.fleet &&
+          cwd === input.workingDirectory &&
+          session === "new" &&
+          (input.harness === undefined || harness === input.harness)
+        );
+      };
+      const keys = [
+        ...new Set(
+          this.hireReceipts
+            .entries()
+            .filter(([key]) => matches(key))
+            .map(([key]) => key),
+        ),
+      ];
+      for (const key of keys) await this.retireUnsentRemoteHires(key, guard);
+      const candidates = this.projectHires.unresolvedAt(input);
+      for (const candidate of candidates) {
+        const receipt = candidate.nativeReceipt;
+        if (
+          projectId === undefined ||
+          candidate.projectId !== projectId ||
+          !receipt ||
+          candidates.filter((entry) => isDeepStrictEqual(entry.nativeReceipt, receipt)).length !== 1 ||
+          !matches(receipt.key) ||
+          candidate.request.freshIntent ||
+          candidate.pane !== undefined ||
+          candidate.seat !== undefined ||
+          candidate.occupantId !== undefined ||
+          candidate.proof !== undefined ||
+          this.activeProjectHires.has(candidate.id) ||
+          this.activeHires.has(receipt.key)
+        )
+          continue;
+        const evidence = this.hireReceipts.settlement(receipt.id);
+        if (
+          !evidence ||
+          evidence.receiptKey !== receipt.key ||
+          ![
+            "never-reserved",
+            "reserved-to-sealed-without-launch",
+            "launch-committed-command-unsent",
+          ].includes(evidence.journal)
+        )
+          continue;
+        // The expected snapshot is checked again after guard awaits, then under
+        // the existing allocation lock after the complete before/after census.
+        await this.settleNativeHireReceipt(candidate.id, guard, "release-allocation", candidate);
+      }
+    } catch {
+      // Unreadable journals, disconnected hosts and denied authority keep the place held.
     }
   }
 

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { FileCredentialStore } from "@clankie/credential-broker";
@@ -20,9 +20,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { DeliveryFence } from "../src/captain/delivery-fence.ts";
-import { createHireLayout, WORKSPACE_CREATE_TIMEOUT_MS } from "../src/captain/hire-layout.ts";
+import { createHireLayout } from "../src/captain/hire-layout.ts";
+import { createHiring, type HiringContext } from "../src/captain/captain-hiring.ts";
+import { PersonaStore } from "../src/captain/personas.ts";
 import { HerdrWatchStore, createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
-import { HerdrFleetError, remoteHerdrCommand } from "../src/herdr-fleet.ts";
+import { HerdrFleetError, remoteHerdrCommand, remoteProgramCommand } from "../src/herdr-fleet.ts";
 import { createRemoteHireReceipts } from "../src/remote-hire-receipts.ts";
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 
@@ -30,8 +32,6 @@ const exec = promisify(execFile);
 const nativeIt = it.skipIf(process.platform !== "darwin" || process.env.HIRE_RECEIPT_NATIVE_TEST !== "1");
 /** The fleet runner's default for one remote Herdr call. */
 const REMOTE_DEFAULT_MS = 20_000;
-/** The joined PC answered its workspace create after more than the 20 s default (VUH-2180). */
-
 /** A PC that never answers the create within any timeout, and creates nothing. */
 const PC_SILENT = Number.POSITIVE_INFINITY;
 
@@ -118,6 +118,12 @@ async function fixture(pcCreateMs: number) {
   const abort = new AbortController();
   let refusedCreate = "";
   const commands: string[] = [];
+  const controls: {
+    authorized: boolean;
+    afterSeal?: () => Promise<void>;
+    authorize?: () => Promise<void>;
+    createGate?: Promise<void>;
+  } = { authorized: true };
   const channel = runJoinedMachineChannel(credential, {
     store,
     signal: abort.signal,
@@ -125,8 +131,10 @@ async function fixture(pcCreateMs: number) {
     ports: {
       shell: async (command, directory, signal) => {
         commands.push(command);
-        if (command === refusedCreate)
+        if (command === refusedCreate) {
+          await controls.createGate;
           return JSON.stringify({ error: "fixture workspace create timed out before creating a pane" });
+        }
         try {
           return JSON.stringify({
             stdout: (
@@ -151,7 +159,7 @@ async function fixture(pcCreateMs: number) {
     session: "default",
     ssh: { host: "fixture-joined-host", shell: "posix" as const },
   };
-  const remote = async (command: string) => {
+  const dispatch = async (command: string): Promise<string> => {
     const result = await joins.request(
       credential.lease.machineId,
       { kind: "shell", directory: home, command },
@@ -161,6 +169,24 @@ async function fixture(pcCreateMs: number) {
     const value = JSON.parse(result.output ?? "{}");
     if (value.error) throw Object.assign(Error(value.error), { stderr: value.stderr });
     return value.stdout ?? "";
+  };
+  const remote = async (command: string): Promise<string> => {
+    if (command.length <= 8_000) return dispatch(command);
+    // SSH supports a larger command line than the join shell. The fixture
+    // transports long scripts in bounded authenticated chunks, preserving the
+    // production join limit and running the original script on the host.
+    const path = join(home, `host-script-${randomUUID()}.sh`);
+    const encoded = Buffer.from(command).toString("base64");
+    for (let offset = 0; offset < encoded.length; offset += 3_000) {
+      const script =
+        offset === 0
+          ? "require('node:fs').writeFileSync(process.argv[1],Buffer.from(process.argv[2],'base64'),{flag:'wx',mode:0o600})"
+          : "require('node:fs').appendFileSync(process.argv[1],Buffer.from(process.argv[2],'base64'))";
+      await dispatch(
+        remoteProgramCommand("posix", "node", ["-e", script, path, encoded.slice(offset, offset + 3_000)]),
+      );
+    }
+    return dispatch(remoteProgramCommand("posix", "sh", [path]));
   };
   const herdrCli = async (args: readonly string[]) =>
     (await exec("herdr", ["--session", "default", ...args], { env, timeout: 10_000 })).stdout;
@@ -181,10 +207,18 @@ async function fixture(pcCreateMs: number) {
     }
     return await remote(remoteHerdrCommand(fleet, args));
   };
-  const receipts = createRemoteHireReceipts({
+  const hostReceipts = createRemoteHireReceipts({
     fleet: async () => fleet,
     shell: () => remote,
   });
+  const receipts = {
+    ...hostReceipts,
+    seal: async (...args: Parameters<typeof hostReceipts.seal>) => {
+      const evidence = await hostReceipts.seal(...args);
+      await controls.afterSeal?.();
+      return evidence;
+    },
+  };
   const watches = join(home, "watches.json");
   const effects: string[] = [];
   const denied = async (name: string): Promise<never> => {
@@ -195,7 +229,7 @@ async function fixture(pcCreateMs: number) {
   const projects = ProjectsSettingsSchema.parse({
     projects: [{ id: "fixture", name: "Fixture", workerCap: 1 }],
   });
-  const watchesStore = new HerdrWatchStore(watches, {
+  const watchOptions: NonNullable<ConstructorParameters<typeof HerdrWatchStore>[1]> = {
     projectHirePolicy: {
       settings: async () => projects,
       project: async () => "fixture",
@@ -241,11 +275,19 @@ async function fixture(pcCreateMs: number) {
       startAgent: async () => denied("startAgent"),
       runInPane: async () => denied("runInPane"),
     },
-  });
+  };
+  let watchesStore = new HerdrWatchStore(watches, watchOptions);
+  const restart = () => {
+    watchesStore.close();
+    watchesStore = new HerdrWatchStore(watches, watchOptions);
+  };
   const authority = {
     owner: { conversationId: "global-default" },
-    current: () => true,
-    authorize: async () => true,
+    current: () => controls.authorized,
+    authorize: async () => {
+      await controls.authorize?.();
+      return controls.authorized;
+    },
   };
   const hire = async (
     directory: string,
@@ -299,7 +341,43 @@ async function fixture(pcCreateMs: number) {
     herdrCli,
     run,
     creates,
-    store: watchesStore,
+    get store() {
+      return watchesStore;
+    },
+    restart,
+    outerHire: async (directory: string, brief: string) => {
+      await settings.update((current) => ({ ...current, projects }));
+      const hiring = createHiring({
+        options: { stateDir: home, repoRoot: home },
+        deps: { fleets: { shell: () => remote } },
+        settings: () => settings.load(),
+        settingsStore: settings,
+        resolveHireProject: async () => "fixture",
+        autonomy: { enabled: true },
+        refreshFleets: async () => [fleet],
+        herdrRunner: watchOptions.runner,
+        herdrWatches: watchesStore,
+        personas: new PersonaStore(home),
+        namedLocal: [],
+        remoteFleets: [fleet],
+        liveSeats: [],
+      } as unknown as HiringContext);
+      return hiring.hireSeat(
+        {
+          schemaVersion: 1,
+          title: "Outer fixture hire",
+          projectId: "fixture",
+          deliverable: "fixture-issue",
+          harness: "claude",
+          fleet: "pc",
+          workingDirectory: directory,
+          effort: "low",
+          effortReason: "Fixture only reaches its workspace create.",
+        },
+        brief,
+        authority,
+      );
+    },
     hire,
     receipt,
     effects,
@@ -308,6 +386,9 @@ async function fixture(pcCreateMs: number) {
     commands,
     joins,
     credential,
+    controls,
+    nativePath: `${watches}.hire-receipts.json`,
+    allocationPath: `${watches}.project-hires.json`,
   };
 }
 
@@ -324,6 +405,7 @@ nativeIt(
       expect(original).toMatchObject({ remoteLaunchCommitted: true, remoteCommandUnsent: true });
       const [allocation] = await f.allocations();
       expect(allocation).toMatchObject({ started: true, gone: false });
+      await f.restart();
       const second = await f.hire(directory, undefined, "Inspect the first fixture issue.");
       expect(second).toMatchObject({ outcome: "failed", reason: "not_ready" });
       const detail = second.outcome === "failed" ? (second.detail ?? "") : "";
@@ -339,6 +421,309 @@ nativeIt(
       expect(f.receipt()[1].messageId).not.toBe(original.messageId);
       expect(f.effects).toEqual([]);
       expect(f.commands.length).toBeGreaterThan(3);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a create that landed late keeps the original receipt and allocation held",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "late-project-place");
+      await f.hire(directory, undefined, "Inspect a late-create fixture issue.");
+      const [, original] = f.receipt();
+      await f.herdrCli(["workspace", "create", "--cwd", directory, "--label", "late", "--no-focus"]);
+      await f.hire(directory, undefined, "Inspect a late-create fixture issue.");
+      expect(f.receipt()[1].messageId).toBe(original.messageId);
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt.each(["missing", "wrong-id", "wrong-key", "duplicate"] as const)(
+  "an allocation with %s native receipt linkage stays held after the host seals the hire",
+  async (mode) => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "unmatched-project-place");
+      await f.hire(directory, undefined, "Inspect an unmatched fixture issue.");
+      const [, original] = f.receipt();
+      const state = JSON.parse(await readFile(f.allocationPath, "utf8"));
+      const row = state.allocations[0];
+      if (mode === "missing") delete row.nativeReceipt;
+      if (mode === "wrong-id") row.nativeReceipt.id = randomUUID();
+      if (mode === "wrong-key")
+        row.nativeReceipt.key = JSON.stringify(["another-fleet", "claude", directory, "new"]);
+      if (mode === "duplicate") state.allocations.push({ ...structuredClone(row), id: randomUUID() });
+      await writeFile(f.allocationPath, JSON.stringify(state));
+      await f.hire(directory, undefined, "Inspect an unmatched fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toMatchObject({
+        journal: "launch-committed-command-unsent",
+      });
+      expect((await f.allocations()).every((entry) => !entry.gone)).toBe(true);
+      expect(f.store.hireUnresolved({ fleet: "pc", workingDirectory: directory, harness: "claude" })).toBe(
+        true,
+      );
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "revocation after the real host seal prevents receipt settlement and allocation release",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "revoked-project-place");
+      await f.hire(directory, undefined, "Inspect a revoked fixture issue.");
+      const [, original] = f.receipt();
+      f.controls.afterSeal = async () => {
+        f.controls.authorized = false;
+      };
+      await f.hire(directory, undefined, "Inspect a revoked fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect(f.receipt()[1].messageId).toBe(original.messageId);
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "an allocation changed during the release guard cannot be freed by a stale snapshot",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "changed-project-place");
+      await f.hire(directory, undefined, "Inspect a changed-allocation fixture issue.");
+      const [, original] = f.receipt();
+      let changed = false;
+      f.controls.authorize = async () => {
+        if (changed || !new DeliveryFence(f.nativePath).settlement(original.messageId)) return;
+        changed = true;
+        const state = JSON.parse(await readFile(f.allocationPath, "utf8"));
+        state.allocations[0].request.title = "Concurrent allocation change";
+        await writeFile(f.allocationPath, JSON.stringify(state));
+      };
+      await f.hire(directory, undefined, "Inspect a changed-allocation fixture issue.");
+      expect(changed).toBe(true);
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "the captain retires the proven-dead original before checkout fences and preserves the owner's dirty start folder",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const origin = join(f.home, "origin.git"),
+        directory = join(f.home, "checkout");
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")),
+      );
+      const git = (...args: string[]) => exec("git", args, { cwd: f.home, env });
+      await git("init", "--bare", "--initial-branch=main", origin);
+      await git("clone", origin, directory);
+      await writeFile(join(directory, "base.txt"), "fixture base\n");
+      await git("-C", directory, "add", "base.txt");
+      await git(
+        "-C",
+        directory,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-m",
+        "base",
+      );
+      await git("-C", directory, "push", "origin", "main");
+      await writeFile(join(directory, "owner-draft.txt"), "preserve this draft\n");
+      const first = await f.hire(directory, undefined, "Inspect the original fixture issue.");
+      expect(first).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      const [allocation] = await f.allocations();
+      const second = await f.outerHire(directory, "Inspect a distinct next fixture issue.");
+      expect(second, JSON.stringify(second)).toMatchObject({
+        outcome: "failed",
+        reason: "start_unconfirmed",
+      });
+      expect(second.outcome === "failed" ? second.detail : "").toContain("workspace create timed out");
+      expect((await f.allocations()).find((entry) => entry.id === allocation!.id)).toMatchObject({
+        gone: true,
+      });
+      expect(f.creates).toHaveLength(2);
+      const nextDirectory = JSON.parse(f.receipt()[0])[2];
+      expect(nextDirectory).not.toBe(directory);
+      expect(await readFile(join(nextDirectory, "base.txt"), "utf8")).toBe("fixture base\n");
+      expect(await readFile(join(directory, "owner-draft.txt"), "utf8")).toBe("preserve this draft\n");
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a still-starting original keeps its allocation even before the remote create answers",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    let release!: () => void;
+    f.controls.createGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let first: ReturnType<typeof f.hire> | undefined;
+    try {
+      const directory = join(f.home, "starting-project-place");
+      first = f.hire(directory, undefined, "Inspect a still-starting fixture issue.");
+      await expect.poll(() => f.creates.length).toBe(1);
+      const [, original] = f.receipt();
+      const second = await f.hire(directory, undefined, "Inspect a still-starting fixture issue.");
+      expect(second).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      release();
+      expect(await first).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(f.effects).toEqual([]);
+    } finally {
+      release();
+      await first;
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a possibly dispatched harness stays held even when the current host census has no pane",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "possibly-starting-project-place");
+      await f.hire(directory, undefined, "Inspect a possibly-starting fixture issue.");
+      const [key, original] = f.receipt();
+      const state = JSON.parse(await readFile(f.nativePath, "utf8"));
+      delete state[key].remoteCommandUnsent;
+      await writeFile(f.nativePath, JSON.stringify(state));
+      f.restart();
+      await f.hire(directory, undefined, "Inspect a possibly-starting fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect(f.receipt()[1].messageId).toBe(original.messageId);
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "automatic retirement cannot release an allocation outside the resolved project",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "different-project-place");
+      await f.hire(directory, undefined, "Inspect a project-scoped fixture issue.");
+      const [, original] = f.receipt();
+      await f.store.retireUnsentRemoteAt(
+        { fleet: "pc", workingDirectory: directory },
+        async () => {},
+        "other-project",
+      );
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeDefined();
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a pane appearing after the host seal prevents automatic allocation release",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "post-seal-pane-place");
+      await f.hire(directory, undefined, "Inspect a post-seal fixture issue.");
+      const [, original] = f.receipt();
+      f.controls.afterSeal = async () => {
+        await f.herdrCli([
+          "workspace",
+          "create",
+          "--cwd",
+          directory,
+          "--label",
+          "late-after-seal",
+          "--no-focus",
+        ]);
+      };
+      await f.hire(directory, undefined, "Inspect a post-seal fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeDefined();
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "a duplicate receipt link introduced during the release guard stays held under the allocation lock",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "concurrent-duplicate-place");
+      await f.hire(directory, undefined, "Inspect a concurrent-link fixture issue.");
+      const [, original] = f.receipt();
+      let duplicated = false;
+      f.controls.authorize = async () => {
+        if (duplicated || !new DeliveryFence(f.nativePath).settlement(original.messageId)) return;
+        duplicated = true;
+        const state = JSON.parse(await readFile(f.allocationPath, "utf8"));
+        state.allocations.push({ ...structuredClone(state.allocations[0]), id: randomUUID() });
+        await writeFile(f.allocationPath, JSON.stringify(state));
+      };
+      await f.hire(directory, undefined, "Inspect a concurrent-link fixture issue.");
+      expect(duplicated).toBe(true);
+      expect((await f.allocations()).every((entry) => !entry.gone)).toBe(true);
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
     } finally {
       await f.close();
     }
