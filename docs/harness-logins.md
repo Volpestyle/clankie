@@ -57,7 +57,8 @@ Windows), Codex with `brew install --cask codex` on a Mac that has Homebrew, els
 provider keys or tokens. It answers 202 with
 `{ ok: true, install: { installId, harness, installer, state: "running", progress, ownerApproval, … } }`;
 `GET` reads the latest install. `progress` is the installer's latest 40 output
-lines as plain text. When the installer exits, the sign-in list is read again and
+lines as plain text, keeping stdout and stderr in the order the installer wrote them
+on Windows, macOS and Linux. When the installer exits, the sign-in list is read again and
 returned as `logins`: `state` is `succeeded` only if the harness is now found,
 otherwise `failed` with `error` `installer_failed`, `not_found_after_install` (it
 exited cleanly but the service's PATH has no such command) or `timed_out` (15

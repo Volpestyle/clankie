@@ -29,6 +29,32 @@ const KILL_GRACE_MS = 5_000;
 /** After the installer exits, how long a grandchild holding its output may delay the outcome. */
 const DRAIN_MS = 2_000;
 
+// Windows cannot exec a shell redirection as POSIX does. Keep argv as argv and give
+// the vendor both copies of this supervisor's stdout handle, before any output is read.
+// IPC stops the vendor itself; killing only the supervisor would leave it running.
+const WINDOWS_INSTALLER = `
+const { spawn } = require("node:child_process");
+const child = spawn(process.argv[1], process.argv.slice(2), {
+  stdio: ["ignore", 1, 1], windowsHide: true,
+});
+const stop = (signal) => {
+  if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+};
+process.on("message", (message) => {
+  if (message?.signal === "SIGTERM" || message?.signal === "SIGKILL") stop(message.signal);
+});
+process.on("disconnect", () => stop("SIGKILL"));
+const finish = (code) => {
+  process.exitCode = code ?? 1;
+  if (process.connected) process.disconnect();
+};
+child.on("error", (error) => {
+  process.stdout.write("Could not start the installer: " + error.message + "\\n");
+  finish(1);
+});
+child.on("exit", finish);
+`;
+
 async function onPath(name: string, env: NodeJS.ProcessEnv): Promise<boolean> {
   return (await findExecutable(name, env)) !== undefined;
 }
@@ -70,6 +96,8 @@ export interface HarnessInstallOptions {
   readonly logins: { list(): Promise<HarnessLoginsResponse> };
   /** Which installer runs; tests stand one in so no vendor install ever runs. */
   readonly installer?: (harness: LoginHarness) => Promise<VendorInstaller | undefined>;
+  /** Launch policy override for cross-platform installer fixtures; defaults to this host. */
+  readonly platform?: NodeJS.Platform;
   readonly timeoutMs?: number;
   readonly now?: () => Date;
 }
@@ -163,13 +191,15 @@ export class HarnessInstalls {
     try {
       // Read from two pipes, output written to both arrives stdout first whenever
       // the service is busy. Joined at the source, it keeps the order it was written in.
-      const joined = process.platform !== "win32";
+      const joined = (this.options.platform ?? process.platform) !== "win32";
       child = spawn(
-        joined ? "/bin/sh" : installer.command,
-        joined ? ["-c", 'exec "$@" 2>&1', "sh", installer.command, ...installer.args] : [...installer.args],
+        joined ? "/bin/sh" : process.execPath,
+        joined
+          ? ["-c", 'exec "$@" 2>&1', "sh", installer.command, ...installer.args]
+          : ["-e", WINDOWS_INSTALLER, "--", installer.command, ...installer.args],
         {
-          env: installerEnv(this.options.env),
-          stdio: ["ignore", "pipe", joined ? "ignore" : "pipe"],
+          env: installerEnv(this.options.env, this.options.platform),
+          stdio: joined ? ["ignore", "pipe", "ignore"] : ["ignore", "pipe", "pipe", "ipc"],
           // Its own process group, so a timeout also stops what the installer started.
           detached: process.platform !== "win32",
         },
@@ -277,8 +307,13 @@ function installerEnv(
 /** SIGTERM to the installer's whole group, then SIGKILL to whatever ignored it. */
 function stop(child: ChildProcess) {
   const signal = (name: NodeJS.Signals) => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
     try {
-      if (process.platform !== "win32" && child.pid !== undefined) process.kill(-child.pid, name);
+      if (child.connected)
+        child.send({ signal: name }, (error) => {
+          if (error) child.kill(name);
+        });
+      else if (process.platform !== "win32" && child.pid !== undefined) process.kill(-child.pid, name);
       else child.kill(name);
     } catch {
       // The group is already gone; the leader alone may remain.
