@@ -301,7 +301,7 @@ export function loadTrackerEventReceipts(ctx: ConversationStore): void {
   }
 }
 
-export function saveTrackerEventReceipts(ctx: ConversationStore): void {
+function saveTrackerEventReceipts(ctx: ConversationStore): void {
   const cutoff = Date.now() - LINEAR_REPLAY_RETENTION_MS;
   const retained = Object.fromEntries(Object.entries(receipts(ctx)).filter(([, at]) => at > cutoff));
   linearEventReceipts.set(ctx, retained);

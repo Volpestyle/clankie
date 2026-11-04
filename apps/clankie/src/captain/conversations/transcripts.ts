@@ -122,7 +122,7 @@ export function syncConversationTranscript(
   if (latestAgentReply !== undefined) resolveSeatReply(ctx, seatId, latestAgentReply);
 }
 
-export function resettle(ctx: ConversationStore, meta: ConversationMeta): void {
+function resettle(ctx: ConversationStore, meta: ConversationMeta): void {
   const events = ctx["readEvents"](meta.conversationId);
   const settled = events.findLastIndex((event) => event.type === "activity");
   if (settled === events.length - 1) return;
@@ -132,7 +132,7 @@ export function resettle(ctx: ConversationStore, meta: ConversationMeta): void {
   }
 }
 
-export function publishTranscriptImages(
+function publishTranscriptImages(
   ctx: ConversationStore,
   meta: ConversationMeta,
   transcript: HerdrSeatTranscript,
@@ -160,7 +160,7 @@ export function publishTranscriptImages(
   }
 }
 
-export function publishNamedImages(
+function publishNamedImages(
   ctx: ConversationStore,
   meta: ConversationMeta,
   text: string,
@@ -170,7 +170,7 @@ export function publishNamedImages(
   void queueDeliveredImages(ctx, meta, namedImagePaths(text).slice(0, 4), workingDirectory);
 }
 
-export function queueDeliveredImages(
+function queueDeliveredImages(
   ctx: ConversationStore,
   meta: ConversationMeta,
   paths: readonly string[],
@@ -190,7 +190,7 @@ export function queueDeliveredImages(
   return result;
 }
 
-export async function publishImages(
+async function publishImages(
   ctx: ConversationStore,
   meta: ConversationMeta,
   paths: readonly string[],
@@ -222,7 +222,7 @@ export async function publishImages(
   return published;
 }
 
-export function completeTranscriptImage(
+function completeTranscriptImage(
   ctx: ConversationStore,
   meta: ConversationMeta,
   sessionKey: string,

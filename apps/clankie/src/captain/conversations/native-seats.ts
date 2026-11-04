@@ -21,7 +21,7 @@ export function conversationIdForSeat(ctx: ConversationStore, seatId: string): s
     ?.conversationId;
 }
 
-export function metaForPersona(ctx: ConversationStore, personaId: string): ConversationMeta | undefined {
+function metaForPersona(ctx: ConversationStore, personaId: string): ConversationMeta | undefined {
   return [...ctx["metas"].values()].find(
     (meta) => meta.scope.kind === "persona" && meta.scope.personaId === personaId,
   );
