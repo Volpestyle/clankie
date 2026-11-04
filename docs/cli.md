@@ -4112,8 +4112,9 @@ Captain model and every config-declared provider. JSON:
 ```
 
 `ok` is false and exit 1 when `clankie.json` has load issues (`issues` is then
-present). `model` and `effort` are `null` when unset. The running service does
-not pick up a write until `clankie restart captain`.
+present). `model` and `effort` are `null` when unset. The running service reads
+the model and declared providers on each turn; `clankie restart captain` is only
+needed for the rest of `clankie.json`.
 
 The JSON `display` array gives plain provider/model, funding, automatic routing and explicit unavailable-rate information from the same API. Restore a prior eligible preference with `model set provider/model`; input/output/cache credit rates remain unavailable while their policy is open.
 
@@ -4168,6 +4169,27 @@ payload includes `probeError`. If the probe fails or lists nothing and
 
 The local runtime is **not** a launcher-owned service. Start ds4, Ollama, or
 LM Studio yourself; `clankie restart captain` only reloads Clankie's config.
+
+### `model local [list]` and `model local use RUNTIME MODEL`
+
+`model local` lists the Ollama, LM Studio and vLLM runtimes answering at their
+default addresses on this Mac, with their models. `model local use` proves the
+model answers with one small request, then declares the endpoint and selects the
+model for the next turn. A failed attempt writes nothing.
+
+```bash
+clankie model local
+clankie model local use ollama qwen3:8b
+```
+
+```json
+{ "ok": true, "model": "ollama/qwen3:8b" }
+```
+
+`RUNTIME` is `ollama`, `lm-studio` or `vllm`. Both go through the running service
+on the same [owner routes a paired app uses](model-keys.md#local-model-endpoints),
+which also lists the error codes. For any other address or port, use
+`model add-local`.
 
 ### `model set providerId/modelId`
 

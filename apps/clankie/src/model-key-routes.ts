@@ -11,6 +11,11 @@ import {
   MODEL_SUBSCRIPTIONS_PATH,
   MODEL_OPTIONS_PATH,
   MODEL_EFFORT_SET_PATH,
+  MODEL_LOCAL_ENDPOINTS_PATH,
+  MODEL_LOCAL_ENDPOINT_ADD_PATH,
+  LocalEndpointAddRequestSchema,
+  LocalEndpointAddResultSchema,
+  LocalEndpointsResponseSchema,
   ModelEffortSetRequestSchema,
   ModelOptionsResponseSchema,
   ModelSubscriptionsResponseSchema,
@@ -55,6 +60,8 @@ export function createModelKeyRoutes(
     MODEL_SUBSCRIPTIONS_PATH,
     MODEL_OPTIONS_PATH,
     MODEL_EFFORT_SET_PATH,
+    MODEL_LOCAL_ENDPOINTS_PATH,
+    MODEL_LOCAL_ENDPOINT_ADD_PATH,
     MODEL_SUBSCRIPTION_METHODS_PATH,
     MODEL_SUBSCRIPTION_START_PATH,
     MODEL_SUBSCRIPTION_STATUS_PATH,
@@ -152,6 +159,38 @@ export function createModelKeyRoutes(
     try {
       if (models!.options === undefined) return context.json({ ok: false, error: "unavailable" }, 503);
       return context.json(ModelOptionsResponseSchema.parse(await models!.options()));
+    } catch {
+      return context.json({ ok: false, error: "unavailable" }, 503);
+    }
+  });
+  app.get(MODEL_LOCAL_ENDPOINTS_PATH, async (context) => {
+    try {
+      if (models!.localEndpoints === undefined) return context.json({ ok: false, error: "unavailable" }, 503);
+      return context.json(LocalEndpointsResponseSchema.parse(await models!.localEndpoints()));
+    } catch {
+      return context.json({ ok: false, error: "unavailable" }, 503);
+    }
+  });
+  app.post(MODEL_LOCAL_ENDPOINT_ADD_PATH, async (context) => {
+    try {
+      const parsed = LocalEndpointAddRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+      if (!parsed.success) return context.json({ ok: false, error: "malformed" }, 400);
+      if (models!.addLocalEndpoint === undefined)
+        return context.json({ ok: false, error: "unavailable" }, 503);
+      // Validation can outlast a revocation, so authority is asked again at the write.
+      const safe = LocalEndpointAddResultSchema.parse(
+        await models!.addLocalEndpoint(
+          parsed.data,
+          async () => (await authorize(context.req.raw)) === true,
+        ),
+      );
+      if (safe.ok) return context.json(safe);
+      const status = ["forbidden", "managed_credits_only"].includes(safe.error)
+        ? 403
+        : safe.error === "provider_conflict"
+          ? 409
+          : 400;
+      return context.json(safe, status);
     } catch {
       return context.json({ ok: false, error: "unavailable" }, 503);
     }

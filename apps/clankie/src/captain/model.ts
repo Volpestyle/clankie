@@ -244,12 +244,20 @@ export async function createCaptainModelRuntime(
   const initialConfig = await loadConfig({ cwd: repoRoot });
   const catalog = await createModelRegistry().catalog();
   registerConfiguredPiProviders(runtime, initialConfig.config, catalog);
+  let registeredProviders = JSON.stringify(initialConfig.config.provider);
   const select = async (
     config: Awaited<ReturnType<typeof loadConfig>>["config"],
     label?: string,
   ): Promise<PiModelSelection> => {
     await options.refuse?.();
     try {
+      // Config is read per turn, so an endpoint added since boot must register
+      // here or a device that just selected it would need a restart it cannot ask for.
+      const providers = JSON.stringify(config.provider);
+      if (providers !== registeredProviders) {
+        registerConfiguredPiProviders(runtime, config, catalog);
+        registeredProviders = providers;
+      }
       const selection = resolvePiModelSelection(config, runtime, {
         hasCodexSubscription:
           !isHostedModelEnvironment() && (await broker.get(CODEX_PROVIDER_ID)) !== undefined,

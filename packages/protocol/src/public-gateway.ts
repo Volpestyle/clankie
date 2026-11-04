@@ -47,6 +47,8 @@ import {
   MODEL_SUBSCRIPTION_CANCEL_PATH,
   MODEL_OPTIONS_PATH,
   MODEL_EFFORT_SET_PATH,
+  MODEL_LOCAL_ENDPOINTS_PATH,
+  MODEL_LOCAL_ENDPOINT_ADD_PATH,
 } from "./model-keys.ts";
 import {
   HARNESS_LOGINS_PATH,
@@ -180,6 +182,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: MODEL_SUBSCRIPTION_CANCEL_PATH, target: "control" },
   { method: "GET", path: MODEL_OPTIONS_PATH, target: "control" },
   { method: "POST", path: MODEL_EFFORT_SET_PATH, target: "control" },
+  { method: "GET", path: MODEL_LOCAL_ENDPOINTS_PATH, target: "control" },
+  { method: "POST", path: MODEL_LOCAL_ENDPOINT_ADD_PATH, target: "control" },
   { method: "GET", path: ACCOUNTS_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_START_PATH, target: "control" },
   { method: "POST", path: ACCOUNT_GITHUB_POLL_PATH, target: "control" },

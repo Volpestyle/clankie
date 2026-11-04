@@ -832,6 +832,22 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/model-keys/local",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "List the Ollama, LM Studio and vLLM runtimes answering at their fixed loopback defaults on this Mac, with their models. Changes nothing.",
+      },
+    ],
+    [
+      "POST /v1/model-keys/local/add",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose:
+          "Name a discovered runtime and model. The body proves the model answers with one bounded local request, declares the endpoint and selects the model for the next turn. A URL is never accepted.",
+      },
+    ],
+    [
       "POST /v1/model-keys/remove",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

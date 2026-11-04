@@ -84,6 +84,8 @@ An authenticated direct local API remains available on self-hosted Macs.
 | GET    | `/v1/model-keys/options`  | none                                                    |
 | POST   | `/v1/model-keys/effort`   | `{ "effort": "high" }` or `{ "effort": null }`          |
 
+[Local model endpoints](#local-model-endpoints) have their own two routes.
+
 GET returns this secret-free projection (the example model is illustrative;
 always populate pickers from the response):
 
@@ -178,6 +180,74 @@ error text are omitted. Catalog identifiers allow letters, digits, `.`, `_`,
 `:`, `/` and `-`, up to 128 characters; credential-shaped values are refused.
 The existing emitter adds `v` and `atMs`, and the host shipper adds tenant and
 instance identity. Telemetry failure never changes a write's result.
+
+## Local model endpoints
+
+A paired app, or `clankie model local`, can add a model that runs on this Mac
+without opening the terminal. Both routes carry the same authority as the rest
+of this API.
+
+| Method | Path                       | Request                                       |
+| ------ | -------------------------- | --------------------------------------------- |
+| GET    | `/v1/model-keys/local`     | none                                          |
+| POST   | `/v1/model-keys/local/add` | `{ "runtime": "ollama", "modelId": "qwen3" }` |
+
+GET probes each runtime at its default loopback address with the same probe
+`/setup` uses. It lists only runtimes that answered with at least one model, so
+an empty `endpoints` array means nothing usable is running. It changes nothing.
+
+| `runtime`   | Name      | Address                     |
+| ----------- | --------- | --------------------------- |
+| `ollama`    | Ollama    | `http://127.0.0.1:11434/v1` |
+| `lm-studio` | LM Studio | `http://127.0.0.1:1234/v1`  |
+| `vllm`      | vLLM      | `http://127.0.0.1:8000/v1`  |
+
+```json
+{
+  "endpoints": [
+    {
+      "runtime": "ollama",
+      "name": "Ollama",
+      "baseURL": "http://127.0.0.1:11434/v1",
+      "models": [{ "id": "qwen3:8b", "context": 40960 }]
+    }
+  ]
+}
+```
+
+The names are the default ports, not a fingerprint: any OpenAI-compatible server
+on port 8000 lists as vLLM. `context` is null when the endpoint does not report
+one. A model that doesn't report one is declared with the 131,072-token fallback.
+
+POST names a listed runtime and model. **It never takes a URL**, which keeps
+these routes from being aimed at another host; `clankie model add-local` remains
+the way to declare any other address, from this Mac. The service lists the
+models again, sends one bounded completion to the chosen model and discards the
+reply. Only then does it repeat authorization, declare the endpoint and select
+the model through the same config as `clankie model set`. A failed attempt writes
+nothing. The result is `{ "ok": true, "model": "ollama/qwen3:8b" }`, and the model
+serves the next turn without a restart, and `usableProviders` includes its
+provider. Adding an endpoint that is already declared refreshes its model list.
+
+No credential is stored, so this route stays open after first-run setup, unlike
+device key entry. Selecting a model is already open to a Take Control device,
+and the endpoint can only be on this Mac.
+
+Errors use `{ "ok": false, "error": CODE }`:
+
+| Code                                     | Status | Meaning                                                                   |
+| ---------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| `endpoint_unavailable`                   | 400    | The runtime is not answering, or lists no models                          |
+| `unsupported_model`                      | 400    | The runtime does not list that model                                      |
+| `unsupported_provider`                   | 400    | `enabled_providers` or `disabled_providers` refuses the provider          |
+| `validation_failed`                      | 400    | The model did not answer the proof request                                |
+| `validation_timeout`                     | 400    | No answer within 45 seconds; a model still loading may succeed on a retry |
+| `provider_conflict`                      | 409    | The provider id already names a hand-written or different endpoint        |
+| `malformed`                              | 400    | Unknown properties, or a runtime outside the table; over 16 KiB is 413    |
+| `forbidden`, `managed_credits_only`      | 403    | No Take Control, including revocation during the proof                    |
+| `authentication_required`, `unavailable` | 401/503 | As for the rest of this API                                              |
+
+The 45-second limit sits under the public gateway's 60-second request deadline.
 
 ## First-run setup and subscription sign-in
 

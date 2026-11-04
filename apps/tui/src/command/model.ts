@@ -18,16 +18,25 @@ import { resolveOperatorCredential } from "@clankie/credential-broker";
 import {
   MODEL_SETTINGS_PATH,
   ModelSettingsResponseSchema,
+  LocalEndpointAddResultSchema,
+  LocalEndpointsResponseSchema,
+  MODEL_LOCAL_ENDPOINT_ADD_PATH,
+  MODEL_LOCAL_ENDPOINTS_PATH,
   ModelKeyResultSchema,
+  type LocalEndpointAddResult,
+  type LocalEndpointsResponse,
   type ModelSettingsResponse,
 } from "@clankie/protocol/model-keys";
 import { commandHost } from "./io.ts";
+import { ownerSettingsApi } from "./owner-settings-api.ts";
 
 const MODEL_USAGE = [
   "Usage: clankie model [status]",
   "       clankie model refresh",
   "       clankie model subscriptions [list|methods|start|status|cancel] …",
   "       clankie model add-local --id ID --base-url URL [--context N] [--models id,id] [--set]",
+  "       clankie model local [list]",
+  "       clankie model local use RUNTIME MODEL",
   "       clankie model set providerId/modelId",
   "       clankie model routing [status|set|off|escalate|purpose|turn-limit] …",
   "       clankie model compaction [status|set TOKENS|default]",
@@ -81,6 +90,8 @@ export type ModelCommandResult =
       readonly model: string;
       readonly restart: string;
     }
+  | ({ readonly ok: true } & LocalEndpointsResponse)
+  | LocalEndpointAddResult
   | {
       readonly ok: boolean;
       readonly source: "network" | "cache" | "bundled";
@@ -232,6 +243,25 @@ async function modelAddLocal(
   };
 }
 
+/** The service's own discovery and add, the same routes a paired app calls. */
+async function modelLocal(
+  args: readonly string[],
+  { fetchImpl, ...options }: ModelCommandOptions,
+): Promise<ModelCommandResult> {
+  const [action, runtime, modelId] = args;
+  const listing = args.length === 0 || (action === "list" && args.length === 1);
+  const using = action === "use" && runtime !== undefined && modelId !== undefined && args.length === 3;
+  if (!listing && !using) throw new Error(MODEL_USAGE);
+  const api = await ownerSettingsApi({ ...options, ...(fetchImpl === undefined ? {} : { fetchImpl }) });
+  if (listing)
+    return { ok: true, ...(await api.get(MODEL_LOCAL_ENDPOINTS_PATH, LocalEndpointsResponseSchema)) };
+  return await api.write(
+    MODEL_LOCAL_ENDPOINT_ADD_PATH,
+    { runtime, modelId },
+    LocalEndpointAddResultSchema,
+  );
+}
+
 /**
  * Re-reads the models.dev catalog every selection surface resolves against.
  *
@@ -370,6 +400,7 @@ export async function runModelCommand(
   if (subcommand === "routing") return await runModelRoutingCommand(args.slice(1), options);
   if (subcommand === "compaction") return await runModelCompactionCommand(args.slice(1), options);
   if (subcommand === "add-local") return await modelAddLocal(parseAddLocalArgs(args.slice(1)), options);
+  if (subcommand === "local") return await modelLocal(args.slice(1), options);
   if (subcommand === "set") {
     const ref = args[1];
     if (ref === undefined || args.length !== 2) throw new Error(MODEL_USAGE);

@@ -27,6 +27,13 @@ captain turn without a restart.
 These endpoints do not establish that the shipped app has an add-provider
 screen: check the current client before sending the owner there.
 
+`clankie model local` lists the Ollama, LM Studio and vLLM runtimes answering at
+their default loopback addresses, and `clankie model local use RUNTIME MODEL`
+proves the model answers, declares the endpoint and selects it for the next turn
+with no restart. They use the owner routes `/v1/model-keys/local` and
+`/v1/model-keys/local/add`, which take a runtime name and never a URL. For any
+other address, use `clankie model add-local` on the Mac itself.
+
 The same devices link the owner's GitHub, Linear and Google accounts through
 `/v1/accounts` (ADR 0196; `clankie accounts` on the CLI): a GitHub device flow
 and browser OAuth with PKCE, run by this machine, tokens only in its broker. A

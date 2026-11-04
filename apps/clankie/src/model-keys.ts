@@ -7,6 +7,11 @@ import {
   CODEX_PROVIDER_ID,
   modelCredentialAllowed,
   loadConfig,
+  LOCAL_RUNTIMES,
+  localProviderConfig,
+  localProviderConflict,
+  declareLocalProvider,
+  probeLocalModels,
   parseModelRef,
   piModelFor,
   piModelsFor,
@@ -20,7 +25,12 @@ import {
 } from "@clankie/model-provider";
 import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { LocalEndpointModelSchema } from "@clankie/protocol/model-keys";
 import type {
+  LocalEndpointAddRequest,
+  LocalEndpointAddResult,
+  LocalEndpointsResponse,
+  LocalRuntimeId,
   ModelSubscriptionMethods,
   ModelSubscriptionStart,
   ModelSubscriptionResult,
@@ -55,7 +65,27 @@ export interface ModelKeysPort {
   options?(): Promise<ModelOptionsResponse>;
   /** The running model's effort; null returns it to the model's default. */
   setEffort?(effort: ModelEffort | null): Promise<ModelKeyResult>;
+  /** The local runtimes answering on this machine right now, with what they serve. */
+  localEndpoints?(): Promise<LocalEndpointsResponse>;
+  /** Proves a local model answers, then declares its endpoint and selects it. */
+  addLocalEndpoint?(
+    input: LocalEndpointAddRequest,
+    guard?: () => Promise<boolean>,
+  ): Promise<LocalEndpointAddResult>;
 }
+
+export interface LocalRuntimeAddress {
+  readonly id: LocalRuntimeId;
+  readonly name: string;
+  readonly baseURL: string;
+}
+
+/**
+ * A local model may have to load before it answers, so this outlasts the key
+ * flow's 15 seconds, while staying under the public gateway's 60-second deadline.
+ */
+const LOCAL_VALIDATION_TIMEOUT_MS = 45_000;
+const LOCAL_MODELS_LISTED_MAX = 256;
 
 /** The CLI's config, broker, Pi runtime and models.dev fill, with a write-only wire projection. */
 /**
@@ -82,6 +112,8 @@ export function createModelKeys(options: {
    */
   onModelChanged?: () => Promise<void>;
   includedMappings?: () => Promise<IncludedModelMappings>;
+  /** Fixed addresses only; never derived from a request. */
+  localRuntimes?: readonly LocalRuntimeAddress[];
 }): ModelKeysPort {
   const { store } = options;
   let writing: Promise<unknown> = Promise.resolve();
@@ -115,15 +147,16 @@ export function createModelKeys(options: {
   };
 
   const registry = createModelRegistry({ env: options.env ?? process.env });
+  const localRuntimes = options.localRuntimes ?? LOCAL_RUNTIMES;
   let initialized: Promise<ModelRuntime> | undefined;
-  const runtime = () =>
-    (initialized ??=
-      options.runtime?.() ??
-      ModelRuntime.create({
-        credentials: new BrokerCredentialStore(store, { env }),
-        modelsPath: null,
-        refreshOnCreate: false,
-      }));
+  const createRuntime = () =>
+    options.runtime?.() ??
+    ModelRuntime.create({
+      credentials: new BrokerCredentialStore(store, { env }),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
+  const runtime = () => (initialized ??= createRuntime());
   const snapshot = async () => {
     const loaded = await loadConfig({
       ...(options.env === undefined ? {} : { env: options.env }),
@@ -152,6 +185,41 @@ export function createModelKeys(options: {
           .map((provider) => state.models.getAvailable(provider.id)),
       )
     ).flat();
+  /**
+   * One bounded completion with no customer context, tools, conversation or
+   * telemetry callbacks. All provider text is discarded.
+   */
+  const proveModel = async (
+    models: ModelRuntime,
+    model: NonNullable<ReturnType<typeof piModelFor>>,
+    proof: { readonly timeoutMs: number; readonly apiKey?: string },
+  ): Promise<"ok" | "validation_failed" | "validation_timeout"> => {
+    const signal = AbortSignal.timeout(proof.timeoutMs);
+    try {
+      const response = await models.complete(
+        model,
+        {
+          messages: [{ role: "user", content: "Reply OK.", timestamp: Date.now() }],
+        },
+        {
+          ...(proof.apiKey === undefined ? {} : { apiKey: proof.apiKey }),
+          maxTokens: 16,
+          maxRetries: 0,
+          timeoutMs: proof.timeoutMs,
+          signal,
+          transport: "sse",
+          cacheRetention: "none",
+        },
+      );
+      return response.stopReason === "error" || response.stopReason === "aborted"
+        ? signal.aborted
+          ? "validation_timeout"
+          : "validation_failed"
+        : "ok";
+    } catch {
+      return signal.aborted ? "validation_timeout" : "validation_failed";
+    }
+  };
   const apiProvider = async (providerId: string) => {
     const state = await snapshot();
     return state.providers.find((provider) => provider.id === providerId)?.auth.apiKey === undefined
@@ -396,6 +464,81 @@ export function createModelKeys(options: {
         },
       };
     },
+    async localEndpoints() {
+      if (!localRuntimes.some((local) => modelCredentialAllowed(local.id, undefined, { env })))
+        return { endpoints: [] };
+      const found = await Promise.all(
+        localRuntimes.map(async ({ id, name, baseURL }) => {
+          const probed = await probeLocalModels(baseURL).catch(() => []);
+          // Whatever holds a default port answers here, so its list is not trusted to fit.
+          const models = probed
+            .flatMap(({ id: modelId, context }) => {
+              const model = LocalEndpointModelSchema.safeParse({ id: modelId, context: context ?? null });
+              return model.success ? [model.data] : [];
+            })
+            .slice(0, LOCAL_MODELS_LISTED_MAX);
+          return models.length === 0 ? [] : [{ runtime: id, name, baseURL, models }];
+        }),
+      );
+      return { endpoints: found.flat() };
+    },
+    async addLocalEndpoint({ runtime: providerId, modelId }, guard) {
+      if (!modelCredentialAllowed(providerId, undefined, { env }))
+        return { ok: false, error: "managed_credits_only" };
+      const local = localRuntimes.find((entry) => entry.id === providerId);
+      if (local === undefined) return { ok: false, error: "unsupported_provider" };
+      const models = await probeLocalModels(local.baseURL).catch(() => undefined);
+      if (models === undefined || models.length === 0) return { ok: false, error: "endpoint_unavailable" };
+      if (!models.some((model) => model.id === modelId)) return { ok: false, error: "unsupported_model" };
+      const state = await snapshot();
+      const { enabled_providers: enabled, disabled_providers: disabled } = state.config;
+      if (disabled?.includes(providerId) || (enabled?.length && !enabled.includes(providerId)))
+        return { ok: false, error: "unsupported_provider" };
+      if (localProviderConflict(state.config, providerId, local.baseURL))
+        return { ok: false, error: "provider_conflict" };
+      // A runtime of its own: the shared one cannot forget a provider, and one
+      // that fails here must not appear in any later listing.
+      const trial = {
+        config: {
+          ...state.config,
+          provider: {
+            ...state.config.provider,
+            [providerId]: localProviderConfig({ providerId, baseURL: local.baseURL, models }),
+          },
+        },
+        catalog: state.catalog,
+      };
+      const trialModels = await createRuntime();
+      registerConfiguredPiProviders(trialModels, trial.config, trial.catalog);
+      const model = piModelFor(trialModels, providerId, modelId, trial);
+      if (model === undefined) return { ok: false, error: "unsupported_model" };
+      const proved = await proveModel(trialModels, model, { timeoutMs: LOCAL_VALIDATION_TIMEOUT_MS });
+      if (proved !== "ok") return { ok: false, error: proved };
+      const refused = await mutate(async () => {
+        if (guard && !(await guard())) return "forbidden" as const;
+        // The proof above can take most of a minute; the config may have moved.
+        const { config } = await loadConfig({
+          ...(options.env === undefined ? {} : { env: options.env }),
+          ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+        });
+        if (localProviderConflict(config, providerId, local.baseURL)) return "provider_conflict" as const;
+        await declareLocalProvider({
+          providerId,
+          baseURL: local.baseURL,
+          models,
+          ...(options.env === undefined ? {} : { env: options.env }),
+        });
+        return undefined;
+      });
+      if (refused !== undefined) return { ok: false, error: refused };
+      const ref = `${providerId}/${modelId}`;
+      const selected = await port.select(ref);
+      if (selected.ok) return { ok: true, model: ref };
+      return {
+        ok: false,
+        error: selected.error === "key_missing" ? "unavailable" : selected.error,
+      };
+    },
     async setEffort(effort) {
       const selection = await running(await snapshot());
       if (selection === undefined) return { ok: false, error: "unsupported_model" };
@@ -458,38 +601,10 @@ export function createModelKeys(options: {
         })
       )
         return { ok: false, error: "validation_failed" };
-      const signal = AbortSignal.timeout(15_000);
-      try {
-        // No customer context, tools, conversation, or telemetry callbacks. Explicit auth
-        // proves this stored key, never a subscription/env fallback. Discard all provider text.
-        const response = await state.models.complete(
-          model,
-          {
-            messages: [{ role: "user", content: "Reply OK.", timestamp: Date.now() }],
-          },
-          {
-            apiKey: credential.key,
-            maxTokens: 16,
-            maxRetries: 0,
-            timeoutMs: 15_000,
-            signal,
-            transport: "sse",
-            cacheRetention: "none",
-          },
-        );
-        const result =
-          response.stopReason === "error" || response.stopReason === "aborted"
-            ? signal.aborted
-              ? "validation_timeout"
-              : "validation_failed"
-            : "ok";
-        report("key-validated", result, providerId);
-        return result === "ok" ? { ok: true } : { ok: false, error: result };
-      } catch {
-        const result = signal.aborted ? "validation_timeout" : "validation_failed";
-        report("key-validated", result, providerId);
-        return { ok: false, error: result };
-      }
+      // Explicit auth proves this stored key, never a subscription/env fallback.
+      const result = await proveModel(state.models, model, { apiKey: credential.key, timeoutMs: 15_000 });
+      report("key-validated", result, providerId);
+      return result === "ok" ? { ok: true } : { ok: false, error: result };
     },
     async select(model) {
       return mutate(async () => {
