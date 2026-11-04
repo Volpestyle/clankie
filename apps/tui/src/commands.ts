@@ -1852,7 +1852,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
                         s.line(
                           "heavy slots",
                           `${roster.resources.capacity.used}/${roster.resources.capacity.heavySlots} · ${roster.resources.queue.length} waiting`,
-                          roster.resources.disk?.warning ? "warn" : "normal",
+                          roster.resources.pressure?.diskWarning ? "warn" : "normal",
                         ),
                         s.line(
                           "simulator slots",

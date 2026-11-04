@@ -128,6 +128,7 @@ it("reports known capacity and unknown where Clankie has no number, and drops se
         warnFreeDiskPercent: 10,
       },
       capacity: { heavySlots: 2, simulatorSlots: 1, used: 1 },
+      pressure: { sampledAtMs: 1, loadRatio: 0.4, availableMemoryMb: 8000, healthy: true },
       leases: [
         {
           id: "lease-1",
@@ -215,8 +216,9 @@ it("reports known capacity and unknown where Clankie has no number, and drops se
     queued: 1,
     lightSlots: "unknown",
     lightUsed: "unknown",
+    healthy: true,
+    pressureReason: "unknown",
   });
-  expect(capacity.heavy).not.toHaveProperty("healthy");
   expect(capacity.tracker).toMatchObject({
     actors: [
       {

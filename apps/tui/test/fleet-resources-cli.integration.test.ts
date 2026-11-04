@@ -694,7 +694,7 @@ describe("fleet resource CLI and doctor across real OS/files/HTTP boundaries", (
       const rendered = formatDoctorReport(report);
       expect(rendered).toContain("Low disk");
       expect(
-        report.resources && "disk" in report.resources && report.resources.disk?.freeDiskGb,
+        report.resources && "pressure" in report.resources && report.resources.pressure?.freeDiskGb,
       ).toBeGreaterThan(0);
       expect(rendered).toContain(`PID ${status.leases[0]!.pid}`);
       expect(rendered).toContain(`Queued Bex · heavy ${basename(process.execPath)}`);

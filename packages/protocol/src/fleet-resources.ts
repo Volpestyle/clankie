@@ -86,16 +86,12 @@ export const FleetResourceSnapshotSchema = z
         serverCpuCores: z.number().finite().positive().max(64).optional(),
       })
       .strict(),
-    /** Free space on the registry's volume against the owner's warning (#599); informational. */
-    disk: z
-      .object({
-        freeDiskGb: z.number().finite().nonnegative(),
-        totalDiskGb: z.number().finite().positive(),
-        warning: z.boolean(),
-      })
-      .strict()
-      .optional(),
-    /** Machine pressure from servers before #599, which gated admission on it; absent since. */
+    /**
+     * A machine reading. Before #599 it gated admission; since, servers send a plain
+     * always-healthy reading in this shape, because clients built earlier require it
+     * and reject unknown keys. The disk fields carry the registry volume's free space
+     * and the owner's low-disk warning. Optional only for #707-era servers.
+     */
     pressure: z
       .object({
         sampledAtMs: timestamp,
