@@ -363,15 +363,15 @@ it("holds a missing receiver quietly across bursts and restarts, then delivers o
   await f.store.close();
   expect(f.events().filter((event) => event.type === "turn")).toEqual([]);
   expect(
-    f
-      .events()
-      .filter(
-        (event) =>
-          event.type === "message" &&
-          event.text.startsWith("Linear receiver unavailable:") &&
-          event.notice?.kind === "linear_receiver_held" &&
-          event.notice.attention === "none",
-      ),
+    f.events().filter(
+      (event) =>
+        event.type === "message" &&
+        event.text.startsWith("Linear receiver unavailable:") &&
+        // The chat's title is quoted: whoever named it wrote it, not the service.
+        /^Linear receiver unavailable: \S+ \(titled "[^"\n]*"\)\./u.test(event.text) &&
+        event.notice?.kind === "linear_receiver_held" &&
+        event.notice.attention === "none",
+    ),
   ).toHaveLength(1);
   await f.restart();
   const [wake] = await f.poll(4000);

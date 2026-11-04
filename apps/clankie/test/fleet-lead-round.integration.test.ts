@@ -883,6 +883,8 @@ it("holds a clean completion watch for an idle lead's round, then wakes it once"
   const [event] = await f.captain.pollSeatEvents(3000, undefined, "global-default");
   expect(event?.content).toContain("This is a Herdr watcher notification you armed earlier");
   expect(event?.content).toContain("Reason you recorded: Harvest the assigned patch");
+  // The pane's own title is quoted: it is the agent's text, not the service's.
+  expect(event?.content).toMatch(/, titled "Worker \d"\)\./u);
   expect(performance.now() - settledAt).toBeGreaterThanOrEqual(1_400);
   await f.finish(event!.id);
   expect(await f.captain.pollSeatEvents(500, undefined, "global-default")).toEqual([]);

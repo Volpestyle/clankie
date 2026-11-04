@@ -1752,7 +1752,7 @@ it("refuses dirty files even with a reason, and allows an explicit reason for cl
   expect(reopened.decisions.latest(path, head)).toMatchObject({
     decision: "closed_unreconciled",
     reason: "Spike superseded by the landed design",
-    by: "lead: Pip",
+    by: `lead: "Pip"`,
   });
   f.watch.close();
 });

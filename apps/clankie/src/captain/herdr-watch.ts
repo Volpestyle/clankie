@@ -155,6 +155,7 @@ import {
   type HerdrAgentSession,
   type HerdrSeatTranscript,
 } from "./herdr-transcript.ts";
+import { quotedLine } from "./quoted-line.ts";
 
 /**
  * Exact persisted conversation and route for a one-shot completion wake.
@@ -7622,7 +7623,7 @@ function watchPrompt(
 ): string {
   const observation =
     failure ??
-    `The watched pane settled with agent status ${agent?.status ?? "unknown"} (${agent?.paneId ?? record.target}, ${agent?.agent ?? "unknown agent"}${agent?.title ? `, ${agent.title}` : ""}).`;
+    `The watched pane settled with agent status ${agent?.status ?? "unknown"} (${agent?.paneId ?? record.target}, ${agent?.agent ?? "unknown agent"}${agent?.title ? `, titled ${quotedLine(agent.title)}` : ""}).`;
   return [
     "This is a Herdr watcher notification you armed earlier, not a new instruction from the owner.",
     `Reason you recorded: ${record.reason}`,

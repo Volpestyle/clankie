@@ -40,6 +40,7 @@ import { describeRetainedWorktrees, listTidyWorktrees, type TidyWorktreesResult 
 import { WorktreeDecisions, workerWorktreeHold } from "./worktree-decisions.ts";
 import { PaneKeeps, type PaneKeep } from "./pane-keeps.ts";
 import { RestoredHireRetirementSchema, type RetirementGuard } from "./retirement-guard.ts";
+import { quotedLine } from "./quoted-line.ts";
 
 const UNDO_MS = 5 * 60_000;
 /** How long a close waits on the GitHub main checkpoint before it holds as unknown (#607). */
@@ -1035,7 +1036,7 @@ export class PaneTidy {
       entry.state = closed ? "closed" : "close_unconfirmed";
       this.save();
       try {
-        const by = `${authority.owner.conversationId}: ${entry.title}`;
+        const by = `${authority.owner.conversationId}: ${quotedLine(entry.title)}`;
         if (entry.unlanded) this.recordLeftBehind(entry.unlanded, by);
         for (const parked of entry.handoffs?.filter((handoff) => handoff.kind === "parked") ?? [])
           this.recordLeftBehind(
@@ -1133,7 +1134,7 @@ export class PaneTidy {
           owner: live.length
             ? live.map((pane) => pane.name ?? pane.paneId).join(", ")
             : closed
-              ? `${closed.title || closed.harness} (closed ${closed.closedAt.slice(0, 10)})`
+              ? `${closed.title ? quotedLine(closed.title) : closed.harness} (closed ${closed.closedAt.slice(0, 10)})`
               : "unattributed",
           ...(at === undefined ? {} : { ageSeconds: Math.max(0, Math.floor((now - at) / 1000)) }),
           ...(decision ? { decision } : {}),
