@@ -21,7 +21,7 @@ import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
-import { RemoteObservationError } from "../src/remote-fleet-relay.ts";
+import { fleetAdmissionUnavailableResponse } from "../src/local-fleet-admission.ts";
 
 const exec = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
@@ -138,21 +138,20 @@ async function service() {
         pane,
         current: () => true,
         validate: async () => true,
-        projectProof: async () => {
-          if (admissionUnavailable) throw new RemoteObservationError("process_exiting");
-          return proof;
-        },
+        projectProof: async () => proof,
       }),
     },
   });
   const server = serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch: fleetLinkFetch((request: Request) =>
-      request.headers.get("x-clankie-pane") === pane
-        ? app.app.fetch(request)
-        : Response.json({ error: "remote_pane_required" }, { status: 403 }),
-    ),
+    fetch: fleetLinkFetch((request: Request) => {
+      if (request.headers.get("x-clankie-pane") !== pane)
+        return Response.json({ error: "remote_pane_required" }, { status: 403 });
+      if (admissionUnavailable && new URL(request.url).pathname.includes("/evidence-uploads"))
+        return fleetAdmissionUnavailableResponse({ observation: "process_exiting" });
+      return app.app.fetch(request);
+    }),
   });
   await new Promise<void>((resolve) => (server.listening ? resolve() : server.once("listening", resolve)));
   const address = server.address();
