@@ -8371,7 +8371,8 @@ Open Clankie in the selected native harness ([ADR 0152](adr/0152-a-harness-takes
 `clankie claude` opens this seat with `claude`; `clankie claude2` uses your
 `claude2` account command. Numbered Claude commands are resolved through your interactive
 `$SHELL`, including shell aliases and functions. The same seat flags work with
-either command. Each numbered command keeps its own resume record. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
+either command. Each numbered command keeps its own resume record, which a `--new`
+Claude seat fills only when it is empty. `clankie codex` and `clankie opencode` open the corresponding native harness with the same flags.
 `clankie grok` and `clankie prime` take them without `--plugin-dir`; see
 [Grok Build](#grok-build-worker-and-operator-seats) and [Prime Agent](#prime-agent-operator-seat).
 
