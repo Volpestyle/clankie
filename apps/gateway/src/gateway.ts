@@ -76,14 +76,19 @@ import {
 import {
   CONNECTOR_AUTHORIZATION_SERVER_PATH,
   CONNECTOR_AUTHORIZE_PATH,
-  CONNECTOR_AUTHORIZE_STATUS_PATH,
   CONNECTOR_MCP_PATH,
   CONNECTOR_PEER_HEADER,
   CONNECTOR_PROTECTED_RESOURCE_PATH,
+  CONNECTOR_TOKEN_PATH,
   isConnectorRoute,
 } from "@clankie/protocol/connector";
 import { clientAddress, clientBlock, type TrustedProxy } from "./client-address.ts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import {
+  CONNECTOR_TOKEN_BODY_BYTES_MAX,
+  createConnectorAdmission,
+  type ConnectorReplyObserver,
+} from "./connector-admission.ts";
 
 const JoinStatusRequestSchema = z.object({ joinId: MachineJoinIdSchema }).strict();
 const JoinChallengeRequestSchema = z.object({ machineId: JoinedMachineIdSchema }).strict();
@@ -122,12 +127,8 @@ const REQUEST_ID_HEADER = "x-clankie-request-id";
 /**
  * The Claude connector (clankie ADR 0301) is plaintext through this doorway:
  * Claude speaks ordinary OAuth and MCP, and the Mac authenticates every call.
- * Claude's servers call from a few shared addresses, so tool calls, token and
- * registration calls are budgeted per host; the sign-in page a browser opens
- * is also budgeted per client.
+ * Its budgets live in `connector-admission.ts`.
  */
-const CONNECTOR_HOST_BUDGET = { capacity: 240, perSecond: 8 } as const;
-const CONNECTOR_SIGN_IN_PEER_BUDGET = { capacity: 60, perSecond: 2 } as const;
 
 /**
  * A device's sealed stream (clankie ADR 0289): the phone's call socket, carried
@@ -252,6 +253,8 @@ interface RoutedRequest {
   readonly target: "control" | "relay";
   readonly path: string;
   readonly body: Buffer;
+  /** Reads the Mac's answer to a connector call, for the budgets it earns. */
+  readonly reply?: ConnectorReplyObserver | undefined;
 }
 
 const silentLogger: PublicGatewayLogger = { info: () => undefined, warn: () => undefined };
@@ -276,6 +279,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   const peerBudgets = new Map<string, { tokens: number; at: number }>();
   const joinBudgets = new Map<string, { tokens: number; at: number }>();
   const connectorBudgets = new Map<string, { tokens: number; at: number }>();
+  // Apart from the host lanes: a flood of sources filling this map refuses new
+  // sources, and must never stop a host's lanes from taking a budget.
+  const connectorSourceBudgets = new Map<string, { tokens: number; at: number }>();
+  const connectorAdmission = createConnectorAdmission(
+    (key, capacity, perSecond) => takeBudget(connectorBudgets, key, capacity, perSecond),
+    (key, capacity, perSecond) => takeBudget(connectorSourceBudgets, key, capacity, perSecond),
+    clock,
+  );
   const telemetryBudgets = new Map<string, { tokens: number; at: number }>();
   const telemetryThrottled = { requests: 0, events: 0, host: 0, reportedAtMs: 0 };
   let pushesInFlight = 0;
@@ -301,12 +312,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
   const heartbeat = setInterval(() => {
     void options.trustedProxy?.refresh();
     reportTelemetryThrottles();
+    connectorAdmission.sweep();
     for (const budgets of [
       pushBudgets,
       peerBudgets,
       telemetryBudgets,
       joinBudgets,
       connectorBudgets,
+      connectorSourceBudgets,
       streamBudgets,
     ]) {
       for (const [key, budget] of budgets) {
@@ -387,6 +400,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     };
     const exchange = beginExchange(routed.host, frame, {
       start(status, headers) {
+        routed.reply?.start(status);
         response.statusCode = status;
         for (const header of headers) {
           if (RESPONSE_HEADER_ALLOWLIST.has(header.name)) response.setHeader(header.name, header.value);
@@ -394,9 +408,11 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         response.flushHeaders();
       },
       chunk: (buffer) => {
+        routed.reply?.chunk(buffer);
         response.write(buffer);
       },
       end: () => {
+        routed.reply?.end();
         response.end();
       },
       fail(status, error) {
@@ -803,24 +819,29 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       return null;
     }
     // After the host check, so made-up host ids never take a budget slot.
+    let reply: ConnectorReplyObserver | undefined;
+    let tokenBody: Buffer | undefined;
     if (connector) {
-      const signInPage =
-        hostRoute.path === CONNECTOR_AUTHORIZE_PATH || hostRoute.path === CONNECTOR_AUTHORIZE_STATUS_PATH;
-      const { capacity, perSecond } = CONNECTOR_HOST_BUDGET;
-      if (
-        !takeBudget(connectorBudgets, `host:${hostRoute.hostId}`, capacity, perSecond) ||
-        (signInPage &&
-          !takeBudget(
-            connectorBudgets,
-            `sign-in:peer:${clientAddress(request, options.trustedProxy)}`,
-            CONNECTOR_SIGN_IN_PEER_BUDGET.capacity,
-            CONNECTOR_SIGN_IN_PEER_BUDGET.perSecond,
-          ))
-      ) {
+      // The token route's credential is in its form, so this one read comes first,
+      // at the Mac's own size limit. Nothing shared is spent to read it.
+      if (hostRoute.path === CONNECTOR_TOKEN_PATH) {
+        const read = await readBody(request, response, CONNECTOR_TOKEN_BODY_BYTES_MAX);
+        if (read === null) return null;
+        tokenBody = read;
+      }
+      const admitted = connectorAdmission.admit({
+        hostId: hostRoute.hostId,
+        path: hostRoute.path,
+        source: clientAddress(request, options.trustedProxy),
+        authorization: request.headers.authorization,
+        tokenBody,
+      });
+      if (admitted === null) {
         response.setHeader("retry-after", "2");
         sendJson(response, 429, { error: "connector_rate_limited" });
         return null;
       }
+      reply = admitted;
     }
     const maxBytes = machineJoin
       ? hostRoute.path === MACHINE_JOIN_CHANNEL_PATH
@@ -833,7 +854,8 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       request.resume();
       return null;
     }
-    const body = request.method === "GET" ? Buffer.alloc(0) : await readBody(request, response, maxBytes);
+    const body =
+      tokenBody ?? (request.method === "GET" ? Buffer.alloc(0) : await readBody(request, response, maxBytes));
     if (body === null) return null;
     if (machineJoin) {
       const schema =
@@ -853,7 +875,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
     }
     // Keep the original bytes and sealed response opaque.
-    return { host, target, path, body };
+    return { host, target, path, body, reply };
   }
 
   async function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {

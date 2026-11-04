@@ -375,5 +375,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0355: An update's outcome reaches its lead](0355-an-updates-outcome-reaches-its-lead.md) — Proposed, 2026-11-03, for #735.
 - [0356: The app signs this Mac in](0356-the-app-signs-this-mac-in.md) — Proposed, 2026-11-04, for #722.
 - [0357: A merged pull request settles an attempt](0357-a-merged-pull-request-settles-an-attempt.md) — Proposed, 2026-11-04, for #703.
+- [0358: The doorway budgets connector work by what the Mac vouched for](0358-the-doorway-budgets-connector-work-by-what-the-mac-vouched-for.md) — Proposed, 2026-11-04, for the doorway connector rate limits.
 
 <!-- adr-index:end -->
