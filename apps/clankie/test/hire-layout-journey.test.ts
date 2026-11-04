@@ -47,13 +47,21 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     CLAUDE_AGENT_ID: "operator-agent",
   };
   const calls: { args: readonly string[]; result: unknown }[] = [];
+  // A hang is one call past its own 10 s timeout. It sticks, so retry loops in
+  // the code under test fail at once instead of spending the test's budget (#562).
+  let hang: Error | undefined;
   const run = async (args: readonly string[]) => {
     if (args[0] !== "server") assertRemoteHerdrArgs(args);
+    if (hang) throw hang;
     const { stdout } = await exec(binary, ["--session", session, ...args], {
       env,
       cwd: root,
       timeout: 10_000,
       maxBuffer: 2 * 1024 * 1024,
+    }).catch((error: unknown) => {
+      if ((error as { killed?: boolean }).killed)
+        hang = new Error(`herdr ${args.join(" ")} hung past its 10 s timeout`, { cause: error });
+      throw hang ?? error;
     });
     calls.push({
       args,
@@ -748,6 +756,9 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         ),
       );
     }
+  } catch (error) {
+    // Name the hung call even when the code under test caught it and failed another way.
+    throw hang ?? error;
   } finally {
     if (process.env.VUH1550_EVIDENCE)
       await writeFile(
@@ -783,4 +794,8 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
         ),
       );
   }
-}, 30_000);
+  // A hang the code under test caught and survived still fails the test.
+  if (hang) throw hang;
+  // About 400 sequential real Herdr calls take 18 s on Linux CI and 33 s on the
+  // loaded shared Mac. This budget only catches a hang the per-call timeout misses.
+}, 120_000);
