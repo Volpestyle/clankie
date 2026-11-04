@@ -207,6 +207,20 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/body-transfer/prepare",
+      {
+        access: "Encrypted active owner device with Take Control",
+        purpose: "Mint a ten-minute read-only peer capability for one transfer.",
+      },
+    ],
+    [
+      "POST /v1/body-transfer/peer",
+      {
+        access: "Owner-minted encrypted transfer-scoped capability",
+        purpose: "Prove this body's keys and frozen transfer binding; cannot mutate state.",
+      },
+    ],
+    [
       "POST /v1/body-transfer/freeze",
       {
         access: "Encrypted active owner device with Take Control",
@@ -1305,6 +1319,7 @@ function buildNetworkRows() {
       method: route.method,
       route:
         [
+          "/v1/body-transfer/peer",
           "/v1/gateway/challenge",
           "/v1/gateway/encrypted",
           "/v1/gateway/push-authorize",

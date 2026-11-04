@@ -311,7 +311,19 @@ try {
   const outId = randomUUID();
   const frozen = await operatorFetch(mac, "/v1/body-transfer/freeze", {
     method: "POST",
-    body: JSON.stringify({ transferId: outId, destination: new URL(hosted.url).origin }),
+    body: JSON.stringify({
+      transferId: outId,
+      destination: new URL(hosted.url).origin,
+      destinationPeer: {
+        url: hosted.url,
+        ticket: await (
+          await operatorFetch(hosted, "/v1/body-transfer/prepare", {
+            method: "POST",
+            body: JSON.stringify({ transferId: outId }),
+          })
+        ).json(),
+      },
+    }),
   });
   mac.child?.kill("SIGKILL");
   assert.equal(frozen.status, 200, await frozen.clone().text());
@@ -340,9 +352,22 @@ try {
   assert.equal(macHealth.self.releasedTo.peer, new URL(hosted.url).origin);
   const refused = await operatorFetch(mac, "/v1/conversations");
   assert.equal(refused.status, 503);
+  const refusedId = randomUUID();
   const reapply = await operatorFetch(mac, "/v1/body-transfer/freeze", {
     method: "POST",
-    body: JSON.stringify({ transferId: randomUUID(), destination: "elsewhere" }),
+    body: JSON.stringify({
+      transferId: refusedId,
+      destination: "elsewhere",
+      destinationPeer: {
+        url: hosted.url,
+        ticket: await (
+          await operatorFetch(hosted, "/v1/body-transfer/prepare", {
+            method: "POST",
+            body: JSON.stringify({ transferId: refusedId }),
+          })
+        ).json(),
+      },
+    }),
   });
   assert.equal(reapply.status, 409);
   const unforced = await operatorFetch(mac, "/v1/body-transfer/reclaim", {

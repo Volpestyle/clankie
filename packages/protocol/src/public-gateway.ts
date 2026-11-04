@@ -1,6 +1,6 @@
 import { FLEET_LEADS_PATH } from "./fleet-leads.ts";
 import { CAPTAIN_SEAT_PATH, CAPTAIN_SEAT_START_PATH, CAPTAIN_SEAT_STATUS_PATH } from "./captain-seat.ts";
-import { BODY_TRANSFER_ROUTES } from "./body-transfer.ts";
+import { BODY_TRANSFER_ROUTES, BODY_TRANSFER_PEER_PATH } from "./body-transfer.ts";
 import { WORK_TRACKER_SETTINGS_PATH } from "./work-tracker-settings.ts";
 import {
   MACHINE_JOIN_START_PATH,
@@ -134,6 +134,7 @@ export { HOSTED_OPERATOR_PATH } from "./hosted-operator.ts";
 export const PUBLIC_GATEWAY_ROUTES = [
   // Owner-only transfers between bodies (ADR 0286), behind the encryption gate.
   ...BODY_TRANSFER_ROUTES.map((route) => ({ ...route, target: "control" as const })),
+  { method: "POST", path: BODY_TRANSFER_PEER_PATH, target: "control" as const },
   ...[
     MACHINE_JOIN_START_PATH,
     MACHINE_JOIN_STATUS_PATH,

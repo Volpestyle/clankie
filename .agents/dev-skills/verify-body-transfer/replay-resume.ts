@@ -34,7 +34,7 @@ const settings = (dir: string) => {
   } as never;
 };
 const root = mkdtempSync(join(tmpdir(), "replay-body-resume-"));
-const url = { S: "http://s.test", A: "http://a.test", B: "http://b.test" } as const;
+const url = { S: "https://s.test", A: "https://a.test", B: "https://b.test" } as const;
 type Name = keyof typeof url;
 const dir = (n: Name) => join(root, n);
 for (const n of ["S", "A", "B"] as const) mkdirSync(join(dir(n), "state"), { recursive: true });
@@ -43,6 +43,7 @@ const body = (n: Name) =>
     roots: { state: join(dir(n), "state"), memory: join(dir(n), "memory"), attachments: join(dir(n), "att") },
     settings: settings(dir(n)),
     label: url[n],
+    fetchImpl,
   });
 const ready = async (commit: () => Promise<void>) => (await commit(), "ready" as const);
 
@@ -80,7 +81,15 @@ const t = randomUUID();
 
 // S freezes for A and restarts dormant.
 await mount("S");
-await live.S.freeze({ transferId: t, destination: url.A }, ready);
+await mount("A");
+await live.S.freeze(
+  {
+    transferId: t,
+    destination: url.A,
+    destinationPeer: { url: url.A, ticket: live.A.preparePeer({ transferId: t }) },
+  },
+  ready,
+);
 await mount("S");
 // A stages and applies over its routes; its reply is lost to the restart, so it stays frozen/applying.
 await mount("A");
@@ -96,7 +105,12 @@ const move = async (to: Name, apply = true) => {
       });
     offset += bytes.length;
     if (offset >= Number(chunk.size)) {
-      await post(to, BODY_TRANSFER_STAGE_PATH, { transferId: t, size: chunk.size, sha256: chunk.sha256 });
+      await post(to, BODY_TRANSFER_STAGE_PATH, {
+        transferId: t,
+        size: chunk.size,
+        sha256: chunk.sha256,
+        sourcePeer: { url: url.S, ticket: live.S.preparePeer({ transferId: t }) },
+      });
       break;
     }
   }

@@ -324,3 +324,14 @@ ingress or Activity media, or routes hosted credits. Those paths now answer
 The process refuses to start while any `CLANKIE_GATEWAY_FLEET_*` setting is
 present, so a host still configured for the fleet fails loudly instead of
 silently dropping it.
+
+## Body-transfer peer metadata
+
+`POST /v1/body-transfer/peer` forwards a bounded encrypted metadata capability
+without a device envelope. The owner first mints a ten-minute ticket for one
+transfer through the encrypted owner-only `prepare` route. The peer endpoint
+can only return body keys and that transfer's frozen binding; it cannot mutate
+state or mint tickets. A fresh request id and encrypted response key prevent
+reply substitution. All transfer writes retain device encryption and owner
+admission. No plaintext owner bearer is forwarded. The capability has a separate
+per-client budget and an 8 KiB request limit.

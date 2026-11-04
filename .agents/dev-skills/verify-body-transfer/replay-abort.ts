@@ -18,12 +18,27 @@ const settings = (dir: string) => {
     update: async (f: (v: typeof value) => typeof value) => (value = f(value)),
   } as never;
 };
-const body = (dir: string, label: string) =>
-  new BodyTransfer({
+const peers = new Map<string, BodyTransfer>();
+const origins: Record<string, string> = { S: "https://s.test", A: "https://a.test", B: "https://b.test" };
+const fetchImpl = (async (input: URL | string, init?: RequestInit) => {
+  const target = peers.get(new URL(String(input)).origin);
+  if (!target) throw Error("unknown_fixture_peer");
+  try {
+    return Response.json(target.peerExchange(JSON.parse(String(init?.body))));
+  } catch {
+    return Response.json({ error: "body_peer_refused" }, { status: 403 });
+  }
+}) as typeof fetch;
+const body = (dir: string, label: string) => {
+  const transfer = new BodyTransfer({
     roots: { state: join(dir, "state"), memory: join(dir, "memory"), attachments: join(dir, "att") },
     settings: settings(dir),
     label,
+    fetchImpl,
   });
+  peers.set(origins[label]!, transfer);
+  return transfer;
+};
 const root = mkdtempSync(join(tmpdir(), "replay-body-transfer-"));
 const [dS, dA, dB] = ["S", "A", "B"].map((n) => join(root, n));
 const { mkdirSync } = await import("node:fs");
@@ -32,7 +47,14 @@ const ready = async (commit: () => Promise<void>) => (await commit(), "ready" as
 const t = randomUUID();
 
 const S = body(dS, "S");
-await S.freeze({ transferId: t, destination: "A" }, ready);
+await S.freeze(
+  {
+    transferId: t,
+    destination: "A",
+    destinationPeer: { url: origins.A, ticket: body(dA, "A").preparePeer({ transferId: t }) },
+  },
+  ready,
+);
 const S2 = body(dS, "S"); // the source restarts dormant
 await S2.boot();
 const A = body(dA, "A");
@@ -42,7 +64,12 @@ for (let offset = 0; ;) {
     await A.stageChunk({ transferId: t, offset, bytesBase64: chunk.bytesBase64 });
   offset += Buffer.from(chunk.bytesBase64, "base64").length;
   if (offset >= chunk.size) {
-    await A.stage({ transferId: t, size: chunk.size, sha256: chunk.sha256 });
+    await A.stage({
+      transferId: t,
+      size: chunk.size,
+      sha256: chunk.sha256,
+      sourcePeer: { url: origins.S, ticket: S2.preparePeer({ transferId: t }) },
+    });
     break;
   }
 }

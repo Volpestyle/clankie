@@ -51,11 +51,15 @@ sequenceDiagram
   participant CLI as clankie transfer (owner)
   participant S as Source body
   participant D as Destination body
-  CLI->>S: freeze(transferId, destination)
+  CLI->>D: prepare(transferId) → scoped peer ticket
+  CLI->>S: freeze(transferId, destination, destinationPeer)
+  S->>D: encrypted peer challenge → body keys
   Note over S: waits for no turn, voice or share;<br/>persists frozen at epoch e+1, then restarts dormant
   CLI->>S: GET bundle
   S-->>CLI: manifest (selfId, epoch e+1, transferId, sha256 per file) + files
-  CLI->>D: stage(bundle)
+  CLI->>S: prepare(transferId) → scoped peer ticket
+  CLI->>D: stage(sealed bundle, sourcePeer)
+  D->>S: encrypted peer challenge → frozen binding
   Note over D: verifies hashes and admission;<br/>stores under transfer/incoming
   CLI->>D: apply(transferId)
   Note over D: idle cutover, restart; on boot applies the stage<br/>and writes active at epoch e+1
@@ -101,6 +105,44 @@ owner's explicit way out. It reactivates the source at a still higher epoch and
 is recorded with the warning that any work the other body did is not merged.
 Each epoch and transfer id is applied at most once. A body refuses a bundle
 whose epoch is not above its own.
+
+**The service enforces the destination binding.** Transfer format v2 keeps
+an Ed25519 self-key pin alongside the existing random `selfId`; upgrading an
+active legacy self preserves its UUID and history. A first transfer mints both.
+The self signing key moves with the state. Each body's separate Ed25519 receipt
+key and X25519 decryption key stay on that installation.
+
+Before freeze, the CLI obtains an owner-only `prepare` ticket from the selected
+destination. The source contacts that peer itself and pins its body keys. Before
+stage, the destination independently contacts the source and pins its frozen
+`transferId`, UUID, self public key, epoch and destination keys. A caller's key
+claim or bundle manifest cannot establish that binding. Both calls require
+HTTPS (or exact IPv4 loopback HTTP), refuse redirects, and have a five-second
+deadline. The owner selects and trusts the actual body URLs; this is not remote
+attestation against a compromised body or a copied state directory.
+
+The peer route is a read-only metadata capability, separate from owner transfer
+routes. Owner-minted tickets last ten minutes and name exactly one transfer.
+Requests and replies are encrypted, correlated to a fresh request and response
+key, and bounded in size. No owner bearer crosses between bodies. Through the
+gateway only this narrow encrypted capability envelope may travel outside a
+device envelope; all transfer writes and ticket minting remain owner-only.
+
+The source signs the manifest with the pinned self key and seals the bundle to
+the selected body's X25519 key with authenticated encryption. The destination
+checks both the sealed recipient and the signed inner binding before staging,
+and revalidates its persisted source binding on apply and boot. Abort requires
+a signed burn from the pinned destination; release requires that body's signed
+activation for the exact UUID, epoch and transfer. Relabelling another body's
+receipt cannot authorize either action. Owner authorization is checked again
+before committing freeze or stage after a peer call.
+
+Old unbound in-flight bundles and receipts fail closed. An old frozen source
+stays dormant and can still report its state; upgrading does not silently
+resume it or manufacture a destination binding. An owner must explicitly
+resolve that old transfer, including the existing warned reclaim escape if
+necessary. Active legacy selves acquire a key pin on their next v2 freeze
+without changing their UUID.
 
 **What moves** is what Clankie knows and has said:
 

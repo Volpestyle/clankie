@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
@@ -177,6 +177,28 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
     // Transfer routes never travel outside the encryption gate.
     expect((await fetch(`${hostBaseUrl}/v1/body-transfer/status`)).status).not.toBe(200);
 
+    expect(
+      (await supervisor.fetch("POST", "/v1/body-transfer/prepare", { transferId: randomUUID() })).status,
+    ).toBe(403);
+    const rawPrepare = await fetch(`${hostBaseUrl}/v1/body-transfer/prepare`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ transferId: randomUUID() }),
+    });
+    expect(rawPrepare.status).not.toBe(200);
+    const rawClaim = await fetch(`${hostBaseUrl}/v1/body-transfer/peer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ bodyIdentity: {} }),
+    });
+    expect(rawClaim.status).toBe(400);
+    const unmintedPeer = await fetch(`${hostBaseUrl}/v1/body-transfer/peer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticketId: randomUUID(), requestId: randomUUID(), sealedRequest: "untrusted" }),
+    });
+    expect(unmintedPeer.status).toBe(403);
+
     // The Mac: real history on disk, including an attachment that spans many chunks.
     const macState = join(root, "mac/state");
     await mkdir(join(macState, "memory/captain-episodes"), { recursive: true });
@@ -229,6 +251,12 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
         return "ready";
       },
     });
+    const macPeerServer = serve({ fetch: macRoutes.fetch, hostname: "127.0.0.1", port: 0 }) as Server;
+    const macPeerOrigin = await listeningOrigin(macPeerServer);
+    closers.push(async () => {
+      macPeerServer.closeAllConnections();
+      await closeServer(macPeerServer);
+    });
     const macPost = async (path: string, value: unknown) =>
       macRoutes.request(path, {
         method: "POST",
@@ -238,7 +266,16 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
 
     const transferId = "5d6c1b0e-6a52-4c6c-9f4e-2b8d1f6c3a10";
     expect(
-      (await macPost("/v1/body-transfer/freeze", { transferId, destination: `hosted:${hostId}` })).status,
+      (
+        await macPost("/v1/body-transfer/freeze", {
+          transferId,
+          destination: `hosted:${hostId}`,
+          destinationPeer: {
+            url: hostBaseUrl,
+            ticket: await (await owner.fetch("POST", "/v1/body-transfer/prepare", { transferId })).json(),
+          },
+        })
+      ).status,
     ).toBe(200);
     const bundle: Buffer[] = [];
     let expected: { size: number; sha256: string } | undefined;
@@ -272,9 +309,13 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       transferId,
       size: bytes.length,
       sha256: expected!.sha256,
+      sourcePeer: {
+        url: macPeerOrigin,
+        ticket: await (await macPost("/v1/body-transfer/prepare", { transferId })).json(),
+      },
     });
     expect(staged.status, await staged.clone().text()).toBe(200);
-    expect(await staged.json()).toMatchObject({ transferId, outcome: "staged", files: 3 });
+    expect(await staged.json()).toMatchObject({ transferId, outcome: "staged", files: 4 });
     // A supervising device cannot apply it.
     expect((await supervisor.fetch("POST", "/v1/body-transfer/apply", { transferId })).status).toBe(403);
     // The restart the apply starts can cut its reply; the body's status decides, as in the CLI.
@@ -339,6 +380,10 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       .fetch("POST", "/v1/body-transfer/freeze", {
         transferId: backId,
         destination: "local:owner-mac",
+        destinationPeer: {
+          url: macPeerOrigin,
+          ticket: await (await macPost("/v1/body-transfer/prepare", { transferId: backId })).json(),
+        },
         destinationMachineId: "join-owner-mac",
       })
       .then(
@@ -422,13 +467,19 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
           transferId: backId,
           size: returnedBytes.length,
           sha256: back!.sha256,
+          sourcePeer: {
+            url: hostBaseUrl,
+            ticket: await (
+              await owner.fetch("POST", "/v1/body-transfer/prepare", { transferId: backId })
+            ).json(),
+          },
         })
       ).status,
     ).toBe(200);
     expect((await macDoorPost("/v1/body-transfer/apply", { transferId: backId })).status).toBe(200);
     for (let attempt = 0; attempt < 100 && macBody.dormant(); attempt++)
       await new Promise((resolve) => setTimeout(resolve, 20));
-    const macActive = macBody.authority();
+    const macActive = macBody.authority({ transfers: true });
     expect(macActive).toMatchObject({
       state: "active",
       dormant: false,

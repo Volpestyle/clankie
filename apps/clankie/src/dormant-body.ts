@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { serve } from "@hono/node-server";
 import type { CredentialStore } from "@clankie/credential-broker";
-import { BODY_TRANSFER_ROUTES } from "@clankie/protocol/body-transfer";
+import { BODY_TRANSFER_ROUTES, isBodyTransferPeerRoute } from "@clankie/protocol/body-transfer";
 import { discordAttachmentRoot, type SettingsStore } from "@clankie/settings";
 import { createClankieApp, type ClankieApp } from "./app.ts";
 import { composerTranscriptionRoutes } from "./composer-transcription.ts";
@@ -21,6 +21,7 @@ import { relayExtension } from "./relay-extension.ts";
  */
 function dormantAdmits(method: string, path: string): boolean {
   if (method === "GET" && path === "/health") return true;
+  if (isBodyTransferPeerRoute(method, path)) return true;
   if (BODY_TRANSFER_ROUTES.some((route) => route.method === method && route.path === path)) return true;
   if (method === "POST" && path === "/v1/devices/self/session/refresh") return true;
   return method === "GET" && path === "/v1/devices/self";

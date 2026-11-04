@@ -1,3 +1,4 @@
+import { isBodyTransferPeerRoute } from "@clankie/protocol/body-transfer";
 import { isMachineJoinTransportRoute } from "@clankie/protocol/machine-join";
 import {
   CONNECTOR_PEER_HEADER,
@@ -584,6 +585,7 @@ export class PublicGatewayConnector {
       const response =
         connector ||
         isMachineJoinTransportRoute(frame.method, frame.path) ||
+        isBodyTransferPeerRoute(frame.method, frame.path) ||
         frame.path === "/v1/hooks/linear"
           ? await this.fetcher(new URL(frame.path, baseUrl), {
               method: frame.method,

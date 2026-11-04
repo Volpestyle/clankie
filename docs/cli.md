@@ -6197,6 +6197,23 @@ proofs are in
 [VUH-2582 evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-21-vuh-2582-transfer-gateway/README.md) and
 [VUH-2583 evidence](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-21-vuh-2583-dormant-doorway/README.md).
 
+Transfer format v2 preserves an existing `selfId` UUID and pins a self public
+key beside it. The CLI obtains owner-only `POST /v1/body-transfer/prepare`
+tickets on both bodies. Freeze takes `destinationPeer: {url, ticket}`; stage
+takes `sourcePeer: {url, ticket}`. Each service contacts the actual peer to
+verify the binding; caller-supplied keys are refused. Peer URLs use HTTPS or
+exact `127.0.0.1` HTTP and never follow redirects. The read-only
+`POST /v1/body-transfer/peer` accepts only a short-lived, encrypted,
+transfer-scoped capability, including through the gateway; it cannot mutate a
+self or mint another ticket. Owner credentials are never forwarded to a peer.
+
+Signed manifests, recipient-sealed bundles and signed destination burn and
+activation receipts enforce the same boundary for direct API callers. Old
+unbound in-flight bundles and receipts are refused; an old frozen body remains
+dormant until the owner resolves it explicitly. The manual no-model service
+proof is `scripts/testing/body-transfer-authority.mjs`; run it through
+`clankie heavy --server --` with a new proof directory under `.local/`.
+
 ### `join`
 
 On the home Mac, `clankie machines legacy-joins [on|off]` reads or changes

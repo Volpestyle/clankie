@@ -7,6 +7,12 @@ import { z } from "zod";
  */
 export const BODY_TRANSFER_STATUS_PATH = "/v1/body-transfer/status";
 export const BODY_TRANSFER_FREEZE_PATH = "/v1/body-transfer/freeze";
+export const BODY_TRANSFER_PREPARE_PATH = "/v1/body-transfer/prepare";
+/** Read-only, scoped encrypted peer exchange; no owner bearer traverses this route. */
+export const BODY_TRANSFER_PEER_PATH = "/v1/body-transfer/peer";
+export function isBodyTransferPeerRoute(method: string, path: string): boolean {
+  return method === "POST" && path === BODY_TRANSFER_PEER_PATH;
+}
 export const BODY_TRANSFER_BUNDLE_PATH = "/v1/body-transfer/bundle";
 export const BODY_TRANSFER_STAGE_CHUNK_PATH = "/v1/body-transfer/stage-chunk";
 export const BODY_TRANSFER_STAGE_PATH = "/v1/body-transfer/stage";
@@ -16,7 +22,7 @@ export const BODY_TRANSFER_DISCARD_PATH = "/v1/body-transfer/discard";
 export const BODY_TRANSFER_ABORT_PATH = "/v1/body-transfer/abort";
 export const BODY_TRANSFER_RECLAIM_PATH = "/v1/body-transfer/reclaim";
 export const BODY_TRANSFER_REBIND_PATH = "/v1/body-transfer/rebind";
-export const BODY_TRANSFER_FORMAT = "clankie-body-transfer/1";
+export const BODY_TRANSFER_FORMAT = "clankie-body-transfer/2";
 /**
  * Bundles move in chunks that fit the gateway's encrypted envelope (1 MiB
  * requests, 16 MiB responses), so one protocol serves loopback and hosted bodies.
@@ -28,6 +34,7 @@ export const BODY_TRANSFER_ROUTES = [
   { method: "GET" as const, path: BODY_TRANSFER_STATUS_PATH },
   ...[
     BODY_TRANSFER_FREEZE_PATH,
+    BODY_TRANSFER_PREPARE_PATH,
     BODY_TRANSFER_BUNDLE_PATH,
     BODY_TRANSFER_STAGE_CHUNK_PATH,
     BODY_TRANSFER_STAGE_PATH,
@@ -44,6 +51,66 @@ export const BodyTransferIdSchema = z.uuid();
 export const BodySelfStateSchema = z.enum(["active", "frozen", "released"]);
 const PeerSchema = z.string().trim().min(1).max(512);
 const AtSchema = z.iso.datetime();
+const PublicKeySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/u)
+  .min(40)
+  .max(128);
+const SignatureSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/u)
+  .max(128);
+/** Installation keys stay with this body, independently of the self it holds. */
+export const BodyTransferIdentitySchema = z.strictObject({
+  signingKey: PublicKeySchema,
+  encryptionKey: PublicKeySchema,
+});
+export type BodyTransferIdentity = z.infer<typeof BodyTransferIdentitySchema>;
+export const BodyTransferBindingSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  selfId: z.uuid(),
+  selfKey: PublicKeySchema,
+  epoch: z.number().int().positive(),
+  destinationIdentity: BodyTransferIdentitySchema,
+});
+export type BodyTransferBinding = z.infer<typeof BodyTransferBindingSchema>;
+const PeerSecretSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+export const BodyTransferPeerTicketSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  ticketId: z.uuid(),
+  secret: PeerSecretSchema,
+  expiresAt: AtSchema,
+});
+export const BodyTransferPeerDescriptorSchema = z.strictObject({
+  url: z.string().url().max(4096),
+  ticket: BodyTransferPeerTicketSchema,
+});
+export type BodyTransferPeerDescriptor = z.infer<typeof BodyTransferPeerDescriptorSchema>;
+export const BodyTransferPeerEnvelopeSchema = z.strictObject({
+  ticketId: z.uuid(),
+  requestId: z.uuid(),
+  sealedRequest: z.string().min(1).max(4096),
+});
+export const BodyTransferPeerPayloadSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  responseSecret: PeerSecretSchema,
+});
+export const BodyTransferPeerWitnessSchema = z.strictObject({
+  requestId: z.uuid(),
+  identity: BodyTransferIdentitySchema,
+  frozen: BodyTransferBindingSchema.optional(),
+  signature: SignatureSchema,
+});
+export type BodyTransferPeerWitness = z.infer<typeof BodyTransferPeerWitnessSchema>;
+export const BodyTransferProofSchema = z.strictObject({
+  transferId: BodyTransferIdSchema,
+  outcome: z.enum(["burned", "active"]),
+  identity: BodyTransferIdentitySchema,
+  selfId: z.uuid().optional(),
+  epoch: z.number().int().nonnegative().optional(),
+  signature: SignatureSchema,
+});
+export type BodyTransferProof = z.infer<typeof BodyTransferProofSchema>;
 
 /** Everything a body has done with one transfer id. Its presence fences the id. */
 export const BodyTransferRecordSchema = z.strictObject({
@@ -54,6 +121,10 @@ export const BodyTransferRecordSchema = z.strictObject({
   at: AtSchema,
   /** Source only: the destination's machine id on this body, which becomes its `local`. */
   destinationMachineId: z.string().min(1).max(200).optional(),
+  /** Absent only on legacy records, which cannot authorize a v2 transfer. */
+  destinationIdentity: BodyTransferIdentitySchema.optional(),
+  /** Destination only: established directly with the source service, never from bundle claims. */
+  sourceBinding: BodyTransferBindingSchema.optional(),
   /** Destination only: replace an independent history instead of refusing. */
   replace: z.boolean().optional(),
 });
@@ -63,6 +134,8 @@ export const BodySelfSchema = z.strictObject({
   schemaVersion: z.literal(1),
   /** Absent on a body that has only fenced ids (an unclaimed destination). */
   selfId: z.uuid().optional(),
+  /** Established beside the UUID; upgrades preserve the UUID itself. */
+  selfKey: PublicKeySchema.optional(),
   epoch: z.number().int().nonnegative(),
   state: BodySelfStateSchema,
   /** The transfer that put this body in its current state. */
@@ -77,6 +150,9 @@ export type BodySelf = z.infer<typeof BodySelfSchema>;
 
 /** `/health` and the status route report this; `selfId` is absent before the first transfer. */
 export const BodyAuthoritySchema = z.strictObject({
+  /** Owner status/receipts only; omitted from the legacy health projection. */
+  bodyIdentity: BodyTransferIdentitySchema.optional(),
+  proof: BodyTransferProofSchema.optional(),
   selfId: z.uuid().optional(),
   epoch: z.number().int().nonnegative(),
   state: BodySelfStateSchema,
@@ -90,6 +166,7 @@ export type BodyAuthority = z.infer<typeof BodyAuthoritySchema>;
 export const BodyTransferFreezeRequestSchema = z.strictObject({
   transferId: BodyTransferIdSchema,
   destination: PeerSchema,
+  destinationPeer: BodyTransferPeerDescriptorSchema,
   destinationMachineId: z.string().min(1).max(200).optional(),
 });
 export const BodyTransferIdRequestSchema = z.strictObject({ transferId: BodyTransferIdSchema });
@@ -138,6 +215,9 @@ export const BodyTransferManifestSchema = z.strictObject({
   format: z.literal(BODY_TRANSFER_FORMAT),
   transferId: BodyTransferIdSchema,
   selfId: z.uuid(),
+  /** Pinned alongside the existing self UUID through a direct source witness; the secret moves only in the sealed bundle. */
+  selfKey: PublicKeySchema,
+  destinationIdentity: BodyTransferIdentitySchema,
   epoch: z.number().int().positive(),
   source: z.strictObject({ label: PeerSchema, platform: z.enum(["posix", "windows"]), createdAt: AtSchema }),
   /** Moved top-level owner settings, workspaces already rewritten for the destination. */
@@ -183,6 +263,7 @@ export const BodyTransferStageRequestSchema = z.strictObject({
   transferId: BodyTransferIdSchema,
   size: z.number().int().nonnegative(),
   sha256: Sha256Schema,
+  sourcePeer: BodyTransferPeerDescriptorSchema,
   replace: z.boolean().optional(),
 });
 export const BodyTransferStageResultSchema = z.strictObject({
