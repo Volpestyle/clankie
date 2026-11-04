@@ -36,9 +36,11 @@ host's connection ends. Losing it only returns calls to the anonymous lane.
 The token route's credential is in its form, so that form is read before a lane can
 be chosen. That read has its own limits, because the gateway's in-flight cap counts
 dispatched exchanges, not bodies still arriving: a size limit checked against the
-declared length first, a deadline, a cap on reads at once and per source, and a
-source budget for starting one. A small reserve of reads is kept for sources the
-Mac has vouched for, so refreshes keep moving when anonymous reads fill the rest.
+declared length first, a three-second deadline on each held read, a cap on reads at
+once and per source, and a source budget for starting one. The deadline bounds one
+read, not delivery: a caller can still wait behind others and retry. At most 80
+reads run at once: 64 for anyone, and 16 more only for sources the Mac has vouched
+for, so refreshes keep moving when anonymous reads fill the rest.
 
 A lane decides who waits, never what anyone may do. The Mac still authenticates
 every call, and being remembered here grants nothing.

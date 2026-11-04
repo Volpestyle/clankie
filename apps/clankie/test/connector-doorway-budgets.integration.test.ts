@@ -151,13 +151,17 @@ async function doorway() {
     expect(response.status).toBe(200);
   };
   const token = (form: Record<string, string>, encoding: Encoding = "form", address = CLAUDE_SERVER) => {
-    const fields = { client_id: clientId, ...form };
+    // The caller's fields come first, so a byte order mark lands on the credential.
+    const fields = { ...form, client_id: clientId };
+    const json = encoding.startsWith("json");
     return fetch(`${base}/oauth/token`, {
       method: "POST",
       headers: from(address, {
-        "content-type": encoding === "json" ? "application/json" : "application/x-www-form-urlencoded",
+        "content-type": json ? "application/json" : "application/x-www-form-urlencoded",
       }),
-      body: encoding === "json" ? JSON.stringify(fields) : new URLSearchParams(fields).toString(),
+      body: `${encoding.endsWith("bom") ? "\uFEFF" : ""}${
+        json ? JSON.stringify(fields) : new URLSearchParams(fields).toString()
+      }`,
     });
   };
   /** Waits for the owner's approval as the page does, then exchanges as Claude's server does. */
@@ -166,9 +170,9 @@ async function doorway() {
     const approved = (await (await poll(OWNER_BROWSER, signIn.request)).json()) as { redirect: string };
     return token(
       {
+        code: new URL(approved.redirect).searchParams.get("code")!,
         grant_type: "authorization_code",
         redirect_uri: CALLBACK,
-        code: new URL(approved.redirect).searchParams.get("code")!,
         code_verifier: signIn.verifier,
       },
       encoding,
@@ -220,7 +224,7 @@ async function doorway() {
   };
 }
 
-type Encoding = "form" | "json";
+type Encoding = "form" | "json" | "form-bom" | "json-bom";
 
 /** What the gateway said before closing, or nothing if it still holds the socket after `waitMs`. */
 async function refusal(socket: Socket, waitMs: number): Promise<string | undefined> {
@@ -303,15 +307,25 @@ it("recognises a credential in a JSON token request as the Mac does", async () =
   const first = await open(OWNER_BROWSER);
   const issued = (await (await finish(first)).json()) as Tokens;
   const second = await open(OWNER_BROWSER);
+  const signIns = [await open(OWNER_BROWSER), await open(OWNER_BROWSER)];
   await drainAnonymous();
 
   const exchanged = await finish(second, "json");
   expect(exchanged.status).toBe(200);
   expect((await toolList(((await exchanged.json()) as Tokens).access_token)).status).toBe(200);
-  const refresh = { grant_type: "refresh_token", refresh_token: issued.refresh_token };
-  const refreshed = await token(refresh, "json");
-  expect(refreshed.status).toBe(200);
-  expect((await toolList(((await refreshed.json()) as Tokens).access_token)).status).toBe(200);
+  // Each refresh rotates the token the next one presents.
+  let refreshToken = issued.refresh_token;
+  for (const encoding of ["json", "json-bom", "form-bom"] as const) {
+    const refreshed = await token({ refresh_token: refreshToken, grant_type: "refresh_token" }, encoding);
+    expect(refreshed.status).toBe(200);
+    const next = (await refreshed.json()) as Tokens;
+    expect((await toolList(next.access_token)).status).toBe(200);
+    refreshToken = next.refresh_token;
+  }
+  for (const encoding of ["json-bom", "form-bom"] as const) {
+    const exchanged = await finish(signIns.shift()!, encoding);
+    expect(exchanged.status).toBe(200);
+  }
 
   // A form that names nothing the Mac vouched for stays anonymous.
   expect((await token({ grant_type: "refresh_token", refresh_token: "junk" }, "json")).status).toBe(429);

@@ -47,9 +47,9 @@ const CLIENT_SOURCE_ENTRIES_MAX = 64;
 /** The least recently taught host is forgotten first, and its calls start anonymous. */
 const HOSTS_REMEMBERED_MAX = 512;
 
-/** Well past the time a token form of a few hundred bytes takes to arrive. */
+/** One held read, not delivery end to end: a caller can wait behind others and retry. */
 export const CONNECTOR_TOKEN_READ_DEADLINE_MS = 3_000;
-/** Token forms being read at once, across every host. */
+/** Token forms being read at once, across every host, before the reserve below. */
 const TOKEN_READS_MAX = 64;
 /** More reads, only for sources the Mac vouched for: their refreshes come this way. */
 const TOKEN_READS_RESERVED = 16;
@@ -327,7 +327,8 @@ function jsonObject(body: Buffer): Record<string, unknown> | undefined {
 
 /** As the Mac reads it: an unknown type or a malformed form names no credential. */
 function tokenForm(body: Buffer | undefined, type = ""): URLSearchParams | undefined {
-  const text = (body ?? Buffer.alloc(0)).toString("utf8");
+  // Not Buffer.toString, which keeps a leading byte order mark that the Mac's parsers drop.
+  const text = new TextDecoder().decode(body);
   if (type.startsWith("application/x-www-form-urlencoded")) return new URLSearchParams(text);
   if (!type.startsWith("application/json")) return undefined;
   const fields = jsonObject(Buffer.from(text));
