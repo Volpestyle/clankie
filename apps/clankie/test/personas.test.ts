@@ -9,8 +9,14 @@ import {
   OperatorCodexAccountSchema,
   type OperatorConversation,
 } from "@clankie/protocol";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { SettingsStore } from "@clankie/settings";
 import { z } from "zod";
-import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
+import {
+  subjectForHerdrName,
+  subjectForHerdrPane,
+  type ObservedFleetSeat,
+} from "../src/captain/herdr-census.ts";
 import { PersonaStore } from "../src/captain/personas.ts";
 
 const OCCUPANT_ONE = `session-${"a".repeat(64)}`;
@@ -392,6 +398,299 @@ describe("PersonaStore", () => {
     expect(JSON.parse(readFileSync(join(root, "personas.json"), "utf8"))).toMatchObject({
       schemaVersion: 2,
       bindings: [{ subject: "atlas-ab12", personaId: first.personaId, occupantId: OCCUPANT_TWO }],
+    });
+  });
+
+  it("moves a hired or role-holding character only within its own pane or by the hire record; a casual one still recovers by name (#349)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-authority-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const hired = store.adoptSpawn(observed("term-1"), "Atlas");
+    const lead = store.reconcile([observed("term-2", OCCUPANT_ONE, "vega")])[0]!;
+    store.setRole({ schemaVersion: 1, personaId: lead.personaId, role: "lead" });
+    const casual = store.reconcile([observed("term-3", OCCUPANT_ONE, "orion")])[0]!;
+
+    // Each one's agent ends; another pane is renamed to take each name.
+    const restarted = new PersonaStore(root);
+    const [takeHire, takeLead, takeCasual] = restarted.reconcile([
+      observed("term-7", OCCUPANT_TWO, "atlas-ab12"),
+      observed("term-8", OCCUPANT_TWO, "vega"),
+      observed("term-9", OCCUPANT_TWO, "orion"),
+    ]);
+    expect(takeHire!.personaId).not.toBe(hired.personaId);
+    expect(takeLead!.personaId).not.toBe(lead.personaId);
+    expect(takeCasual!.personaId).toBe(casual.personaId);
+    const personas = restarted.all([], () => undefined);
+    expect(personas.find((entry) => entry.personaId === takeHire!.personaId)?.name).not.toBe("Atlas");
+    expect(personas.find((entry) => entry.personaId === takeLead!.personaId)?.role).toBeUndefined();
+
+    // The hired character's own pane restarting keeps it, and the hire ledger can move it.
+    const again = new PersonaStore(root);
+    expect(again.reconcile([observed("term-1", OCCUPANT_TWO)])[0]!.personaId).toBe(hired.personaId);
+    expect(again.adoptMoved(observed("term-4", `session-${"c".repeat(64)}`), "Atlas").personaId).toBe(
+      hired.personaId,
+    );
+  });
+
+  it("never hands a hired character to another hire whose ledger title matches its name (#349)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-ledger-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const first = store.adoptSpawn(observed("term-1", OCCUPANT_ONE, "atlas-ab12"), "Atlas");
+    store.setRole({ schemaVersion: 1, personaId: first.personaId, role: "reviewer" });
+    // A second, separate hire titled "Atlas" sits in another pane; its own ledger record is genuine.
+    const other = `session-${"c".repeat(64)}`;
+    const hireTitle = (seat: ObservedFleetSeat) => (seat.occupantId === other ? "Atlas" : undefined);
+    store.reconcile([observed("term-2", other, "atlas-cd34")], hireTitle);
+    // The first agent ends, and the second pane is renamed to the first one's key.
+    const [taken] = new PersonaStore(root).reconcile([observed("term-2", other, "atlas-ab12")], hireTitle);
+    expect(taken!.personaId).not.toBe(first.personaId);
+    const after = new PersonaStore(root).all([], () => undefined);
+    expect(after.find((entry) => entry.personaId === first.personaId)?.role).toBe("reviewer");
+    expect(after.find((entry) => entry.personaId === taken!.personaId)?.role).toBeUndefined();
+  });
+
+  it("keeps a chosen name out of the pane keys, and a stored key that reads like another pane's moves nobody (#349)", () => {
+    expect(subjectForHerdrName(subjectForHerdrPane("w1:p2"))).toMatch(/^named-adhoc-/u);
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-panekey-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    // A role holder in pane 1 whose stored key is pane 2's own, as a name could make it before.
+    const holder = store.reconcile([observed("p1", OCCUPANT_ONE, subjectForHerdrPane("w1:pp2"))])[0]!;
+    store.setRole({ schemaVersion: 1, personaId: holder.personaId, role: "lead" });
+    // Pane 2's own unnamed occupant presents that key.
+    const [stranger] = new PersonaStore(root).reconcile([
+      observed("p2", OCCUPANT_TWO, subjectForHerdrPane("w1:pp2")),
+    ]);
+    expect(stranger!.personaId).not.toBe(holder.personaId);
+    // The stranger keeps its own character on the next census, and pane 1 restarting keeps the holder.
+    const again = new PersonaStore(root);
+    expect(again.reconcile([observed("p2", OCCUPANT_TWO, subjectForHerdrPane("w1:pp2"))])[0]!.personaId).toBe(
+      stranger!.personaId,
+    );
+    const back = again.reconcile([
+      observed("p1", `session-${"d".repeat(64)}`, subjectForHerdrPane("w1:pp2")),
+    ])[0]!;
+    expect(back.personaId).toBe(holder.personaId);
+  });
+
+  describe("a held character never moves through a key stored before names and panes had separate keys (#349)", () => {
+    const OCCUPANT_THREE = `session-${"c".repeat(64)}`;
+    /** A Herdr seat as the census reports it: unnamed, or renamed from its own pane's key. */
+    const seen = (paneId: string, occupantId: string, name?: string): ObservedFleetSeat => ({
+      seatId: paneId,
+      paneId,
+      occupantId,
+      harness: "codex",
+      status: "working",
+      title: "Build",
+      subject: name === undefined ? subjectForHerdrPane(paneId) : subjectForHerdrName(name)!,
+      ...(name === undefined ? {} : { renamed: { name, from: subjectForHerdrPane(paneId) } }),
+    });
+    /** A character a name filed under `key` before the keys were separated, holding `role`. */
+    const legacy = (store: PersonaStore, paneId: string, occupantId: string, key: string, role: string) => {
+      const held = store.reconcile([
+        {
+          ...seen(paneId, occupantId),
+          subject: key,
+          renamed: { name: key, from: subjectForHerdrPane(paneId) },
+        },
+      ])[0]!;
+      store.setRole({ schemaVersion: 1, personaId: held.personaId, role });
+      return held;
+    };
+    const fresh = (prefix: string) => {
+      const root = mkdtempSync(join(tmpdir(), prefix));
+      roots.push(root);
+      return root;
+    };
+
+    it.each([false, true])(
+      "a rename in another pane leaves it where it is (pane record lost: %s)",
+      (lost) => {
+        const root = fresh("clankie-personas-legacy-rename-");
+        const holder = legacy(
+          new PersonaStore(root),
+          "w1:p3",
+          OCCUPANT_THREE,
+          subjectForHerdrPane("w1:p2"),
+          "reviewer",
+        );
+        if (lost) rmSync(join(root, "personas.panes.json"));
+        const [renamed] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO, "fresh-name")]);
+        expect(renamed!.personaId).not.toBe(holder.personaId);
+        const roles = new PersonaStore(root).all([], () => undefined);
+        expect(roles.find((entry) => entry.personaId === holder.personaId)?.role).toBe("reviewer");
+      },
+    );
+
+    it("a seat refused one name can't land in a held character under its own pane's key", () => {
+      const root = fresh("clankie-personas-legacy-refile-");
+      const store = new PersonaStore(root);
+      const holder = legacy(store, "w1:p3", OCCUPANT_THREE, subjectForHerdrPane("w1:p2"), "reviewer");
+      store.adoptSpawn(seen("w1:p1", OCCUPANT_ONE, "atlas-ab12"), "Atlas", "lead");
+      const [refused] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO, "atlas-ab12")]);
+      expect(refused!.personaId).not.toBe(holder.personaId);
+    });
+
+    it("a seat filed away from held characters keeps the same character on every census and restart", () => {
+      const root = fresh("clankie-personas-legacy-stable-");
+      const store = new PersonaStore(root);
+      const own = subjectForHerdrPane("w1:p2");
+      legacy(store, "w1:p3", OCCUPANT_THREE, own, "reviewer");
+      const occupantKey = `${own}-${createHash("sha256").update(OCCUPANT_TWO).digest("hex").slice(0, 5)}`;
+      legacy(store, "w1:p4", OCCUPANT_ONE, occupantKey, "reviewer");
+      const first = store.reconcile([seen("w1:p2", OCCUPANT_TWO)])[0]!;
+      expect(store.reconcile([seen("w1:p2", OCCUPANT_TWO)])[0]!.personaId).toBe(first.personaId);
+      expect(new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO)])[0]!.personaId).toBe(
+        first.personaId,
+      );
+    });
+
+    it("an older runtime's character that a binding already holds is never restored to another session", () => {
+      const root = fresh("clankie-personas-v1-");
+      const legacyId = `agent-${OCCUPANT_TWO.slice("session-".length)}`;
+      const at = "2026-11-04T00:00:00.000Z";
+      writeFileSync(
+        join(root, "personas.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          personas: [
+            {
+              schemaVersion: 1,
+              personaId: legacyId,
+              name: "Legacy character",
+              appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+              harness: "codex",
+              createdAt: at,
+              updatedAt: at,
+            },
+          ],
+        }),
+      );
+      // The older session restores its character, then another takes it over in the same pane.
+      expect(new PersonaStore(root).reconcile([seen("w1:p1", OCCUPANT_TWO, "vega")])[0]!.personaId).toBe(
+        legacyId,
+      );
+      const replaced = new PersonaStore(root);
+      expect(replaced.reconcile([seen("w1:p1", OCCUPANT_ONE, "vega")])[0]!.personaId).toBe(legacyId);
+      replaced.setRole({ schemaVersion: 1, personaId: legacyId, role: "reviewer" });
+      // The older session comes back in another pane under a fresh name.
+      const store = new PersonaStore(root);
+      const live = store.reconcile([
+        seen("w1:p1", OCCUPANT_ONE, "vega"),
+        seen("w1:p2", OCCUPANT_TWO, "fresh-name"),
+      ]);
+      expect(live[1]!.personaId).not.toBe(legacyId);
+      expect(store.boundPersona(live, "w1:p2", OCCUPANT_TWO)?.role).toBeUndefined();
+      expect(store.boundPersona(live, "w1:p1", OCCUPANT_ONE)?.role).toBe("reviewer");
+    });
+
+    it.each([false, true])(
+      "an older runtime's character is restored once, even after hire cleanup drops its binding (project roles: %s)",
+      async (projectRoles) => {
+        const root = fresh("clankie-personas-v1-once-");
+        const legacyId = `agent-${OCCUPANT_TWO.slice("session-".length)}`;
+        const at = "2026-11-04T00:00:00.000Z";
+        writeFileSync(
+          join(root, "personas.json"),
+          JSON.stringify({
+            schemaVersion: 1,
+            personas: [
+              {
+                schemaVersion: 1,
+                personaId: legacyId,
+                name: "Legacy character",
+                appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+                harness: "codex",
+                createdAt: at,
+                updatedAt: at,
+              },
+            ],
+          }),
+        );
+        const settings = new SettingsStore(join(root, "settings.json"));
+        if (projectRoles)
+          await settings.update((current) => ({
+            ...current,
+            projects: ProjectsSettingsSchema.parse({ projects: [{ id: "default", name: "Default" }] }),
+          }));
+        const stores: PersonaStore[] = [];
+        const open = async () => {
+          const store = new PersonaStore(root);
+          stores.push(store);
+          if (projectRoles) await store.ready(settings);
+          return store;
+        };
+        try {
+          // The older session restores its character in its own pane, unnamed.
+          const first = await open();
+          expect(first.reconcile([seen("w1:p1", OCCUPANT_TWO)])[0]!.personaId).toBe(legacyId);
+          await first.close();
+          // Another session replaces it there and is given a role.
+          const current = await open();
+          expect(current.reconcile([seen("w1:p1", OCCUPANT_ONE)])[0]!.personaId).toBe(legacyId);
+          if (projectRoles)
+            await current.setProjectRole({
+              schemaVersion: 1,
+              personaId: legacyId,
+              role: "reviewer",
+              projectId: "default",
+            });
+          else current.setRole({ schemaVersion: 1, personaId: legacyId, role: "reviewer" });
+          // The service hires that session under a new handle, retiring its pane binding.
+          expect(current.adoptSpawn(seen("w1:p3", OCCUPANT_ONE, "atlas-ab12"), "Atlas").personaId).not.toBe(
+            legacyId,
+          );
+          await current.close();
+          // After a restart the older session comes back in another pane under a fresh name.
+          const store = await open();
+          const live = store.reconcile([
+            seen("w1:p3", OCCUPANT_ONE, "atlas-ab12"),
+            seen("w1:p2", OCCUPANT_TWO, "fresh-name"),
+          ]);
+          expect(live[1]!.personaId).not.toBe(legacyId);
+          expect(store.boundPersona(live, "w1:p2", OCCUPANT_TWO)?.role).toBeUndefined();
+        } finally {
+          for (const store of stores) await store.close();
+        }
+      },
+    );
+
+    it("an older runtime's character still waiting for its session is restored after later restarts", () => {
+      const root = fresh("clankie-personas-v1-waiting-");
+      const at = "2026-11-04T00:00:00.000Z";
+      const record = (occupantId: string) => ({
+        schemaVersion: 1,
+        personaId: `agent-${occupantId.slice("session-".length)}`,
+        name: "Legacy character",
+        appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+        harness: "codex",
+        createdAt: at,
+        updatedAt: at,
+      });
+      writeFileSync(
+        join(root, "personas.json"),
+        JSON.stringify({ schemaVersion: 1, personas: [record(OCCUPANT_ONE), record(OCCUPANT_TWO)] }),
+      );
+      new PersonaStore(root).reconcile([seen("w1:p1", OCCUPANT_ONE)]);
+      new PersonaStore(root).reconcile([seen("w1:p1", OCCUPANT_ONE)]);
+      const [waited] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO)]);
+      expect(waited!.personaId).toBe(record(OCCUPANT_TWO).personaId);
+    });
+
+    it("nor in a held character under any key it falls back to", () => {
+      const root = fresh("clankie-personas-legacy-fallback-");
+      const store = new PersonaStore(root);
+      const own = subjectForHerdrPane("w1:p2");
+      legacy(store, "w1:p3", OCCUPANT_THREE, own, "lead");
+      const occupantKey = `${own}-${createHash("sha256").update(OCCUPANT_TWO).digest("hex").slice(0, 5)}`;
+      const holders = [
+        legacy(store, "w1:p4", OCCUPANT_ONE, `${own}-p`, "reviewer"),
+        legacy(store, "w1:p5", `session-${"e".repeat(64)}`, occupantKey, "reviewer"),
+      ];
+      const [refused] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO)]);
+      expect(holders.map((holder) => holder.personaId)).not.toContain(refused!.personaId);
     });
   });
 

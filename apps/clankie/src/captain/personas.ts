@@ -43,7 +43,7 @@ import {
   type UpdateOperatorAgentPersona,
 } from "@clankie/protocol";
 import { z } from "zod";
-import { subjectForHerdrName, type ObservedFleetSeat } from "./herdr-census.ts";
+import { subjectForHerdrName, subjectForHerdrPane, type ObservedFleetSeat } from "./herdr-census.ts";
 import { adoptedName, herdrAgentName } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
@@ -96,6 +96,21 @@ const PersonaMarkersSchema = z
   })
   .strict();
 
+/**
+ * The pane each subject's occupant was last seen in, and the v1 characters not yet restored, kept in
+ * their own file so that neither the persona file nor the markers change shape for a rolled-back
+ * runtime. Missing or unreadable reads as empty, which only keeps a character from moving by name
+ * and a v1 character from being restored again (#349).
+ */
+const PersonaPanesSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    panes: z.record(z.string(), z.string().min(1).max(512)),
+    /** v1 characters still waiting for their own occupant. Each is restored at most once. */
+    restorable: z.array(OperatorAgentPersonaIdSchema).optional(),
+  })
+  .strict();
+
 const PendingRoleSchema = z
   .object({
     id: z.string().uuid(),
@@ -111,16 +126,23 @@ export type PersonaRoleWrite = { outcome: "pending"; operationId: string } | { o
 type PersonaBinding = z.infer<typeof PersonaBindingSchema> & {
   /** Clankie minted this subject when it hired this occupant (PersonaMarkersSchema). */
   readonly hired?: true;
+  /** The pane this occupant was last seen in (PersonaPanesSchema). */
+  readonly paneId?: string;
 };
 
 /** Host-owned fleet characters. Herdr seats are only their current locations. */
 export class PersonaStore {
   private readonly path: string;
   private readonly markersPath: string;
+  private readonly panesPath: string;
   private readonly avatarDir: string;
   private readonly records = new Map<string, OperatorAgentPersona>();
   private readonly bindings = new Map<string, PersonaBinding>();
+  /** Personas holding a project role in any project: the characters a name alone can't move (#349). */
+  private roleHolders = new Set<string>();
   private readonly ownerNamed = new Set<string>();
+  /** v1 characters their own occupant may still restore; a restored one leaves for good (#349). */
+  private readonly restorable = new Set<string>();
   private unreadable = false;
   private loadedSource: string | undefined;
   private projectStore?: SettingsStore;
@@ -139,6 +161,7 @@ export class PersonaStore {
   public constructor(stateDir: string) {
     this.path = join(stateDir, "personas.json");
     this.markersPath = join(stateDir, "personas.markers.json");
+    this.panesPath = join(stateDir, "personas.panes.json");
     this.avatarDir = join(stateDir, "persona-avatars");
     mkdirSync(stateDir, { recursive: true });
     mkdirSync(this.avatarDir, { recursive: true });
@@ -172,6 +195,17 @@ export class PersonaStore {
         for (const personaId of markers.ownerNamed)
           if (this.records.has(personaId)) this.ownerNamed.add(personaId);
       }
+      const sidecar = this.readPanes();
+      for (const [subject, paneId] of Object.entries(sidecar.panes)) {
+        const binding = this.bindings.get(subject);
+        if (binding !== undefined) this.bindings.set(subject, { ...binding, paneId });
+      }
+      // Only a file no v2 runtime has saved yet, or the record of what is still waiting, makes a
+      // v1 character restorable: binding cleanup later can't make a restored one look new.
+      const waiting = sidecar.restorable ?? (state.schemaVersion === 1 ? [...this.records.keys()] : []);
+      const bound = new Set([...this.bindings.values()].map((binding) => binding.personaId));
+      for (const personaId of waiting)
+        if (this.records.has(personaId) && !bound.has(personaId)) this.restorable.add(personaId);
     } catch {
       this.unreadable = true;
     }
@@ -296,6 +330,11 @@ export class PersonaStore {
   }
 
   private projectRoles(projects: Parameters<typeof projectRoleForPersona>[0]): void {
+    this.roleHolders = new Set(
+      projects.assignments.flatMap((assignment) =>
+        assignment.role === undefined ? [] : [assignment.personaId],
+      ),
+    );
     for (const [id, persona] of this.records) {
       const { role: _legacy, ...identity } = persona;
       const role = projectRoleForPersona(projects, id);
@@ -452,6 +491,8 @@ export class PersonaStore {
         (subject) =>
           this.bindings.get(subject)?.hired === true ||
           (title !== undefined && mintedFrom(title, subject, observed.paneId)),
+        // A title the ledger holds proves which name a hire was given, never which character it is.
+        false,
       );
       changed ||= bound.changed;
       return bound.seat;
@@ -499,6 +540,7 @@ export class PersonaStore {
       (subject) =>
         this.bindings.get(subject)?.hired === true ||
         (hired && subject === observed.subject && !isPaneSubject(subject)),
+      true,
     );
     const current = this.records.get(seat.personaId);
     if (current === undefined) throw new Error("Agent persona binding did not create a character");
@@ -755,6 +797,10 @@ export class PersonaStore {
   private bindSeat(
     observed: ObservedFleetSeat,
     minted: (subject: string) => boolean,
+    /** The service's own hire or move of this exact seat proves this subject. */
+    proven: boolean,
+    /** How many keys this seat was already refused under; each fallback key is checked again. */
+    refused = 0,
   ): { readonly seat: OperatorFleetSeat; readonly binding: PersonaBinding; changed: boolean } {
     let changed = false;
     // The key this seat is bound under: its observed subject, or its hire's when Herdr lost the name.
@@ -779,7 +825,8 @@ export class PersonaStore {
       // rename strands that persona and its conversation offline, and the
       // replacement takes its name from a terminal title nobody chose.
       const previous = this.bindings.get(observed.renamed.from);
-      if (previous !== undefined) {
+      // The character under the old key moves with the rename only when this seat may take it.
+      if (previous !== undefined && this.mayTake(previous, observed, proven)) {
         this.bindings.delete(observed.renamed.from);
         // The new subject is Clankie's only if it minted it; `minted` decides that below.
         const { account, hired: _hired, ...identity } = previous;
@@ -797,18 +844,42 @@ export class PersonaStore {
     if (binding === undefined) {
       // Compatibility only: v1 derived persona ids from occupants. Retaining a
       // matching record preserves its conversations; new ids are always minted.
+      // A record is restored once, while it still waits for its occupant: after that it is its
+      // binding's character, which moves only as mayTake allows, whatever becomes of that binding (#349).
       const legacyPersonaId = `agent-${observed.occupantId.slice("session-".length)}`;
-      const personaId = this.records.has(legacyPersonaId) ? legacyPersonaId : `agent-${randomUUID()}`;
+      const restorable =
+        this.restorable.has(legacyPersonaId) &&
+        this.records.has(legacyPersonaId) &&
+        ![...this.bindings.values()].some((entry) => entry.personaId === legacyPersonaId);
+      this.restorable.delete(legacyPersonaId);
+      const personaId = restorable ? legacyPersonaId : `agent-${randomUUID()}`;
       binding = { subject, personaId, occupantId: observed.occupantId };
       this.bindings.set(subject, binding);
       changed = true;
     } else if (binding.occupantId !== observed.occupantId) {
+      // A character that carries authority moves to a new occupant only in its own pane or through
+      // the service's own hire or move. Its name alone never moves it (#349). A refused seat is
+      // filed under a key of its own, which is checked the same way.
+      if (!this.mayTake(binding, observed, proven)) {
+        const { renamed: _renamed, ...unnamed } = observed;
+        return this.bindSeat(
+          { ...unnamed, subject: refusedKey(observed, refused) },
+          minted,
+          false,
+          refused + 1,
+        );
+      }
       binding = {
         subject: binding.subject,
         personaId: binding.personaId,
         occupantId: observed.occupantId,
         ...(binding.hired ? { hired: binding.hired } : {}),
       };
+      this.bindings.set(subject, binding);
+      changed = true;
+    }
+    if (binding.paneId !== observed.paneId) {
+      binding = { ...binding, paneId: observed.paneId };
       this.bindings.set(subject, binding);
       changed = true;
     }
@@ -920,6 +991,30 @@ export class PersonaStore {
     };
   }
 
+  private readPanes(): { panes: Record<string, string>; restorable?: readonly string[] | undefined } {
+    try {
+      if (!existsSync(this.panesPath)) return { panes: {} };
+      return PersonaPanesSchema.parse(JSON.parse(readFileSync(this.panesPath, "utf8")));
+    } catch {
+      return { panes: {}, restorable: [] };
+    }
+  }
+
+  /**
+   * Whether this seat may become the binding's occupant. A character with a hire or a project role
+   * passes to another occupant only in the pane it was last seen in, or through the service's own
+   * hire or move. The recorded pane decides, whatever the key looks like: a key stored before names
+   * and panes had separate keys can still read like another pane's (#349).
+   */
+  private mayTake(binding: PersonaBinding, observed: ObservedFleetSeat, proven: boolean): boolean {
+    if (proven || binding.occupantId === observed.occupantId) return true;
+    const authority =
+      binding.hired === true ||
+      this.roleHolders.has(binding.personaId) ||
+      this.records.get(binding.personaId)?.role !== undefined;
+    return !authority || (binding.paneId !== undefined && binding.paneId === observed.paneId);
+  }
+
   private writeAvatar(personaId: string, revision: string, image: Buffer): void {
     const path = join(this.avatarDir, `${encodeURIComponent(personaId)}-${revision}.png`);
     const temporary = `${path}.tmp`;
@@ -938,6 +1033,15 @@ export class PersonaStore {
       hired: [...this.bindings.values()].filter((binding) => binding.hired).map((binding) => binding.subject),
       ownerNamed: [...this.ownerNamed],
     });
+    durableJson(this.panesPath, {
+      schemaVersion: 1,
+      panes: Object.fromEntries(
+        [...this.bindings.values()].flatMap((binding) =>
+          binding.paneId === undefined ? [] : [[binding.subject, binding.paneId]],
+        ),
+      ),
+      restorable: [...this.restorable].filter((personaId) => this.records.has(personaId)),
+    });
     durableJson(this.path, {
       schemaVersion: 2,
       personas: [...this.records.values()].map((persona) => {
@@ -945,7 +1049,7 @@ export class PersonaStore {
         const { role: _role, ...identity } = persona;
         return identity;
       }),
-      bindings: [...this.bindings.values()].map(({ hired: _hired, ...binding }) => binding),
+      bindings: [...this.bindings.values()].map(({ hired: _hired, paneId: _paneId, ...binding }) => binding),
     });
   }
 }
@@ -1067,6 +1171,23 @@ function acquireJournalWriter(journal: string): { path: string; nonce: string } 
 
 /** The census's key for a pane whose agent Herdr has not named (subjectForHerdrPane). */
 const isPaneSubject = (subject: string) => subject.startsWith("adhoc-");
+/**
+ * Where a seat refused a character is filed: its own pane's key, then keys from its own occupant,
+ * the same on every census so it keeps its character, and only after those a fresh one. Each is
+ * checked like any other key, so none can hand over a held character.
+ */
+const REFUSED_OCCUPANT_KEYS = 8;
+const refusedKey = (observed: ObservedFleetSeat, refused: number) => {
+  const own = subjectForHerdrPane(observed.paneId);
+  if (refused === 0 && own !== observed.subject) return own;
+  const tail =
+    refused <= REFUSED_OCCUPANT_KEYS
+      ? createHash("sha256")
+          .update(refused <= 1 ? observed.occupantId : `${observed.occupantId}:${refused}`)
+          .digest("hex")
+      : randomUUID().replaceAll("-", "");
+  return `${own}-${tail.slice(0, 5)}`;
+};
 /** The census's key for a Herdr name on this pane (subjectForHerdrName, with a remote seat's fleet). */
 const keyOf = (name: string, paneId: string) => subjectForHerdrName(name, /^([^/]+)\//u.exec(paneId)?.[1]);
 /**

@@ -126,7 +126,7 @@ export function occupantIdForHerdrSession(session: {
 }
 
 /** Stable fallback identity for an unnamed agent while its Herdr pane exists. */
-function subjectForHerdrPane(paneId: string): string {
+export function subjectForHerdrPane(paneId: string): string {
   return `adhoc-${createHash("sha256").update(paneId).digest("hex").slice(0, 20)}`;
 }
 
@@ -138,12 +138,12 @@ function subjectForHerdrPane(paneId: string): string {
  * with nothing to slug leaves the seat on its pane-derived subject.
  */
 export function subjectForHerdrName(name: string, fleet?: string): string | undefined {
-  const slug = (fleet === undefined ? name : `${fleet}-${name}`)
+  const slugged = (fleet === undefined ? name : `${fleet}-${name}`)
     .toLowerCase()
     .replaceAll(/[^a-z0-9_-]+/gu, "-")
-    .replace(/^[^a-z]+/u, "")
-    .replace(/-+$/u, "")
-    .slice(0, 32);
+    .replace(/^[^a-z]+/u, "");
+  // Pane-derived subjects own the `adhoc-` keys: no chosen name can become one (#349).
+  const slug = (slugged.startsWith("adhoc-") ? `named-${slugged}` : slugged).slice(0, 32).replace(/-+$/u, "");
   return slug.length === 0 ? undefined : slug;
 }
 
