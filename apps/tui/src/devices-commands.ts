@@ -5,6 +5,7 @@
  */
 import { runDevicesCommand, type DevicesCliCommandOptions } from "./command/devices.ts";
 import type { DeviceListItem } from "@clankie/protocol";
+import { connectorShowableText } from "@clankie/protocol/connector";
 import type { ClankieFaceShell, FaceShellCommand } from "./shell/shell.ts";
 
 export type DevicesCommandServices = Omit<DevicesCliCommandOptions, "stdout" | "stderr">;
@@ -57,6 +58,11 @@ async function devicesJson(args: readonly string[], services: DevicesCommandServ
   return result;
 }
 
+/** A device named before names were checked still reads cleanly; the id stays the handle. */
+function shownName(device: DeviceListItem): string {
+  return connectorShowableText(device.name) || device.deviceId;
+}
+
 async function runDevicesMenu(shell: ClankieFaceShell, services: DevicesCommandServices): Promise<void> {
   let devices: DeviceListItem[];
   try {
@@ -79,7 +85,7 @@ async function runDevicesMenu(shell: ClankieFaceShell, services: DevicesCommandS
         message: devices.length ? `Paired devices (${devices.length})` : "No paired devices · /pair adds one",
         options: devices.map((device) => ({
           value: device.deviceId,
-          label: device.name,
+          label: shownName(device),
           hint: `${device.platform} · ${device.status}${device.review === true ? " · review" : ""}`,
           description: device.deviceId,
         })),
@@ -88,7 +94,7 @@ async function runDevicesMenu(shell: ClankieFaceShell, services: DevicesCommandS
       const device = devices.find((entry) => entry.deviceId === choice);
       if (!device) return;
       const confirm = await flow.readSelect({
-        message: `Revoke ${device.name}?`,
+        message: `Revoke ${shownName(device)}?`,
         options: [
           { value: "no", label: "Keep it" },
           { value: "yes", label: "Revoke", hint: "it must pair again to reach him" },
@@ -98,7 +104,7 @@ async function runDevicesMenu(shell: ClankieFaceShell, services: DevicesCommandS
       if (confirm !== "yes") continue;
       try {
         await devicesJson(["revoke", device.deviceId], services);
-        flow.renderLine(`Revoked ${device.name}.`, "success");
+        flow.renderLine(`Revoked ${shownName(device)}.`, "success");
       } catch (error) {
         flow.renderLine(error instanceof Error ? error.message : String(error), "error");
       }

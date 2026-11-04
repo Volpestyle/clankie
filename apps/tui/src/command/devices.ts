@@ -1,4 +1,5 @@
 import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import { connectorShowableText } from "@clankie/protocol/connector";
 import {
   DevicesCommandError,
   devicesFailureMessage,
@@ -70,7 +71,7 @@ function formatDevicesTable(devices: readonly DeviceListItem[]): string {
   ] as const;
   const rows = devices.map((device) => [
     device.deviceId,
-    device.name,
+    connectorShowableText(device.name),
     device.platform,
     device.status,
     device.run?.purpose ?? (device.review === true ? "review" : "pair"),
@@ -122,7 +123,7 @@ export async function runDevicesCommand(
     if (parsed.subcommand === "revoke") {
       const device = await revokeDevice(parsed.deviceId, request);
       if (parsed.json) outputJson(stdout, { ok: true, device });
-      else stdout.write(`Revoked ${device.deviceId} (${device.name}).\n`);
+      else stdout.write(`Revoked ${device.deviceId} (${connectorShowableText(device.name)}).\n`);
       return 0;
     }
     const devices = await listDevices({ ...request, grouped: parsed.grouped });

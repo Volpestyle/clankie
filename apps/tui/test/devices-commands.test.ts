@@ -30,4 +30,45 @@ describe("/devices", () => {
     }) as typeof fetch);
     expect(results[0]?.tone).toBe("error");
   });
+
+  it("shows a device named before names were checked cleanly, and still acts on its id", async () => {
+    const device = {
+      deviceId: "device-legacy",
+      name: "Cla\u202Eu\u200Bde",
+      platform: "unknown",
+      status: "active",
+      grants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
+      createdAt: "2026-11-01T00:00:00.000Z",
+    };
+    const requests: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
+      return Response.json(init?.method === "POST" ? { ...device, status: "revoked" } : [device]);
+    }) as typeof fetch;
+    const seen: unknown[] = [];
+    const lines: string[] = [];
+    const answers = ["device-legacy", "yes", undefined];
+    const shell = {
+      insertCommandResult: () => {},
+      setupFlow: {
+        begin: () => {},
+        end: () => {},
+        readSelect: async (select: unknown) => {
+          seen.push(select);
+          return answers.shift();
+        },
+        renderLine: (line: string) => void lines.push(line),
+      },
+    } as unknown as ClankieFaceShell;
+    const [command] = buildDevicesCommands({
+      env: { CLANKIE_OPERATOR_TOKEN: "operator-secret" },
+      host: "http://127.0.0.1:4310",
+      fetchImpl,
+    });
+    await command!.run("", shell);
+    expect(seen[0]).toMatchObject({ options: [{ value: "device-legacy", label: "Claude" }] });
+    expect(seen[1]).toMatchObject({ message: "Revoke Claude?" });
+    expect(lines).toEqual(["Revoked Claude."]);
+    expect(requests.join(" ")).toContain("device-legacy");
+  });
 });

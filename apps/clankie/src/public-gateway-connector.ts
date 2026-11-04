@@ -1,5 +1,9 @@
 import { isMachineJoinTransportRoute } from "@clankie/protocol/machine-join";
-import { CONNECTOR_PUBLIC_BASE_HEADER, isConnectorRoute } from "@clankie/protocol/connector";
+import {
+  CONNECTOR_PEER_HEADER,
+  CONNECTOR_PUBLIC_BASE_HEADER,
+  isConnectorRoute,
+} from "@clankie/protocol/connector";
 import {
   PUBLIC_GATEWAY_HOST_CONNECT_PATH,
   PUBLIC_GATEWAY_IN_FLIGHT_MAX,
@@ -570,7 +574,11 @@ export class PublicGatewayConnector {
     // Connector routes carry their own OAuth and name their URLs from the
     // public base the request arrived at (ADR 0301).
     const connector = isConnectorRoute(frame.method, frame.path);
-    if (connector) headers.set(CONNECTOR_PUBLIC_BASE_HEADER, this.hostBaseUrl);
+    if (connector) {
+      headers.set(CONNECTOR_PUBLIC_BASE_HEADER, this.hostBaseUrl);
+      const peer = frame.headers.find((header) => header.name === CONNECTOR_PEER_HEADER);
+      if (peer !== undefined) headers.set(CONNECTOR_PEER_HEADER, peer.value);
+    }
     const body = frame.bodyBase64 === undefined ? undefined : Buffer.from(frame.bodyBase64, "base64");
     try {
       const response =

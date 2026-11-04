@@ -52,11 +52,32 @@ export const CONNECTOR_SIGN_IN_DENY_PATH = "/v1/connector/sign-ins/deny";
  */
 export const CONNECTOR_PUBLIC_BASE_HEADER = "x-clankie-public-base";
 
+/**
+ * Who opened a sign-in, as a per-host hash the gateway computes from the address it
+ * saw: an identifier for counting, not anonymity, since an address is guessable input.
+ * The doorway never takes it from a caller, and the Mac drops it from every decrypted
+ * request. The service doesn't authenticate it, so a direct caller can leave it out or
+ * vary it: the per-requester share holds for the doorway, and local access answers only
+ * to the shared cap.
+ */
+export const CONNECTOR_PEER_HEADER = "x-clankie-connector-peer";
+export const ConnectorPeerSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+
 /** Where the hosted Claude apps send a finished sign-in. */
 export const CLAUDE_CONNECTOR_CALLBACK_URLS = [
   "https://claude.ai/api/mcp/auth_callback",
   "https://claude.com/api/mcp/auth_callback",
 ] as const;
+
+/**
+ * What approving an app gives it, in the owner's words, from the connector's tools
+ * and op allowlist. A change to either changes this too.
+ */
+export const CONNECTOR_ACCESS_SUMMARY =
+  "see your agents and read their screens, message them, pass images to and from them, start new ones in your projects, close finished agents that Clankie or an app hired, read your issues, write issues and comments under each project's posting setting, share notes with your other connected apps and wake a connected lead";
+/** Access an app gains only by the owner's later choice, and what it never has. */
+export const CONNECTOR_ACCESS_LIMITS =
+  "If you hand the lead to connected apps, it can also read held work and its own hires' reports. If you turn it on for this app, it can also answer prompts and press keys in agents' terminals. It can't read or change your settings.";
 
 /** Sign-in codes are short and typed by the owner on another screen. */
 export const ConnectorSignInCodeSchema = z
@@ -99,6 +120,23 @@ export function connectorRedirectHost(value: string): string {
   } catch {
     return "an unknown address";
   }
+}
+
+// Control, format (bidi and zero-width among them), lone surrogate and separator
+// characters, and the invisible marks outside those categories.
+const UNSHOWABLE_CHARACTERS =
+  "\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\u034F\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180F\\u3164\\uFE00-\\uFE0F\\uFFA0\\u{E0100}-\\u{E01EF}";
+const UNSHOWABLE = new RegExp(`[${UNSHOWABLE_CHARACTERS}]`, "u");
+const UNSHOWABLE_ALL = new RegExp(`[${UNSHOWABLE_CHARACTERS}]`, "gu");
+
+/** An app's name is its own claim and is shown to the owner: it must read as what it is. */
+export function connectorTextShowable(value: string): boolean {
+  return !UNSHOWABLE.test(value);
+}
+
+/** The same text with anything that can't be shown removed, for names already stored. */
+export function connectorShowableText(value: string): string {
+  return value.replace(UNSHOWABLE_ALL, "").trim();
 }
 
 export const ConnectorSignInSchema = z

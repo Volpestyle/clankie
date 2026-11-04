@@ -114,6 +114,14 @@ own `/mcp` on a trusted network.
   later, revokes the device. An attacker who refreshes first is still caught
   when the real client next refreshes, normally much later than 60 seconds.
   Sign in again after revocation to reconnect.
+  Amendment (2026-11-04): an app's name must be readable text, and is cleaned
+  wherever a name from an earlier client id is shown. Through the doorway, one
+  requester holds at most four waiting sign-ins of the 32 the Mac keeps: its next
+  sign-in replaces its oldest waiting one. The gateway names the requester with a
+  per-host hash of its address (an IPv6 address's /64), an identifier and not
+  anonymity. A sign-in opens only in plaintext: an encrypted request can't open one
+  or name a requester. The service doesn't authenticate that identifier, so local
+  access can leave it out or vary it, and answers only to the 32.
 - **Narrow by the scope, not the grants.** The service answers a connector
   device only at `GET /v1/devices/self`. The relay holds it to its op
   allowlist, and confirms each send or read is for a persona thread before it

@@ -1,3 +1,4 @@
+import { CONNECTOR_PEER_HEADER } from "@clankie/protocol/connector";
 import type { ModelKeysPort } from "../src/model-keys.ts";
 import type { AccountsPort } from "../src/accounts.ts";
 import { randomBytes } from "node:crypto";
@@ -5,7 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SUPERVISE_GRANTS, TAKE_CONTROL_GRANTS, type DeviceGrantSet } from "@clankie/protocol";
 import { derivePublicGatewayHostId } from "@clankie/protocol/public-gateway";
 import {
+  GATEWAY_CHALLENGE_PATH,
   GATEWAY_ENCRYPTED_PATH,
+  gatewayRequestAad,
   type GatewayEncryptionCredential,
 } from "@clankie/protocol/gateway-encryption";
 import {
@@ -554,4 +557,70 @@ it("groups real device registrations through encrypted transport and refuses oth
         })
       ).status,
     ).toBe(200);
+});
+
+it("keeps a paired device's encrypted requests out of sign-ins and their requester counts", async () => {
+  const owner = await account("sealed-sign-in", undefined, undefined, TAKE_CONTROL_GRANTS);
+  const registered = await owner.app.app.request("/oauth/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Claude",
+      redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+    }),
+  });
+  const { client_id: clientId } = (await registered.json()) as { client_id: string };
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: "https://claude.ai/api/mcp/auth_callback",
+    code_challenge: "a".repeat(43),
+    code_challenge_method: "S256",
+  });
+  // Sealed by hand: anyone holding a device's credentials can send more than our client does.
+  const send = async (path: string) => {
+    const challenge = await owner.raw(`${owner.base}${GATEWAY_CHALLENGE_PATH}`, { method: "GET" });
+    const credential = owner.getCredential();
+    const context = {
+      ticket: credential.ticket,
+      challenge: ((await challenge.json()) as { challenge: string }).challenge,
+      requestId: randomBytes(32).toString("hex"),
+    };
+    const sealed = sealGatewayValue(
+      Buffer.from(credential.key, "base64"),
+      JSON.stringify({
+        method: "GET",
+        path,
+        headers: [
+          { name: "authorization", value: owner.headers.authorization },
+          { name: CONNECTOR_PEER_HEADER, value: "b".repeat(43) },
+          { name: "X-Clankie-Connector-Peer", value: "c".repeat(43) },
+        ],
+        responseKey: randomBytes(32).toString("base64"),
+      }),
+      gatewayRequestAad(credential.hostId, context),
+    );
+    return owner.raw(`${owner.base}${GATEWAY_ENCRYPTED_PATH}`, {
+      method: "POST",
+      body: JSON.stringify({ version: 1, ...context, sealed }),
+    });
+  };
+
+  // A sealed sign-in never reaches the service, whatever it names itself.
+  expect((await send(`/oauth/authorize?${query.toString()}`)).status).toBe(401);
+  const waiting = await owner.app.app.request("/v1/connector/sign-ins", {
+    headers: { authorization: "Bearer owner" },
+  });
+  expect(((await waiting.json()) as { signIns: unknown[] }).signIns).toEqual([]);
+
+  // On any other sealed request the name is dropped before the service sees it.
+  const received: Request[] = [];
+  const fetchApp = owner.app.app.fetch;
+  vi.spyOn(owner.app.app, "fetch").mockImplementation((request, ...rest) => {
+    received.push(request as Request);
+    return fetchApp(request, ...rest);
+  });
+  expect((await send("/v1/connector/sign-ins")).status).toBe(200);
+  expect(received.map((request) => new URL(request.url).pathname)).toContain("/v1/connector/sign-ins");
+  expect(received.every((request) => !request.headers.has(CONNECTOR_PEER_HEADER))).toBe(true);
 });

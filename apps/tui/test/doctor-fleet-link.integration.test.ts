@@ -171,6 +171,24 @@ it.each(["healthy", "unavailable"] as const)(
       };
       const withVoice = { ...observed, voice: { ...observed.voice!, providerReadiness: voice } };
       const summary = formatDoctorSummary(withVoice);
+      // An app named before names were checked reads cleanly here too.
+      const legacyApp = formatDoctorSummary({
+        ...withVoice,
+        connectorRefreshRevocations: {
+          devices: [
+            {
+              deviceId: "device-1",
+              name: "Cla\u202Eu\u200Bde",
+              platform: "unknown",
+              status: "revoked",
+              grants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
+              createdAt: "2026-10-01T00:00:00.000Z",
+              revokedAt: "2026-11-01T00:00:00.000Z",
+            },
+          ],
+        },
+      });
+      expect(legacyApp).toContain('Connector app "Claude" (device-1) disconnected');
       expect(summary.split("\n")[0]).toContain("Voice provider openai refused");
       expect(summary).toContain("Observe mode:");
       expect(summary).toContain("UNBOUND launcher unregistered");

@@ -3,7 +3,7 @@ import type { IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import { PUBLIC_GATEWAY_PUSH_REGISTRATIONS_PATH } from "@clankie/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { clientAddress, normalizeAddress, trustedProxyByName } from "../src/client-address.ts";
+import { clientAddress, clientBlock, normalizeAddress, trustedProxyByName } from "../src/client-address.ts";
 import type { ApnsSender } from "../src/apns.ts";
 import { createPublicGateway } from "../src/gateway.ts";
 import type { PushRegistrations } from "../src/push-registrations.ts";
@@ -16,6 +16,22 @@ const request = (peer: string, forwarded?: string | string[]) =>
 
 describe("client address", () => {
   const caddy = trustedProxyByName("172.18.0.3");
+
+  it("groups an IPv6 client by its /64 and leaves an IPv4 client alone", () => {
+    expect(clientBlock("203.0.113.9")).toBe("203.0.113.9");
+    for (const address of [
+      "2001:db8:1:2::1",
+      "2001:db8:1:2:aaaa:bbbb:cccc:dddd",
+      "2001:0DB8:0001:0002::fe",
+      "2001:db8:1:2::1%en0",
+      "2001:db8:1:2:0:0:192.0.2.1",
+    ])
+      expect(clientBlock(address)).toBe("2001:db8:1:2::/64");
+    expect(clientBlock("2001:db8:1:3::1")).toBe("2001:db8:1:3::/64");
+    expect(clientBlock("::1")).toBe("0:0:0:0::/64");
+    expect(clientBlock("2001::1:2:3:4:5")).toBe("2001:0:0:1::/64");
+    expect(clientBlock("unknown")).toBe("unknown");
+  });
 
   it("takes the last X-Forwarded-For entry only from the trusted proxy", () => {
     expect(clientAddress(request("172.18.0.3", "203.0.113.7"), caddy)).toBe("203.0.113.7");
