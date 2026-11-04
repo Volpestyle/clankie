@@ -110,6 +110,7 @@ export function createFleetRounds(ctx: FleetRoundsContext) {
     conversations.recordServiceNotice(
       conversationId,
       `Your native seat hit its ${limited.window === "other" ? "usage" : limited.window} limit (resets ${new Date(limited.until).toISOString()}). Until then, wakes and rounds run on Clankie's service lane instead of being sent into it.`,
+      { kind: "lead_seat_limited", attention: "none" },
     );
     // A local lead moves to the account with the most headroom; a remote head has no local launcher.
     if (conversations.runsCaptainTurns(conversationId))

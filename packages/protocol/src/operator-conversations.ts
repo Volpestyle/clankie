@@ -1948,6 +1948,22 @@ export const OPERATOR_SERVICE_NOTICE_KINDS = [
   "finished_hires_tidied",
   /** Unread reports from closed seats were retired. */
   "worker_reports_retired",
+  /** Clankie's own seat has waited for a fresh restart it can't get. */
+  "lead_seat_restart_waiting",
+  /** Clankie's own seat restarted fresh in its pane. */
+  "lead_seat_restarted",
+  /** Clankie's own seat restart may or may not have happened. */
+  "lead_seat_restart_unconfirmed",
+  /** Clankie's seat hit a usage limit, moved accounts, moved back, or stayed with the service lane covering. */
+  "lead_seat_limited",
+  /** A move of Clankie's seat to another account may or may not have happened. */
+  "lead_seat_move_unconfirmed",
+  /** Clankie's service lane took over a conversation from its silent seat. */
+  "service_lane_takeover",
+  /** Clankie's seat didn't confirm an owner turn and needs a reconnect. */
+  "seat_reconnect_needed",
+  /** A Linear receiver was unavailable; its activity is held for the lead route. */
+  "linear_receiver_held",
 ] as const;
 export type OperatorServiceNoticeKind = (typeof OPERATOR_SERVICE_NOTICE_KINDS)[number];
 

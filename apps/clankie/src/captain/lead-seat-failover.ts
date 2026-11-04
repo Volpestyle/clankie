@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { z } from "zod";
+import type { OperatorServiceNotice } from "@clankie/protocol";
 import type { MachineWorkerAccounts, WorkerAccountStatus } from "./harness-accounts.ts";
 import type { LeadSeatLaunch, RelaunchLeadSeatInput, RelaunchLeadSeatResult } from "./lead-seat-relaunch.ts";
 import type { SeatUsageLimit } from "./seat-outbox.ts";
@@ -50,7 +51,7 @@ export interface LeadSeatFailoverDeps {
   readonly accounts: () => Promise<MachineWorkerAccounts>;
   /** The newly launched seat is not the limited one; let input reach it again. */
   readonly released: (conversationId: string) => void;
-  readonly notice: (conversationId: string, text: string) => void;
+  readonly notice: (conversationId: string, text: string, notice: OperatorServiceNotice) => void;
   readonly now?: () => number;
 }
 
@@ -128,6 +129,7 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
         deps.notice(
           conversationId,
           `Clankie couldn't tell which account your native seat runs on, so it was not moved; Clankie's service lane runs this conversation until the limit resets (${resets(limit.until)}).`,
+          { kind: "lead_seat_limited", attention: "none" },
         );
         return;
       }
@@ -136,6 +138,7 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
         deps.notice(
           conversationId,
           `No other Claude or Codex account here has room, so your native seat stays where it is; Clankie's service lane runs this conversation until the limit resets (${resets(limit.until)}).`,
+          { kind: "lead_seat_limited", attention: "none" },
         );
         return;
       }
@@ -168,6 +171,7 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
         deps.notice(
           conversationId,
           `Your native seat hit its ${limit.window === "other" ? "usage" : limit.window} limit on ${describe(current)}, so Clankie moved it to ${describe(to)} in the same pane. It moves back to ${describe(original)} after the limit resets (${resets(limit.until)}).`,
+          { kind: "lead_seat_limited", attention: "none" },
         );
         return;
       }
@@ -186,12 +190,14 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
         deps.notice(
           conversationId,
           `Clankie's move of your native seat to ${describe(to)} is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
+          { kind: "lead_seat_move_unconfirmed", attention: "owner" },
         );
         return;
       }
       deps.notice(
         conversationId,
         `Clankie couldn't move your native seat to ${describe(to)} (${result.outcome === "refused" ? result.reason : result.detail}); Clankie's service lane runs this conversation until the limit resets (${resets(limit.until)}).`,
+        { kind: "lead_seat_limited", attention: "none" },
       );
     } finally {
       running.delete(conversationId);
@@ -219,6 +225,7 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
           deps.notice(
             conversationId,
             `The ${moved.window === "other" ? "usage" : moved.window} limit reset, so Clankie moved your native seat back from ${describe(moved.current)} to ${describe(moved.original)}.`,
+            { kind: "lead_seat_limited", attention: "none" },
           );
         } else if (result.outcome === "uncertain") {
           state[conversationId] = { ...moved, uncertain: result.receiptId };
@@ -226,6 +233,7 @@ export function createLeadSeatFailover(deps: LeadSeatFailoverDeps) {
           deps.notice(
             conversationId,
             `Clankie's move of your native seat back to ${describe(moved.original)} is unconfirmed (receipt ${result.receiptId}): ${result.detail} It is never retried automatically; check the pane.`,
+            { kind: "lead_seat_move_unconfirmed", attention: "owner" },
           );
         }
         // A refused return (busy, owner active, a draft) tries again on the next check.

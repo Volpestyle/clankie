@@ -272,6 +272,7 @@ export function createConversationRunner(ctx: CreateConversationRunnerContext): 
                 ctx.conversations.recordServiceNotice(
                   conversationId,
                   `Clankie's seat needs a reconnect: /mcp. Owner turn ${delivery.messageId} did not confirm receipt. It remains uncertain and will not be resent automatically.`,
+                  { kind: "seat_reconnect_needed", attention: "owner" },
                 );
             }
             if (delivery.outcome === "aborted")

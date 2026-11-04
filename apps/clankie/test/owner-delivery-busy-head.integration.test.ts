@@ -459,6 +459,7 @@ it("a native head that stays silent past its lane hold is taken over explicitly"
     expect.objectContaining({
       type: "message",
       text: expect.stringContaining("Clankie's service lane took over this conversation"),
+      notice: { kind: "service_lane_takeover", attention: "none" },
     }),
   );
 });

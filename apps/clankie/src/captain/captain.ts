@@ -1524,12 +1524,18 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                   conversations.recordServiceNotice(
                     conversationId,
                     `Clankie's service lane took over this conversation: its seat last asked for events at ${new Date(lastAskAt).toISOString()} and stayed silent for ${String(Math.round(silentForMs / 1000))}s with input waiting.`,
+                    { kind: "service_lane_takeover", attention: "none" },
                   );
               },
             }),
         startedAt: serviceStartedAt,
         onBridgeIssue: (detail) => {
-          if (!shutdown.signal.aborted) conversations.recordServiceNotice(conversationId, detail);
+          // Every bridge issue is a seat that needs /mcp to reconnect.
+          if (!shutdown.signal.aborted)
+            conversations.recordServiceNotice(conversationId, detail, {
+              kind: "seat_reconnect_needed",
+              attention: "owner",
+            });
         },
         ...(deps.onSeatBridgeState === undefined
           ? {}
