@@ -133,11 +133,6 @@ export const landingFsInputs = Object.fromEntries([
       "apps/clankie/test/helpers/project-native-proof/shell.sh",
     ],
   ],
-  // The pressure-consumer proof compiles its CPU burner from this C source at runtime (#332).
-  [
-    "apps/clankie/test/pressure-consumers.integration.test.ts",
-    ["apps/clankie/test/helpers/pressure-consumers/burn.c"],
-  ],
   // The frequency proof builds its sampler from this C source at runtime.
   [
     "apps/clankie/test/project-proof-frequency.integration.test.ts",
