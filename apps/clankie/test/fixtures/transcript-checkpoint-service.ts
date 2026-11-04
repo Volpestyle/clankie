@@ -57,6 +57,9 @@ process.on("message", async (raw) => {
         checkpointBytes: Buffer.byteLength(JSON.stringify(meta.seatTranscript)),
         metaBytes: statSync(path).size,
       };
+    } else if (command.action === "save") {
+      store.rememberNativeHead(id, "metadata-save-only");
+      result = true;
     } else if (command.action === "hook") {
       result = store.syncNativeSeatTranscript(
         id,

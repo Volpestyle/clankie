@@ -175,7 +175,9 @@ it.each(["entryIds", "messageIds"] as const)(
     await rm(join(f.directory, "transcript-checkpoint.sqlite"));
     const before = await f.journal();
     service = await runtime(f.root);
-    await service.call("sync"); // A quiet observation must migrate too.
+    await service.call("save"); // Ordinary saves compact even without a transcript read.
+    expect((await readFile(path)).length).toBeLessThan(2048);
+    await service.call("sync"); // A quiet observation must not replay the migrated history.
     await service.call("hook", { entries: all.slice(0, 3) });
     expect(await f.journal()).toBe(before);
     expect((await readFile(path)).length).toBeLessThan(2048);

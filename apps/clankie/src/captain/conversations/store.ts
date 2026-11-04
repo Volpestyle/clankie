@@ -388,7 +388,6 @@ export class ConversationStore {
       // before the reference save retries this migration without losing an ID.
       index.add(checkpoint?.entryIds ?? checkpoint?.messageIds ?? []);
       meta.seatTranscript = { sessionKey: checkpoint?.sessionKey ?? sessionKey, index: "sqlite-v1" };
-      this.saveMeta(meta);
     }
     return index;
   }
@@ -4119,6 +4118,14 @@ export class ConversationStore {
     directory = join(this.root, meta.conversationId),
     durable = false,
   ): void {
+    // Even an ordinary metadata save compacts a legacy head checkpoint; it
+    // must not depend on the native transcript still being readable or active.
+    if (
+      (meta.scope.kind === "global" || meta.scope.kind === "workspace") &&
+      meta.seatTranscript !== undefined &&
+      meta.seatTranscript.index === undefined
+    )
+      this.transcriptCheckpoint(meta, meta.seatTranscript.sessionKey);
     // Retention is part of this commit. Before the manifest rename, a failed
     // save must leave the caller's receipt map available for rollback.
     const sharded = meta.inboundReportStore !== undefined || this.inboundReportMigrationReady();

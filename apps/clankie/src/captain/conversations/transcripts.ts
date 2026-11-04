@@ -71,6 +71,7 @@ export function syncConversationTranscript(
   // a seat resumes or both the native hook and Herdr observe the same record.
   const captainThread = meta.scope.kind === "global" || meta.scope.kind === "workspace";
   const index = captainThread ? ctx["transcriptCheckpoint"](meta, transcript.sessionKey) : undefined;
+  if (captainThread && checkpoint?.index === undefined) ctx["saveMeta"](meta);
   const seen = new Set(
     index === undefined && checkpoint?.sessionKey === transcript.sessionKey ? checkpointIds : [],
   );
