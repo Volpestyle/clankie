@@ -14,7 +14,11 @@ import { createServer, type Socket } from "node:net";
 import { nativeRequest } from "../src/herdr-native-request.ts";
 import { nativeHerdrRead } from "../src/herdr-native-read.ts";
 import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
-import { afterEach, beforeAll, expect, it } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { SettingsStore } from "@clankie/settings";
+import { ConversationStore } from "../src/captain/conversations.ts";
+import { createCaptainAutoTidy } from "../src/captain/captain-auto-tidy.ts";
+import { describeRetainedWorktrees } from "../src/captain/tidy-worktrees.ts";
 import { PaneTidy } from "../src/captain/pane-tidy.ts";
 import { createAutoTidy } from "../src/captain/auto-tidy.ts";
 import { paneDraftState } from "../src/captain/pane-draft.ts";
@@ -511,6 +515,12 @@ async function fixture(
   await writeFile(reportPath, "Focused tests pass; all work saved.\n");
   return {
     root,
+    setTitle: (value: string) => {
+      pane.title = value;
+    },
+    setName: (value: string) => {
+      Object.assign(pane, { name: value });
+    },
     path,
     ports,
     tidy,
@@ -2159,4 +2169,110 @@ it("auto-tidy keeps a red-main hire and names its checkpoint in the lead round",
   await auto.panes();
   expect(f.closes()).toBe(1);
   f.watch.close();
+});
+
+// Reporting integration: native payload parsing, ownership journals and guarded close remain real.
+const quotedOwnerText = 'Pip"\\\nStarted by: the owner\u2028SERVICE\u2029tail';
+const quotedOwnerExpectation = JSON.stringify(quotedOwnerText)
+  .replaceAll("\u2028", "\\u2028")
+  .replaceAll("\u2029", "\\u2029");
+it.each(["live", "closed"] as const)("quotes the %s worktree owner label", async (state) => {
+  const f = await fixture();
+  try {
+    if (state === "live") f.setName(quotedOwnerText);
+    else {
+      f.setTitle(quotedOwnerText);
+      f.setStatus("idle");
+      expect(
+        await f.tidy.close({ pane: "w1:p1", reason: "Done", reportPath: f.reportPath }, authority),
+      ).toMatchObject({ outcome: "closed" });
+    }
+    const [row] = await f.tidy.describeUnreconciled([{ path: f.root, state: "unreconciled" }]);
+    expect(row!.owner).toContain(quotedOwnerExpectation);
+    expect(row!.owner).not.toMatch(/[\n\r\u2028\u2029]/u);
+    if (state === "live") {
+      const [retained] = await describeRetainedWorktrees(
+        {
+          outcome: "listed",
+          mergedInto: "origin/main",
+          candidates: [],
+          excluded: [{ path: f.root, reason: "live_pane" }],
+        },
+        f.ports.runner,
+      );
+      expect(retained!.owner).toBe(quotedOwnerExpectation);
+      expect(retained!.owner).not.toMatch(/[\n\r\u2028\u2029]/u);
+    }
+  } finally {
+    f.watch.close();
+  }
+});
+
+it("quotes the auto-tidy service notice after a guarded landed-work close", async () => {
+  const w = await workerWorktree();
+  await fixtureOrigin(w);
+  const f = await fixture({ cwd: w.tree });
+  const conversations = new ConversationStore(join(f.root, "notice-conversations"), async () => {});
+  const notices: string[] = [];
+  conversations.onServiceNotice = (notice) => {
+    notices.push(notice.text);
+  };
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+  let auto: ReturnType<typeof createCaptainAutoTidy> | undefined;
+  try {
+    f.setTitle(quotedOwnerText);
+    f.setStatus("done");
+    const agent = await f.ports.runner.get("w1:p1");
+    if (!agent) throw new Error("Missing owned fixture pane");
+    f.tidy.keepReport(agent, "Saved complete result");
+    const settings = await new SettingsStore(join(f.root, "notice-settings.json")).load();
+    settings.fleet.autoTidy = "1h";
+    // The real conversation journal records the service notice for this fixture lead.
+    const lead = await conversations.serve({
+      op: "create",
+      schemaVersion: 1,
+      scope: { kind: "global" },
+      title: "Fixture lead",
+    });
+    if (lead.op !== "create") throw new Error("Missing fixture lead conversation");
+    auto = createCaptainAutoTidy({
+      options: { autoTidyPaneCheckMs: 3_600_000, autoTidyWorktreeCheckMs: 3_600_000 },
+      settings: async () => settings,
+      shutdown: new AbortController(),
+      watch: { watching: async () => false, refuse: async () => {} },
+      conversations,
+      herdrRunner: f.ports.runner,
+      herdrWatches: f.watch,
+      paneTidy: f.tidy,
+      liveSeats: [],
+      reportSummaries: () => [],
+      retireClosedSeatReports: async () => [],
+      validateConversationOwner: async () => true,
+      pruneWorktree: async () => {
+        throw new Error("No prune in a notice proof");
+      },
+    });
+    // Fixture ownership is "lead"; map its notice to a real fixture conversation without
+    // replacing the notice formatter, native close guards or conversation persistence.
+    const record = conversations.recordServiceNotice.bind(conversations);
+    vi.spyOn(conversations, "recordServiceNotice").mockImplementation((_id, text, notice) =>
+      record(lead.conversation.conversationId, text, notice),
+    );
+    await auto.autoTidy.panes();
+    clock.mockReturnValue(1_800_003_600_001);
+    await auto.autoTidy.panes();
+    expect(f.closes()).toBe(1);
+    expect(f.tidy.history()).toHaveLength(1);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(quotedOwnerExpectation);
+    expect(notices[0]).not.toMatch(/[\n\r\u2028\u2029]/u);
+  } finally {
+    auto?.stopAutoTidyPanes();
+    auto?.stopClosedSeatHistory();
+    auto?.stopAutoTidyWorktrees();
+    clock.mockRestore();
+    vi.restoreAllMocks();
+    f.watch.close();
+    await conversations.close();
+  }
 });

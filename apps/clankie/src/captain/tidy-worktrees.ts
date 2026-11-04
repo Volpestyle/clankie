@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { promisify } from "node:util";
 import { canonicalProjectPath, projectPathContains } from "@clankie/settings";
 import { processWorkingDirectories } from "../process-working-directories.ts";
+import { quotedLine } from "./quoted-line.ts";
 import type { HerdrWatchRunner } from "./herdr-watch.ts";
 
 export interface TidyWorktreesResult {
@@ -326,7 +327,9 @@ export async function describeRetainedWorktrees(
       );
       return {
         ...entry,
-        owner: owners.length ? owners.map((pane) => pane.name ?? pane.paneId).join(", ") : "unattributed",
+        owner: owners.length
+          ? owners.map((pane) => (pane.name === undefined ? pane.paneId : quotedLine(pane.name))).join(", ")
+          : "unattributed",
         ...(metadata
           ? {
               ageSeconds: Math.max(0, Math.floor((Date.now() - metadata.birthtimeMs) / 1000)),

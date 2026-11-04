@@ -1132,7 +1132,7 @@ export class PaneTidy {
         return {
           ...worktree,
           owner: live.length
-            ? live.map((pane) => pane.name ?? pane.paneId).join(", ")
+            ? live.map((pane) => (pane.name === undefined ? pane.paneId : quotedLine(pane.name))).join(", ")
             : closed
               ? `${closed.title ? quotedLine(closed.title) : closed.harness} (closed ${closed.closedAt.slice(0, 10)})`
               : "unattributed",
