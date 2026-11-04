@@ -7,6 +7,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   CONNECTOR_GRANTS,
   defaultOperatorAgentAppearance,
+  type AppNote,
   type OperatorConversationServiceRequest,
   type OperatorConversationServiceResult,
   type OperatorTerminalMachine,
@@ -688,7 +689,7 @@ describe("Claude connector MCP endpoint", () => {
           workingDirectory: "C:\\code\\kh2",
           status: "working",
           title: "kh2 netcode",
-          startedBy: "Grok",
+          startedBy: 'the app "Grok"',
           canMessage: true,
         },
         {
@@ -1137,7 +1138,7 @@ describe("Claude connector MCP endpoint", () => {
         ),
       ) as {
         about: string;
-        notes: Array<{ sequence: number; author: string; text: string }>;
+        notes: AppNote[];
         newer: string;
       };
     const empty = await notes(grok);
@@ -1156,6 +1157,7 @@ describe("Claude connector MCP endpoint", () => {
     const posted = await claude.callTool({ name: "post_note", arguments: { text: handover } });
     expect(JSON.parse(textOf(posted)).posted).toMatchObject({
       author: "Claude",
+      authorKind: "app",
       text: handover.trim(),
     });
     // The relay stamped the device it authenticated, nothing the caller said.
@@ -1173,6 +1175,7 @@ describe("Claude connector MCP endpoint", () => {
         sequence: 1,
         at: expect.any(String),
         author: "Claude",
+        authorKind: "app",
         text: handover.trim(),
       },
     ]);
@@ -1181,8 +1184,8 @@ describe("Claude connector MCP endpoint", () => {
       arguments: { text: "Seen. I'll take the docs instead." },
     });
     const after = await notes(claude, first.newer);
-    expect(after.notes.map((note) => [note.author, note.text])).toEqual([
-      ["Grok", "Seen. I'll take the docs instead."],
+    expect(after.notes.map((note) => [note.author, note.authorKind, note.text])).toEqual([
+      ["Grok", "app", "Seen. I'll take the docs instead."],
     ]);
     expect((await notes(claude, after.newer)).notes).toEqual([]);
     // Without a cursor, the newest notes, oldest first.
