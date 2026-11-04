@@ -11,7 +11,13 @@ import {
 } from "@clankie/protocol";
 import { z } from "zod";
 import { ConversationOwnerSchema, type ConversationOwner } from "./conversation-owner.ts";
-import { SeatCommitBaselineSchema, type SeatCommitBaseline, type SeatTelemetry } from "./seat-telemetry.ts";
+import {
+  HireLaunchRecordSchema,
+  SeatCommitBaselineSchema,
+  type HireLaunchRecord,
+  type SeatCommitBaseline,
+  type SeatTelemetry,
+} from "./seat-telemetry.ts";
 
 const Timestamp = z.string().datetime();
 const RecordSchema = z
@@ -27,6 +33,8 @@ const RecordSchema = z
     commitBaseline: SeatCommitBaselineSchema.optional(),
     /** The baseline was captured before this hire launched, not at a later first observation. */
     launchBaseline: z.literal(true).optional(),
+    /** A remote hire's own launch record (#703): branch and start commit on that machine, no local paths. */
+    launchRecord: HireLaunchRecordSchema.optional(),
     offScope: z.boolean().optional(),
     assignmentStatus: z.enum(["active", "paused", "canceled", "done"]).optional(),
     evidence: z.string().min(1).max(4000).optional(),
@@ -146,6 +154,8 @@ export class SeatEfficiencyStore {
       effort?: string | undefined;
       assignedAt?: string | undefined;
       commitBaseline?: SeatCommitBaseline | undefined;
+      /** A remote hire's launch record, captured before its harness launched (#703). */
+      launch?: HireLaunchRecord | undefined;
     },
   ): void {
     z.string()
@@ -173,6 +183,7 @@ export class SeatEfficiencyStore {
       ...(assignment.commitBaseline === undefined
         ? {}
         : { commitBaseline: assignment.commitBaseline, launchBaseline: true as const }),
+      ...(assignment.launch === undefined ? {} : { launchRecord: assignment.launch }),
     });
     delete this.records[occupantId]!.inactiveSince;
     this.save();
@@ -193,12 +204,16 @@ export class SeatEfficiencyStore {
   }
 
   /**
-   * The baseline the hire captured before its native harness launched (#602): its
-   * branch, start commit and capture time. A first-observation fallback is not one.
+   * What the hire captured before its native harness launched (#602): its branch, start
+   * commit and capture time, from a local hire's commit baseline or a remote hire's
+   * launch record (#703). A first-observation fallback is not one.
    */
-  public readLaunchBaseline(occupantId: string, owner: ConversationOwner): SeatCommitBaseline | undefined {
+  public readLaunchBaseline(occupantId: string, owner: ConversationOwner): HireLaunchRecord | undefined {
     const record = Object.hasOwn(this.records, occupantId) ? this.records[occupantId] : undefined;
-    return record?.launchBaseline === true ? this.readCommitBaseline(occupantId, owner) : undefined;
+    if (record?.launchBaseline === true) return this.readCommitBaseline(occupantId, owner);
+    return record?.launchRecord !== undefined && sameOwner(record.owner, owner)
+      ? HireLaunchRecordSchema.parse(record.launchRecord)
+      : undefined;
   }
 
   /** Establish a legacy occupant's first-observed baseline without retro-credit. */

@@ -2924,8 +2924,8 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
     // #602: closing an attempt settles its deliverable from what each attempt's hire recorded
     // before launch (branch, start, time) and the pull request GitHub merged from that branch;
-    // nothing the worktree writes counts. Only a local hire records its branch, so a remote
-    // attempt leaves the deliverable to the lead.
+    // nothing the worktree writes counts. A local hire records it in its commit baseline, a
+    // remote one from the fresh worktree its machine made (#703).
     attemptRecord: (agent) => {
       const record = herdrWatches.hireAttemptRecord(agent);
       const owner = herdrWatches.tidyProvenance(agent);

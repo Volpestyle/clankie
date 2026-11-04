@@ -16,6 +16,8 @@ import type { SpawnOperatorSeat } from "@clankie/protocol";
 import { attemptLaunch, ProjectHires, settleAttemptByMerge } from "../src/captain/project-hires.ts";
 import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { readSeatCommitBaseline } from "../src/captain/seat-telemetry.ts";
+import { hireWorktreeLaunch, verifyRemoteHireCheckout } from "../src/captain/checkout-freshness.ts";
+import type { HerdrFleet } from "../src/herdr-fleet.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 
 const exec = promisify(execFile);
@@ -438,4 +440,144 @@ it("leaves an attempt unsettled when its deliverable names no GitHub issue", asy
   );
   expect(settled?.detail).toContain("the deliverable names no GitHub issue");
   expect(ledger.allocation(one.id)?.attemptWon).toBeUndefined();
+});
+
+it("a remote attempt records its launch from the worktree its machine made, and its merge supersedes a local sibling (#703)", async () => {
+  const root = await scratch();
+  const repo = await repository(root);
+  const { git } = repo;
+  // The local attempt starts as local hires do, from a baseline captured before launch.
+  const local = await repo.checkout("attempt-local", "clankie/attempt-local");
+  // The "pc" is this machine's own shell with its own home, running the real remote checkout
+  // program; the start checkout is dirty, so the hire gets its own worktree from origin/main.
+  const pc = join(root, "pc");
+  await exec("git", ["clone", "-q", repo.origin, pc]);
+  await writeFile(join(pc, "owner-notes.txt"), "the owner's own work\n");
+  const fleet: HerdrFleet = { id: "pc", session: "default", ssh: { host: "fixture@pc", shell: "posix" } };
+  const shell = async (command: string) =>
+    (await exec("/bin/sh", ["-c", command], { env: { ...process.env, HOME: root } })).stdout;
+  const freshness = await verifyRemoteHireCheckout(fleet, shell, pc, [], "Remote");
+  expect(freshness).toMatchObject({
+    outcome: "worktree",
+    branch: expect.stringMatching(/^clankie\/remote-/u),
+  });
+  const launch = hireWorktreeLaunch(freshness)!;
+  expect(launch).toEqual({
+    branchRef: `refs/heads/${freshness.branch}`,
+    head: (await git(repo.seed, "rev-parse", "origin/main")).stdout.trim(),
+    capturedAt: expect.any(String),
+  });
+  // A hire that stayed in place made no branch of its own, so it records nothing.
+  expect(hireWorktreeLaunch({ ...freshness, outcome: "fresh" })).toBeUndefined();
+
+  const efficiency = new SeatEfficiencyStore(join(root, "seat-efficiency.json"));
+  efficiency.assign("occupant-w1:p1", { owner, commitBaseline: (await readSeatCommitBaseline(local))! });
+  efficiency.assign("occupant-pc:p2", { owner, launch });
+  // The record is the lead's own: another conversation reads nothing, and it survives a restart.
+  expect(efficiency.readLaunchBaseline("occupant-pc:p2", { conversationId: "other" })).toBeUndefined();
+  const reopened = new SeatEfficiencyStore(join(root, "seat-efficiency.json"));
+  expect(reopened.readLaunchBaseline("occupant-pc:p2", owner)).toEqual(launch);
+  // It names no path on the PC, so local Git never reads one as this seat's worktree.
+  expect(reopened.readCommitBaseline("occupant-pc:p2", owner)).toBeUndefined();
+
+  const ledger = new ProjectHires(join(root, "project-hires.json"));
+  const claude = ledger.reserve(settings(), "game", hire(local, { attempt: true }));
+  running(ledger, claude.id, "w1:p1");
+  const codex = ledger.reserve(
+    settings(),
+    "game",
+    hire(freshness.workingDirectory!, { harness: "codex", fleet: "pc", attempt: true }),
+  );
+  running(ledger, codex.id, "pc:p2");
+
+  // The PC attempt commits in its worktree and pushes its hire branch; so does the local one.
+  const worktree = freshness.workingDirectory!;
+  await writeFile(join(worktree, "fix.txt"), "pc fix\n");
+  await git(worktree, "add", "fix.txt");
+  await git(worktree, "commit", "-q", "-m", "pc fix");
+  await git(worktree, "push", "-q", "origin", `HEAD:${freshness.branch!}`);
+  const pcHead = (await git(worktree, "rev-parse", "HEAD")).stdout.trim();
+  await git(local, "commit", "-q", "--allow-empty", "-m", "local fix");
+  await git(local, "push", "-q", "origin", "HEAD:clankie/attempt-local");
+  const localHead = (await git(local, "rev-parse", "HEAD")).stdout.trim();
+
+  const github = await githubFixture(repo.origin);
+  const service = createWorkItemsService({
+    stateDirectory: root,
+    githubToken: async () => "fixture-only",
+    githubApiBase: github.baseUrl,
+  });
+  const settle = (record: { allocation: string; occupantId: string }) =>
+    settleAttemptByMerge(
+      ledger,
+      record,
+      (candidate) => attemptLaunch(efficiency.readLaunchBaseline(candidate.occupantId ?? "", owner)),
+      (repository, launch) => service.mergedPull(repository, launch),
+    );
+  github.merged.set(freshness.branch!, [{ number: 21, mergedAt: minutesFromNow(1), head: pcHead }]);
+  github.merged.set("clankie/attempt-local", [{ number: 22, mergedAt: minutesFromNow(2), head: localHead }]);
+  // The local pane closes, yet the PC attempt merged first and wins.
+  const settled = await settle({ allocation: claude.id, occupantId: "occupant-w1:p1" });
+  expect(settled).toMatchObject({ outcome: "won", allocation: codex.id, superseded: ["w1:p1"] });
+  expect(settled?.detail).toContain(`branch ${freshness.branch!}`);
+  expect(settled?.detail).toContain("https://github.com/Volpestyle/clankie/pull/21");
+  expect(ledger.allocation(codex.id)?.attemptWon).toEqual(expect.any(String));
+  expect(ledger.allocation(claude.id)).toMatchObject({ supersededBy: codex.id });
+  // The owner's start checkout on the PC was left as it was.
+  expect(await readFile(join(pc, "owner-notes.txt"), "utf8")).toBe("the owner's own work\n");
+});
+
+it("a squash-merged attempt counts as landed by its pull request's head, though main holds none of its commits (#703)", async () => {
+  const root = await scratch();
+  const repo = await repository(root);
+  const { git } = repo;
+  const a = await repo.checkout("attempt-a", "clankie/attempt-a");
+  const b = await repo.checkout("attempt-b", "clankie/attempt-b");
+  const efficiency = new SeatEfficiencyStore(join(root, "seat-efficiency.json"));
+  efficiency.assign("occupant-w1:p1", { owner, commitBaseline: (await readSeatCommitBaseline(a))! });
+  efficiency.assign("occupant-w1:p2", { owner, commitBaseline: (await readSeatCommitBaseline(b))! });
+  const ledger = new ProjectHires(join(root, "project-hires.json"));
+  const claude = ledger.reserve(settings(), "game", hire(a, { attempt: true }));
+  running(ledger, claude.id, "w1:p1");
+  const codex = ledger.reserve(settings(), "game", hire(b, { harness: "codex", attempt: true }));
+  running(ledger, codex.id, "w1:p2");
+
+  // A makes two commits on its hire branch, and the project squash-merges them as one.
+  for (const name of ["one", "two"]) {
+    await writeFile(join(a, `${name}.txt`), `${name}\n`);
+    await git(a, "add", `${name}.txt`);
+    await git(a, "commit", "-q", "-m", name);
+  }
+  await git(a, "push", "-q", "origin", "HEAD:clankie/attempt-a");
+  const aHead = (await git(a, "rev-parse", "HEAD")).stdout.trim();
+  await git(repo.seed, "fetch", "-q", "origin");
+  await git(repo.seed, "merge", "-q", "--squash", "origin/clankie/attempt-a");
+  await git(repo.seed, "commit", "-q", "-m", "Attempt A (#30)");
+  await git(repo.seed, "push", "-q", "origin", "HEAD:main");
+  // Main has A's change in one new commit, and none of A's own commits.
+  await git(repo.seed, "fetch", "-q", "origin");
+  await expect(git(repo.seed, "merge-base", "--is-ancestor", aHead, "origin/main")).rejects.toThrow();
+  expect((await git(repo.seed, "cherry", "origin/main", aHead)).stdout).toMatch(/^\+ /mu);
+  // B merges later with an ordinary pull request.
+  await git(b, "commit", "-q", "--allow-empty", "-m", "b");
+  await git(b, "push", "-q", "origin", "HEAD:clankie/attempt-b");
+  const bHead = (await git(b, "rev-parse", "HEAD")).stdout.trim();
+
+  const github = await githubFixture(repo.origin);
+  github.merged.set("clankie/attempt-a", [{ number: 30, mergedAt: minutesFromNow(1), head: aHead }]);
+  github.merged.set("clankie/attempt-b", [{ number: 31, mergedAt: minutesFromNow(2), head: bHead }]);
+  const service = createWorkItemsService({
+    stateDirectory: root,
+    githubToken: async () => "fixture-only",
+    githubApiBase: github.baseUrl,
+  });
+  const settled = await settleAttemptByMerge(
+    ledger,
+    { allocation: codex.id, occupantId: "occupant-w1:p2" },
+    (candidate) => attemptLaunch(efficiency.readLaunchBaseline(candidate.occupantId ?? "", owner)),
+    (repository, launch) => service.mergedPull(repository, launch),
+  );
+  expect(settled).toMatchObject({ outcome: "won", allocation: claude.id, superseded: ["w1:p2"] });
+  expect(settled?.detail).toContain("https://github.com/Volpestyle/clankie/pull/30");
+  expect(ledger.allocation(codex.id)).toMatchObject({ supersededBy: claude.id });
 });

@@ -373,5 +373,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0353: Workers raise structured asks in their reports](0353-workers-raise-structured-asks-in-their-reports.md) — Proposed, 2026-11-03, for #604.
 - [0354: Clankie is a platform for leads](0354-clankie-is-a-platform-for-leads.md) — Accepted, 2026-11-03, on James's positioning brief relayed by his lead: Clankie is "no longer a lead agent" but an open-source, self-hosted "super agent" platform.
 - [0355: An update's outcome reaches its lead](0355-an-updates-outcome-reaches-its-lead.md) — Proposed, 2026-11-03, for #735.
+- [0357: A merged pull request settles an attempt](0357-a-merged-pull-request-settles-an-attempt.md) — Proposed, 2026-11-04, for #703.
 
 <!-- adr-index:end -->

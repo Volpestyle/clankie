@@ -95,15 +95,18 @@ model and its own worktree. When an attempt's pane closes, the winner comes
 only from what the host recorded: each hire's branch, start commit and time,
 captured before its harness launched, and the pull request GitHub merged from
 that branch into the default branch after the hire, with a head descended from
-that start. Once every attempt has such a merge, the first one wins, with its
-harness and model, whichever pane is closing. Its live siblings show the
+that start. A remote (PC) hire records the same from the fresh worktree its
+machine made for it, and a squash-merged pull request counts, since only its
+head is compared. Once every attempt has such a merge, the first one wins, with
+its harness and model, whichever pane is closing. Its live siblings show the
 `superseded` flag in `fleet_efficiency`; close them, since only one attempt
 should merge. Commits, reflogs or a cherry-picked copy in a worktree never
 count. Until every attempt has that evidence (a pull request not merged yet, a
-deliverable that is not `owner/repo#N`, a hire with no launch record such as a
-remote one), or if the attempts changed while GitHub was read, nothing is set:
-the close result's `entry.attempt` names the candidates for you to decide.
-Every attempt shows the `attempt` flag.
+deliverable that is not `owner/repo#N`, a hire with no launch record, such as
+a remote one that started in place rather than in a worktree made for it), or
+if the attempts changed while GitHub was read, nothing is set: the close
+result's `entry.attempt` names the candidates for you to decide. Every attempt
+shows the `attempt` flag.
 
 Never rearrange existing panes or substitute the lead's or focused pane.
 Sub-leads without `hire_agent` use the exact
