@@ -8,7 +8,12 @@ import {
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { WorkerAccountStatus } from "./harness-accounts.ts";
 import type { PiSeatModel } from "./herdr-watch.ts";
-import { discoverPiNativeCapability, PiNativeRefusal } from "./pi-native-capability.ts";
+import {
+  discoverPiNativeCapability,
+  inspectPiInstallation,
+  PiNotInstalled,
+  PiTooOld,
+} from "./pi-native-capability.ts";
 
 /** Inspect the same default profile native Pi opens; no login, refresh or credential mutation. */
 export async function localPiWorkerModelStatus(cwd: string): Promise<{ model: string } | { reason: string }> {
@@ -75,48 +80,61 @@ export function piSeatModelRefs(selected: PiSeatModel | undefined): readonly str
   return [...new Set([selected.model, ...declared])];
 }
 
-/** Pi is an owner opt-in in the service's environment, not a setting or a command (VUH-2625). */
-export const PI_NOT_ENABLED =
-  "Native Pi is not enabled. It is an owner opt-in: restart Clankie with CLANKIE_PI_NATIVE_ENABLED=1 in its environment (CLANKIE_PI_NATIVE_ENABLED=1 clankie restart). No setting or other command enables it";
+/** Owner-facing action; no process or environment knowledge required. */
+export const PI_NOT_ENABLED = "Turn on Pi to use your API key or local model for coding workers.";
+const PI_INSTALL_COMMAND = "npm install -g @earendil-works/pi-coding-agent";
 
 /** Native runtime and model authority are independently verified before Pi enters the shared account view. */
 export function createPiWorkerStatusReader(options: {
-  enabled: () => boolean;
+  enabled: () => boolean | Promise<boolean>;
   cwd: string;
   seatModel?: (() => Promise<PiSeatModel | undefined>) | undefined;
 }) {
   return async (): Promise<WorkerAccountStatus> => {
     const base = { harness: "pi" as const, label: "default", home: getAgentDir(), headroom: null };
-    if (!options.enabled()) return { ...base, signedIn: null, usable: false, reason: PI_NOT_ENABLED };
+    let state: "not_enabled" | "ready" = "not_enabled";
     try {
+      await inspectPiInstallation(process.env);
+      if (!(await options.enabled()))
+        return { ...base, pi: { state }, signedIn: null, usable: false, reason: PI_NOT_ENABLED };
+
       const capability = await discoverPiNativeCapability({ harness: "pi", cwd: options.cwd, brief: "" });
       await capability.verify();
+      state = "ready";
       let models: readonly string[];
       if (options.seatModel) models = piSeatModelRefs(await options.seatModel());
       else {
         const status = await localPiWorkerModelStatus(options.cwd);
-        if ("reason" in status) return { ...base, signedIn: false, usable: false, reason: status.reason };
+        if ("reason" in status)
+          return { ...base, pi: { state }, signedIn: false, usable: false, reason: status.reason };
         models = [status.model];
       }
       if (!models.length)
         return {
           ...base,
+          pi: { state },
           signedIn: false,
           usable: false,
           reason: "No authenticated model is available from the configured Pi worker provider",
         };
-      return { ...base, signedIn: true, usable: true, models };
+      return { ...base, pi: { state }, signedIn: true, usable: true, models };
     } catch (error) {
       // Native capability/auth failures can contain paths or secrets; only a safe reason leaves the service.
       // A release refusal names the installed version and the failed surface, so an upgrade stays visible.
       return {
         ...base,
+        pi:
+          error instanceof PiNotInstalled
+            ? { state: "not_installed", installCommand: PI_INSTALL_COMMAND }
+            : error instanceof PiTooOld
+              ? { state: "too_old", installCommand: PI_INSTALL_COMMAND }
+              : { state },
         signedIn: null,
         usable: false,
         reason:
-          error instanceof PiNativeRefusal
+          error instanceof PiNotInstalled || error instanceof PiTooOld
             ? error.message
-            : "Native Pi capability or model authentication could not be verified",
+            : "Pi could not be checked. Check its installation and model sign-in, then try again.",
       };
     }
   };

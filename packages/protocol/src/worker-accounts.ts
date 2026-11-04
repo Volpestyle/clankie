@@ -9,6 +9,23 @@ export const WORKER_ACCOUNTS_PATH = "/v1/worker-accounts";
 export const WORKER_ACCOUNT_HOLDS_PATH = "/v1/worker-accounts/holds";
 export const WORKER_ACCOUNT_BUDGETS_PATH = "/v1/worker-accounts/budgets";
 
+/** Owner / Take Control only; changes apply to new Pi hires without a restart. */
+export const PI_SETTINGS_PATH = "/v1/worker-accounts/pi";
+export const PiSettingsSnapshotSchema = z.object({
+  enabled: z.boolean(),
+  revision: z.string(),
+});
+export const UpdatePiSettingsSchema = z
+  .object({
+    enabled: z.boolean(),
+    expectedRevision: z.string(),
+  })
+  .strict();
+export const PiReadinessSchema = z.object({
+  state: z.enum(["not_installed", "too_old", "not_enabled", "ready"]),
+  installCommand: z.string().optional(),
+});
+
 export const WorkerAccountHarnessSchema = z.enum(["claude", "codex", "pi"]);
 export type WorkerAccountHarness = z.infer<typeof WorkerAccountHarnessSchema>;
 /** Prime Agent's providers are read and shown, never held or allocated. */
@@ -114,6 +131,7 @@ const IdentityFields = {
 };
 
 export const WorkerAccountStatusSchema = z.object({
+  pi: PiReadinessSchema.optional(),
   ...IdentityFields,
   harness: ReportedHarnessSchema,
   label: z.string(),

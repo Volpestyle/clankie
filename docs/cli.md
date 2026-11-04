@@ -2581,13 +2581,22 @@ accounts (request, role or fleet) and owner holds always win.
 
 The local Pi `default` profile uses the same report and holds. It is usable only
 when the native adapter is enabled, its pinned files and executable verify, and
-the worker has a configured authenticated model. The opt-in is
-`CLANKIE_PI_NATIVE_ENABLED=1` in the service environment, followed by an
-owner-authorized service restart, for example
-`CLANKIE_PI_NATIVE_ENABLED=1 clankie restart`; the disabled report names that
-step. A service started later without the variable, such as by autostart, runs
-with Pi disabled again. There is no setting or `clankie pi` command for it.
-Other values leave native Pi disabled. The
+the worker has a configured authenticated model. Use `clankie accounts pi show`,
+`clankie accounts pi enable` or `clankie accounts pi disable`. This saved owner
+preference takes effect for new hires immediately, survives service restarts,
+and overrides the legacy `CLANKIE_PI_NATIVE_ENABLED=1` startup default. Turning
+native Pi off leaves existing workers running and preserves unbriefed hosted Pi
+terminal launches. Briefed native Pi hires still refuse while it is off. The owner or a Take Control device can
+read and change it through `GET`/`POST /v1/worker-accounts/pi`; writes require the
+current `expectedRevision` and an `enabled` boolean. No service restart is needed.
+
+The Pi account's `pi.state` is `not_installed`, `too_old`, `not_enabled` or `ready`.
+The first two include `pi.installCommand`:
+`npm install -g @earendil-works/pi-coding-agent`. Installation is checked before
+the enable switch. `ready` describes the native runtime; `usable` additionally
+requires model authentication and the owner's holds and budgets to permit a hire.
+A failed capability check stays `not_enabled` with an owner-facing reason.
+There is no automatic installation or model call when the owner enables Pi. The
 local profile is separate from Clankie’s service credentials: its selected model
 must be available and authenticated. The report distinguishes a missing default,
 an unavailable model, missing authentication and expired OAuth. Refresh expired

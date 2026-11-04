@@ -40,26 +40,19 @@ const Session = z.object({
   }),
   runtime: z.object({ executable: z.string(), argv: z.array(z.string()).length(2), node: z.string() }),
 });
+class PiTurnedOff extends Error {}
+
 const Delivery = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("accepted"), messageId: z.string().uuid(), state: z.literal("started") }),
   z.object({ outcome: z.literal("unconfirmed"), messageId: z.string().uuid(), detail: z.string() }),
   z.object({ outcome: z.literal("unavailable"), detail: z.string() }),
 ]);
 
-/** Native Pi admits the installed release that passes its capability probe and
- * awaits full owner acceptance. Keep its host construction and adapter
- * registration absent unless explicitly opted in. */
-export function piNativeOptions(
-  enabled: string | undefined,
-  createNative: () => ReturnType<typeof createPreparedNativeHost>,
-): { readonly piNative?: ReturnType<typeof createPreparedNativeHost> } {
-  return enabled?.trim() === "1" ? { piNative: createNative() } : {};
-}
-
 export function createPiSeatAdapter(deps: {
   readonly repoRoot: string;
   readonly stateDir: string;
   readonly native: ReturnType<typeof createPreparedNativeHost>;
+  readonly enabled?: () => Promise<boolean>;
   readonly discover?: typeof discoverPiNativeCapability;
   readonly controller?: typeof createPiWorkerController;
   readonly timeoutMs?: number;
@@ -82,6 +75,8 @@ export function createPiSeatAdapter(deps: {
     },
     async prepare(launch: SeatLaunch, signal): Promise<PreparedSeatLaunch> {
       signal?.throwIfAborted();
+      if (deps.enabled && !(await deps.enabled()))
+        throw new Error("Turn on Pi before hiring a coding worker.");
       if (launch.harness !== "pi") throw new Error("Native Pi launch required");
       if (launch.model !== undefined && !/^[^/\s]+\/[^\s]+$/u.test(launch.model))
         throw new Error("Pi model must be an exact native provider/model");
@@ -185,6 +180,8 @@ export function createPiSeatAdapter(deps: {
           try {
             signal?.throwIfAborted();
             startSignal?.throwIfAborted();
+            if (deps.enabled && !(await deps.enabled()))
+              throw new PiTurnedOff("Pi was turned off before this hire started.");
             await capability.verify();
             await view.guard?.();
             root = await deps.native.capture(view.paneId, capability.executable, cwd);
@@ -360,13 +357,15 @@ export function createPiSeatAdapter(deps: {
             )
               throw new Error("brief_delivery_unverified: native Pi did not confirm its brief");
             return { outcome: "started", control };
-          } catch {
+          } catch (error) {
             await dispose();
             return {
               outcome: "failed",
               reason: "not_ready",
               detail:
-                "Native Pi binding or brief unconfirmed; inspect the original pane before retrying. No duplicate process or terminal fallback was used.",
+                error instanceof PiTurnedOff
+                  ? error.message
+                  : "Native Pi binding or brief unconfirmed; inspect the original pane before retrying. No duplicate process or terminal fallback was used.",
             };
           }
         },

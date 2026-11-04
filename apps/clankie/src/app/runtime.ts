@@ -1,3 +1,4 @@
+import { createPiSettingsRoutes } from "../pi-settings-routes.ts";
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
@@ -707,6 +708,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
 
   app.route("/", createCaptainSeatRoutes(authorizeOwnerSecrets, settingsSource, dependencies.captainSeats));
+  app.route("/", createPiSettingsRoutes(authorizeOwnerSecrets, settingsSource));
   app.route("/", createHttpSettingsRoutes(authorizeOwnerSecrets, settingsSource));
   app.route(
     "/",

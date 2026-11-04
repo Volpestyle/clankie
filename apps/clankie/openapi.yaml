@@ -3052,7 +3052,7 @@ paths:
       tags: [Operator]
       operationId: getWorkerAccounts
       summary: Read one machine's worker accounts and verified Pi profile
-      description: Discovered identity-keyed accounts and their homes, sign-in, email, plan, usage headroom, re-sign notices, verified Pi model references, holds and whether Clankie would hire now (MachineWorkerAccountsSchema). Duplicate homes share one account; preferences remain with the identity after a home re-signs. Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
+      description: Discovered identity-keyed accounts and their homes, sign-in, email, plan, usage headroom, re-sign notices, verified Pi model references, Pi readiness (`pi.state` is not_installed, too_old, not_enabled, ready; `pi.installCommand` for missing or old installs), holds and whether Clankie would hire now (MachineWorkerAccountsSchema). Duplicate homes share one account; preferences remain with the identity after a home re-signs. Omit fleet for this machine; fleet names a runtime connection, the only query accepted. Owner or Take Control device authority.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       parameters:
         - {
@@ -3067,6 +3067,50 @@ paths:
         "401": { description: Authentication required }
         "409": { description: The machine could not be read }
         "503": { description: Worker accounts unavailable }
+  /v1/worker-accounts/pi:
+    get:
+      tags: [Operator]
+      operationId: getPiSettings
+      summary: Read whether Pi coding workers are enabled
+      description: Owner or Take Control device only. Returns enabled and the current revision. The saved preference overrides the legacy CLANKIE_PI_NATIVE_ENABLED default.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      responses:
+        "200":
+          description: Pi setting and revision
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [enabled, revision]
+                properties:
+                  enabled: { type: boolean }
+                  revision: { type: string }
+        "401": { description: Authentication required }
+        "403": { description: Take Control required }
+    post:
+      tags: [Operator]
+      operationId: setPiSettings
+      summary: Turn Pi coding workers on or off
+      description: Owner or Take Control device only. Persists immediately for new hires without a restart; existing workers keep their sessions. Enabling does not install Pi, sign in, or bypass native capability checks.
+      security: [{ operatorBearer: [] }, { deviceBearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [enabled, expectedRevision]
+              properties:
+                enabled: { type: boolean }
+                expectedRevision: { type: string }
+      responses:
+        "200": { description: Updated enabled and revision }
+        "400": { description: Malformed change }
+        "401": { description: Authentication required }
+        "403": { description: Take Control required }
+        "409": { description: Stale revision or authority changed }
+        "503": { description: Settings unavailable }
   /v1/worker-accounts/holds:
     get:
       tags: [Operator]

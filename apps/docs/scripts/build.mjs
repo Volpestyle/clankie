@@ -585,6 +585,20 @@ function buildNetworkRows() {
       },
     ],
     [
+      "GET /v1/worker-accounts/pi",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Read whether Pi coding workers are enabled and the current setting revision.",
+      },
+    ],
+    [
+      "POST /v1/worker-accounts/pi",
+      {
+        access: "Encrypted active device bearer with terminalControl (Take Control)",
+        purpose: "Turn Pi coding workers on or off for new hires immediately, against the current revision.",
+      },
+    ],
+    [
       "GET /v1/worker-accounts",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

@@ -28,6 +28,8 @@ import {
   OperatorConversationServiceResultSchema,
   ProjectsSettingsSchema,
   TAKE_CONTROL_GRANTS,
+  PI_SETTINGS_PATH,
+  PiSettingsSnapshotSchema,
   WORKER_ACCOUNT_HOLDS_PATH,
   WorkerAccountHoldsSchema,
   workerAccountsRoute,
@@ -843,4 +845,27 @@ it("round-trips own-seat control with the paired device bearer and refuses weake
   expect((await call(CAPTAIN_SEAT_START_PATH, { ...input, requestId: randomUUID() })).status).toBe(401);
   expect(f.seatEffects()).toBe(1);
   expect(f.captainCalls()).toBe(0);
+});
+
+it("round-trips Pi enablement through device/relay/service and refuses weaker or revoked devices", async () => {
+  const f = await fixture();
+  const call = (body?: unknown, device: keyof typeof f.tokens = "control") =>
+    fetch(`${f.relayUrl}${PI_SETTINGS_PATH}`, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { authorization: `Bearer ${f.tokens[device]}`, "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+  expect(publicGatewayTargetFor("GET", PI_SETTINGS_PATH)).toBe("relay");
+  expect(publicGatewayTargetFor("POST", PI_SETTINGS_PATH)).toBe("relay");
+  const initial = PiSettingsSnapshotSchema.parse(await (await call()).json());
+  for (const device of ["chat", "steer"] as const) {
+    expect((await call({ enabled: true, expectedRevision: initial.revision }, device)).status).toBe(403);
+  }
+  expect((await call({ enabled: true, expectedRevision: initial.revision })).status).toBe(200);
+  expect((await new SettingsStore(f.settings.path).load()).piNativeEnabled).toBe(true);
+  expect((await call({ enabled: false, expectedRevision: initial.revision })).status).toBe(409);
+  const current = PiSettingsSnapshotSchema.parse(await (await call()).json());
+  await f.revoke("control");
+  expect((await call({ enabled: false, expectedRevision: current.revision })).status).toBe(401);
+  expect((await f.settings.load()).piNativeEnabled).toBe(true);
 });

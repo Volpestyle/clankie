@@ -59,6 +59,10 @@ export interface PrimeSpend {
 const WORKER_ACCOUNT_HARNESSES: readonly WorkerAccountHarness[] = ["claude", "codex"];
 
 export interface WorkerAccountStatus {
+  readonly pi?: {
+    readonly state: "not_installed" | "too_old" | "not_enabled" | "ready";
+    readonly installCommand?: string;
+  };
   readonly harness: WorkerAccountHarness;
   readonly label: string;
   readonly accountKey?: string;

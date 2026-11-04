@@ -437,6 +437,9 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
   const fleetRevisions = new Map<string, number>();
   // Every account read is a usage sample for the burn rate a lead reads (ADR 0324).
   const usageHistory = new UsageHistory(join(options.stateDir, "usage-history.json"));
+  const piEnabled = async () =>
+    options.piNative !== undefined &&
+    ((await settings()).piNativeEnabled ?? process.env.CLANKIE_PI_NATIVE_ENABLED?.trim() === "1");
   const readWorkerAccountsUnrecorded = createWorkerAccountsReader({
     identityPath: harnessAccountIdentityPath(options.stateDir),
     notifyIdentityChange: (text) =>
@@ -444,7 +447,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     settings: () => settings(),
     localFleet: (id) => namedLocal.some((entry) => entry.id === id),
     piStatus: createPiWorkerStatusReader({
-      enabled: () => options.piNative !== undefined,
+      enabled: piEnabled,
       cwd: workingDirectory,
       seatModel: deps.piSeatModel,
     }),
@@ -574,8 +577,15 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       createHerdrWatchRunner(
         deps.herdrAvailable,
         undefined,
-        (options.openCodeNative ?? options.grokNative ?? options.primeNative ?? options.piNative)
-          ?.createCommandTab,
+        async (input) => {
+          const native =
+            options.openCodeNative ??
+            options.grokNative ??
+            options.primeNative ??
+            ((await piEnabled()) ? options.piNative : undefined);
+          if (!native) throw new Error("Native initial-command pane creation unavailable; Pi is turned off.");
+          return native.createCommandTab(input);
+        },
         {
           localCodexBinding: () => deps.runtimes?.configuredBinding("default") ?? Promise.resolve(undefined),
           ...(deps.runtimes ? { localReadBinding: () => deps.runtimes!.configuredBinding("default") } : {}),
@@ -1054,6 +1064,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         }),
     ...(deps.piSeatModel === undefined ? {} : { piSeatModel: deps.piSeatModel }),
     ...(deps.hireCapacity === undefined ? {} : { hireCapacity: deps.hireCapacity }),
+    piNativeEnabled: piEnabled,
     seatAdapters: options.seatAdapters ?? [
       createCodexSeatAdapter({
         fleetGates: localFleetGates,
@@ -1109,6 +1120,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               repoRoot: options.repoRoot,
               stateDir: options.stateDir,
               native: options.piNative,
+              enabled: piEnabled,
             }),
           ]),
     ],

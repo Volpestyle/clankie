@@ -216,7 +216,6 @@ import { createGrokNativeHost } from "./captain/grok-native-host.ts";
 import { createPrimeNativeHost } from "./captain/prime-native-host.ts";
 import { createOpenCodeNativeHost } from "./captain/opencode-native-host.ts";
 import { createPreparedNativeHost } from "./captain/prepared-native-host.ts";
-import { piNativeOptions } from "./captain/pi-seat-adapter.ts";
 import { createProjectWorkspaceResolver } from "./project-membership.ts";
 import {
   createRemoteProjectObserver,
@@ -1774,13 +1773,11 @@ const captain = createCaptain(
       binding: localFleetBinding,
       processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
     }),
-    ...piNativeOptions(process.env.CLANKIE_PI_NATIVE_ENABLED, () =>
-      createPreparedNativeHost({
-        harness: "pi",
-        binding: localFleetBinding,
-        processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
-      }),
-    ),
+    piNative: createPreparedNativeHost({
+      harness: "pi",
+      binding: localFleetBinding,
+      processHelper: join(repoRoot, "integrations/opencode-plugin/process-birth.py"),
+    }),
     bodyActivity: bodyHeartbeat,
     repoRoot,
     ...(startupSettings.captain.workingDirectory === undefined

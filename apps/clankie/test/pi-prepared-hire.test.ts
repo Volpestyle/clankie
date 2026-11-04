@@ -17,7 +17,7 @@ import {
   type HerdrWatchRunner,
   type PiSeatModel,
 } from "../src/captain/herdr-watch.ts";
-import { createPiSeatAdapter, piNativeOptions } from "../src/captain/pi-seat-adapter.ts";
+import { createPiSeatAdapter } from "../src/captain/pi-seat-adapter.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { HireLayoutUnconfirmed } from "../src/captain/hire-layout.ts";
 
@@ -332,54 +332,6 @@ test.each([undefined, "automated brief"])(
   },
 );
 
-test.each([undefined, "", "0", "false", "true", "yes"])(
-  "native Pi registration is absent without explicit opt-in (%s), preserving hosted launches",
-  async (enabled) => {
-    const f = await fixture();
-    const createNative = vi.fn(() => {
-      throw new Error("Native Pi host must not be constructed without opt-in");
-    });
-    const options = piNativeOptions(enabled, createNative);
-    expect(options).toEqual({});
-    expect(createNative).not.toHaveBeenCalled();
-    const included: PiSeatModel = {
-      model: "clankie/default",
-      provider: {
-        id: "clankie",
-        config: { baseUrl: "http://127.0.0.1:1/not-called", apiKey: "synthetic-not-a-credential" },
-      },
-    };
-    const store = new HerdrWatchStore(join(f.directory, "default-off.json"), {
-      runner: f.runner,
-      seatAdapters:
-        options.piNative === undefined
-          ? []
-          : [createPiSeatAdapter({ repoRoot: f.directory, stateDir: f.directory, native: options.piNative })],
-      piSeatModel: async () => included,
-    });
-    cleanups.push(async () => store.close());
-    expect(
-      await store.spawnSeat({
-        schemaVersion: 1,
-        harness: "pi",
-        title: "hosted seat",
-        workingDirectory: f.directory,
-        model: "fixture/native",
-      }),
-    ).toMatchObject({ outcome: "spawned", control: { mode: "terminal", reason: "no_brief" } });
-    expect(f.runner.configurePiProvider).toHaveBeenCalledWith("clankie", included.provider!.config);
-    expect(f.runner.configurePiProvider.mock.invocationCallOrder[0]).toBeLessThan(
-      f.runner.startAgent.mock.invocationCallOrder[0]!,
-    );
-    expect(f.runner.startAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "pi", args: ["--model", "clankie/default"] }),
-    );
-    expect(f.runner.installPiIntegration).toHaveBeenCalledOnce();
-    expect(f.runner.runInPane).not.toHaveBeenCalled();
-    expect(f.adapter.prepare).not.toHaveBeenCalled();
-  },
-);
-
 test("opted-in prepared Pi without a brief refuses failed native discovery before allocation or legacy fallback", async () => {
   const f = await fixture();
   const discover = vi.fn(async () => {
@@ -389,7 +341,7 @@ test("opted-in prepared Pi without a brief refuses failed native discovery befor
     throw new Error("capture forbidden");
   });
   const createNative = vi.fn(() => ({ createCommandTab: async () => "forbidden", capture }));
-  const options = piNativeOptions("1", createNative);
+  const options = { piNative: createNative() };
   expect(createNative).toHaveBeenCalledOnce();
   const adapter = createPiSeatAdapter({
     repoRoot: f.directory,
@@ -442,4 +394,38 @@ test("prepared Pi refuses a hosted model that conflicts with the project's requi
   expect(f.runner.startAgent).not.toHaveBeenCalled();
   expect(f.runner.runInPane).not.toHaveBeenCalled();
   expect(f.brief).not.toHaveBeenCalled();
+});
+
+test("native Pi off preserves the hosted terminal launch and provider selection", async () => {
+  const f = await fixture();
+  const included: PiSeatModel = {
+    model: "clankie/default",
+    provider: {
+      id: "clankie",
+      config: { baseUrl: "http://127.0.0.1:1/not-called", apiKey: "synthetic-not-a-credential" },
+    },
+  };
+  const store = new HerdrWatchStore(join(f.directory, "default-off.json"), {
+    runner: f.runner,
+    seatAdapters: [f.adapter],
+    piNativeEnabled: async () => false,
+    piSeatModel: async () => included,
+  });
+  cleanups.push(async () => store.close());
+  expect(
+    await store.spawnSeat({
+      schemaVersion: 1,
+      harness: "pi",
+      title: "hosted seat",
+      workingDirectory: f.directory,
+      model: "fixture/native",
+    }),
+  ).toMatchObject({ outcome: "spawned", control: { mode: "terminal", reason: "no_brief" } });
+  expect(f.adapter.prepare).not.toHaveBeenCalled();
+  expect(f.runner.configurePiProvider).toHaveBeenCalledWith("clankie", included.provider!.config);
+  expect(f.runner.configurePiProvider.mock.invocationCallOrder[0]).toBeLessThan(
+    f.runner.startAgent.mock.invocationCallOrder[0]!,
+  );
+  expect(f.runner.startAgent).toHaveBeenCalledOnce();
+  expect(f.runner.runInPane).not.toHaveBeenCalled();
 });

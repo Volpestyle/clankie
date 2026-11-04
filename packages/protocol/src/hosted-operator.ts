@@ -20,6 +20,7 @@ import {
   isUsageReportRoute,
   USAGE_PATH,
   USAGE_SETTINGS_PATH,
+  PI_SETTINGS_PATH,
   WORKER_ACCOUNT_HOLDS_PATH,
 } from "./worker-accounts.ts";
 import { HUDDLE_CLOSE_PATH, HUDDLES_PATH } from "./huddles.ts";
@@ -178,6 +179,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       MAXIMUM_TRUST_MODE_PATH,
       EXTENSIONS_PATH,
       "/v1/operator/voice",
+      PI_SETTINGS_PATH,
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_PATH,
       USAGE_SETTINGS_PATH,
@@ -246,6 +248,7 @@ export function hostedOperatorAllows(method: string, path: string, body?: string
       "/v1/agent-hosts",
       FLEET_SETTINGS_PATH,
       FLEET_HIRE_DEFAULTS_PATH,
+      PI_SETTINGS_PATH,
       WORKER_ACCOUNT_HOLDS_PATH,
       USAGE_SETTINGS_PATH,
       HUDDLES_PATH,

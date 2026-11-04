@@ -1302,7 +1302,7 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       name: "accounts",
       aliases: [],
       description: "Claude profiles and Codex accounts: register, see sign-in/usage per machine, hold",
-      argumentHint: "[codex|claude [list | add HOME --label LABEL | remove LABEL]]",
+      argumentHint: "[pi show|enable|disable | codex|claude [list | add HOME --label LABEL | remove LABEL]]",
       takesArgument: true,
       async run(argument, shell): Promise<void> {
         const words = splitQuotedArguments(argument);
@@ -1320,6 +1320,14 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
             },
             words[0],
           );
+          return;
+        }
+        if (words[0] === "pi") {
+          const result = await runAccountsCommand(
+            words,
+            context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher },
+          );
+          shell.insertCommandResult("/accounts", JSON.stringify(result, null, 2), "success");
           return;
         }
         if (!["codex", "claude"].includes(words[0] ?? ""))

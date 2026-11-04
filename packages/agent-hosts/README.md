@@ -168,8 +168,10 @@ the distinction between automated checks and live evidence are recorded in the
 [delivery verification notes](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-01-native-agent-delivery/README.md).
 
 Pi uses the original process-bound extension and causal native custom-message
-receipts. The service registers this local adapter only with
-`CLANKIE_PI_NATIVE_ENABLED=1`; defaults remain off until live acceptance.
+receipts. Native Pi is off by default; the owner enables new hires with
+`clankie accounts pi enable` (or the Take Control route
+`POST /v1/worker-accounts/pi`). The saved setting applies without a restart and
+overrides the legacy `CLANKIE_PI_NATIVE_ENABLED=1` startup default.
 The account/usability
 view admits Pi only with verified native capability and an authenticated worker
 model; automatic choice respects holds and falls back to Pi after eligible
