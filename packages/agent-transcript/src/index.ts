@@ -713,7 +713,7 @@ function flatEntries(
 }
 
 /** Claude config homes, most specific first: CLAUDE_CONFIG_DIR, ~/.claude, then any ~/.claude-*. */
-function claudeConfigRoots(): string[] {
+export function claudeConfigRoots(): string[] {
   const configured = process.env.CLAUDE_CONFIG_DIR?.trim();
   const roots = [
     ...(configured ? [configured] : []),

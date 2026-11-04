@@ -71,8 +71,9 @@ agent showed.
   a shell (`terminal.get`'s `pid`, `argv` and `foreground`); the agent is the
   terminal's own program unless that is a shell, else the process in front.
   The occupant is the terminal, its root process and the agent's pid, checked
-  again after the read. `herdr_core_read` reads history and screen and passes
-  them through the same scope, with anchors kept per core and terminal, and
+  again after the read. For other harnesses, `herdr_core_read` reads history
+  and screen and passes them through the same scope, with anchors kept per core
+  and terminal (Claude Code and Codex are read from their transcript, below), and
   `herdr_core_list` lists only terminals that hold such an agent (added
   2026-10-31).
 - **A refusal is final.** The connector's Herdr session source used to stream
@@ -114,9 +115,19 @@ agent showed.
   transcript can be read (no
   session reported, no file yet, an unreachable host), the read is refused;
   the screen is never shown in its place. Other harnesses keep the screen
-  read and its cut, and so do the Herdr desktop app's own terminals
-  (`herdr_core_read`), whose owner-started agents carry no session identity
-  ([#530](https://github.com/Volpestyle/clankie/issues/530)).
+  read and its cut. The Herdr desktop app's own terminals (`herdr_core_read`)
+  read Claude Code and Codex from their transcript too
+  ([#530](https://github.com/Volpestyle/clankie/issues/530)). An agent the
+  owner started there carries no session Clankie named, so its session is the
+  one the harness's own files tie to that exact process:
+  - Claude Code's `sessions/<pid>.json` in its config home, only when its
+    recorded start (`procStart`) is that pid's kernel birth to the second, so a
+    file left on a reused pid names nothing.
+  - For Codex, the one rollout the process holds open, and only if Codex's own
+    lookup by that id finds the same file.
+
+  Anything short of exactly one such session, or no transcript, is refused. Its
+  screen is never read, so a menu it waits on is named from its session alone.
 
 ## Consequences
 

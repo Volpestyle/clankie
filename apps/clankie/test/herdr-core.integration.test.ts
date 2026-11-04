@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { homedir, hostname, tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { SessionRefusal, SessionSources, createHerdrCoreSessionSource } from "@clankie/agent-hosts/sessions";
@@ -48,17 +48,22 @@ async function until(check: () => Promise<boolean>, ms = 10_000): Promise<void> 
 
 const coreIt = it.skipIf(hc === undefined || process.platform === "win32");
 
-/** Run a test agent as node, which reports its status (OSC 7501) and prints `lines`. */
+/**
+ * Run a test agent as node, which reports its status (OSC 7501) and prints `lines`. It reports a
+ * harness read from its screen; Claude Code and Codex are read from their transcript (#530).
+ */
 function agentScript(lines: readonly string[], then: string): string {
   return [
     `for (const line of ${JSON.stringify(lines)}) process.stdout.write(line + "\\n");`,
-    `process.stdout.write("\\x1b]7501;state=idle:app=claude-code\\x1b\\\\");`,
+    `process.stdout.write("\\x1b]7501;state=idle:app=opencode\\x1b\\\\");`,
     then,
   ].join("\n");
 }
 
 beforeAll(async () => {
   if (hc === undefined || process.platform === "win32") return;
+  // A Claude Code session file names its process only against that pid's kernel birth (#530).
+  await exec(process.execPath, [join(import.meta.dirname, "../../../scripts/build-fleet-proof.mjs")]);
   cwd = await mkdtemp(join(tmpdir(), "clankie-herdr-core-"));
   go = join(cwd, "go");
   // An agent, as hc defines one: a program that reports its status (OSC 7501). The shell
@@ -151,7 +156,7 @@ coreIt(
       expect.objectContaining({
         id: "herdr-core:t1",
         source: "herdr-core",
-        harness: "claude-code",
+        harness: "opencode",
         // This Mac's agents carry its own name, as its fleet seats do (#262).
         machine: hostname().slice(0, 64),
         status: "idle",
@@ -183,6 +188,150 @@ coreIt(
     await expect(layer.send("herdr-core:t1", "please also fix them")).rejects.toBeInstanceOf(SessionRefusal);
     // Nothing was typed into the agent's terminal.
     expect(await run("read", "agent")).not.toContain("please also fix them");
+  },
+);
+
+coreIt(
+  "reads an owner-started Claude Code or Codex agent from its own session transcript, never its screen (#530)",
+  async () => {
+    const homes = await realpath(await mkdtemp(join(tmpdir(), "clankie-core-sessions-")));
+    const claudeHome = join(homes, "claude");
+    const codexHome = join(homes, "codex");
+    // This service's transcript lookup reads the homes the stand-ins write.
+    const saved = { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CODEX_HOME: process.env.CODEX_HOME };
+    process.env.CLAUDE_CONFIG_DIR = claudeHome;
+    process.env.CODEX_HOME = codexHome;
+    const started: string[] = [];
+    try {
+      // Each session's transcript, as its harness writes it.
+      const now = new Date();
+      const stamp = now.getTime().toString(16).padStart(12, "0");
+      const claudeSession = "5c1d7e2a-30b4-4f6e-8a1c-9d2e4f6a8b0c";
+      // A Codex id carries its day, which names the folder its rollout lives in.
+      const codexSession = `${stamp.slice(0, 8)}-${stamp.slice(8, 12)}-7222-8333-944455556666`;
+      const day = [now.getUTCFullYear(), now.getUTCMonth() + 1, now.getUTCDate()]
+        .map((part) => String(part).padStart(2, "0"))
+        .join("/");
+      const claudeTranscript = join(claudeHome, "projects", "-work", `${claudeSession}.jsonl`);
+      const rollout = join(codexHome, "sessions", day, `rollout-2026-11-04T00-00-00-${codexSession}.jsonl`);
+      await mkdir(dirname(claudeTranscript), { recursive: true });
+      await mkdir(dirname(rollout), { recursive: true });
+      await writeFile(
+        claudeTranscript,
+        [
+          { type: "user", uuid: "u1", parentUuid: null, message: { role: "user", content: "Fix issue 530" } },
+          {
+            type: "assistant",
+            uuid: "a1",
+            parentUuid: "u1",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "claude: read from its session" }],
+            },
+          },
+        ]
+          .map((entry) => JSON.stringify(entry))
+          .join("\n") + "\n",
+      );
+      await writeFile(
+        rollout,
+        [
+          ["user", "input_text", "Fix issue 530"],
+          ["assistant", "output_text", "codex: read from its session"],
+        ]
+          .map(([role, type, text], index) =>
+            JSON.stringify({
+              timestamp: now.toISOString(),
+              type: "response_item",
+              payload: {
+                id: `m${index}`,
+                type: "message",
+                role,
+                content: [{ type, text }],
+                ...(role === "user"
+                  ? { internal_chat_message_metadata_passthrough: { content_item_kinds: ["user.text"] } }
+                  : {}),
+              },
+            }),
+          )
+          .join("\n") + "\n",
+      );
+      // A stand-in for each harness, started by the owner's shell after his own text. Claude Code
+      // records its session under its pid with its start, as `ps -o lstart` prints it; Codex
+      // holds its rollout open. Each then reports itself (OSC 7501) and prints a screen-only line.
+      const standIn = join(homes, "stand-in.cjs");
+      await writeFile(
+        standIn,
+        `const fs = require("node:fs");
+const { execFileSync } = require("node:child_process");
+const [harness, home, session, rollout] = process.argv.slice(2);
+if (harness === "claude") {
+  const procStart = execFileSync("ps", ["-o", "lstart=", "-p", String(process.pid)], { encoding: "utf8" }).trim();
+  fs.mkdirSync(home + "/sessions", { recursive: true });
+  fs.writeFileSync(home + "/sessions/" + process.pid + ".json", JSON.stringify({ pid: process.pid, sessionId: session, procStart }));
+} else globalThis.held = fs.openSync(rollout, "a");
+process.stdout.write("screen-only=secret\\n");
+process.stdout.write("\\x1b]7501;state=idle:app=" + (harness === "claude" ? "claude-code" : "codex") + "\\x1b\\\\");
+setInterval(() => {}, 1 << 30);
+`,
+      );
+      const start = async (name: string, ...args: string[]) => {
+        const { address } = JSON.parse(
+          await run(
+            "run",
+            "--bg",
+            "--json",
+            "--name",
+            name,
+            "--",
+            "sh",
+            "-c",
+            'printf "owner=secret\\n"; exec "$0" "$@"',
+            process.execPath,
+            standIn,
+            ...args,
+          ),
+        ) as { address: string };
+        started.push(address);
+        await run("wait", address);
+        return `herdr-core:${address}`;
+      };
+      const claude = await start("owner-claude", "claude", claudeHome, claudeSession);
+      const codex = await start("owner-codex", "codex", codexHome, codexSession, rollout);
+      const layer = sources({ ...env, XDG_STATE_HOME: stateHome });
+      // hc reads a terminal's foreground about twice a second; both are listed once it has.
+      await until(async () => {
+        const listed = (await layer.list()).sessions.map((session) => session.id);
+        return listed.includes(claude) && listed.includes(codex);
+      });
+
+      for (const [id, reply] of [
+        [claude, "claude: read from its session"],
+        [codex, "codex: read from its session"],
+      ] as const) {
+        const read = await layer.read(id, 50);
+        expect(read.text).toContain("› Fix issue 530");
+        expect(read.text).toContain(reply);
+        // Neither the owner's shell text nor anything only on its screen is read.
+        expect(read.text).not.toContain("owner=secret");
+        expect(read.text).not.toContain("screen-only=secret");
+        expect(read.note).toMatch(/own session transcript, not its screen/u);
+      }
+
+      // A session file whose recorded start isn't this process's own (a reused pid) names
+      // nothing, and the read is refused rather than shown from the screen.
+      const recorded = (await readdir(join(claudeHome, "sessions"))).find((name) => name.endsWith(".json"))!;
+      const file = join(claudeHome, "sessions", recorded);
+      const original = JSON.parse(await readFile(file, "utf8")) as { procStart: string };
+      await writeFile(file, JSON.stringify({ ...original, procStart: "Mon Jan  1 00:00:00 2024" }));
+      await expect(layer.read(claude, 50)).rejects.toThrow(/own session transcript can't be read now/u);
+    } finally {
+      for (const address of started) await run("kill", address).catch(() => undefined);
+      for (const [key, value] of Object.entries(saved))
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      await rm(homes, { recursive: true, force: true });
+    }
   },
 );
 
