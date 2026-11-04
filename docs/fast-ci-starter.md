@@ -55,7 +55,9 @@ workflows before replacing anything or adding duplicate jobs.
 ## What the first profile offers
 
 The first profile is **GitHub Actions, pnpm and Vitest 4 on Ubuntu**, with a
-pinned `packageManager`, lockfile and an explicit Vitest config. Other stacks
+pinned `packageManager`, lockfile and an explicit Vitest config whose root is
+the Git repository root. Each test file must be selected once; duplicate-file
+projects and other root layouts need a project-specific adapter. Other stacks
 need a project-specific proposal. Node defaults to 24; 22 and 26 are also
 selectable. The workflow uses JSON syntax, which is compatible with YAML, in
 `.github/workflows/fast-ci.yml`.

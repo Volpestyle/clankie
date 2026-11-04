@@ -206,7 +206,9 @@ const summary = [
 ].join("\n");
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + "\n");
 for (const key of shared)
-  console.log(`::warning title=Already failing on main::${key} fails on the base too; fix it on main.`);
+  console.log(
+    `::warning title=Already failing on ${generic ? "base" : "main"}::${key} fails on the base too; fix it on ${generic ? "the base" : "main"}.`,
+  );
 for (const key of own)
   console.log(
     `::error title=New test failure::${key}${missing.includes(key.split(" > ")[0]) ? " (new file)" : ""}`,

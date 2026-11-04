@@ -63,6 +63,14 @@ const request = {
 async function offer(): Promise<ProjectCiStarterOffer> {
   const host = await createQaService();
   try {
+    const snapshot = async () => {
+      const response = await fetch(host.baseUrl + "/v1/operator/projects", {
+        headers: { authorization: `Bearer ${host.operatorToken}` },
+      });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+    const before = await snapshot();
     const result = await run(
       process.execPath,
       [join(repo, "apps/tui/bin/clankie.ts"), "project", "ci", "offer", "--json-stdin"],
@@ -75,6 +83,7 @@ async function offer(): Promise<ProjectCiStarterOffer> {
       },
     );
     expect(result.code, result.stderr).toBe(0);
+    expect(await snapshot()).toEqual(before);
     return ProjectCiStarterOfferSchema.parse(JSON.parse(result.stdout));
   } finally {
     await host.close();
@@ -125,6 +134,13 @@ it("the actual launcher/owner HTTP path offers files without applying them or ac
         body: JSON.stringify(body),
       });
     expect((await post(request)).status).toBe(401);
+    const malformed = await fetch(host.baseUrl + PROJECT_CI_STARTER_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${host.operatorToken}` },
+      body: "{broken",
+    });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toEqual({ error: "malformed" });
     for (const bad of [
       { ...request, ownerApproved: true },
       { ...request, projectPath: "/tmp/unapproved" },
@@ -275,7 +291,7 @@ it("the emitted reporter/comparator run real Vitest in real Git worktrees and ne
   expect((await f.execute()).code).toBe(1);
   const shared = await f.workflowCompare();
   expect(shared.code, shared.stdout + shared.stderr).toBe(0);
-  expect(shared.stdout).toContain("Already failing on main");
+  expect(shared.stdout).toContain("Already failing on base");
   expect(shared.stdout).toContain("1 already failing there, 0 new");
   await mkdir(join(f.root, "scripts/testing"), { recursive: true });
   await writeFile(
@@ -289,6 +305,8 @@ it("the emitted reporter/comparator run real Vitest in real Git worktrees and ne
   );
   expect(legacy.code, legacy.stdout + legacy.stderr).toBe(0);
   expect(legacy.stdout).toContain("1 already failing there, 0 new");
+  expect(legacy.stdout).toContain("Already failing on main");
+  expect(legacy.stdout).toContain("fix it on main.");
 
   const sharedReport = JSON.parse(await readFile(f.report, "utf8"));
   const sharedPath = join(f.root, ".local/shared.json");

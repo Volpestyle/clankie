@@ -126,7 +126,7 @@ export async function projectCiStarterOffer(
     ],
     limits: [
       "Preview only: no repository, settings, branch, pull request, runner or protection was changed.",
-      "First profile: pnpm with a pinned packageManager, lockfile, Vitest 4 and an explicit config on an Ubuntu GitHub-hosted runner. Other stacks need a project-specific proposal.",
+      "First profile: pnpm with a pinned packageManager, lockfile, Vitest 4 with its root at the Git repository root, and one execution per file, on an Ubuntu GitHub-hosted runner. Other layouts or stacks need a project-specific proposal.",
       "Install uses --frozen-lockfile and retains the project's dependency-build approval policy.",
       "The selected compiler cache paths must actually be produced by the full-check command. Cache restore never skips checks.",
       "The full non-test command must include the project's other required checks; the test invocation keeps its existing Vitest configuration.",

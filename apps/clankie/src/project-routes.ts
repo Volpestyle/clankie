@@ -139,7 +139,13 @@ export function createProjectRoutes(
     app.use(path, bodyLimit({ maxSize: 16 * 1024 }));
   }
   app.post(PROJECT_CI_STARTER_PATH, async (context) => {
-    const input = ProjectCiStarterRequestSchema.safeParse(await context.req.json().catch(() => undefined));
+    let body: unknown;
+    try {
+      body = await context.req.json();
+    } catch {
+      return context.json({ error: "malformed" }, 400);
+    }
+    const input = ProjectCiStarterRequestSchema.safeParse(body);
     if (!input.success) return context.json({ error: "malformed" }, 400);
     try {
       return context.json(await projectCiStarterOffer(input.data));
