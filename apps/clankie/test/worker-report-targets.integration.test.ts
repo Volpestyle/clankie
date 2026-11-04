@@ -36,9 +36,42 @@ afterEach(async () => {
 
 // Native transports are isolated fixtures. The bridge, TCP, linked admission,
 // captain policy, hire journal, report journal and lead outbox are production code.
-it.each(["local", "linked"])(
-  "addresses only recorded report leads without adopting the worker and reconciles its original destination (%s, #347)",
-  async (transport) => {
+it.each([
+  { transport: "local", scenario: "records only permitted destinations", revocation: undefined },
+  { transport: "linked", scenario: "records only permitted destinations", revocation: undefined },
+  {
+    transport: "local",
+    scenario: "keeps a revoked hiring-app destination absent across restart",
+    revocation: "modern",
+  },
+  {
+    transport: "linked",
+    scenario: "keeps a revoked hiring-app destination absent across restart",
+    revocation: "modern",
+  },
+  {
+    transport: "local",
+    scenario: "materializes legacy app destinations before owner grants and revocation",
+    revocation: "legacy",
+  },
+  {
+    transport: "linked",
+    scenario: "materializes legacy app destinations before owner grants and revocation",
+    revocation: "legacy",
+  },
+  {
+    transport: "local",
+    scenario: "revokes an implicit legacy app destination directly",
+    revocation: "legacy-direct",
+  },
+  {
+    transport: "linked",
+    scenario: "revokes an implicit legacy app destination directly",
+    revocation: "legacy-direct",
+  },
+] as const)(
+  "$scenario ($transport, #347)",
+  async ({ transport, revocation }) => {
     const linked = transport === "linked";
     const root = await mkdtemp(join(tmpdir(), "report-targets-"));
     cleanup.push(() => rm(root, { recursive: true, force: true }));
@@ -73,13 +106,23 @@ it.each(["local", "linked"])(
       cwd: root,
     };
     const ownerPath = join(root, "herdr-watches.json.owners.json");
-    new HireOwners(ownerPath).bind(
+    const hireOwners = new HireOwners(ownerPath);
+    const hireIntent =
+      revocation === undefined
+        ? undefined
+        : hireOwners.intent({ conversationId: "global-default" }, { kind: "app", deviceId: "other-app" });
+    hireOwners.bind(
       qualified,
       { conversationId: "global-default" },
       terminal,
-      undefined,
+      hireIntent,
       occupantIdForHerdrSession(session),
     );
+    if (revocation === "legacy" || revocation === "legacy-direct") {
+      const journal = JSON.parse(await readFile(ownerPath, "utf8"));
+      delete journal.hires[0].reportLeads;
+      await writeFile(ownerPath, JSON.stringify(journal));
+    }
     let replaceAtCensus = false;
     let duringCensus: (() => Promise<void>) | undefined;
     const execute = async (args: readonly string[], remote = false) => {
@@ -370,6 +413,73 @@ it.each(["local", "linked"])(
       decodeMcpResult(await client.call("tools/call", { name, arguments: args })) as Record<string, unknown>;
     const report = (text: string, target?: string) =>
       tool("message_clankie", { text, kind: "blocked", ...(target === undefined ? {} : { target }) });
+    const ownerFetcher = {
+      fetch: async (path: string, init?: RequestInit) =>
+        service.app.request(path, {
+          ...init,
+          headers: { "content-type": "application/json", authorization: "Bearer fixture-owner" },
+        }),
+    };
+    if (revocation !== undefined) {
+      const mode = await service.app.request("/operator/v1/dispatch", {
+        method: "POST",
+        headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
+        body: JSON.stringify({ op: "lead", schemaVersion: 1, command: { action: "set", lead: "apps" } }),
+      });
+      expect(mode.status).toBe(200);
+      expect(JSON.stringify(await tool("list_report_leads"))).toContain("hiring-app");
+      // Editing another grant must retain a legacy hire's existing app destination.
+      if (revocation === "legacy") {
+        await runFleetReportLeadsCommand([qualified, "grant", otherId], { ownerFetcher });
+        expect(JSON.stringify(await tool("list_report_leads"))).toContain("hiring-app");
+      }
+      const appReports = async () => {
+        const token = new DeviceSessionSigner(deviceSessionKey).issue(
+          mintDeviceSessionClaims({
+            deviceId: "other-app",
+            nowEpochSeconds: Math.floor(now / 1000),
+            ttlSeconds: 3600,
+          }),
+        );
+        const response = await fetch(relayUrl + "/operator/v1/dispatch", {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ op: "worker_reports", schemaVersion: 1, conversationId: "global-default" }),
+        });
+        expect(response.status).toBe(200);
+        return (await response.json()).page.items as Array<{ text: string }>;
+      };
+      expect(await report("Before owner revoked the app target", "hiring-app")).toMatchObject({
+        received: true,
+        deliveryStage: "stored",
+      });
+      expect(await appReports()).toMatchObject([{ text: "Before owner revoked the app target" }]);
+      const revoked = await runFleetReportLeadsCommand([qualified, "revoke", "hiring-app"], { ownerFetcher });
+      for (const checkpoint of ["before restart", "after restart"]) {
+        const listed = await tool("list_report_leads");
+        const text = `Report after app grant revocation: ${checkpoint}`;
+        const result = await report(text, "hiring-app");
+        const exposed = (await appReports()).some((item) => item.text === text);
+        expect({ result, exposed }).toMatchObject({
+          result: { received: false, definitive: "not_sent" },
+          exposed: false,
+        });
+        expect(JSON.stringify(listed)).not.toContain("hiring-app");
+        if (checkpoint === "before restart") {
+          await client.stop();
+          await service.close();
+          await captain.close();
+          captain = makeCaptain();
+          await captain.pollSeatEvents(1, undefined, "global-default");
+          service = await makeService();
+          route = linked ? fleetLinkFetch(service.app.fetch) : localLink.fetch(service.app.fetch);
+          client = await startBridge();
+        }
+      }
+      expect(revoked.leads.some((lead) => lead.id === "hiring-app")).toBe(false);
+      expect(JSON.parse(await readFile(ownerPath, "utf8")).hires[0].reportLeads).toBeDefined();
+      return;
+    }
     // On main the bridge drops target and stores this in the hiring chat.
     const unknownTarget = await report(
       "This target was never granted",
@@ -384,13 +494,6 @@ it.each(["local", "linked"])(
     expect(initial).toMatchObject({
       leads: [{ id: "conversation:global-default", conversationId: "global-default" }],
     });
-    const ownerFetcher = {
-      fetch: async (path: string, init?: RequestInit) =>
-        service.app.request(path, {
-          ...init,
-          headers: { "content-type": "application/json", authorization: "Bearer fixture-owner" },
-        }),
-    };
     const granted = await runFleetReportLeadsCommand([qualified, "grant", otherId], { ownerFetcher });
     const target = granted.leads.find(
       (lead) => lead.conversationId === otherId && lead.deviceId === undefined,

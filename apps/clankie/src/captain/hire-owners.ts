@@ -139,7 +139,7 @@ export class HireOwners {
       ...(held.hired === true &&
       held.startedBy?.kind === "app" &&
       held.appLeadOccupantId === occupantId &&
-      !held.reportLeads?.some((lead) => lead.id === "hiring-app")
+      held.reportLeads === undefined
         ? [
             {
               id: "hiring-app",
@@ -164,6 +164,11 @@ export class HireOwners {
     )
       throw new Error("Report grants require the exact persisted native occupant");
     const parsed = ReportLeadSchema.parse(lead);
+    // Materialize legacy app access before the first owner edit. A present list,
+    // including an empty one after revocation, is authoritative thereafter.
+    const existing =
+      held.reportLeads ??
+      this.reportLeads(paneId, seatId, occupantId).filter((entry) => entry.id === "hiring-app");
     this.save({
       ...this.state,
       hires: this.state.hires.map((entry) =>
@@ -171,7 +176,7 @@ export class HireOwners {
           ? entry
           : {
               ...entry,
-              reportLeads: [...(entry.reportLeads ?? []).filter((item) => item.id !== parsed.id), parsed],
+              reportLeads: [...existing.filter((item) => item.id !== parsed.id), parsed],
             },
       ),
     });
@@ -180,15 +185,18 @@ export class HireOwners {
     const held = this.state.hires.find(
       (entry) => entry.paneId === paneId && entry.seatId === seatId && entry.occupantId === occupantId,
     );
-    if (!held?.reportLeads?.some((lead) => lead.id === id))
-      throw new Error("No owner-added report destination matches");
+    const existing =
+      held?.reportLeads ??
+      this.reportLeads(paneId, seatId, occupantId).filter((entry) => entry.id === "hiring-app");
+    if (!held || !existing.some((lead) => lead.id === id))
+      throw new Error("No recorded report destination matches");
     this.save({
       ...this.state,
       hires: this.state.hires.map((entry) =>
         entry === held
           ? {
               ...entry,
-              reportLeads: entry.reportLeads!.filter((lead) => lead.id !== id),
+              reportLeads: existing.filter((lead) => lead.id !== id),
             }
           : entry,
       ),
