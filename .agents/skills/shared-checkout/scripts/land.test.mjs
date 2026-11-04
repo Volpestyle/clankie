@@ -17,6 +17,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 const helper = process.env.LAND_HELPER || fileURLToPath(new URL("./land.mjs", import.meta.url));
+// Run from `git bisect run`, a hook or `rebase --exec` in a linked worktree, the fixture's
+// `git init` would otherwise reinitialize the caller's checkout as bare (#846).
+for (const name of [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_PREFIX",
+  "GIT_CONFIG",
+])
+  delete process.env[name];
 function fixture(run) {
   const root = mkdtempSync(join(tmpdir(), "land-test-"));
   const git = (...args) =>
