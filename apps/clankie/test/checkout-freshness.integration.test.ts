@@ -866,7 +866,7 @@ it("a retry whose launch is still fenced in its clean start folder is never move
     // Only the native launch is stood in for: it stays unconfirmed, so its folder stays fenced.
     const fenced = new Set<string>();
     const launched: string[] = [];
-    vi.spyOn(HerdrWatchStore.prototype, "hireRetained").mockImplementation((input) =>
+    vi.spyOn(HerdrWatchStore.prototype, "hireUnresolved").mockImplementation((input) =>
       fenced.has(input.workingDirectory),
     );
     vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
@@ -1020,6 +1020,132 @@ it("an old unresolved start under another harness doesn't pin a new start to its
   }
 });
 
+it("a settled original start no longer pins its dirty folder; a pending one still does (#721)", async () => {
+  const { vi } = await import("vitest");
+  const { createCaptain } = await import("../src/captain/captain.ts");
+  const { SettingsStore } = await import("@clankie/settings");
+  const { HerdrWatchStore, createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
+  const { deliveryFingerprint } = await import("../src/captain/delivery-fence.ts");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-hire-settled-")));
+  const origin = join(root, "origin.git"),
+    owner = join(root, "owner"),
+    state = join(root, "state");
+  try {
+    await exec("git", ["init", "--bare", "--initial-branch=main", origin]);
+    await exec("git", ["clone", origin, owner]);
+    await checkoutGit(owner, ["config", "user.name", "Fixture"]);
+    await checkoutGit(owner, ["config", "user.email", "fixture@example.invalid"]);
+    await writeFile(join(owner, "base.txt"), "base\n");
+    await checkoutGit(owner, ["add", "base.txt"]);
+    await checkoutGit(owner, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await checkoutGit(owner, ["push", "origin", "main"]);
+    await writeFile(join(owner, "draft.txt"), "keep owner draft\n");
+    // An earlier codex start in the start folder itself, kept under its original key as a
+    // remote host's journal keeps it once recovery settled it.
+    await mkdir(state, { recursive: true });
+    const receipts = join(state, "herdr-watches.json.hire-receipts.json");
+    const original = async (settled: boolean) => {
+      const key = JSON.stringify(["local", "codex", owner, "new"]);
+      const fingerprint = deliveryFingerprint("original brief");
+      await writeFile(
+        receipts,
+        JSON.stringify({
+          [key]: {
+            messageId: "6f1c2a0e-3b7d-4e59-9a41-2d8e5c7b9f10",
+            fingerprint,
+            paneId: "herdr-core/t9q",
+            ...(settled
+              ? {
+                  settlement: {
+                    receiptId: "6f1c2a0e-3b7d-4e59-9a41-2d8e5c7b9f10",
+                    receiptKey: key,
+                    fingerprint,
+                    disposition: "adopted",
+                    journal: "local-host-inventory",
+                    census: { observedAt: 1, panes: 1, sha256: "0".repeat(64) },
+                    pane: {
+                      paneId: "herdr-core/t9q",
+                      present: true,
+                      terminalId: "herdr-core/t9q",
+                      occupantId: "session-fixture",
+                      owner: { conversationId: "global-default" },
+                    },
+                  },
+                }
+              : {}),
+          },
+        }),
+      );
+    };
+    // Only the native launch is stood in for; the real receipt journal decides what is unresolved.
+    const launched: string[] = [];
+    vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
+      launched.push(seat.workingDirectory);
+      return { outcome: "failed", reason: "start_unconfirmed", detail: "fixture launch unconfirmed" };
+    });
+    // A new captain for each hire reads the journals as a restarted service would.
+    const hire = async () => {
+      const captain = createCaptain(
+        { herdrAvailable: () => true } as import("../src/captain/deps.ts").CaptainDeps,
+        {
+          repoRoot: join(root, "runtime"),
+          stateDir: state,
+          settings: new SettingsStore(join(root, "settings.json")),
+          nativeHerdrRunner: createHerdrWatchRunner(() => false),
+        },
+      );
+      try {
+        return await captain.serveOperatorConversation({
+          schemaVersion: 1,
+          op: "spawn_seat",
+          conversationId: "global-default",
+          seat: {
+            schemaVersion: 1,
+            harness: "codex",
+            title: "Fixture",
+            workingDirectory: owner,
+            effort: "low",
+            effortReason: "A fixture hire only needs to reach the native launch.",
+          },
+          brief: "new work",
+        });
+      } finally {
+        await captain.close();
+      }
+    };
+    // Still pending, it may be running unconfirmed: a new start is checked in place and refused.
+    await original(false);
+    expect(await hire()).toMatchObject({
+      op: "spawn_seat",
+      result: {
+        outcome: "failed",
+        reason: "not_ready",
+        detail: expect.stringMatching(
+          /Start checkout is dirty.*an earlier codex start in this folder is still unresolved/su,
+        ),
+      },
+    });
+    expect(launched).toEqual([]);
+    // Settled, its key stays fenced but no longer holds the folder: new work gets a fresh worktree.
+    await original(true);
+    await hire();
+    expect(launched).toHaveLength(1);
+    expect(launched[0]).toMatch(/[/\\]\.local[/\\]wt-fixture-[0-9a-f]{6}$/u);
+    expect(await checkoutGit(owner, ["status", "--porcelain=v1"])).toBe("?? draft.txt\n");
+  } finally {
+    vi.restoreAllMocks();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it("an overlapping hire while a clean in-place hire is still being admitted is never moved once the folder turns dirty", async () => {
   const { vi } = await import("vitest");
   const { createCaptain } = await import("../src/captain/captain.ts");
@@ -1052,6 +1178,7 @@ it("an overlapping hire while a clean in-place hire is still being admitted is n
     // receipt exists, the window in which nothing in the herdr store fences its folder yet.
     const launched: string[] = [];
     vi.spyOn(HerdrWatchStore.prototype, "hireRetained").mockReturnValue(false);
+    vi.spyOn(HerdrWatchStore.prototype, "hireUnresolved").mockReturnValue(false);
     vi.spyOn(HerdrWatchStore.prototype, "spawnSeat").mockImplementation(async (seat) => {
       launched.push(seat.workingDirectory);
       await admitted;

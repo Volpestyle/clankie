@@ -65,10 +65,13 @@ instead of a refusal.
   folder queue through checkout preparation, and one that relocates keeps its
   place until it returns, so an overlapping attempt finds the first launch
   fenced instead of making a second worktree. Hires that run in the start
-  folder itself still overlap as before. A hire whose earlier launch is still
-  fenced in the start folder itself, or is still being admitted there and so has
-  no allocation or receipt yet, is never moved: that folder is checked the old
-  way, so a retry meets its own allocation and receipt or the old refusal.
+  folder itself still overlap as before. A hire whose earlier launch under the
+  same harness is still unresolved in the start folder itself (a pending receipt
+  or an unconfirmed allocation), or is still being admitted there and so has no
+  allocation or receipt yet, is never moved: that folder is checked the old way,
+  so a retry meets its own allocation and receipt or the old refusal. A launch
+  there that recovery settled no longer holds the folder (#721): its original key
+  stays fenced against replay, and new work moves to a fresh worktree.
 
 A worktree left by a hire that failed later is clean at `origin/main`, so the
 usual tidy removes it once no pane or process is in it. Calling
