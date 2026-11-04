@@ -47,6 +47,8 @@ async function fakeAccountService() {
   const access = jwt({ sub: "account-1", client_id: "client123", token_use: "access" });
   const secrets = { access, refresh: "refresh-secret-1", session: "cognito-session-secret-1" };
   const targets: string[] = [];
+  // While closed, code checks wait here, so racing completes overlap at the send.
+  const gate = { closed: false, held: [] as (() => void)[] };
   let origin = "";
   const server = createServer(async (request, response) => {
     const send = (status: number, body: unknown) => {
@@ -71,6 +73,7 @@ async function fakeAccountService() {
     if (target === "AWSCognitoIdentityProviderService.InitiateAuth")
       return send(200, { ChallengeName: "EMAIL_OTP", Session: secrets.session });
     if (target === "AWSCognitoIdentityProviderService.RespondToAuthChallenge") {
+      if (gate.closed) await new Promise<void>((release) => gate.held.push(release));
       if (body.Session !== secrets.session) return send(400, { __type: "NotAuthorizedException" });
       if (body.ChallengeResponses?.EMAIL_OTP_CODE !== "24680")
         return send(400, { __type: "CodeMismatchException", message: "Invalid code" });
@@ -81,7 +84,13 @@ async function fakeAccountService() {
     return send(400, { __type: "UnknownOperationException" });
   });
   origin = await listen(server);
-  return { origin, secrets, targets };
+  const openGate = () => {
+    gate.closed = false;
+    for (const release of gate.held.splice(0)) release();
+  };
+  // A failed assertion must not leave held requests keeping the server open.
+  cleanups.push(openGate);
+  return { origin, secrets, targets, gate, openGate };
 }
 
 async function fixture() {
@@ -282,19 +291,27 @@ describe("this Mac's clankie.bot sign-in from the owner's app (#722)", () => {
     const { challengeId } = (
       await f.call("/v1/clankie-account/start", { email: "owner@example.com" }, f.macApp)
     ).body as { challengeId: string };
-    const statuses = await Promise.all(
-      Array.from(
-        { length: 8 },
-        async () =>
-          (await f.call("/v1/clankie-account/complete", { challengeId, code: "00000" }, f.macApp)).status,
-      ),
-    );
-    expect(statuses.sort()).toEqual([400, 400, 400, 400, 400, 404, 404, 404]);
+    // Every code check waits until all eight completes are either waiting at the
+    // account service or already answered, so none is decided before the others send.
+    f.account.gate.closed = true;
+    let answered = 0;
+    const completes = Array.from({ length: 8 }, async () => {
+      const { status } = await f.call(
+        "/v1/clankie-account/complete",
+        { challengeId, code: "00000" },
+        f.macApp,
+      );
+      answered += 1;
+      return status;
+    });
+    while (f.account.gate.held.length + answered < 8) await new Promise((tick) => setTimeout(tick, 5));
     const sent = () =>
       f.account.targets.filter(
         (target) => target === "AWSCognitoIdentityProviderService.RespondToAuthChallenge",
       );
     expect(sent()).toHaveLength(5);
+    f.account.openGate();
+    expect((await Promise.all(completes)).sort()).toEqual([400, 400, 400, 400, 400, 404, 404, 404]);
     expect(
       (await f.call("/v1/clankie-account/complete", { challengeId, code: "24680" }, f.macApp)).status,
     ).toBe(404);
