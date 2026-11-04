@@ -10,6 +10,7 @@ tail -n 40 ~/.clankie/captain/conversations/<id>/events.jsonl | jq -c '{type, ro
 
 App navigation lag: `clankie metrics --app` reads each paired device/platform's
 last-64 destination windows (`firstFrameMs`/`longTaskMs` p50/p95 and `slowCount`).
+Destinations include `feed`; `work` and `mailbox` remain accepted for older clients.
 These are client reports, not cross-device percentiles. Null long-task timing is
 unsupported. Windows expire after one idle hour and reset on service restart.
 
