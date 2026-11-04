@@ -149,6 +149,57 @@ coreIt("a hire starts in Clankie's space with its own identity, and ends when Cl
   expect(await seats.get("t999999")).toBeUndefined();
 });
 
+// The desktop app tells its own Mac terminals that Herdr Browser is there; a hire gets the
+// same, only when the browser is installed, and its own run's values still win (#697).
+it.skipIf(hc === undefined || process.platform !== "darwin")(
+  "a Mac hire learns Herdr Browser is there only when it is installed",
+  async () => {
+    const browserBin = join(cwd, "browser-bin");
+    await mkdir(browserBin, { recursive: true });
+    await writeFile(join(browserBin, "herdr-browser-open"), "#!/bin/sh\nexit 0\n");
+    await chmod(join(browserBin, "herdr-browser-open"), 0o755);
+    const keys = ["HERDR_BROWSER", "BROWSER"];
+    const seen = async (seatEnv: NodeJS.ProcessEnv, name: string, runEnv?: Record<string, string>) => {
+      const report = join(cwd, `${name}.json`);
+      const seats = createHerdrCoreSeats({ env: seatEnv });
+      const address = await seats.start({
+        argv: [
+          process.execPath,
+          "-e",
+          [
+            `const keys = ${JSON.stringify(keys)};`,
+            `require("node:fs").writeFileSync(${JSON.stringify(report)}, JSON.stringify(Object.fromEntries(keys.map((k) => [k, process.env[k] ?? null]))));`,
+            `setInterval(() => {}, 1000);`,
+          ].join("\n"),
+        ],
+        cwd,
+        ...(runEnv === undefined ? {} : { env: runEnv }),
+        seat: name,
+      });
+      try {
+        await until(async () => existsSync(report));
+        return JSON.parse(await readFile(report, "utf8")) as Record<string, string | null>;
+      } finally {
+        await seats.kill(address);
+      }
+    };
+    const plain = "/usr/bin:/bin";
+    expect(await seen({ ...env, PATH: `${browserBin}${delimiter}${plain}` }, "browser-on")).toEqual({
+      HERDR_BROWSER: "1",
+      BROWSER: "herdr-browser-open",
+    });
+    const off = await seen({ ...env, PATH: plain }, "browser-off");
+    expect(off.HERDR_BROWSER ?? "").toBe("");
+    expect(off.BROWSER ?? "").not.toBe("herdr-browser-open");
+    expect(
+      await seen({ ...env, PATH: `${browserBin}${delimiter}${plain}` }, "browser-own", {
+        HERDR_BROWSER: "",
+        BROWSER: "open",
+      }),
+    ).toMatchObject({ BROWSER: "open" });
+  },
+);
+
 coreIt("Clankie reads, waits on and closes his own hire, and its worker knows its seat", async () => {
   const seats = createHerdrCoreSeats({ env });
   const runner = createHerdrCoreRunner({ seats, pollMs: 50 });

@@ -1,3 +1,6 @@
+import { constants } from "node:fs";
+import { access } from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { HerdrCoreError, SEAT_LABEL, herdrCoreCall, herdrCoreSocketPath } from "./herdr-core.ts";
 
 // Where Clankie's hires start in the Herdr desktop app (ADR 0319): a terminal in
@@ -34,6 +37,24 @@ const INHERITED_HERDR_IDENTITY = [
  * colorless settings, and a hire would draw in plain white, so a hire's terminal clears them.
  */
 const INHERITED_COLOR_OPT_OUTS = ["NO_COLOR", "FORCE_COLOR"] as const;
+
+/**
+ * The Herdr desktop app tells the terminals it opens itself on a Mac that its browser
+ * is there (herdr-app `hc.rs`): HERDR_BROWSER marks it, and BROWSER sends a link to a
+ * browser pane. A hire is started here, not by the app, so it gets the same values,
+ * but only when Herdr Browser is installed, so a hire without it falls back (#697).
+ */
+async function herdrBrowserEnv(env: NodeJS.ProcessEnv): Promise<Record<string, string>> {
+  if (process.platform !== "darwin") return {};
+  for (const dir of (env.PATH ?? "").split(delimiter)) {
+    if (!dir) continue;
+    try {
+      await access(join(dir, "herdr-browser-open"), constants.X_OK);
+      return { HERDR_BROWSER: "1", BROWSER: "herdr-browser-open" };
+    } catch {}
+  }
+  return {};
+}
 
 interface HerdrCoreSeatStart {
   /** The hire's command, run as the terminal's own program. */
@@ -128,6 +149,7 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
           [...INHERITED_HERDR_IDENTITY, ...INHERITED_COLOR_OPT_OUTS].map((key) => [key, ""]),
         ),
         ...(options.herdrSocket?.trim() ? { HERDR_SOCKET_PATH: options.herdrSocket.trim() } : {}),
+        ...(await herdrBrowserEnv(options.env ?? process.env)),
         ...request.env,
       };
       const started = (await call("terminal.run", {
