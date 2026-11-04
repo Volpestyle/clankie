@@ -79,7 +79,8 @@ round warn below either 200 GiB or 10% free; set `warnFreeDiskGb` and
 `clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N` (values are
 GiB). The warning is informational: no lane or simulator waits on disk. The
 retired `--minimum-free-disk-gb`, `--max-load-ratio` and
-`--minimum-free-memory-mb` flags are refused.
+`--minimum-free-memory-mb` flags are refused, and the fleet settings API
+answers `retired_setting` to a write that changes those fields.
 
 An unbounded `find`, `bfs` or recursive listing over all worktrees,
 `node_modules` or `~/.clankie/integration` once held tens of thousands of open

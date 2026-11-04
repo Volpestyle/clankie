@@ -16,6 +16,7 @@ import {
   matchingAutonomyLevel,
   autonomyDrift,
   UpdateFleetSettingsSchema,
+  FleetResourcePolicySchema,
   type FleetSettingsSnapshot,
   type FleetResourcePolicy,
 } from "@clankie/protocol";
@@ -25,6 +26,31 @@ import {
   type FleetSettingsContextDependencies,
 } from "./fleet-settings-context.ts";
 import { resourceMachine, machineResourcePolicy } from "./machine-fleet-resources.ts";
+
+/** Pressure floors nothing reads since #599; old settings and journals still carry them. */
+const RETIRED_FLOORS = ["maxLoadRatio", "minAvailableMemoryMb", "minFreeDiskGb"] as const;
+const DEFAULT_RESOURCES = FleetResourcePolicySchema.parse({});
+
+/**
+ * True when a write sets a retired floor to a new value. Echoing the saved value
+ * (clients round-trip the whole policy) or resetting it to the default is fine.
+ */
+function setsRetiredFloor(body: unknown, current: ClankieSettings): boolean {
+  const changes = (body as { changes?: Record<string, unknown> } | null)?.changes;
+  const policies: [string, unknown][] = [
+    ...(changes?.resources === undefined ? [] : [["local", changes.resources] as [string, unknown]]),
+    ...Object.entries((changes?.machineResources as Record<string, unknown> | undefined) ?? {}),
+  ];
+  return policies.some(([machine, policy]) => {
+    if (!policy || typeof policy !== "object") return false;
+    const saved = machineResourcePolicy(current, machine);
+    return RETIRED_FLOORS.some((key) => {
+      if (!Object.hasOwn(policy, key)) return false;
+      const value = (policy as Record<string, unknown>)[key];
+      return value !== saved[key] && value !== DEFAULT_RESOURCES[key];
+    });
+  });
+}
 
 function fleetSettingsSnapshot(
   settings: ClankieSettings,
@@ -114,8 +140,13 @@ export function createFleetSettingsRoutes(
   });
   app.post(FLEET_SETTINGS_PATH, bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     if (!settings.update) return context.json({ error: "settings_unavailable" }, 503);
-    const input = UpdateFleetSettingsSchema.safeParse(await context.req.json().catch(() => null));
+    // allow-swallowed-rejection -- an unparseable body becomes null, which the schema answers as malformed (400).
+    const body: unknown = await context.req.json().catch(() => null);
+    const input = UpdateFleetSettingsSchema.safeParse(body);
     if (!input.success) return context.json({ error: "malformed" }, 400);
+    // Retired by #599: heavy work queues on slots alone. The revision check below
+    // pins the settings this compares against.
+    if (setsRetiredFloor(body, await settings.load())) return context.json({ error: "retired_setting" }, 400);
     if (
       input.data.changes.maximumTrustMode !== undefined &&
       context.req.query("includeMaximumTrust") !== "true"

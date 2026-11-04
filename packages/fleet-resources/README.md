@@ -397,5 +397,7 @@ settings API, `/fleet resources`, or
 `clankie fleet set --warn-free-disk-gb N --warn-free-disk-percent N`; values are
 in GiB). The warning is informational: no lane or simulator waits on disk.
 `minFreeDiskGb`, `maxLoadRatio` and `minAvailableMemoryMb` stay readable in saved
-policy so older installs keep parsing it, but nothing reads them, and the CLI
-refuses to set them.
+policy so older installs keep parsing it, but nothing reads them. The CLI
+refuses them, and the fleet settings API answers `retired_setting` (400) to a
+write that gives one a new value; echoing the saved value or the default is
+accepted, so clients that round-trip the whole policy keep working.
