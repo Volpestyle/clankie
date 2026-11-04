@@ -305,13 +305,13 @@ export class FleetHealthMetrics {
   /**
    * Whether a proof observation can page (#324). Every observation stays in
    * clankie metrics --fleet. Not counted: a caller that exited before its own
-   * check finished; any request from a pane that holds no Clankie hire (the
+   * check finished or closed its connection; any request from a pane that holds no Clankie hire (the
    * owner's own sessions, the operator seat, a hand-started pane); and a hire's
    * not_member in its first minute, while its admission completes. Requests
    * with no claimed pane, or when hires can't be read, still count.
    */
   private countsTowardAlerts(event: LocalFleetProofDiagnostic, pane?: string): boolean {
-    if (event.source === "proof" && event.reason === "caller_exited") return false;
+    if (event.source === "proof" && ["caller_exited", "closed_socket"].includes(event.reason)) return false;
     if (pane === undefined || this.options.caller === undefined) return true;
     let hire: ReturnType<FleetProofCaller> | "unknown";
     try {

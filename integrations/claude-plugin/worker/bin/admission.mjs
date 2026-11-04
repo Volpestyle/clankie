@@ -2,6 +2,35 @@ import { setTimeout as delay } from "node:timers/promises";
 
 export class FleetMembershipRefused extends Error {}
 
+// Fixed proof vocabulary only: response text and unknown values must not become
+// a diagnostic instruction or leak a process path/credential into worker logs.
+const proofReasons = new Set([
+  "unsupported_platform",
+  "unsupported_pid_namespace",
+  "invalid_pane",
+  "closed_socket",
+  "missing_binding",
+  "caller_exited",
+  "ancestor_exited",
+  "native_initial_unavailable",
+  "native_final_unavailable",
+  "pane_unavailable",
+  "pane_moved",
+  "not_member",
+  "snapshot_changed",
+  "pane_changed",
+  "private_seat_expired",
+  "binding_changed",
+  "observation_failed",
+  "connection_unavailable",
+  "connection_changed",
+  "private_seat_lifetime_unavailable",
+  "private_seat_occupant_unavailable",
+]);
+function proofReason(value) {
+  return proofReasons.has(value) ? `Native proof reason: ${value}. ` : "";
+}
+
 export async function checkFleetMembership(response) {
   if (response.status !== 403) return;
   const value = await response
@@ -10,7 +39,8 @@ export async function checkFleetMembership(response) {
     .catch(() => undefined);
   if (value?.error === "local_process_membership_required")
     throw new FleetMembershipRefused(
-      "This native seat is no longer admitted to the fleet. Automatic mailbox polling stopped. Ask Clankie to confirm or restore this seat's admission; repeated retries cannot grant access.",
+      proofReason(value.refusal) +
+        "This native seat is no longer admitted to the fleet. Automatic mailbox polling stopped. Ask Clankie to confirm or restore this seat's admission; repeated retries cannot grant access.",
     );
 }
 
@@ -26,6 +56,7 @@ export async function admissionRefusal(response) {
     ? {
         retryable: true,
         detail:
+          proofReason(value.observation) +
           "Clankie could not verify fleet admission just now; nothing was sent. Wait briefly and retry. If it persists, report the admission check failure to Clankie; it does not mean you left the fleet.",
       }
     : undefined;

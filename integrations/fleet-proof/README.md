@@ -518,7 +518,10 @@ An exact HTTP 503 `fleet_admission_unavailable` means current proof is
 unavailable and that request was refused before dispatch. Claude and Codex
 bridges retry once after a short wait; persistent uncertainty asks the worker
 to retry shortly, then report it to the lead. A definite non-member gets HTTP 403
-`local_process_membership_required` and should ask the lead to inspect admission.
-Neither bridge retries that refusal. Uncertain writes or lost replies must
+`local_process_membership_required`, its fixed native `refusal` code and a
+bounded `reason` describing the failure and recovery action. The bridge keeps
+known refusal/observation codes in worker and load diagnostics, without copying
+raw server text or process identities. Ask the lead to inspect `clankie fleet
+status` and the original pane's admission. Neither bridge retries that refusal. Uncertain writes or lost replies must
 reconcile their original receipt. A later refusal does not establish that an
 earlier uncertain operation never ran.
