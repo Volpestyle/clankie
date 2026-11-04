@@ -7,7 +7,11 @@ import { maximumTrustModeCommand } from "../../tui/src/maximum-trust-mode-comman
 import { commandHelp } from "../../tui/src/command/registry.ts";
 import type { ClankieFaceShell } from "../../tui/src/shell/shell.ts";
 import { SettingsStore } from "@clankie/settings";
-import { MAXIMUM_TRUST_MODE_PATH, MaximumTrustModeSnapshotSchema } from "@clankie/protocol/owner-settings";
+import {
+  MAXIMUM_TRUST_MODE_PATH,
+  MAXIMUM_TRUST_MODE_WORDING,
+  MaximumTrustModeSnapshotSchema,
+} from "@clankie/protocol/owner-settings";
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { createMaximumTrustModeRoutes } from "../src/maximum-trust-mode-routes.ts";
 import { launchedWithMaximumTrust, readPaneForegroundArgv } from "../src/captain/herdr-census.ts";
@@ -154,8 +158,7 @@ it("the owner API and CLI name local-only coverage even when observation is unav
       ok: true,
       enabled: false,
       seatsScope: "local",
-      description:
-        "Off: Clankie adds no bypass override; each coding agent keeps its own permission behavior.",
+      description: MAXIMUM_TRUST_MODE_WORDING.off,
     });
     expect(result.seatsOnOtherMode).toBeUndefined();
     expect((await settings.load()).maximumTrustMode).toBe(false);
@@ -207,10 +210,10 @@ it("owner API status, TUI help and CLI help describe supported overrides without
       expect(status).toContain(
         "Live seat status: this machine only; remote machines are not listed; local observation unavailable.",
       );
-      if (enabled) expect(status).toContain("OpenCode keeps its configured permissions");
-      else expect(status).toContain("Off: Clankie adds no bypass override");
+      expect(status).toContain(enabled ? MAXIMUM_TRUST_MODE_WORDING.on : MAXIMUM_TRUST_MODE_WORDING.off);
+      if (enabled) expect(status).toContain("OpenCode keeps the permissions you set for it");
       expect(status).not.toMatch(
-        /every harness|every permission prompt|skip every permission|without its permission prompts and sandbox/u,
+        /every harness|every permission prompt|skip every permission|without its permission prompts and sandbox|bypass|launch mode|launches/u,
       );
       expect((await settings.load()).maximumTrustMode).toBe(enabled);
     }

@@ -268,8 +268,8 @@ export type AppearanceSettingsSnapshot = z.infer<typeof AppearanceSettingsSnapsh
 export const MAXIMUM_TRUST_MODE_PATH = "/v1/operator/maximum-trust-mode";
 export const MAXIMUM_TRUST_MODE_WORDING = {
   title: "Maximum trust mode",
-  off: "Off: Clankie adds no bypass override; each coding agent keeps its own permission behavior.",
-  on: "On: new Claude, Codex and Grok launches use their native bypass mode. OpenCode keeps its configured permissions; Pi and Prime Agent ask no approvals. Existing seats keep their launch mode.",
+  off: "Off: Clankie leaves each coding agent's own permission settings alone.",
+  on: "On: Claude, Codex and Grok skip their permission prompts when Clankie starts them. OpenCode keeps the permissions you set for it, and Pi and Prime Agent never ask anyway. Agents already running stay as they started until they restart.",
   warning:
     "Agents run any command, edit any file and reach the network without asking, with your accounts and credentials. Only turn this on for machines and repositories you would let them change unsupervised.",
 } as const;
