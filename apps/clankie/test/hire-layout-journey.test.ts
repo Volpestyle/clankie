@@ -47,20 +47,24 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
     CLAUDE_AGENT_ID: "operator-agent",
   };
   const calls: { args: readonly string[]; result: unknown }[] = [];
-  // A hang is one call past its own 10 s timeout. It sticks, so retry loops in
-  // the code under test fail at once instead of spending the test's budget (#562).
+  // Ordinary CLI calls keep their 10 s hang detector. Agent startup carries
+  // the runner's longer deadline so Herdr can return its bounded readiness
+  // result first. Any timeout sticks across retry loops (#562, #731).
   let hang: Error | undefined;
-  const run = async (args: readonly string[]) => {
+  const run = async (args: readonly string[], signal?: AbortSignal, timeoutMs = 10_000) => {
     if (args[0] !== "server") assertRemoteHerdrArgs(args);
     if (hang) throw hang;
     const { stdout } = await exec(binary, ["--session", session, ...args], {
       env,
       cwd: root,
-      timeout: 10_000,
+      timeout: timeoutMs,
+      ...(signal ? { signal } : {}),
       maxBuffer: 2 * 1024 * 1024,
     }).catch((error: unknown) => {
       if ((error as { killed?: boolean }).killed)
-        hang = new Error(`herdr ${args.join(" ")} hung past its 10 s timeout`, { cause: error });
+        hang = new Error(`herdr ${args.join(" ")} hung past its ${timeoutMs / 1000} s timeout`, {
+          cause: error,
+        });
       throw hang ?? error;
     });
     calls.push({
@@ -637,8 +641,8 @@ it("places new hires through real Herdr CLI/socket in repo workspaces and delibe
       const faultCwd = fault === "workspace-create" ? join(root, "uncertain-new-workspace") : plain;
       if (fault === "workspace-create") await mkdir(faultCwd);
       let dropped = false;
-      const faultRunner = createHerdrWatchRunner(undefined, async (args) => {
-        const raw = await run(args);
+      const faultRunner = createHerdrWatchRunner(undefined, async (args, signal, timeoutMs) => {
+        const raw = await run(args, signal, timeoutMs);
         if (
           !dropped &&
           ((fault === "workspace-create" && args[0] === "workspace" && args[1] === "create") ||

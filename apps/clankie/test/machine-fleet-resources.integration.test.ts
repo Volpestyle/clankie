@@ -113,7 +113,8 @@ it("the real settings/API/client keeps host policies and observations separate, 
       machine: "other",
       status: "available",
       specs,
-      snapshot: { capacity: { heavySlots: 5, simulatorSlots: 0 } },
+      // 16 cores / 64 GiB: two full jobs at four cores and 24 GiB each (#599).
+      snapshot: { capacity: { heavySlots: 2, simulatorSlots: 0 } },
     });
     expect((await client.fleetResources()).capacity.heavySlots).toBe(2);
     saved = await client.updateFleetSettings({
@@ -185,14 +186,14 @@ it("the real settings/API/client keeps host policies and observations separate, 
         cores: 18,
         memoryBytes: 128 * 1024 ** 3,
       }),
-    ).toMatchObject({ heavySlots: 9, simulatorSlots: 1 });
+    ).toMatchObject({ heavySlots: 4, simulatorSlots: 1 });
     expect(
       resolveFleetResourcePolicy(FleetResourcePolicySchema.parse({}), {
         platform: "win32",
         cores: 32,
         memoryBytes: 64 * 1024 ** 3,
       }),
-    ).toMatchObject({ heavySlots: 5, simulatorSlots: 0 });
+    ).toMatchObject({ heavySlots: 2, simulatorSlots: 0 });
   } finally {
     await Promise.all([
       new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
