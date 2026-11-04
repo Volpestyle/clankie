@@ -1048,6 +1048,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest.includeQuiet === true &&
       options.deviceDispatch !== undefined &&
       currentAuthorization.device.grants.terminalControl &&
+      // A second layer: connectorOperationAllowed already refuses a connector's presence read.
       currentAuthorization.device.scope !== "connector" &&
       currentAuthorization.device.controlScope !== "hosted" &&
       currentAuthorization.device.supportGrantId === undefined;

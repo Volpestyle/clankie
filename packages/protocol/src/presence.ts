@@ -145,7 +145,8 @@ export const OperatorPresenceRequestSchema = z
     includeToolActivity: z.boolean().optional(),
     /**
      * Opt in to the owner's quiet hours. Answered only for the operator or a Take
-     * Control device; any other reader gets presence without the fields, and no error.
+     * Control device; any other device reading through the relay gets presence without
+     * the fields, and a device that loses Take Control during the read gets a 403.
      */
     includeQuiet: z.boolean().optional(),
     waitMs: z.number().int().min(0).max(OPERATOR_PRESENCE_WAIT_MS_MAX).optional(),

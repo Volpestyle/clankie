@@ -10,7 +10,8 @@ health. Source-derived presence and a desktop expression are separate: the
 short bubble. It publishes an expiring expression, not keyboard or mouse input.
 Desktop clients honor quiet hours and macOS Focus. A presence read with
 `includeQuiet: true` reports `quiet` and `quietUntil` to the operator or a Take
-Control device only; other readers get neither field and no error.
+Control device only; other devices reading through the relay get neither field
+and no error, and a device that loses Take Control during the read gets a 403.
 `clankie desktop status` reports both locally. Publication is not proof a client displayed it. For app input, use `desktop-control` or a computer-use seat.
 
 The `presence` read with `includeFace: true` also carries a source-derived `face` for the desktop

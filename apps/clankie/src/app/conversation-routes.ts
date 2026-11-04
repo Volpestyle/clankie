@@ -705,18 +705,18 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     }
     if (parsed.success && parsed.data.op === "presence" && parsed.data.includeQuiet === true) {
       // When the owner sleeps is theirs: only this machine's operator or their own
-      // Take Control device. Anyone else simply reads presence without it.
+      // Take Control device. Anyone else takes the ordinary presence path, without it.
       const quietReader = () => {
         if (!owner?.current()) return false;
         return owner.principal.kind === "operator" || leadSwitchDevice(ctx.devices.get(owner.principal.id));
       };
       const admitted = quietReader() && owner !== undefined && (await owner.authorize());
       if (!admitted) delete parsed.data.includeQuiet;
-      if (owner !== undefined && parsed.data.includeCurrentActivity !== true) {
+      if (admitted && parsed.data.includeCurrentActivity !== true) {
         context.header("cache-control", "private, no-store");
         const result = await ctx.dependencies.captain.serveOperatorConversation(parsed.data);
         // A parked read can outlast the authority that opened it.
-        if (admitted && result.op === "presence" && !(quietReader() && (await owner.authorize()))) {
+        if (result.op === "presence" && !(quietReader() && (await owner.authorize()))) {
           const { quiet: _quiet, quietUntil: _until, ...snapshot } = result.snapshot;
           return context.json({ ...result, snapshot });
         }
