@@ -4159,7 +4159,7 @@ paths:
       tags: [Operator]
       operationId: getMaximumTrustMode
       summary: Read whether maximum trust mode is on
-      description: Requests supported native bypass overrides on new Claude, Codex and Grok launches. OpenCode keeps its configured permissions. Native owner confirmations, managed denies, read-only hires and machine access ceilings remain in force. Running seats keep their launch mode. Separate from the autonomy dial.
+      description: Requests supported native bypass overrides on new Claude, Codex and Grok launches. OpenCode keeps its configured permissions. Native owner confirmations, managed denies, read-only hires and machine access ceilings remain in force. Agents already running stay as they started until they restart. Separate from the autonomy dial.
       security: [{ operatorBearer: [] }, { deviceBearer: [] }]
       responses:
         "200":

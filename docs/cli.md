@@ -5982,15 +5982,16 @@ service; older services refuse the query.
 ### `maximum-trust-mode [status|on|off]`
 
 The owner's switch requests native bypass overrides for supported harnesses
-(VUH-2048). Off, the default, adds no bypass override: `clankie claude`
+(VUH-2048). Off, the default, leaves each coding agent's own permission settings alone: `clankie claude`
 and Claude hires start with `--permission-mode auto`, whose classifier stops
 risky commands. Claude refuses auto mode for some models (older ones, some
 providers) and would ask before every command, so a local Claude hire first asks
 the installed Claude, without a prompt, and is refused before launch with
 Claude's reason when auto mode is unavailable; the hire receipt's
-`permissionMode` names the mode the worker runs in. On, new Claude, Codex and
-Grok launches take the native overrides below; OpenCode keeps its configured
-permissions:
+`permissionMode` names the mode the worker runs in. On, Claude, Codex and Grok
+skip their permission prompts when Clankie starts them, through the native flags
+below; OpenCode keeps the permissions the owner set for it, and Pi and Prime
+Agent never ask anyway:
 
 | Harness         | Flag while on                                                                                                      | Applied at launch                                    |
 | --------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
@@ -6030,8 +6031,8 @@ rules remain authoritative. This switch also never raises a machine's
 [access ceiling](adr/0244-machines-join-clankie-at-an-access-level.md), approved workspace
 grants or a read-only hire's permissions.
 
-It applies to launches after the change. Running seats keep the mode they
-started with until relaunched: the snapshot's `seatsOnOtherMode` lists this
+It applies to agents Clankie starts after the change. Agents already running
+stay as they started until they restart: the snapshot's `seatsOnOtherMode` lists this
 machine's live seats (`seatId`, `title`, `harness`, `maximumTrust`) whose own
 process flags still show the other mode, read through Herdr. The API and CLI
 label the list `seatsScope: "local"`; a missing list means observation was
