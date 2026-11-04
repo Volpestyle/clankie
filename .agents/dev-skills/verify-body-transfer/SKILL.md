@@ -38,14 +38,14 @@ clankie heavy -- sh .agents/dev-skills/verify-body-transfer/check.sh
 
 It needs Java 11 or later on `PATH` (or `JAVA=`), and it fetches `tla2tools.jar` v1.7.4 into `.local/tla2tools/` and checks its sha256 (or uses `TLA2TOOLS=`). The replays import the real `apps/clankie/src/body-transfer.ts`, its routes and `apps/tui/src/command/transfer.ts`, so they need a workspace install (`clankie heavy -- pnpm install`). `REPLAY_DEPS` (a folder where `npm install zod@4.4.3 hono@4.12.28` has run) is enough only for `replay-abort.ts`. The whole check takes under a minute.
 
-Every line should print `ok`. Lines marked **residual** are expected findings, not passes (see below). When one is fixed, flip its expected value in `check.sh`.
+Every line should print `ok`. The current code and CLI models pass; deliberately broken configs must still produce their named counterexamples.
 
 `Bound` in a model config is the set of steps held to the body named at freeze: `stage`, `release`, `abort`.
 
 | Line                                         | What it shows                                                                                                                 |
 | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `model cli: pass`                            | Main as `clankie transfer` drives it: stage, release and abort all go to the body named at freeze, and one self stays active. |
-| `model code: OneActiveSelf`                  | **Residual.** The source binds release and abort (PR 112), but the bundle it serves can be staged anywhere.                   |
+| `model code: pass`                           | The service binds stage, release and abort to the independently verified peer.                                                |
 | `model pre-112: OneActiveSelf`               | #101 as found: nothing was bound.                                                                                             |
 | `model brk-abort-unbound: OneActiveSelf`     | With stage bound but abort not, the bug returns, so PR 112's source check is needed.                                          |
 | `model brk-discard: OneActiveSelf`           | The model catches a discard that burns an already-applied id.                                                                 |
@@ -53,10 +53,10 @@ Every line should print `ok`. Lines marked **residual** are expected findings, n
 | `model brk-release: NeverLost`               | The model catches a release that skips the activation check.                                                                  |
 | `code abort --to A[ booted]`                 | The real destination refuses to burn an id it is applying or applied (`transfer_applied`).                                    |
 | `code abort --to B`                          | **#101 fixed.** The source refuses B's burn (`answer_not_from_recorded_destination`).                                         |
-| `code abort B's burn labeled A`              | **Residual.** The source checks the `destination` label the caller sends, not who burned the id.                              |
+| `code abort B's burn labeled A`              | A signed burn from B cannot impersonate the pinned destination A.                                                             |
 | `code cli resume --to B`, `cli abort --to B` | The real CLI refuses to resume or abort with a body other than the one named at freeze.                                       |
-| `code routes resume at B`                    | **Residual.** Over the real routes, a caller that skips the CLI stages and applies the bundle at B after A applied.           |
-| `code routes stage at B, abort --to A`       | **Residual,** the model's shortest path: B stages S's bundle, the owner aborts correctly through the CLI, then B applies.     |
+| `code routes resume at B`                    | Over the real routes, the bundle sealed for A cannot stage at B.                                                              |
+| `code routes stage at B, abort --to A`       | B cannot stage A's bundle, so aborting through A cannot leave B able to apply.                                                |
 
 ## Read a model result
 
@@ -66,12 +66,22 @@ Read each TLA+ result with the pstack `/statechart` skill. Give it `model/BodyTr
 
 #101: `release` and `abort` on the source never compared the destination they were handed with the one `freeze` recorded (`record.peer`), and `clankie transfer` could resume a move to a second body. PR 112 (`c1b89e5`) added `recordedDestination()` to the source's `release` and `abort`, a required `destination` on the abort request, and CLI checks that refuse a resume or abort naming another body. Through `clankie transfer`, the model and every replay hold.
 
-Two residuals remain for an owner-authorized caller that uses the HTTP routes directly instead of the CLI:
+#201 closes both direct-API residuals: source and destination independently
+challenge the actual peer using owner-minted encrypted metadata capabilities.
+The source pins the destination's body keys; the destination pins the source's
+frozen UUID/self-key/epoch/recipient tuple. The source signs and seals its bundle
+to that recipient. Burn and activation receipts must verify against the pinned
+destination. Existing UUIDs remain unchanged; the public-key pin sits beside
+them. Legacy unbound in-flight transfers fail closed.
 
-1. `abort` compares the `destination` label the caller sends. Nothing in `discarded` says which body burned the id, so B's burn sent as A's is accepted.
-2. `bundleChunk`/`exportBundle` serve the bundle to anyone, and `stage`/`apply` at a body do not check that the source froze for it. Shortest path: freeze at S for A. B stages the bundle. The owner aborts correctly with A's burn, and S is active. Then B applies and boots, and B is active with the same self.
-
-Closing both at the source would mean binding the bundle (or the manifest) to the recorded destination, and having the destination's burn name itself.
+The finite-state model assumes honest bodies and authenticated peer binding;
+it does not verify the cryptographic primitives. The authority integration test
+covers real cryptography, capability expiry/scope/replay, restart validation and
+owner authorization rechecks. The gateway test carries a multi-chunk bundle
+through its real encrypted device transport. For an actual service run without
+model calls, use `clankie heavy --server -- node
+scripts/testing/body-transfer-authority.mjs .local/UNIQUE-PROOF`. It boots and
+stops only its private loopback services and replays all three direct-API attacks.
 
 ## Real bug or modeling error?
 

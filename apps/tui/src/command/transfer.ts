@@ -10,6 +10,8 @@ import {
   BODY_TRANSFER_BUNDLE_PATH,
   BODY_TRANSFER_DISCARD_PATH,
   BODY_TRANSFER_FREEZE_PATH,
+  BODY_TRANSFER_PREPARE_PATH,
+  BodyTransferPeerTicketSchema,
   BODY_TRANSFER_REBIND_PATH,
   BODY_TRANSFER_RECLAIM_PATH,
   BODY_TRANSFER_RELEASE_PATH,
@@ -214,7 +216,12 @@ export async function runTransferCommand(
         await post(source, BODY_TRANSFER_FREEZE_PATH, {
           transferId,
           destination: destination.label,
-          destinationIdentity: to.bodyIdentity,
+          destinationPeer: {
+            url: destination.url,
+            ticket: BodyTransferPeerTicketSchema.parse(
+              await post(destination, BODY_TRANSFER_PREPARE_PATH, { transferId }),
+            ),
+          },
           ...(values["destination-machine"] === undefined
             ? {}
             : { destinationMachineId: values["destination-machine"] }),
@@ -291,6 +298,12 @@ export async function runTransferCommand(
           transferId,
           size: expected!.size,
           sha256: expected!.sha256,
+          sourcePeer: {
+            url: source.url,
+            ticket: BodyTransferPeerTicketSchema.parse(
+              await post(source, BODY_TRANSFER_PREPARE_PATH, { transferId }),
+            ),
+          },
           ...(values.replace ? { replace: true } : {}),
         }),
       );

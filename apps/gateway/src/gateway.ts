@@ -1,3 +1,4 @@
+import { isBodyTransferPeerRoute, BodyTransferPeerEnvelopeSchema } from "@clankie/protocol/body-transfer";
 import { CognitoRevocationUnavailableError } from "./cognito-jwt.ts";
 import { z } from "zod";
 import {
@@ -794,8 +795,10 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
     }
     const machineJoin = isMachineJoinTransportRoute(request.method ?? "", hostRoute.path);
     const connector = isConnectorRoute(request.method ?? "", path);
+    const bodyPeer = isBodyTransferPeerRoute(request.method ?? "", hostRoute.path);
     if (
       !machineJoin &&
+      !bodyPeer &&
       !connector &&
       ![GATEWAY_CHALLENGE_PATH, GATEWAY_ENCRYPTED_PATH, "/v1/hooks/linear"].includes(hostRoute.path)
     ) {
@@ -818,14 +821,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       sendJson(response, 400, { error: "plaintext_authorization_forbidden" });
       return null;
     }
-    if (machineJoin) {
+    if (machineJoin || bodyPeer) {
       // Before parsing or creating a tunnel exchange. These are admission limits,
       // not proof of machine identity; the body's registry verifies the envelope.
       // 256/s sustains both challenge and poll for the body's 63-machine limit.
       const bootstrap = hostRoute.path === MACHINE_JOIN_START_PATH;
-      const category = bootstrap ? "start" : "transport";
-      const capacity = bootstrap ? 32 : 512;
-      const perSecond = bootstrap ? 0.2 : 256;
+      const category = bodyPeer ? "body-peer" : bootstrap ? "start" : "transport";
+      const capacity = bodyPeer ? 32 : bootstrap ? 32 : 512;
+      const perSecond = bodyPeer ? 8 : bootstrap ? 0.2 : 256;
       const peer = clientAddress(request, options.trustedProxy);
       // Four immediate starts and at most five more during a ticket's five-minute
       // life leave room in the 32-ticket pool for other clients. Never use
@@ -839,12 +842,12 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
         )
       ) {
         response.setHeader("retry-after", bootstrap ? "60" : "1");
-        sendJson(response, 429, { error: "machine_join_rate_limited" });
+        sendJson(response, 429, { error: bodyPeer ? "body_peer_rate_limited" : "machine_join_rate_limited" });
         return null;
       }
       if (!takeBudget(joinBudgets, `${category}:host:${hostRoute.hostId}`, capacity, perSecond)) {
         response.setHeader("retry-after", bootstrap ? "5" : "1");
-        sendJson(response, 429, { error: "machine_join_rate_limited" });
+        sendJson(response, 429, { error: bodyPeer ? "body_peer_rate_limited" : "machine_join_rate_limited" });
         return null;
       }
     }
@@ -880,13 +883,15 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       }
       reply = admitted;
     }
-    const maxBytes = machineJoin
-      ? hostRoute.path === MACHINE_JOIN_CHANNEL_PATH
-        ? MACHINE_JOIN_CHANNEL_BYTES_MAX
-        : MACHINE_JOIN_METADATA_BYTES_MAX
-      : PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX;
+    const maxBytes = bodyPeer
+      ? 8192
+      : machineJoin
+        ? hostRoute.path === MACHINE_JOIN_CHANNEL_PATH
+          ? MACHINE_JOIN_CHANNEL_BYTES_MAX
+          : MACHINE_JOIN_METADATA_BYTES_MAX
+        : PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX;
     const declaredBytes = request.headers["content-length"];
-    if (machineJoin && typeof declaredBytes === "string" && Number(declaredBytes) > maxBytes) {
+    if ((machineJoin || bodyPeer) && typeof declaredBytes === "string" && Number(declaredBytes) > maxBytes) {
       sendJson(response, 413, { error: "request_too_large" });
       request.resume();
       return null;
@@ -908,6 +913,14 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
           throw new Error("invalid_join_request");
       } catch {
         sendJson(response, 400, { error: "invalid_join_request" });
+        return null;
+      }
+    }
+    if (bodyPeer) {
+      try {
+        BodyTransferPeerEnvelopeSchema.parse(JSON.parse(body.toString("utf8")));
+      } catch {
+        sendJson(response, 400, { error: "invalid_body_peer_request" });
         return null;
       }
     }

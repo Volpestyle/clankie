@@ -1,7 +1,6 @@
 import {
   createCipheriv,
   createDecipheriv,
-  createHash,
   createPrivateKey,
   createPublicKey,
   diffieHellman,
@@ -23,6 +22,10 @@ import {
   BodyTransferIdentitySchema,
   BodyTransferManifestSchema,
   BodyTransferProofSchema,
+  BodyTransferBindingSchema,
+  BodyTransferPeerWitnessSchema,
+  type BodyTransferBinding,
+  type BodyTransferPeerWitness,
   type BodyTransferIdentity,
   type BodyTransferManifest,
   type BodyTransferProof,
@@ -71,7 +74,11 @@ function keys(state: string, file: string, encryption: boolean) {
       if (fd !== undefined) closeSync(fd);
     }
     const directory = openSync(state, "r");
-    try { fsyncSync(directory); } finally { closeSync(directory); }
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
   }
   const value = KeyFile.parse(readPrivateJson(path, { allowReadable: true }));
   const privateKey = (encoded: string, type: "ed25519" | "x25519") => {
@@ -86,14 +93,6 @@ function keys(state: string, file: string, encryption: boolean) {
 }
 const identityBytes = (identity: BodyTransferIdentity) =>
   JSON.stringify(BodyTransferIdentitySchema.parse(identity));
-/** UUIDv8 bound to the self's signing key, rather than a caller-supplied UUID label. */
-function selfId(publicKey: string): string {
-  const bytes = createHash("sha256").update("clankie-self-v2:").update(publicKey).digest().subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 const proofBytes = (proof: Omit<BodyTransferProof, "signature">) =>
   Buffer.from(
     JSON.stringify({
@@ -123,32 +122,38 @@ export class BodyTransferKeys {
   }
   validateDestination(identity: BodyTransferIdentity): void {
     publicKey(identity.signingKey, "ed25519");
-    diffieHellman({ privateKey: this.body.encryption!, publicKey: publicKey(identity.encryptionKey, "x25519") });
+    diffieHellman({
+      privateKey: this.body.encryption!,
+      publicKey: publicKey(identity.encryptionKey, "x25519"),
+    });
   }
   self() {
     const signing = keys(this.state, SELF_SIGNING_KEY_FILE, false).signing;
     const publicKey = encodePublic(signing);
-    return { signing, publicKey, selfId: selfId(publicKey) };
+    return { signing, publicKey };
   }
   signManifest(manifest: BodyTransferManifest): string {
     const signer = this.self();
-    if (manifest.selfId !== signer.selfId || manifest.selfKey !== signer.publicKey)
-      throw Error("self_identity_mismatch");
+    if (manifest.selfKey !== signer.publicKey) throw Error("self_identity_mismatch");
     const payload = JSON.stringify(BodyTransferManifestSchema.parse(manifest));
     return JSON.stringify({
       payload,
       signature: sign(null, Buffer.from(payload), signer.signing).toString("base64"),
     });
   }
-  verifyManifest(encoded: string): BodyTransferManifest {
+  verifyManifest(encoded: string, expected: BodyTransferBinding): BodyTransferManifest {
     const envelope = SignedManifest.parse(JSON.parse(encoded));
     const manifest = BodyTransferManifestSchema.parse(JSON.parse(envelope.payload));
     if (
-      manifest.selfId !== selfId(manifest.selfKey) ||
+      manifest.selfId !== expected.selfId ||
+      manifest.selfKey !== expected.selfKey ||
+      manifest.epoch !== expected.epoch ||
+      manifest.transferId !== expected.transferId ||
+      identityBytes(manifest.destinationIdentity) !== identityBytes(expected.destinationIdentity) ||
       !verify(
         null,
         Buffer.from(envelope.payload),
-        publicKey(manifest.selfKey, "ed25519"),
+        publicKey(expected.selfKey, "ed25519"),
         Buffer.from(envelope.signature, "base64"),
       )
     )
@@ -156,6 +161,32 @@ export class BodyTransferKeys {
     if (identityBytes(manifest.destinationIdentity) !== identityBytes(this.identity))
       throw Error("bundle_for_another_body");
     return manifest;
+  }
+  peerWitness(requestId: string, frozen?: BodyTransferBinding): BodyTransferPeerWitness {
+    const data = {
+      requestId,
+      identity: this.identity,
+      ...(frozen ? { frozen: BodyTransferBindingSchema.parse(frozen) } : {}),
+    };
+    return {
+      ...data,
+      signature: sign(null, Buffer.from(JSON.stringify(data)), this.body.signing).toString("base64"),
+    };
+  }
+  verifyPeerWitness(raw: unknown, requestId: string): BodyTransferPeerWitness {
+    const witness = BodyTransferPeerWitnessSchema.parse(raw);
+    const { signature, ...data } = witness;
+    if (
+      witness.requestId !== requestId ||
+      !verify(
+        null,
+        Buffer.from(JSON.stringify(data)),
+        publicKey(witness.identity.signingKey, "ed25519"),
+        Buffer.from(signature, "base64"),
+      )
+    )
+      throw Error("body_peer_unverified");
+    return witness;
   }
   proof(
     transferId: string,

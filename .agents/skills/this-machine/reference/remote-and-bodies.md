@@ -83,3 +83,15 @@ frozen or released body is dormant: `/health` carries `self` with
 - A dormant body answers only health, transfers and device session upkeep.
   Anything else is `503 body_dormant`, which means "he lives elsewhere", not an
   outage.
+
+Transfer v2 keeps an existing self UUID and adds a self-key pin beside it.
+The CLI prepares a ten-minute read-only peer capability on each selected body;
+the services contact each other directly to pin the frozen source and recipient
+keys. Use the actual trusted HTTPS body URLs (exact `127.0.0.1` HTTP is allowed
+for local bodies); redirects are refused. Never substitute caller-provided keys.
+The bundle is signed and sealed to its recipient. Burn and activation receipts
+are signed by the pinned destination, so direct API calls cannot bypass the
+one-active-body fence. Old unbound in-flight bundles and receipts are refused:
+an old frozen body stays dormant until the owner explicitly resolves the move.
+The peer capability route cannot change state; all writes and capability
+minting still require owner authority. No owner bearer is sent between bodies.

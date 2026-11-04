@@ -1,3 +1,5 @@
+import { BodyTransferPeers, readBodyTransferPeer } from "./body-transfer-peer.ts";
+import { bodyLimit } from "hono/body-limit";
 import { BodyTransferKeys, SELF_SIGNING_KEY_FILE } from "./body-transfer-identity.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -37,6 +39,10 @@ import {
   BODY_TRANSFER_DISCARD_PATH,
   BODY_TRANSFER_FORMAT,
   BODY_TRANSFER_FREEZE_PATH,
+  BODY_TRANSFER_PREPARE_PATH,
+  BODY_TRANSFER_PEER_PATH,
+  type BodyTransferBinding,
+  type BodyTransferPeerDescriptor,
   BODY_TRANSFER_REBIND_PATH,
   BODY_TRANSFER_RECLAIM_PATH,
   BODY_TRANSFER_RELEASE_PATH,
@@ -141,9 +147,9 @@ const transferredMachineId = (transferId: string) => `transferred:${transferId}`
 
 class BodyTransferError extends Error {
   readonly code: string;
-  readonly status: 400 | 404 | 409 | 503;
+  readonly status: 400 | 403 | 404 | 409 | 503;
 
-  constructor(code: string, status: 400 | 404 | 409 | 503 = 409) {
+  constructor(code: string, status: 400 | 403 | 404 | 409 | 503 = 409) {
     super(code);
     this.code = code;
     this.status = status;
@@ -169,6 +175,8 @@ export class BodyTransfer {
   private readonly label: string;
   private readonly now: () => Date;
   private readonly keys: BodyTransferKeys;
+  private readonly peers: BodyTransferPeers;
+  private readonly peerFetch: typeof fetch;
   /** Set when boot could not apply a staged transfer; the body stays dormant. */
   bootError: string | undefined;
   /**
@@ -183,12 +191,52 @@ export class BodyTransfer {
     settings: SettingsStore;
     label?: string;
     now?: () => Date;
+    fetchImpl?: typeof fetch;
   }) {
     this.roots = options.roots;
     this.keys = new BodyTransferKeys(this.roots.state);
+    this.peers = new BodyTransferPeers(this.roots.state);
+    this.peerFetch = options.fetchImpl ?? fetch;
     this.settings = options.settings;
     this.label = options.label ?? hostname();
     this.now = options.now ?? (() => new Date());
+  }
+
+  preparePeer(input: unknown) {
+    return this.peers.prepare(input);
+  }
+  peerExchange(input: unknown) {
+    return this.peers.exchange(input, (transferId, requestId) => {
+      const self = this.current(),
+        record = self.transfers[transferId];
+      const frozen =
+        self.state === "frozen" &&
+        self.transferId === transferId &&
+        record?.role === "source" &&
+        record.outcome === "frozen" &&
+        self.selfId &&
+        self.selfKey &&
+        record.destinationIdentity
+          ? {
+              transferId,
+              selfId: self.selfId,
+              selfKey: self.selfKey,
+              epoch: self.epoch,
+              destinationIdentity: record.destinationIdentity,
+            }
+          : undefined;
+      return this.keys.peerWitness(requestId, frozen);
+    });
+  }
+  private async peer(descriptor: BodyTransferPeerDescriptor, transferId: string) {
+    try {
+      const reply = await readBodyTransferPeer(descriptor, transferId, this.peerFetch);
+      const witness = this.keys.verifyPeerWitness(reply.witness, reply.requestId);
+      this.keys.validateDestination(witness.identity);
+      return witness;
+    } catch {
+      throw new BodyTransferError("body_peer_unverified", 409);
+    }
   }
 
   private get selfPath() {
@@ -287,11 +335,6 @@ export class BodyTransfer {
   /** Source, active: stop being Clankie before any snapshot exists. */
   freeze(input: unknown, cutover: BodyCutover): Promise<BodyAuthority> {
     const request = BodyTransferFreezeRequestSchema.parse(input);
-    try {
-      this.keys.validateDestination(request.destinationIdentity);
-    } catch {
-      throw new BodyTransferError("destination_identity_invalid", 400);
-    }
     return this.serial(async () => {
       const self = this.current();
       const known = self.transfers[request.transferId];
@@ -299,11 +342,16 @@ export class BodyTransfer {
         return this.authority();
       if (known !== undefined) throw new BodyTransferError("transfer_id_used");
       if (self.state !== "active") throw new BodyTransferError("body_not_active");
+      const destination = await this.peer(request.destinationPeer, request.transferId);
+      const signer = this.keys.self();
+      if (self.selfKey !== undefined && self.selfKey !== signer.publicKey)
+        throw new BodyTransferError("self_key_mismatch");
       const epoch = self.epoch + 1;
       const frozen: BodySelf = this.record(
         {
           ...self,
-          selfId: this.keys.self().selfId,
+          selfId: self.selfId ?? randomUUID(),
+          selfKey: signer.publicKey,
           epoch,
           state: "frozen",
           transferId: request.transferId,
@@ -314,7 +362,7 @@ export class BodyTransfer {
           outcome: "frozen",
           epoch,
           peer: request.destination,
-          destinationIdentity: request.destinationIdentity,
+          destinationIdentity: destination.identity,
           ...(request.destinationMachineId === undefined
             ? {}
             : { destinationMachineId: request.destinationMachineId }),
@@ -339,7 +387,7 @@ export class BodyTransfer {
   async exportBundle(transferId: string): Promise<{ manifest: BodyTransferManifest; stream: Readable }> {
     const { self, record } = this.frozenSource(BodyTransferIdSchema.parse(transferId));
     if (record.outcome !== "frozen") throw new BodyTransferError("transfer_not_frozen_here");
-    if (!record.destinationIdentity) throw new BodyTransferError("legacy_transfer_unbound");
+    if (!record.destinationIdentity || !self.selfKey) throw new BodyTransferError("legacy_transfer_unbound");
     const replaces: BodyTransferEntry[] = [
       ...STATE_ENTRIES.map((path) => ({ root: "state" as const, path })),
       ...(await topLevel(this.roots.memory, MEMORY_ENTRIES)).map((path) => ({
@@ -372,7 +420,7 @@ export class BodyTransfer {
       format: BODY_TRANSFER_FORMAT,
       transferId,
       selfId: self.selfId,
-      selfKey: this.keys.self().publicKey,
+      selfKey: self.selfKey,
       destinationIdentity: record.destinationIdentity,
       epoch: record.epoch,
       source: {
@@ -523,9 +571,10 @@ export class BodyTransfer {
   private outgoingBundle(transferId: string): Promise<{ path: string; size: number; sha256: string }> {
     return this.serial(async () => {
       if (this.bootedDormant === false) throw new BodyTransferError("source_still_shutting_down");
-      const { record } = this.frozenSource(transferId);
+      const { self, record } = this.frozenSource(transferId);
       if (record.outcome !== "frozen") throw new BodyTransferError("transfer_not_frozen_here");
-      if (!record.destinationIdentity) throw new BodyTransferError("legacy_transfer_unbound");
+      if (!record.destinationIdentity || !self.selfKey)
+        throw new BodyTransferError("legacy_transfer_unbound");
       const path = this.dir("outgoing", `${transferId}.bundle`);
       const summary = `${path}.json`;
       if (existsSync(summary)) {
@@ -563,7 +612,7 @@ export class BodyTransfer {
     const self = this.read();
     const record = self?.transferId === undefined ? undefined : self.transfers[self.transferId];
     if (self?.state !== "frozen" || record?.role !== "source" || record.outcome !== "frozen") return;
-    if (record.destinationIdentity) await this.outgoingBundle(self.transferId!);
+    if (record.destinationIdentity && self?.selfKey) await this.outgoingBundle(self.transferId!);
   }
 
   private async removeOutgoing(transferId: string): Promise<void> {
@@ -601,7 +650,7 @@ export class BodyTransfer {
   }
 
   /** Destination: the uploaded bundle is complete and intact; stage it. Repeatable. */
-  async stage(input: unknown) {
+  async stage(input: unknown, guard?: () => Promise<void>) {
     const request = BodyTransferStageRequestSchema.parse(input);
     const known = this.current().transfers[request.transferId];
     const path = this.incomingBundle(request.transferId);
@@ -633,6 +682,8 @@ export class BodyTransfer {
       }
       const result = await this.stageStream(request.transferId, createReadStream(plaintext), {
         replace: request.replace === true,
+        sourcePeer: request.sourcePeer,
+        ...(guard ? { guard } : {}),
       });
       await rm(path, { force: true });
       return result;
@@ -642,7 +693,11 @@ export class BodyTransfer {
   }
 
   /** Destination: verify every byte before anything is admitted. */
-  private stageStream(transferId: string, body: Readable, options: { replace: boolean }) {
+  private stageStream(
+    transferId: string,
+    body: Readable,
+    options: { replace: boolean; sourcePeer: BodyTransferPeerDescriptor; guard?: () => Promise<void> },
+  ) {
     const id = BodyTransferIdSchema.parse(transferId);
     return this.serial(async () => {
       const known = this.current().transfers[id];
@@ -654,6 +709,7 @@ export class BodyTransfer {
       await mkdir(join(incoming, "files"), { recursive: true, mode: 0o700 });
       let manifest: BodyTransferManifest | undefined;
       let signedManifest = "";
+      let sourceBinding: BodyTransferBinding | undefined;
       let bytes = 0;
       const reader = new ByteReader(body.pipe(createGunzip()));
       try {
@@ -662,7 +718,10 @@ export class BodyTransfer {
         if (!Number.isSafeInteger(length) || length <= 0 || length > 512 * 1024 * 1024)
           throw new BodyTransferError("bundle_format", 400);
         signedManifest = (await reader.exact(length)).toString("utf8");
-        manifest = this.keys.verifyManifest(signedManifest);
+        const witness = await this.peer(options.sourcePeer, id);
+        sourceBinding = witness.frozen;
+        if (!sourceBinding) throw new BodyTransferError("source_not_frozen_for_transfer");
+        manifest = this.keys.verifyManifest(signedManifest, sourceBinding);
         if (manifest.transferId !== id) throw new BodyTransferError("bundle_transfer_mismatch", 400);
         await this.admit(manifest, options.replace);
         const covered = new Set(manifest.replaces.map((entry) => `${entry.root}/${entry.path}`));
@@ -696,12 +755,14 @@ export class BodyTransfer {
         );
       }
       await writeFile(join(incoming, "manifest.json"), signedManifest, { mode: 0o600 });
+      await options.guard?.();
       this.write(
         this.record(this.current(), id, {
           role: "destination",
           outcome: "staged",
           epoch: manifest.epoch,
           peer: manifest.source.label,
+          sourceBinding: sourceBinding!,
           ...(options.replace ? { replace: true } : {}),
         }),
       );
@@ -713,6 +774,8 @@ export class BodyTransfer {
   private async admit(manifest: BodyTransferManifest, replace: boolean): Promise<void> {
     const self = this.read();
     if (self?.selfId === manifest.selfId) {
+      if (self.selfKey !== undefined && self.selfKey !== manifest.selfKey)
+        throw new BodyTransferError("self_key_mismatch");
       if (self.state === "active") throw new BodyTransferError("self_already_active_here");
       if (manifest.epoch <= self.epoch) throw new BodyTransferError("stale_epoch");
       return;
@@ -748,7 +811,13 @@ export class BodyTransfer {
         throw new BodyTransferError("transfer_not_staged");
       const manifest = await this.stagedManifest(request.transferId);
       const applying: BodySelf = this.record(
-        { ...self, selfId: manifest.selfId, state: "frozen", transferId: request.transferId },
+        {
+          ...self,
+          selfId: manifest.selfId,
+          selfKey: manifest.selfKey,
+          state: "frozen",
+          transferId: request.transferId,
+        },
         request.transferId,
         { ...record, outcome: "applying" },
       );
@@ -764,8 +833,11 @@ export class BodyTransfer {
 
   private async stagedManifest(transferId: string): Promise<BodyTransferManifest> {
     try {
+      const binding = this.current().transfers[transferId]?.sourceBinding;
+      if (!binding) throw new BodyTransferError("legacy_transfer_unbound");
       return this.keys.verifyManifest(
         await readFile(this.dir("incoming", transferId, "manifest.json"), "utf8"),
+        binding,
       );
     } catch {
       throw new BodyTransferError("bundle_signature_invalid", 400);
@@ -821,7 +893,14 @@ export class BodyTransfer {
     await this.settings.update((current) => ({ ...current, ...manifest.settings }) as typeof current);
     await rm(incoming, { recursive: true, force: true });
     const active: BodySelf = this.record(
-      { ...self, selfId: manifest.selfId, epoch: manifest.epoch, state: "active", transferId: id },
+      {
+        ...self,
+        selfId: manifest.selfId,
+        selfKey: manifest.selfKey,
+        epoch: manifest.epoch,
+        state: "active",
+        transferId: id,
+      },
       id,
       { ...record, outcome: "applied" },
     );
@@ -1030,6 +1109,14 @@ export function createBodyTransferRoutes(options: {
 }): Hono {
   const { transfer } = options;
   const app = new Hono();
+  app.post(BODY_TRANSFER_PEER_PATH, bodyLimit({ maxSize: 8192 }), async (context) => {
+    context.header("cache-control", "no-store");
+    try {
+      return context.json(transfer.peerExchange(await context.req.json()));
+    } catch {
+      return context.json({ error: "body_peer_refused" }, 403);
+    }
+  });
   app.use("/v1/body-transfer/*", async (context, next) => {
     context.header("cache-control", "no-store");
     const allowed = await options.authorize(context.req.raw);
@@ -1052,10 +1139,26 @@ export function createBodyTransferRoutes(options: {
       ...(transfer.bootError === undefined ? {} : { bootError: transfer.bootError }),
     })),
   );
+  const guard = (context: Context) => async () => {
+    if ((await options.authorize(context.req.raw)) !== true)
+      throw new BodyTransferError("owner_authority_changed", 403);
+  };
+  app.post(BODY_TRANSFER_PREPARE_PATH, (context) =>
+    handle(context, async () => {
+      const input = await context.req.json();
+      await guard(context)();
+      return transfer.preparePeer(input);
+    }),
+  );
   app.post(BODY_TRANSFER_FREEZE_PATH, (context) =>
     handle(context, async () => {
       if (options.cutover === undefined) throw new BodyTransferError("body_not_active");
-      return transfer.freeze(await context.req.json(), options.cutover);
+      return transfer.freeze(await context.req.json(), async (commit) =>
+        options.cutover!(async () => {
+          await guard(context)();
+          await commit();
+        }),
+      );
     }),
   );
   app.post(BODY_TRANSFER_BUNDLE_PATH, (context) =>
@@ -1065,7 +1168,7 @@ export function createBodyTransferRoutes(options: {
     handle(context, async () => transfer.stageChunk(await context.req.json())),
   );
   app.post(BODY_TRANSFER_STAGE_PATH, (context) =>
-    handle(context, async () => transfer.stage(await context.req.json())),
+    handle(context, async () => transfer.stage(await context.req.json(), guard(context))),
   );
   app.post(BODY_TRANSFER_APPLY_PATH, (context) =>
     handle(context, async () => {

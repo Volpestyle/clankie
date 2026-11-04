@@ -229,6 +229,12 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
         return "ready";
       },
     });
+    const macPeerServer = serve({ fetch: macRoutes.fetch, hostname: "127.0.0.1", port: 0 }) as Server;
+    const macPeerOrigin = await listeningOrigin(macPeerServer);
+    closers.push(async () => {
+      macPeerServer.closeAllConnections();
+      await closeServer(macPeerServer);
+    });
     const macPost = async (path: string, value: unknown) =>
       macRoutes.request(path, {
         method: "POST",
@@ -242,7 +248,10 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
         await macPost("/v1/body-transfer/freeze", {
           transferId,
           destination: `hosted:${hostId}`,
-          destinationIdentity: (await status()).bodyIdentity,
+          destinationPeer: {
+            url: hostBaseUrl,
+            ticket: await (await owner.fetch("POST", "/v1/body-transfer/prepare", { transferId })).json(),
+          },
         })
       ).status,
     ).toBe(200);
@@ -278,6 +287,10 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       transferId,
       size: bytes.length,
       sha256: expected!.sha256,
+      sourcePeer: {
+        url: macPeerOrigin,
+        ticket: await (await macPost("/v1/body-transfer/prepare", { transferId })).json(),
+      },
     });
     expect(staged.status, await staged.clone().text()).toBe(200);
     expect(await staged.json()).toMatchObject({ transferId, outcome: "staged", files: 4 });
@@ -345,7 +358,10 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
       .fetch("POST", "/v1/body-transfer/freeze", {
         transferId: backId,
         destination: "local:owner-mac",
-        destinationIdentity: mac.authority({ transfers: true }).bodyIdentity,
+        destinationPeer: {
+          url: macPeerOrigin,
+          ticket: await (await macPost("/v1/body-transfer/prepare", { transferId: backId })).json(),
+        },
         destinationMachineId: "join-owner-mac",
       })
       .then(
@@ -429,6 +445,12 @@ describe("body transfer through the public gateway (ADR 0286, VUH-2582)", () => 
           transferId: backId,
           size: returnedBytes.length,
           sha256: back!.sha256,
+          sourcePeer: {
+            url: hostBaseUrl,
+            ticket: await (
+              await owner.fetch("POST", "/v1/body-transfer/prepare", { transferId: backId })
+            ).json(),
+          },
         })
       ).status,
     ).toBe(200);

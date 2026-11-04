@@ -3,11 +3,12 @@
  * use clankie heavy --server -- node scripts/testing/body-transfer-authority.mjs .local/PROOF.
  */
 import assert from "node:assert/strict";
-import { spawn, execFileSync } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { appendFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { parseEnv } from "node:util";
+import { parseEnv, promisify } from "node:util";
+const execFileAsync = promisify(execFile);
 import { randomUUID, createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 const repo = resolve(import.meta.dirname, "../.."),
@@ -34,6 +35,14 @@ async function make(caseName, name) {
   env.CLANKIE_TEST_FLEET_RESOURCES_DIRECTORY = join(dir, "resources");
   const b = { name, dir, env, url: env.CLANKIE_CAPTAIN_URL, supervise: true, child: undefined, pids: [] };
   all.push(b);
+  if (name === "S") {
+    b.legacyId = randomUUID();
+    await mkdir(env.CLANKIE_STATE, { recursive: true });
+    await writeFile(
+      join(env.CLANKIE_STATE, "self.json"),
+      JSON.stringify({ schemaVersion: 1, selfId: b.legacyId, epoch: 3, state: "active", transfers: {} }),
+    );
+  }
   start(b);
   await until(async () => {
     const h = await fetch(b.url + "/health", { redirect: "error", signal: AbortSignal.timeout(1000) });
@@ -92,14 +101,17 @@ async function state(b, predicate = () => true) {
   }, b.name + " state");
 }
 async function freeze(s, a, t) {
-  const d = await state(a);
+  const ticket = await call(a, "prepare", { transferId: t });
+  assert.equal(ticket.status, 200, JSON.stringify(ticket));
   const r = await call(s, "freeze", {
     transferId: t,
     destination: a.url,
-    ...(d.bodyIdentity ? { destinationIdentity: d.bodyIdentity } : {}),
+    destinationPeer: { url: a.url, ticket: ticket.data },
   });
   assert.equal(r.status, 200, JSON.stringify(r));
-  return state(s, (x) => x.state === "frozen" && x.dormant);
+  const frozen = await state(s, (x) => x.state === "frozen" && x.dormant);
+  assert.equal(frozen.selfId, s.legacyId, "first v2 freeze preserves legacy UUID");
+  return frozen;
 }
 async function move(s, d, t, apply = true) {
   let stage;
@@ -114,7 +126,14 @@ async function move(s, d, t, apply = true) {
     }
     offset += size;
     if (offset >= c.size) {
-      stage = await call(d, "stage", { transferId: t, size: c.size, sha256: c.sha256 });
+      const ticket = await call(s, "prepare", { transferId: t });
+      assert.equal(ticket.status, 200, JSON.stringify(ticket));
+      stage = await call(d, "stage", {
+        transferId: t,
+        size: c.size,
+        sha256: c.sha256,
+        sourcePeer: { url: s.url, ticket: ticket.data },
+      });
       break;
     }
   }
@@ -128,6 +147,7 @@ async function move(s, d, t, apply = true) {
 const sourceFiles = [
   "apps/clankie/src/body-transfer.ts",
   "apps/clankie/src/body-transfer-identity.ts",
+  "apps/clankie/src/body-transfer-peer.ts",
   "packages/protocol/src/body-transfer.ts",
   "scripts/testing/body-transfer-authority.mjs",
 ];
@@ -188,6 +208,7 @@ try {
       const active = readings.filter((x) => x.state === "active" && x.selfId === frozen.selfId).length;
       const row = {
         kind,
+        legacyIdPreserved: frozen.selfId === s.legacyId,
         active,
         refusal,
         states: readings.map((x, i) => ({
@@ -203,6 +224,47 @@ try {
     } finally {
       await Promise.all([s, a, b].map(stop));
     }
+  }
+  const s = await make("cli-roundtrip", "S"),
+    a = await make("cli-roundtrip", "A");
+  try {
+    const sourceToken = join(s.dir, "operator-token"),
+      destinationToken = join(a.dir, "operator-token");
+    await writeFile(sourceToken, s.env.CLANKIE_OPERATOR_TOKEN, { mode: 0o600 });
+    await writeFile(destinationToken, a.env.CLANKIE_OPERATOR_TOKEN, { mode: 0o600 });
+    const cli = async (from, to, fromToken, toToken) => {
+      const result = await execFileAsync(
+        process.execPath,
+        [
+          join(repo, "apps/tui/bin/clankie.ts"),
+          "transfer",
+          "--from",
+          from.url,
+          "--to",
+          to.url,
+          "--from-token-file",
+          fromToken,
+          "--to-token-file",
+          toToken,
+          "--transfer-id",
+          randomUUID(),
+        ],
+        { cwd: repo, env: { PATH: process.env.PATH, LANG: process.env.LANG, ...from.env }, timeout: 180_000 },
+      );
+      return JSON.parse(result.stdout.trim().split("\n").at(-1));
+    };
+    const out = await cli(s, a, sourceToken, destinationToken);
+    assert.equal(out.destination.selfId, s.legacyId);
+    assert.equal(out.source.state, "released");
+    const back = await cli(a, s, destinationToken, sourceToken);
+    assert.equal(back.destination.selfId, s.legacyId);
+    assert.equal(back.destination.epoch, 5);
+    assert.equal(back.source.state, "released");
+    const row = { kind: "cli-roundtrip", legacyIdPreserved: true, active: 1, epoch: back.destination.epoch };
+    report.cases.push(row);
+    console.log(JSON.stringify(row));
+  } finally {
+    await Promise.all([s, a].map(stop));
   }
   assert(
     report.cases.every((x) => x.active === 1),
