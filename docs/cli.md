@@ -7096,8 +7096,9 @@ after approval is restored. Never work around them with Mac desktop control or
 credential rotation. Delegations issued before this identity-hash change also
 need a fresh launch; their old hashes are not migrated or relaxed.
 
-The head's transcript hooks retry a failed seat sync after 2 and 5 seconds and
-stay silent until three hook runs in a row fail; the lead's pane then shows one
+The head's startup transcript hook retries within a 50-second budget; ordinary
+mid-turn and Stop hooks share a two-second budget with no retry backoff. Both
+budgets include process startup. Hooks stay silent until three runs in a row fail; the lead's pane then shows one
 line naming the error. Every hook run is recorded on the PC in
 `~/.clankie/remote-leads/hooks.log` (rotated at 256 KiB, never holding the launch
 secret) with its event, exit code, duration and full error. A running head picks
@@ -9958,8 +9959,11 @@ instruct the harness to continue or block a stop. The current 9,000-entry displa
 is the replay bound. Image files use `clankie file publish` separately.
 
 Remote Claude lead hooks use `/v1/fleet/lead/transcript` over their authenticated
-fleet relay. They share a two-second upload deadline across every page, with no
-in-hook retry backoff. Only acknowledged display entry IDs are checkpointed on
+fleet relay. Ordinary mid-turn and Stop hooks share a two-second deadline across
+process startup and every page, with no in-hook retry backoff. MCP bridge setup
+is deferred until bridge mode, so transcript hooks do not initialize it. The
+startup hook has a 50-second retry budget to survive service restarts. Only
+acknowledged display entry IDs are checkpointed on
 the native host, scoped to the session and destination; an interrupted upload
 resumes its remaining records on the next hook. Losing the checkpoint causes a
 safe replay. Each request consumes its body before one fresh native lifetime

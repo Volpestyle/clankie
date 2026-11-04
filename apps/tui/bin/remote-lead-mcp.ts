@@ -15,8 +15,6 @@ import {
 import { readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { connectLaneUpstream, createSeatBridge, pumpSeatEvents } from "../src/command/mcp.ts";
 import { runSeatSyncCommand } from "../src/command/seat-sync.ts";
 
 const token = process.env.CLANKIE_REMOTE_LEAD_TOKEN;
@@ -148,6 +146,10 @@ try {
       await delay(wait);
     }
   } else {
+    // Hooks are short-lived uploads: don't initialize the MCP bridge and its
+    // schemas on every tool call, or spend their deadline before sync starts.
+    const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+    const { connectLaneUpstream, createSeatBridge, pumpSeatEvents } = await import("../src/command/mcp.ts");
     let reconnectNeeded = false;
     const connect = () =>
       connectLaneUpstream({
@@ -226,9 +228,15 @@ async function syncQuietly(): Promise<number> {
     // Startup must survive a home-service restart without relying on another
     // hook. Mid-turn/Stop uploads keep their short interactive budget.
     const startup = event === "SessionStart";
+    // The interactive budget includes Node/module startup and stdin, not just
+    // the HTTP upload. Slow startup must not add another full budget to a stall.
+    const remaining = Math.max(
+      0,
+      Math.floor((startup ? PROMPT_RETRY_BUDGET_MS : SYNC_BUDGET_MS) - performance.now()),
+    );
     const signal = AbortSignal.any([
       closing.signal,
-      AbortSignal.timeout(startup ? PROMPT_RETRY_BUDGET_MS : SYNC_BUDGET_MS),
+      AbortSignal.timeout(remaining),
     ]);
     await runSeatSyncCommand([], {
       env: { ...process.env, CLANKIE_OPERATOR_TOKEN: token },

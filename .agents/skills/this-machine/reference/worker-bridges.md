@@ -22,6 +22,9 @@ scripts/build-remote-lead.mjs`.
 - `~/.clankie/remote-leads/hooks.log` on that machine records hook timing; a short
   hook timeout does not retire or restart the lead
   ([native seat transcript sync](../../../../docs/cli.md#native-seat-transcript-sync)).
+  Ordinary remote sync hooks include process startup in their two-second budget;
+  MCP bridge setup runs only in bridge mode. A startup sync instead retries
+  within 50 seconds while the home service recovers.
 - A launch's early pane report is cleanup information, not native admission or
   permission to replay the launch. Inspect the original receipt and coordinate
   cleanup; do not close another lead's pane as a probe.
