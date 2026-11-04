@@ -179,10 +179,7 @@ export function createModelKeyRoutes(
         return context.json({ ok: false, error: "unavailable" }, 503);
       // Validation can outlast a revocation, so authority is asked again at the write.
       const safe = LocalEndpointAddResultSchema.parse(
-        await models!.addLocalEndpoint(
-          parsed.data,
-          async () => (await authorize(context.req.raw)) === true,
-        ),
+        await models!.addLocalEndpoint(parsed.data, async () => (await authorize(context.req.raw)) === true),
       );
       if (safe.ok) return context.json(safe);
       const status = ["forbidden", "managed_credits_only"].includes(safe.error)

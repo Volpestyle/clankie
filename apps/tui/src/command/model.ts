@@ -255,11 +255,7 @@ async function modelLocal(
   const api = await ownerSettingsApi({ ...options, ...(fetchImpl === undefined ? {} : { fetchImpl }) });
   if (listing)
     return { ok: true, ...(await api.get(MODEL_LOCAL_ENDPOINTS_PATH, LocalEndpointsResponseSchema)) };
-  return await api.write(
-    MODEL_LOCAL_ENDPOINT_ADD_PATH,
-    { runtime, modelId },
-    LocalEndpointAddResultSchema,
-  );
+  return await api.write(MODEL_LOCAL_ENDPOINT_ADD_PATH, { runtime, modelId }, LocalEndpointAddResultSchema);
 }
 
 /**

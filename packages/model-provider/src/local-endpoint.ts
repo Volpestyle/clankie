@@ -231,11 +231,7 @@ export function localProviderConfig(
  * declaration of this endpoint, such as a hand-written entry or the same id
  * pointed elsewhere. Declaring replaces the entry whole, so that must be refused.
  */
-export function localProviderConflict(
-  config: ClankieConfig,
-  providerId: string,
-  baseURL: string,
-): boolean {
+export function localProviderConflict(config: ClankieConfig, providerId: string, baseURL: string): boolean {
   const existing = config.provider?.[providerId];
   if (existing === undefined) return false;
   const declaredBaseURL = existing.options?.baseURL;
