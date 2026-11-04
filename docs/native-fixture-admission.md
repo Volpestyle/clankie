@@ -26,6 +26,14 @@ against arbitrary same-UID file/process control. The requester cannot select an
 artifact, expected digest, manifest, fixture executable, root or PID. Missing
 artifacts at host construction refuse rather than hot-adopting later files.
 
+Every pinned file must be canonical, owned by the host's user, regular and not
+group- or other-writable. The artifact, manifest and helper must also have a
+single link. A build input in pnpm's virtual store (`node_modules/.pnpm/`) may
+have more: a Linux install hardlinks each one to its owned store copy, which adds
+no writer. Those inputs are only hashed against their pinned digests, never
+executed, and a write through the store copy still refuses the next bootstrap
+(#304). A second link on first-party source is still refused.
+
 The host mints the fixture-only capability into its new private file broker,
 passes it over the child's stdin pipe and observes that actual child PID's
 kernel lifetime. No caller PID is accepted. The callback requires the capability
