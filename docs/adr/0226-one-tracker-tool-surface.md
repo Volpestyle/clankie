@@ -261,16 +261,19 @@ the repository named by its origin remote (`github.com/owner/name`). Clones
 and worktrees therefore record one release. Releases live in `tracker.json`
 beside the items they ship.
 
-**Membership is derived, never typed.** A sync reads the repository's `v*`
-versions through the same tag source as `clankie work project`. It then reads
-the commits between each version and the previous one in version order. The
+**Membership is derived, never typed.** A sync reads the GitHub origin's `v*`
+releases with a publication date and at least one uploaded, nonempty asset
+(amended by #358). Drafts, bare tags and assetless releases do not prove shipment.
+Unavailable publication reads refuse the sync, with no tag fallback. It then
+reads the commits between each published version and the previous published one
+in version order. The
 first version takes its whole history. The items are the keys those commit
 messages name: built-in keys (`LOCAL-…`) and the connected tracker's team key
 from the repository's convention (`VUH-…`). Other key-shaped text (`UTF-8`,
 `SHA-256`) is not work. No tool writes a release or its items. The sync is a
 host operation that the owner starts with `clankie work releases sync`
 (`POST /v1/tracker/releases/sync`), and the release skill runs it after
-pushing a tag.
+publishing the release and its assets.
 
 **Delivered on ship.** A built-in item reaches `delivered` on the first release
 that contains it, on any lane. That move is a `stage` event written as Clankie

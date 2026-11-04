@@ -1,7 +1,8 @@
 import { basename } from "node:path";
 import type { WorkConvention } from "@clankie/protocol/work-items";
 import type { CommandRunner } from "./convention.ts";
-import { readProjectWork } from "./project-read.ts";
+import type { GithubApi } from "./backends/github.ts";
+import { WorkShippedVersionSchema } from "@clankie/protocol/work-items";
 
 /** One work item a release shipped, and the landed commits that name it. */
 export interface ReleaseItemSnapshot {
@@ -9,7 +10,7 @@ export interface ReleaseItemSnapshot {
   readonly commits: readonly string[];
 }
 
-/** A shipped version as git records it; membership comes from commits, never from a person. */
+/** A published version; membership comes from git commits, never from a person. */
 export interface ReleaseSnapshot {
   readonly version: string;
   readonly tag: string;
@@ -70,21 +71,53 @@ export function releaseKeyPattern(convention: WorkConvention): RegExp {
 }
 
 /**
- * The repository's shipped versions (the same tag source as `clankie work project`),
- * each with the items named by the commits between the previous version and it.
+ * Published GitHub releases with uploaded assets, each with the items named by
+ * commits since the previous published version. A bare tag never proves shipment.
  */
 export async function readReleaseHistory(
   root: string,
   convention: WorkConvention,
   run: CommandRunner,
+  github: GithubApi | undefined,
 ): Promise<ReleaseHistory> {
   const lane = convention.releases?.lane ?? "repository";
-  const facts = await readProjectWork(root, { ...convention, releases: { source: "tags", lane } }, { run });
-  if (facts.unavailable.some((entry) => entry.read === "shipped"))
-    throw new Error("Version tags could not be read in this repository");
-  const remote = await run("git", ["remote", "get-url", "origin"], root).catch(() => "");
+  const remote = await run("git", ["remote", "get-url", "origin"], root);
+  const repository = repositoryName(remote, root);
+  const match = /^github\.com\/([^/]+\/[^/]+)$/iu.exec(repository);
+  if (!github || !match) throw new Error("Published GitHub releases are unavailable for this repository");
+  // Read every page before computing any ranges or writing delivery records.
+  // Failure refuses the sync; local tags are never a publication fallback.
+  const versions = (await github.list(`repos/${match[1]}/releases?per_page=100`))
+    .flatMap((value) => {
+      if (value === null || typeof value !== "object" || Array.isArray(value))
+        throw new Error("GitHub returned an invalid release");
+      const release = value as Record<string, unknown>;
+      if (
+        typeof release.draft !== "boolean" ||
+        typeof release.tag_name !== "string" ||
+        !Array.isArray(release.assets)
+      )
+        throw new Error("GitHub returned an incomplete release");
+      if (release.draft || release.published_at == null || !release.tag_name.startsWith("v")) return [];
+      const uploaded = release.assets.some((value) => {
+        if (value === null || typeof value !== "object") throw new Error("GitHub returned an invalid asset");
+        const asset = value as Record<string, unknown>;
+        return asset.state === "uploaded" && typeof asset.size === "number" && asset.size > 0;
+      });
+      return uploaded
+        ? [
+            WorkShippedVersionSchema.parse({
+              version: release.tag_name,
+              date: release.published_at,
+              dateKind: "published",
+              lane,
+              itemIds: [],
+            }),
+          ]
+        : [];
+    })
+    .sort((a, b) => compareVersions(a.version, b.version));
   const pattern = releaseKeyPattern(convention);
-  const versions = [...facts.shipped].sort((a, b) => compareVersions(a.version, b.version));
   const releases: ReleaseSnapshot[] = [];
   let previous: string | undefined;
   for (const shipped of versions) {
@@ -107,10 +140,10 @@ export async function readReleaseHistory(
       tag,
       commit,
       date: shipped.date,
-      dateKind: shipped.dateKind,
+      dateKind: "published",
       items: [...items].map(([key, commits]) => ({ key, commits })),
     });
     previous = commit;
   }
-  return { repository: repositoryName(remote, root), lane, releases };
+  return { repository, lane, releases };
 }
