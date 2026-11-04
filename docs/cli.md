@@ -1858,7 +1858,8 @@ signed in, and the sign-ins waiting. JSON: `{ "ok": true, "connectorUrl"?: URL,
 Claude's sign-in page shows a code such as `ABCD-2345`; `clankie connector
 approve CODE` lets that sign-in in (human: `Approved CODE. …`; JSON
 `{ "ok": true, "code", "decision": "approved", "clientName" }`), and `deny`
-turns it away. A code waits ten minutes. Exit 1 with status `not_found` when no
+turns it away. A code waits ten minutes, or until the same requester has opened
+four newer sign-ins through the doorway. Exit 1 with status `not_found` when no
 sign-in waits with that code, or `already_decided`. Approve only a code you see
 on a page you opened. An approved connector is a device in `clankie devices`
 with `scope: "connector"`; `clankie devices revoke ID` disconnects it.

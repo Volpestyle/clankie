@@ -17,6 +17,7 @@ import {
   ConnectorPromptAnswersResponseSchema,
   ConnectorSignInCodeSchema,
   ConnectorSignInDecisionResponseSchema,
+  connectorShowableText,
   ConnectorSignInsResponseSchema,
   type ConnectorDetectionResponse,
   type ConnectorPromptAnswersResponse,
@@ -195,7 +196,9 @@ function formatDetection(status: ConnectorDetectionResponse): string {
 function formatServed(status: ConnectorDetectionResponse): string {
   if (status.apps.length === 0) return "No apps are connected.";
   return [
-    ...status.apps.map((app) => `${app.name}: ${app.served ? "on" : "off"}  (${app.deviceId})`),
+    ...status.apps.map(
+      (app) => `${connectorShowableText(app.name)}: ${app.served ? "on" : "off"}  (${app.deviceId})`,
+    ),
     "An app that is on is served by the connector. One that is off is refused.",
   ].join("\n");
 }
@@ -203,7 +206,9 @@ function formatServed(status: ConnectorDetectionResponse): string {
 function formatPromptAnswers(status: ConnectorPromptAnswersResponse): string {
   if (status.apps.length === 0) return "No apps are connected.";
   return [
-    ...status.apps.map((app) => `${app.name}: ${app.allowed ? "on" : "off"}  (${app.deviceId})`),
+    ...status.apps.map(
+      (app) => `${connectorShowableText(app.name)}: ${app.allowed ? "on" : "off"}  (${app.deviceId})`,
+    ),
     "An app that is on may answer menus and permission prompts open in your agents' panes, and press keys there (arrows, esc, ctrl+c).",
   ].join("\n");
 }
@@ -231,7 +236,7 @@ function formatStatus(status: ConnectorSignInsResponse): string {
   else
     for (const signIn of status.signIns)
       lines.push(
-        `Waiting: ${signIn.code}  ${signIn.clientName}, sending access to ${signIn.redirectHost}. Approve with \`clankie connector approve ${signIn.code}\`.`,
+        `Waiting: ${signIn.code}  ${connectorShowableText(signIn.clientName)}, sending access to ${connectorShowableText(signIn.redirectHost)}. Approve with \`clankie connector approve ${signIn.code}\`.`,
       );
   return lines.join("\n");
 }
@@ -279,7 +284,7 @@ async function readWebhook(
 }
 
 function formatNote(note: AppNote): string {
-  const head = `#${String(note.sequence)} ${note.at} ${note.author}${note.to === undefined ? "" : ` → ${note.to.join(", ")}`}`;
+  const head = `#${String(note.sequence)} ${note.at} ${connectorShowableText(note.author)}${note.to === undefined ? "" : ` → ${note.to.join(", ")}`}`;
   const wakes = (note.wakes ?? []).map(
     (wake) =>
       `  woke ${wake.lead}: ${wake.reached === "none" ? "not reached" : wake.held ? `${wake.reached} (held for the apps)` : wake.reached}` +
@@ -558,7 +563,7 @@ export async function runConnectorCommand(
     else
       stdout.write(
         decided.data.decision === "approved"
-          ? `Approved ${decided.data.code}. ${decided.data.clientName} can now list your agents, read their screens and message them.\nIt shows in \`clankie devices\`; revoke it there to disconnect.\n`
+          ? `Approved ${decided.data.code}. ${connectorShowableText(decided.data.clientName)} can now list your agents, read their screens and message them.\nIt shows in \`clankie devices\`; revoke it there to disconnect.\n`
           : `Denied ${decided.data.code}. Nothing was connected.\n`,
       );
     return 0;

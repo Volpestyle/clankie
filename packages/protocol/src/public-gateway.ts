@@ -502,6 +502,7 @@ export function publicGatewayTargetFor(
   );
 }
 
+export const PUBLIC_GATEWAY_REQUEST_HEADERS_MAX = 8;
 export const PublicGatewayHttpHeaderSchema = z
   .object({
     name: z
@@ -558,7 +559,7 @@ export const PublicGatewayRequestFrameSchema = z
     target: PublicGatewayTargetSchema,
     method: z.enum(["GET", "POST"]),
     path: RelativePublicPathSchema,
-    headers: z.array(PublicGatewayHttpHeaderSchema).max(8),
+    headers: z.array(PublicGatewayHttpHeaderSchema).max(PUBLIC_GATEWAY_REQUEST_HEADERS_MAX),
     bodyBase64: BoundedCanonicalBase64Schema(PUBLIC_GATEWAY_REQUEST_BODY_BYTES_MAX).optional(),
   })
   .strict();

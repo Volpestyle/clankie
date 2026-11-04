@@ -6,6 +6,7 @@ import {
   CONNECTOR_AUTHORIZE_STATUS_PATH,
   CONNECTOR_DETECTION_PATH,
   CONNECTOR_MCP_PATH,
+  CONNECTOR_PEER_HEADER,
   CONNECTOR_PROMPT_ANSWERS_PATH,
   CONNECTOR_PUBLIC_BASE_HEADER,
   CONNECTOR_REGISTER_PATH,
@@ -14,12 +15,15 @@ import {
   CONNECTOR_SIGN_IN_DENY_PATH,
   CONNECTOR_TOKEN_PATH,
   ConnectorDetectionRequestSchema,
+  ConnectorPeerSchema,
   ConnectorPromptAnswersRequestSchema,
   ConnectorSignInDecisionRequestSchema,
   type ConnectorDetectionResponse,
   type ConnectorPromptAnswersResponse,
   connectorRedirectHost,
   connectorRedirectUriAllowed,
+  connectorShowableText,
+  connectorTextShowable,
   type ConnectorSignIn,
   type ConnectorSignInDecisionResponse,
   type ConnectorSignInsResponse,
@@ -59,6 +63,8 @@ const REFRESH_IDLE_MS = 90 * 24 * 60 * 60_000;
 /** Concurrent sessions may retry the immediately previous refresh binding. */
 const REFRESH_RACE_MS = 60_000;
 const PENDING_SIGN_INS_MAX = 32;
+/** One requester's share of the pool; its next sign-in replaces its oldest waiting one. */
+const PENDING_SIGN_INS_PER_PEER_MAX = 4;
 const CLIENT_PURPOSE = "connector-client-v1";
 const REFRESH_PURPOSE = "connector-refresh-v1";
 const CODE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
@@ -94,6 +100,7 @@ interface PendingSignIn {
   readonly redirectUri: string;
   readonly codeChallenge: string;
   readonly state: string | undefined;
+  readonly peer: string | undefined;
   readonly createdAtMs: number;
   readonly expiresAtMs: number;
   decision?:
@@ -178,6 +185,14 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         },
         400,
       );
+    if (parsed.data.client_name !== undefined && !connectorTextShowable(parsed.data.client_name))
+      return context.json(
+        {
+          error: "invalid_client_metadata",
+          error_description: "client_name has characters that can't be shown",
+        },
+        400,
+      );
     const redirects = parsed.data.redirect_uris;
     if (!redirects.every(connectorRedirectUriAllowed))
       return context.json(
@@ -187,7 +202,8 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         },
         400,
       );
-    const name = (parsed.data.client_name ?? "Claude").slice(0, 64);
+    // Cutting can split a pair of surrogates, so the cut text is cleaned too.
+    const name = connectorShowableText((parsed.data.client_name ?? "Claude").slice(0, 64));
     // Stateless: the id carries its own name and callbacks under this Mac's MAC,
     // so registration stores nothing and a flood of registrations costs nothing.
     const payload = Buffer.from(JSON.stringify({ n: name, r: redirects }), "utf8").toString("base64url");
@@ -223,7 +239,8 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
     if (!sameBytes(Buffer.from(mac, "base64url"), key.mac(CLIENT_PURPOSE, payload))) return undefined;
     try {
       const claims = ClientClaimsSchema.parse(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
-      return { clientId, name: claims.n, redirectUris: claims.r };
+      // A client id issued earlier stays valid, so its name is cleaned on the way in.
+      return { clientId, name: connectorShowableText(claims.n) || "Unnamed app", redirectUris: claims.r };
     } catch {
       return undefined;
     }
@@ -266,6 +283,16 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
         400,
       );
     prune();
+    const peer = ConnectorPeerSchema.safeParse(context.req.header(CONNECTOR_PEER_HEADER)).data;
+    if (peer !== undefined) {
+      // Oldest first: a Map keeps insertion order. Replacing rather than refusing
+      // lets someone who reloads their page keep going.
+      const waiting = [...signIns.values()].filter(
+        (signIn) => signIn.peer === peer && signIn.decision === undefined,
+      );
+      const excess = Math.max(0, waiting.length + 1 - PENDING_SIGN_INS_PER_PEER_MAX);
+      for (const replaced of waiting.slice(0, excess)) signIns.delete(replaced.id);
+    }
     if (signIns.size >= PENDING_SIGN_INS_MAX)
       return context.html(
         page("Too many sign-ins are waiting", "Approve or let the others expire, then try again."),
@@ -280,6 +307,7 @@ export function registerConnectorRoutes(ctx: RegisterConnectorRoutesContext): vo
       redirectUri,
       codeChallenge: challenge,
       state,
+      peer,
       createdAtMs: now,
       expiresAtMs: now + SIGN_IN_TTL_MS,
     };

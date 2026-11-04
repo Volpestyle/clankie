@@ -1239,3 +1239,82 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     await rm(boardRoot, { recursive: true, force: true });
   }
 }, 30_000);
+
+it("keeps an app's name to characters the owner can read, wherever it is shown", async () => {
+  const host = await createQaService();
+  try {
+    for (const refused of [
+      "Cla\u001bude",
+      "Cla\nude",
+      "Cla\u202Eude",
+      "Cla\u200Bude",
+      "Cla\u2028ude",
+      "Cla\u3164ude",
+      "Cla\u{E0041}ude",
+      "Cla\uD800ude",
+    ]) {
+      const response = await register(host.baseUrl, [CALLBACK], refused);
+      expect(response.status, JSON.stringify(refused)).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_client_metadata" });
+    }
+    // Ordinary names in any language or with an emoji still register, cut to size.
+    for (const accepted of ["Claude Code", "Клод", "クロード", "Grok 🚀"]) {
+      const response = await register(host.baseUrl, [CALLBACK], accepted);
+      expect(response.status).toBe(201);
+      expect(await response.json()).toMatchObject({ client_name: accepted });
+    }
+    // A cut that lands inside an emoji leaves no half of it behind.
+    const long = await register(host.baseUrl, [CALLBACK], `${"a".repeat(63)}🚀`);
+    expect(((await long.json()) as { client_name: string }).client_name).toBe("a".repeat(63));
+  } finally {
+    await host.close();
+  }
+});
+
+it("prints a stored app name without the characters an older sign-in could carry", async () => {
+  const stored = "Cla\u001b\nu\u202Ede";
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(
+      JSON.stringify({
+        signIns: [
+          {
+            code: "ABCD-2345",
+            clientName: stored,
+            redirectHost: "claude.ai",
+            createdAt: "2026-11-04T00:00:00.000Z",
+            expiresAt: "2026-11-04T00:10:00.000Z",
+          },
+        ],
+      }),
+    );
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  try {
+    const { port } = server.address() as AddressInfo;
+    let stdout = "";
+    await runConnectorCommand([], {
+      host: `http://127.0.0.1:${port}`,
+      env: { ...process.env, CLANKIE_OPERATOR_TOKEN: "operator-token" },
+      stdout: { write: (text: string) => void (stdout += text) },
+      stderr: { write: () => {} },
+    });
+    expect(stdout).toContain("Waiting: ABCD-2345  Claude, sending access to claude.ai.");
+  } finally {
+    server.close();
+  }
+});
+
+it("still fills to the shared cap for sign-ins that name no requester", async () => {
+  const host = await createQaService();
+  try {
+    const { client_id: clientId } = (await (await register(host.baseUrl)).json()) as { client_id: string };
+    const first = await startSignIn(host.baseUrl, clientId);
+    for (let index = 1; index < 32; index++) await startSignIn(host.baseUrl, clientId);
+    expect((await status(host.baseUrl, first.request!)).status).toBe("pending");
+    expect((await startSignIn(host.baseUrl, clientId)).page.status).toBe(429);
+  } finally {
+    await host.close();
+  }
+});

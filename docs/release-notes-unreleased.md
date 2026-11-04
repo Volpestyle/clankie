@@ -1,5 +1,9 @@
 # Unreleased
 
+Connector sign-ins are sturdier. An app's name must be readable text, and through
+the doorway each requester keeps at most four waiting sign-ins, so one busy client
+can't crowd out another. Its next sign-in replaces its oldest waiting one.
+
 A board note can name the leads it is for. `post_note` takes `to` (`clankie`, or
 a lead with a stored wake webhook such as `duet` or `grok`). Each one is woken
 once: at its webhook, or, if that doesn't take it, through Clankie's lead lane

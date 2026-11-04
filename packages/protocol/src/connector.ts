@@ -52,6 +52,15 @@ export const CONNECTOR_SIGN_IN_DENY_PATH = "/v1/connector/sign-ins/deny";
  */
 export const CONNECTOR_PUBLIC_BASE_HEADER = "x-clankie-public-base";
 
+/**
+ * Who opened a sign-in, as an opaque per-host hash the doorway computes from the
+ * address it saw. It is never read from the caller's own request at the doorway.
+ * Only the doorway's sign-in route carries it; a sign-in without one isn't counted
+ * per requester, and a direct caller who sets it only moves between those counts.
+ */
+export const CONNECTOR_PEER_HEADER = "x-clankie-connector-peer";
+export const ConnectorPeerSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
+
 /** Where the hosted Claude apps send a finished sign-in. */
 export const CLAUDE_CONNECTOR_CALLBACK_URLS = [
   "https://claude.ai/api/mcp/auth_callback",
@@ -99,6 +108,23 @@ export function connectorRedirectHost(value: string): string {
   } catch {
     return "an unknown address";
   }
+}
+
+// Control, format (bidi and zero-width among them), lone surrogate and separator
+// characters, and the invisible marks outside those categories.
+const UNSHOWABLE_CHARACTERS =
+  "\\p{Cc}\\p{Cf}\\p{Cs}\\p{Zl}\\p{Zp}\\u034F\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180F\\u3164\\uFE00-\\uFE0F\\uFFA0\\u{E0100}-\\u{E01EF}";
+const UNSHOWABLE = new RegExp(`[${UNSHOWABLE_CHARACTERS}]`, "u");
+const UNSHOWABLE_ALL = new RegExp(`[${UNSHOWABLE_CHARACTERS}]`, "gu");
+
+/** An app's name is its own claim and is shown to the owner: it must read as what it is. */
+export function connectorTextShowable(value: string): boolean {
+  return !UNSHOWABLE.test(value);
+}
+
+/** The same text with anything that can't be shown removed, for names already stored. */
+export function connectorShowableText(value: string): string {
+  return value.replace(UNSHOWABLE_ALL, "").trim();
 }
 
 export const ConnectorSignInSchema = z

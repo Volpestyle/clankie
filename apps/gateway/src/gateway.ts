@@ -58,6 +58,7 @@ import {
   PublicGatewayTunnelFrameSchema,
   derivePublicGatewayHostId,
   PUBLIC_GATEWAY_REQUEST_HEADER_ALLOWLIST,
+  PUBLIC_GATEWAY_REQUEST_HEADERS_MAX,
   PUBLIC_GATEWAY_RESPONSE_HEADER_ALLOWLIST,
   publicGatewayTargetFor,
   sendableStreamCloseCode,
@@ -77,10 +78,11 @@ import {
   CONNECTOR_AUTHORIZE_PATH,
   CONNECTOR_AUTHORIZE_STATUS_PATH,
   CONNECTOR_MCP_PATH,
+  CONNECTOR_PEER_HEADER,
   CONNECTOR_PROTECTED_RESOURCE_PATH,
   isConnectorRoute,
 } from "@clankie/protocol/connector";
-import { clientAddress, type TrustedProxy } from "./client-address.ts";
+import { clientAddress, clientBlock, type TrustedProxy } from "./client-address.ts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const JoinStatusRequestSchema = z.object({ joinId: MachineJoinIdSchema }).strict();
@@ -380,7 +382,7 @@ export function createPublicGateway(options: PublicGatewayOptions): PublicGatewa
       target: routed.target,
       method: request.method === "GET" ? "GET" : "POST",
       path: routed.path,
-      headers: publicRequestHeaders(request),
+      headers: frameHeaders(request, routed.host.hostId, routed.path, options.trustedProxy),
       ...(routed.body.byteLength === 0 ? {} : { bodyBase64: routed.body.toString("base64") }),
     };
     const exchange = beginExchange(routed.host, frame, {
@@ -1660,6 +1662,22 @@ function publicRequestHeaders(request: IncomingMessage): PublicGatewayHttpHeader
     if (typeof value === "string") headers.push({ name, value });
   }
   return headers;
+}
+
+/** A sign-in also says who opened it, hashed per host so the Mac never learns an address. */
+function frameHeaders(
+  request: IncomingMessage,
+  hostId: string,
+  path: string,
+  proxy: TrustedProxy | undefined,
+): PublicGatewayHttpHeader[] {
+  const headers = publicRequestHeaders(request);
+  if (request.method !== "GET" || path.split("?", 1)[0] !== CONNECTOR_AUTHORIZE_PATH) return headers;
+  const block = clientBlock(clientAddress(request, proxy));
+  const value = createHash("sha256")
+    .update(`clankie-connector-peer-v1\0${hostId}\0${block}`)
+    .digest("base64url");
+  return [{ name: CONNECTOR_PEER_HEADER, value }, ...headers].slice(0, PUBLIC_GATEWAY_REQUEST_HEADERS_MAX);
 }
 
 function sendToHost(connection: HostConnection, frame: PublicGatewayTunnelFrame): boolean {

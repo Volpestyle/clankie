@@ -23,6 +23,23 @@ export function normalizeAddress(address: string): string {
   return (mapped?.[1] ?? address).toLowerCase();
 }
 
+/**
+ * The block one client controls: an IPv4 address, or an IPv6 address's /64,
+ * since a single home or host is routinely handed a whole /64.
+ */
+export function clientBlock(address: string): string {
+  if (isIP(address) !== 6) return address;
+  const [head = "", tail] = address.split("%", 1)[0]!.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  const rightGroups = right.reduce((count, group) => count + (group.includes(".") ? 2 : 1), 0);
+  const groups = [...left, ...Array<string>(8 - left.length - rightGroups).fill("0"), ...right];
+  return `${groups
+    .slice(0, 4)
+    .map((group) => Number.parseInt(group, 16).toString(16))
+    .join(":")}::/64`;
+}
+
 export function clientAddress(request: IncomingMessage, proxy?: TrustedProxy): string {
   const peer = normalizeAddress(request.socket.remoteAddress ?? "unknown");
   if (proxy === undefined || !proxy.trusts(peer)) return peer;

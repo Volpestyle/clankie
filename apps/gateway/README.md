@@ -98,7 +98,9 @@ health route.
   Connector calls are budgeted per host (240 in a burst, 8 a second), because
   Claude's servers share a few addresses; the sign-in page and its polling are
   also budgeted per client (60, 2 a second). Refusals are
-  `429 connector_rate_limited` with `Retry-After`. This route lets the gateway
+  `429 connector_rate_limited` with `Retry-After`. A sign-in also carries a hash
+  of its requester's address and the host id, so the Mac can limit each requester's
+  waiting sign-ins without seeing the address. This route lets the gateway
   read pane text and messages on their way through; the app's own traffic stays
   encrypted.
 - `/gateway/v1/hosts/connect?hostId=…&installationId=…` is the account-authenticated
