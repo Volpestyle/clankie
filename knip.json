@@ -14,7 +14,7 @@
         "integrations/remote-lead/claude-setup.d.mts",
         "integrations/herdr-plugin/claude-path-shim.d.mts",
         "scripts/scratch-stack.mjs",
-    "scripts/heavy-waits.mjs",
+        "scripts/heavy-waits.mjs",
         "scripts/manual/work-inbox-proof.mjs",
         "scripts/manual/sweep-play-archive.mjs",
         "scripts/manual/tracker-peak-day.ts",
