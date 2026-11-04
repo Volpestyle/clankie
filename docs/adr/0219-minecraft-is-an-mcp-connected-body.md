@@ -306,3 +306,15 @@ A tagged monthly budget provides notification, not a hard cap; stopped volumes
 and snapshots still accrue storage cost. Every manual run ends with EC2 state
 confirmed stopped. Live guardrail, premium-human and Discord acceptance remains
 separate from deterministic adapter tests and is recorded with its actual scope.
+
+## Revisit when
+
+The stock conformance spike and the owned offline implementation above hold this
+record's evidence.
+
+- A newer yuniko release forwards request cancellation, reports refused world
+  effects, and covers follow and the account and viewer integration, so the
+  owned implementation could move back onto it.
+- A Mineflayer, pathfinder or Paper upgrade changes the measured navigation stop
+  or dig cancellation results.
+- The browser viewer cannot render a newly chosen Minecraft version.

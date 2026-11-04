@@ -132,3 +132,17 @@ get no card either. The route answers `detected: false` there.
   one exists.
 - `SpawnOperatorSeat` gains an optional `chrome` field. The private neighbour
   repos read the protocol and can ignore it.
+
+## Evidence and limits
+
+This record links no measurement. The decision cites the 2026-09-27 observation that
+Codex computer use drove James's own Chrome and Mac apps, and the harness
+capabilities in the detection table as of that date, when Claude Code had no
+native desktop use.
+
+## Revisit when
+
+- Claude Code ships native desktop use, so its row gains Mac apps.
+- A harness changes the status or feature output the detection reads.
+- His own browser handles hard tasks as well as a hired harness on the same
+  task.

@@ -45,3 +45,16 @@ as half.
   names that step; Clankie does not sign anyone in.
 - `GET /v1/usage` shares one reading for a minute across every surface that
   polls; `?refresh=1` reads again.
+
+## Evidence and limits
+
+No measurement record is linked. The probe rests on Claude Code 2.1.295
+answering `/usage` as a local command (`num_turns: 0`, no cost, about half a
+second) and on Codex's `account/rateLimits/read`.
+
+## Revisit when
+
+- Claude Code changes its `/usage` output, or stops answering it locally.
+- Codex changes `account/rateLimits/read`.
+- Anthropic or OpenAI offer a usage read that needs no OAuth token in Clankie's
+  hands.

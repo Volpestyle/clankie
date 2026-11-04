@@ -255,3 +255,18 @@ uses the existing refusal/uncertainty results. Integration proof lives in the
 app's `tests/integration/turn-delivery.test.ts`: actual app controls and receipts,
 local and encrypted HTTP routes, native control, and the real Claude outbox/MCP
 bridge/seat-sync boundary. It follows ADR 0221, "Tests prove the product and its boundaries."
+
+## Evidence and limits
+
+The record cites no measurement. The decision rests on the 2026-09-01 reading
+that the Claude Agent SDK only runs the `claude` binary in print mode, that its
+terms forbid offering a claude.ai login or its rate limits to other people, and
+that channels are a research preview.
+
+## Revisit when
+
+- Anthropic's terms let a Claude login serve turns for people other than its
+  owner, so a social lane could run on it.
+- Channels leave research preview, so `clankie seat` no longer needs the
+  development flag.
+- Claude Code transcripts carry live drafts, so the app could show them.

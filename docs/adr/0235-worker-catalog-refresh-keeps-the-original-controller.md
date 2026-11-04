@@ -88,3 +88,14 @@ are fixtures and do not establish live harness acceptance. The production
 proof must deploy through the integrator, keep original TUI/thread identity,
 observe busy deferral and peer catalogs, settle an exact retained receipt, and
 store a separate deliberate `message_clankie` report. No AWS deploy is involved.
+
+## Revisit when
+
+The linked app-server, live and source evidence above and the Verification
+section hold this record's evidence.
+
+- Codex stops rebuilding its tool router at each sampling step, or exposes the
+  model-facing tool list.
+- Codex's app-server offers an atomic idle, config and reload transaction.
+- Claude's mods API offers an original-server reconnect, or OpenCode's SDK
+  exposes the model-visible MCP inventory.

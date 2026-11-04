@@ -1208,3 +1208,13 @@ regression observes zero checkpoint decodes on that continuation, and a fresh
 large-open guard rejects whole-buffer string conversion. The
 [measurement record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-28-local-vuh-49-streamed-open/README.md#review-revision-hash-before-decoding)
 retains the full results and the original 900 MB proof's scope.
+
+## Revisit when
+
+The measured sections of the LOCAL-VUH-42, LOCAL-VUH-47 and LOCAL-VUH-49
+amendments hold this record's storage evidence. Their generated stores model
+600 sync commits a day.
+
+- A live single write's p95 exceeds the accepted 25 ms bar at fleet volume.
+- `node:sqlite` with `fullfsync` beats JSONL appends at equal durability.
+- Whole-store memory becomes the limiting resource on the owner's machine.

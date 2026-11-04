@@ -349,3 +349,19 @@ rules assumed every check was local and every receipt prompt.
   After any settled original, a different message to that seat goes out in
   the same call, and the result carries the original's outcome as `previous`;
   only the same text never resends.
+
+## Evidence and limits
+
+The later amendments rest on observations quoted in place: 4,840 retained
+reports at 15 MB per save (VUH-2410); Claude channel receipts recorded 45–77 s
+after a sub-second bridge acknowledgment; and remote proofs taking 13–18 s
+against a 20-second bridge budget (VUH-2779). No measurement record is linked.
+The 50-second bridge allowance is sized under Codex's 60-second MCP tool limit.
+
+## Revisit when
+
+- Codex changes its 60-second MCP tool limit.
+- Interactive Claude ships a native interrupt, or records a mid-turn channel
+  event when it arrives.
+- Remote proofs on linked machines approach the 50-second allowance, or the
+  250 ms freshness bound refuses ordinary sends.

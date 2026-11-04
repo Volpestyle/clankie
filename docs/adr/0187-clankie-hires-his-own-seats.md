@@ -206,3 +206,18 @@ native record to key it, and the owner's own draft already shows what happened.
 Everything else stays as above: `interrupt()` remains false, a hire's brief and
 messages never use terminal keys, and no other automation types into a Claude
 pane.
+
+## Evidence and limits
+
+No measurement record is linked. The startup deadlines rest on the observation
+that a 5-second query timeout killed `herdr agent start` while pi was still
+loading under CPU contention. The MCP server amendment rests on 27 Codex worker
+app-servers and their MCP children holding about 16.8 GB before the change. The
+Esc amendment rests on interactive Claude having no programmatic interrupt.
+
+## Revisit when
+
+- pi's startup under load exceeds the 30-second readiness deadline.
+- Codex or Claude stop starting a copy of the owner's MCP servers per worker
+  session, so the hire profile no longer needs to narrow them.
+- Interactive Claude ships a native interrupt, so Stop no longer needs a key.
