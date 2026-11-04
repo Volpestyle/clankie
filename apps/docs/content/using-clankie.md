@@ -1,8 +1,10 @@
 # Using Clankie
 
-Start with what you want to do. Clankie can help you think something through,
-make a draft or picture, remember a preference, and bring in help for a larger
-job. You do not need to learn agent terminology to talk to him.
+Start with what you want to do. This page follows the built-in lead, which is
+called Clankie and goes by "he". Other leads work the same fleet and the same app
+in their own way ([bring your own lead](/diy/#bring-your-own-lead)). A lead can
+help you think something through, make a draft or picture, remember a preference,
+and bring in workers for a larger job.
 
 ## Everyday help
 
@@ -68,14 +70,14 @@ leaf makes a decision wait for you, Clankie names that leaf when he asks.
 When Clankie needs your decision or an action only you can take, he can leave a
 structured ask showing what waits, his recommendation and the exact next steps.
 The console's `/question list` collects pending asks; answering wakes the source
-conversation. The app mailbox is a later addition. See the [ask reference](/cli/#owner-asks-conversations-questions-id-and-conversations-answer).
+conversation, and the app's Feed shows them too. See the [ask reference](/cli/#owner-asks-conversations-questions-id-and-conversations-answer).
 
 DIY helpers use the harnesses you install and sign in to
 ([bring your own team](/diy/#bring-your-own-team)).
 
 ## The app
 
-**Sessions is home.** Clankie's thread is pinned at the top, and every agent
+**Sessions is home.** The built-in lead's thread is pinned at the top, and every agent
 is listed under the machine and Herdr session it runs in, so you can follow a
 larger job without a terminal.
 
@@ -158,4 +160,4 @@ A routine can do only what its conversation could already do. Pause, resume,
 run now or remove one from any of those places; the full syntax is under
 [`clankie routines`](/cli/#routines).
 
-Next: [how he works](/how-it-works/) explains what sits underneath.
+Next: [how it works](/how-it-works/) explains what sits underneath.

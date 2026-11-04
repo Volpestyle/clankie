@@ -1,50 +1,60 @@
 # How Clankie works
 
-Clankie lives in a persistent service on one machine of yours. The app, the terminal console, and Discord are ways to reach him. The
-service owns his conversations, memory, tools, and access, so closing a client
-loses nothing.
+Clankie is a persistent service on one machine of yours. Leads, workers and the
+clients you read them in all connect to it. The service owns conversations,
+memory, tools, and access, so closing a client loses nothing.
 
-You can use him without knowing any of this. It helps when you want to
-customize him, connect a team, or know where your work goes.
+You can use it without knowing any of this. It helps when you want to add a lead,
+connect a team, or know where your work goes.
 
-<div class="diagram" role="img" aria-label="The app and console, plus optional Discord text and voice, reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
+<div class="diagram" role="img" aria-label="The app, the console, connected leads and optional Discord rooms reach Clankie's persistent service. The service stores conversations and memory and uses configured models, tools, and agent connections. Capabilities depend on the host.">
   <div class="diagram-col">
-    <h4>Talk to him</h4>
+    <h4>Talk to a lead</h4>
     <div class="dnode"><strong>The app</strong><span>Sessions · Feed · World · Terminal</span></div>
     <div class="dnode"><strong>The console</strong><span>on this machine</span></div>
+    <div class="dnode"><strong>Connected leads</strong><span>Claude · Codex · Grok</span></div>
     <div class="dnode"><strong>Optional rooms</strong><span>Discord text · voice</span></div>
   </div>
   <div class="diagram-col diagram-center">
-    <h4>His home</h4>
+    <h4>Your machine</h4>
     <div class="dnode dnode-main"><strong>Clankie's service</strong><span>conversations · memory · projects</span><span>tools · credentials · access</span></div>
-    <div class="dnode"><strong>On his host</strong><span>your Mac or Linux host</span></div>
+    <div class="dnode"><strong>On your host</strong><span>your Mac or Linux host</span></div>
   </div>
   <div class="diagram-col">
-    <h4>His connections</h4>
+    <h4>Its connections</h4>
     <div class="dnode"><strong>Models and tools</strong><span>chosen for the task</span></div>
     <div class="dnode"><strong>Helper agents</strong><span>native harnesses in Herdr</span></div>
     <div class="dnode"><strong>Optional services</strong><span>accounts · browser · media · play</span></div>
   </div>
 </div>
 
-## One identity, many conversations
+## Leads
 
-There is one Clankie. A chat in the app, a project in the console, and a Discord
-room each have their own history and permissions, but the same character. What
-is said in one room does not leak into another.
+A lead is an agent you talk to directly, which hires and answers workers. Several
+can share a fleet, and none outranks another; the service reports which are
+active. There are three ways to be one.
 
-His built-in agent runs on [pi](https://pi.dev), which handles models, sessions,
-tools, skills, and compaction. Clankie adds the lasting identity, memory, his
-connections, and the authority each caller brings.
+**The built-in lead.** It is called Clankie and runs on [pi](https://pi.dev), which
+handles models, sessions, tools, skills, and compaction. The service adds its
+lasting identity, memory, connections, and the authority each caller brings. A chat
+in the app, a project in the console, and a Discord room each have their own
+history and permissions, but the same character. What is said in one room does not
+leak into another.
 
-Other harnesses can take his seat: `clankie claude`, `clankie codex`,
-`clankie opencode`, and `clankie grok` open that tool as Clankie, with his
-persona, memory, and tools, on a chat of their own or an existing one
-([seat commands](/cli/#seat-commands)). While a seat is open, worker reports and
-wakes for its chat go to it; when it closes, pi takes over again.
+**A seat.** `clankie claude`, `clankie codex`, `clankie opencode`, and
+`clankie grok` open that tool with the built-in lead's persona, memory, and tools,
+on a chat of their own or an existing one ([seat commands](/cli/#seat-commands)).
+While a seat is open, worker reports and wakes for its chat go to it; when it
+closes, pi takes over again.
+
+**A connected app.** Claude, Claude Code, Codex, Grok and other MCP apps reach the
+fleet through a narrow connector the host serves, signing in with OAuth to your own
+machine ([bring your own lead](/diy/#bring-your-own-lead)). A connected lead can
+be woken at its own webhook. The owner can hand the lead to these apps, which holds
+the built-in lead's own turns until the owner hands it back.
 
 Requests from Discord text or voice run as their own visible threads under
-Clankie, several at once, and the answer returns to the room that asked.
+the built-in lead, several at once, and the answer returns to the room that asked.
 
 ## History, memory, and projects
 
@@ -69,14 +79,16 @@ A model reasons, a tool acts, and a skill explains how to approach a task.
 Choosing a model installs no browser, signs in to no account, and gives no
 Discord room a shell. Chat, images, video, and voice are configured separately.
 
-## A team around him
+<a id="a-team-around-him"></a>
+
+## Workers and the work
 
 **Work stays where you track it.** Clankie and his workers share one
 Linear-shaped tracker. It uses the tracker you choose for all projects or one
 project, such as your connected Linear account or durable local storage;
 `clankie doctor` shows which. Built-in work carries evidence
-bundles that someone else checks, and owner questions and run approvals arrive
-in the same [owner mailbox](/cli/). You can [mirror a Linear project](/cli/) into
+bundles that someone else checks, and owner questions and run approvals reach you
+as [asks](/cli/#owner-asks-conversations-questions-id-and-conversations-answer). You can [mirror a Linear project](/cli/) into
 a scratch built-in store for inspection while Linear remains authoritative.
 
 **Herdr holds the agents.** Workers run in their real terminals, which you can
@@ -108,7 +120,7 @@ Agents can also message Clankie and each other (`message_clankie`,
 is something to check, not proof the work is finished.
 
 In the app, agents appear in Sessions, as figures in the World, and as live
-panes in Terminal. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
+panes in Terminal, and the Feed holds what needs you and what finished. In the console, `/chats`, `/agents`, `/rooms`, `/history`, and
 `/sessions` open each kind of thread
 ([vocabulary](https://github.com/Volpestyle/clankie/blob/main/docs/product-vocabulary.md),
 [console](/console/)).
@@ -133,7 +145,7 @@ call local. See [credentials](https://github.com/Volpestyle/clankie/blob/main/do
 
 The app reaches the host through the public gateway, which relays encrypted
 exchanges it cannot read (it sees only routing metadata, sizes, and timing). A
-self-hosted Mac can also offer a direct route with no account. Either way the
+self-hosted Mac can also offer the app a direct route with no account. Either way the
 host issues pairings and enforces every device's grants
 ([network](/network/), [privacy](https://clankie.bot/privacy/)).
 

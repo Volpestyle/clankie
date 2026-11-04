@@ -2,6 +2,11 @@
   "$comment": "Claims a later ADR retired. scripts/check-retired-claims.mjs fails when live code, skills or guides repeat one. ADRs, testing evidence, proposals and release notes keep history and are not scanned.",
   "claims": [
     {
+      "pattern": "\\b(an?|persistent|AI) agent lead\\b|personal AI assistant with a personality",
+      "adr": "0354",
+      "now": "Clankie is a self-hosted platform for leads; the persona is its built-in lead."
+    },
+    {
       "pattern": "mark(ing|ed)? (it|the pull request|a pull request) ready (also )?(runs|starts|adds) the real-app run|ready pull requests? adds? the real-app run",
       "adr": "0347",
       "now": "No pull request runs the real app; it runs on main after merges and nightly, and a red run files a ci-finding issue."

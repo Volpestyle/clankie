@@ -4,16 +4,13 @@
 
 # Clankie
 
-**An agent lead with a personality. Your machine, models, and tools.**
+**The open-source, self-hosted super agent platform.**
 
-Clankie plans your work, hires coding agents to do it, owns it until it lands,
-and makes as many of the calls as you let him. Between jobs he has ideas of his
-own and hangs out in your Discord. Run him on your Mac, shape his character,
-and reach the same Clankie from the iPhone and iPad app wherever you are.
+Run always-on lead agents on your own machines, tie in the leads and workers you
+already have, and see all of the work in one place.
 
 [Get started](https://docs.clankie.bot/get-started/#diy-install-on-your-own-machine) ·
-[Customize Clankie](https://docs.clankie.bot/diy/) ·
-[Watch the film](https://clankie.bot/#film) ·
+[How it works](https://docs.clankie.bot/how-it-works/) ·
 [Technical reference](docs/README.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0%20%2B%20AGPL--3.0-blue?style=flat-square)](#license)
@@ -22,137 +19,106 @@ and reach the same Clankie from the iPhone and iPad app wherever you are.
 
 </div>
 
-## Run your own
+A lead is an agent you talk to directly: Grok Bot, Claude Code, Codex, or the
+built-in lead on [pi](https://pi.dev). You tell a lead what you want. It hires
+coding workers, Claude Code or Codex in [Herdr](https://herdr.dev) terminals
+across your machines, and those workers come and go and report back. The lead
+stays, so the conversation and the context stay with it.
 
-The [quick start](https://docs.clankie.bot/get-started/#diy-install-on-your-own-machine)
-installs a self-contained bundle on **Apple silicon, macOS 14 or newer** and on
-**arm64 or x64 Linux (Ubuntu 24.04 or newer)**; a Windows PC joins as a fleet
-machine:
+That is the difference from a ticket board. You don't file work into a queue and
+wait; you talk to a lead that is already running, and it staffs the job, answers
+its workers and tells you what landed.
+
+## What you get
+
+**Always-on leads.** The service keeps running on your machine, and a lead can
+wake on a worker's report, a schedule or its own webhook. Pick one lead or
+several. "Always on" means while the machine is
+awake and online; a Mac stays awake while plugged in by default
+([always on](docs/always-on.md)).
+
+**Workers across your machines.** Leads hire into real terminals you can watch
+and type into, on your Mac, a Linux machine or a linked Windows PC. New hires go
+to the account with capacity to spare, and heavy builds take turns so a busy
+fleet doesn't stall the machine
+([machines](https://docs.clankie.bot/diy/#bring-your-own-team),
+[harness support](packages/agent-hosts/README.md#tool-flow-and-current-support)).
+
+**The leads and workers you already have.** Agents you opened by hand in Herdr
+show up beside hired ones. Claude, Claude Code, Codex and Grok connect through
+one remote MCP server, and each sign-in is a device you approve and can revoke
+([bring your own lead](https://docs.clankie.bot/diy/#bring-your-own-lead)).
+
+**A way to see the work.** The iPhone and iPad app has Sessions, with every agent
+by machine; the Feed, with what needs you and what finished, grouped by project;
+the World, which draws the same agents as a little village; and Terminal, which
+opens the real panes. Reports carry evidence, kept in its own store rather than
+your git history ([the app](https://docs.clankie.bot/using-clankie/#the-app),
+[evidence store](docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
+
+**Your machines, your rules.** There is no hosted Clankie. Credentials, history
+and settings stay on your host, you bring your own models and agent
+subscriptions, and one autonomy setting decides how much a lead does without
+asking. Money and accounts always come to you
+([autonomy](https://docs.clankie.bot/cli/#autonomy-dial)).
+
+## Choose your leads
+
+| Lead                              | How it joins                                                                                                                   | Runs on                         |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| [Built-in](docs/built-in-lead.md) | Part of the service, with its own persona, memory and Discord presence if you want them                                        | A model you connect             |
+| Claude Code or Codex              | `clankie claude` or `clankie codex` opens that harness as a seat with the service's tools ([seats](docs/cli.md#seat-commands)) | Your own Claude or ChatGPT plan |
+| Connected apps                    | Add the connector URL in Claude, Claude Code, Codex or Grok ([connector](https://docs.clankie.bot/diy/#bring-your-own-lead))   | That app's own account          |
+| Grok Bot or your own bot          | A connected app with a webhook, so Clankie can wake it with a job                                                              | Whatever you built it on        |
+
+Leads share one fleet, and the fleet reports which are active.
+`clankie connector lead apps` switches the built-in lead off and hands its
+worker traffic to the connected apps.
+
+## Run it
+
+The installer brings its own runtime on **Apple silicon, macOS 14 or newer**, and
+on **arm64 or x64 Linux (Ubuntu 24.04 or newer)**. A Windows PC joins as a fleet
+machine.
 
 ```sh
 curl -fsSL https://clankie.bot/install | sh
 clankie
 ```
 
-A Mac release with a published app pin also installs `Clankie.app` in
-`/Applications` and opens it to pair with the local service. On the Mac, Clankie
-is the desktop pet with a small panel for Sessions, the Feed and Settings. For a
-terminal-only install:
+`/setup` connects a model, then offers phone pairing, account connections and a
+first agent. Only the model is required, and it can't be a Claude subscription;
+use `clankie claude` for that plan. The
+[get started guide](https://docs.clankie.bot/get-started/) covers each platform;
+[distribution](docs/distribution.md) covers checksums, pinning and the Mac app,
+whose signed release is not available yet. To work on the code, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-```sh
-curl -fsSL https://clankie.bot/install | sh -s -- --no-app
-```
+The software is free; model providers and connected services may charge. A
+Clankie account is free too, and you need one only for the public gateway:
 
-Updates retain that choice. **The signed companion release is not available
-yet**, so the current installer supplies the terminal bundle only; see
-[distribution](docs/distribution.md#mac-companion-app). Linux and source
-checkouts do not install the app.
+| To reach your machine from      | You need                                                                                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The console, CLI or a seat      | Nothing extra                                                                                                                                    |
+| The app, on your LAN or tailnet | No account: `clankie gateway direct` ([pairing](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app))                    |
+| The app, from anywhere          | A free account, for the encrypted gateway                                                                                                        |
+| A connected app                 | Remote access for the connector URL, which needs that account. The app's own sign-in is a code you approve on your machine, not a Clankie login. |
 
-`/setup` connects a model (subscription, API key, or local runtime), then
-offers phone pairing, account connections, and a first agent. Only the model is
-required. That model can't be a Claude subscription; to talk to Clankie on your
-own Claude or ChatGPT plan, run `clankie claude` or `clankie codex`, which opens
-that harness as him ([seat commands](docs/cli.md#seat-commands)).
-
-- [Install and pair the app](https://docs.clankie.bot/get-started/): the full onboarding path
-- [Run from source](CONTRIBUTING.md): development setup and checks
-- [Run on Linux](infra/hosted/README.md): advanced self-hosting, with its own capability limits
-- [Release details](docs/distribution.md): checksums, layout, pinning, and upgrades
-
-Run Clankie on your Mac with your own agent subscriptions. The software is free;
-model providers and connected services may charge. Clankie leads the Claude Code
-and Codex agents in your Herdr sessions, and joins Discord through a bot you make
-yourself. A free Clankie account adds phone pairing and steering while your Mac
-is awake.
 Check [clankie.bot](https://clankie.bot) for account and install availability.
 
-## What he does
-
-You drive him. He drives the rest.
-
-**Plans the work.** Hand him an outcome, not a task list. He breaks it into
-issues where your repo already tracks work, in Linear, GitHub issues or its own
-files, or in his built-in tracker, and keeps the plan true as it moves
-([work items](https://docs.clankie.bot/cli/#work-status-work-init-work-list-show-create-update-close-attach-write-receipt)).
-
-**Delegates it.** When a job needs more hands he hires Claude Code, Codex, Pi,
-OpenCode, or Grok Build agents into real terminals in Herdr, panes you can
-watch and type into, and briefs them through each harness's native input. Each
-project can get its own lead, on your Mac or a linked PC, and leads message
-each other directly. New hires go to the account with capacity to spare, and
-builds and simulators take turns so a busy fleet doesn't grind your Mac to a
-halt ([agent control](packages/agent-hosts/README.md#seat-adapters),
-[remote project leads](docs/adr/0259-remote-project-leads-use-seat-bound-delegation.md),
-[shared resources](https://docs.clankie.bot/cli/#heavy-server-seat-label-holder-id-command-args-fleet-resources-simulator)).
-
-**Owns it.** He reads every report, checks it against the evidence, lands the
-work, and moves the issue to Done with that evidence attached. Evidence lives
-in its own store, not your git history
-([evidence store](docs/adr/0258-evidence-lives-in-the-evidence-store.md)).
-
-**Improves how it gets done.** He reviews every worker he leads on a schedule,
-flags the stalled and the drifting, and steps in. Per-issue metrics show where
-the time and tokens went
-([efficiency](https://docs.clankie.bot/cli/#agents-efficiency-agents-tidy-worktrees),
-[metrics](https://docs.clankie.bot/cli/#metrics-issues-issue-id-worker-id-since-iso-until-iso)).
-
-**Decides as much as you let him.** One autonomy dial: off, low, high or full.
-At high, the default, he answers his workers, decides on changes that are hard
-to undo, commits, pushes and closes work, and asks you before a release. Money
-and accounts always come to you. Under Advanced, each gate, commit, push,
-release rule (even "when the last release is a week old") and close is its own
-setting, for every project or just one. When he needs you, he leaves one ask
-with his recommendation
-([autonomy](https://docs.clankie.bot/cli/#autonomy-dial),
-[working preferences](https://docs.clankie.bot/cli/#fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear),
-[asks](https://docs.clankie.bot/cli/#owner-asks-conversations-questions-id-and-conversations-answer)).
-
-**Works without being asked.** Put a project on Auto, give it a one-line
-focus, and he works its backlog unprompted, waking himself up to carry long work
-along. The autonomy dial decides which calls he takes alone. `/auto off` stops
-everything unprompted. From his own conversations he can post into your Discord
-rooms: a find worth sharing, or an announcement in the server he runs. In
-Discord, chattiness and what wakes him set how readily he jumps in
-([projects on Auto](https://docs.clankie.bot/using-clankie/#give-him-ongoing-work)).
-
-**Your right-hand man.** Think out loud with him and get pushed back on, hand
-him drafts and pictures to make, and ask what's moving, what's stuck, and what
-actually landed. His persona is yours to shape, and his history, memory, and
-projects live in the service, so he picks up where you left off on any screen.
-
-**Goes where you are.** Talk to him from his own console, or seat him in Claude
-Code or Codex, the terminal you already use. In the iPhone and iPad app,
-Sessions is home, with every agent by machine; the Feed holds what needs you and
-what finished; the World draws those sessions as a little village; and Terminal
-opens the real worker panes.
-[Pair the app](https://docs.clankie.bot/get-started/#bring-your-mac-s-clankie-into-the-app)
-with your Mac to reach him away from your desk; he stays reachable while the
-Mac is plugged in.
-
-**Hangs out after hours.** In Discord he chats, joins voice, plays requested
-music, and streams his Pokémon play (from his own PokeAgents seat) through an
-Activity. Screen-share watching and Go Live need the separate personal-lab body
-([Discord media](docs/discord-media.md)).
-
-**Is built to extend.** Models, skills, and connected services are independent
-choices: Linear, GitHub, Gmail, Google Calendar and Drive, Discord, image and
-video generation, and his own browser with his own logins
-([browser contract](docs/adr/0082-clankie-holds-the-browser.md)). A headless
-CLI, an HTTP API, and an MCP bridge expose the same authorized tools to scripts
-and other agents ([customize](https://docs.clankie.bot/diy/)).
-
-## The system underneath
+## Under the hood
 
 Clankie is one persistent service plus the clients and connections around it.
-His built-in agent runs on [pi](https://pi.dev); worker harnesses are
-connections and never replace it. The host owns conversations, memory,
-credentials, tool authority, and device access.
+The service owns conversations, memory, credentials, tool authority and device
+access; runtimes, trackers and leads are connections. A headless CLI, an HTTP API
+and an MCP bridge expose the same authorized tools to scripts and other agents.
 
 - [Architecture](docs/architecture.md): the system diagram and request flows
 - [Library index](docs/README.md): every subsystem's canonical guide
 - [CLI](docs/cli.md) and [HTTP catalog](apps/clankie/openapi.yaml): command and route contracts
+- [The built-in lead](docs/built-in-lead.md): planning, Auto, Discord, voice and play
 
-This repository holds the service, console, relay, phone gateway, and public
+This repository holds the service, console, relay, phone gateway and public
 contracts. The Clankie app and the gateway's deployment are private
 ([ADR 0311](docs/adr/0311-the-doorway-source-is-public.md)).
 

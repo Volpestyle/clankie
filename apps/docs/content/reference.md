@@ -13,8 +13,9 @@ Choose the reference for the job. [Get started](/get-started/) covers setup;
 | Script configuration, inspect status, or troubleshoot | [CLI](/cli/)                                                                                                                    |
 | Install a pinned release or understand its files      | [Distribution](https://github.com/Volpestyle/clankie/blob/main/docs/distribution.md)                                            |
 | Understand credentials and access                     | [Credentials](https://github.com/Volpestyle/clankie/blob/main/docs/credentials.md)                                              |
-| Inspect what he remembers                             | [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)                                                        |
+| Inspect what a lead remembers                         | [Memory](https://github.com/Volpestyle/clankie/blob/main/docs/memory.md)                                                        |
 | Configure Discord voice, music, or a watch surface    | [Discord media](https://github.com/Volpestyle/clankie/blob/main/docs/discord-media.md)                                          |
+| Connect a lead of your own                            | [Bring your own lead](/diy/#bring-your-own-lead)                                                                                |
 | Connect coding agents and other machines              | [Native agent adapters and runtime connections](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md) |
 | Grant a worker limited use of a connected account     | [Worker access](https://github.com/Volpestyle/clankie/blob/main/docs/worker-access.md)                                          |
 | Run the service on Linux                              | [Self-hosted Linux](https://github.com/Volpestyle/clankie/blob/main/infra/hosted/README.md)                                     |
@@ -23,7 +24,7 @@ Choose the reference for the job. [Get started](/get-started/) covers setup;
 
 | Reference                                                                            | Owns                                                      |
 | ------------------------------------------------------------------------------------ | --------------------------------------------------------- |
-| [How he works](/how-it-works/)                                                       | A readable overview of the service and its connections    |
+| [How it works](/how-it-works/)                                                       | A readable overview of the service and its connections    |
 | [Architecture](https://github.com/Volpestyle/clankie/blob/main/docs/architecture.md) | Current system boundaries and request flows               |
 | [HTTP API](/api/)                                                                    | The service's route catalog, rendered from OpenAPI        |
 | [Public network](/network/)                                                          | The gateway's allowed host routes and their authorization |

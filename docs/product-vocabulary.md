@@ -7,6 +7,8 @@ agent nor a complete history of connections.
 | Term       | Meaning                                                                            | TUI entry               |
 | ---------- | ---------------------------------------------------------------------------------- | ----------------------- |
 | Chat       | A personal or workspace thread with Clankie                                        | `/chats`                |
+| Lead       | An agent you talk to directly, which hires and answers workers                     | `clankie connector`     |
+| Worker     | A hired coding agent in a terminal; it comes and goes and reports to its lead      | `/agents`               |
 | Agent      | A known identity; availability comes from the current fleet snapshot               | `/agents`               |
 | Room       | A shared group channel or a Discord text/voice inspection view                     | `/rooms`                |
 | History    | All retained threads, including ongoing chats and offline agent threads            | `/history`              |

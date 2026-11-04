@@ -5,6 +5,9 @@ Status: accepted (James, 2026-09-03). Amends
 deployment ownership it drew stand; the site now leads with Clankie rather than
 two paths, and renders the operator-depth references it previously only linked.
 
+Amended by [ADR 0354](0354-clankie-is-a-platform-for-leads.md): the site now leads
+with the platform, and the persona belongs to the built-in lead.
+
 ## Context
 
 ADR 0155 gave `docs.clankie.bot` two user paths and a generated network table,

@@ -1,10 +1,13 @@
 # Working in this repo
 
-Clankie is a persistent agent with a personality: he chats in Discord (text
-and voice), plays Pokemon on stream, makes images and videos,
-browses the web, codes, and leads native coding agents through their harness
-connections. This repo is
-his body: one persistent service (`apps/clankie`) plus the portals that reach it.
+Clankie is an open-source, self-hosted super agent platform: always-on leads on
+the owner's machines, the coding workers they hire, and the views that show the
+work ([ADR 0354](docs/adr/0354-clankie-is-a-platform-for-leads.md)). Its built-in
+lead, also Clankie, is a persistent agent with a personality: he chats in Discord
+(text and voice), plays Pokemon on stream, makes images and videos, browses the
+web, codes, and leads native coding agents through their harness connections.
+This repo is his body: one persistent service (`apps/clankie`) plus the portals
+that reach it.
 Execution runtimes and work trackers are connections, independent of his identity
 ([ADR 0181](docs/adr/0181-clankie-is-independent-of-his-connections.md)); current
 support lives in [the agent-host adapters](packages/agent-hosts/README.md).
