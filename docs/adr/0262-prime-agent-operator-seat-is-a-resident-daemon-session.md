@@ -51,3 +51,12 @@ reattaching the live session and reopening its file after the worker was
 killed. Busy-session steering and room escalations were not exercised. Prime
 asks no tool approvals by default. A worker restart loses the MCP server until
 `--resume` (read from Prime's source, not exercised). Versions other than 0.10.x and protocols other than 7 refuse.
+
+## Revisit when
+
+- Prime Agent ships a version other than 0.10.x or a protocol other than 7,
+  which the seat refuses until it is verified again.
+- Prime adds lifecycle hooks, or gives its model MCP outside the Python REPL.
+- Busy-session steering or room escalations, which this record did not
+  exercise, are run and behave differently than expected; or a worker restart
+  behaves differently from what this record read from Prime's source.

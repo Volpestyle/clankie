@@ -124,3 +124,11 @@ The spawn-churn admission measurements are in #440 and the pull request that lan
 - Fleet admission on Linux converges under ordinary process churn. Sheer process count can still exceed the 600 ms budget: about 3000 idle processes did, on both the old and new helpers.
 - `census.attempts` and its refusal reasons keep their meaning: whole-attempt discards only. Per-process re-reads are not reported.
 - Darwin is unchanged.
+
+## Revisit when
+
+- A fleet machine's process count nears the about 3000 idle processes that
+  exceeded the 600 ms budget on both helpers.
+- Linux admission, such as checkpoint's `desktop-codex-hire`, refuses again with
+  `attempts_exhausted` or `budget_exhausted` under ordinary churn.
+- A kernel change breaks the `/proc/PID` inode identity this record assumes.

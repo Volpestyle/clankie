@@ -43,3 +43,17 @@ falls on the compiler more than on readers.
   has no deadline of its own.
 - The pilot's costs (tens of milliseconds of first import in development,
   about 12 KB gzip in the release) are paid once and do not grow per module.
+
+## Evidence and limits
+
+The decision rests on the pilot's measurements in
+[ADR 0327](0327-effect-pilot-on-fleet-observation.md): about 63 ms of cold import
+in development when importing by path, release bundle growth of about 33 KB
+minified and 12 KB gzip, and microseconds per read against Herdr reads of
+milliseconds. They come from one seam. That the costs are paid once and do not
+grow per module is an expectation from the pilot, not a measurement.
+
+## Revisit when
+
+- Cold import time or bundle size grows measurably as more modules convert.
+- Bugs keep landing at the seams between Effect and plain `async` code.

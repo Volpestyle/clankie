@@ -152,3 +152,23 @@ within the GitHub connection, for three minutes. Concurrent checks share the
 same pending read. Read failures are cached too, so a fleet sweep cannot repeat
 a rate-limited request per pane. A new connection gets a separate cache; a new
 bug is observed after the prior result expires.
+
+## Evidence and limits
+
+This record links no timing record. The decision cites these observations: the whole
+landing gate on every push took about 20 minutes on a hosted runner, with a cold
+typecheck; the owner's Mac took one job at a time; a ready pull request waited
+up to 15 minutes for a Mac runner, then ran up to 15 more; and one test already
+failing on `main` (fixture-admission-corrective on hosted Linux) held three pull
+requests for an afternoon. The quick `check` job takes about a minute. The
+three Mac runner instances and GitHub's merge queue being unavailable to
+personal-account repositories are as stated on 2026-10-31.
+
+## Revisit when
+
+- The quick `check` job grows well past a minute, or a ready pull request's
+  gate takes tens of minutes again.
+- `ci-finding` issues from `main` arrive faster than workers close them.
+- GitHub offers its merge queue to repositories owned by a personal account.
+- The Mac runners change in number, or keep failing jobs before code runs
+  ([ADR 0347](0347-a-pull-request-merges-on-local-checks-and-the-quick-checks.md)).

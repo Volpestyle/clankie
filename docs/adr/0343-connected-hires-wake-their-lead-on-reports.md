@@ -29,3 +29,17 @@ at the window's end, with a new window after each send. Failed notifications
 are logged and never prevent inbox delivery. Notifications are best effort;
 the inbox remains the durable record. Anthropic routine webhooks receive
 `anthropic-version: 2026-10-21`.
+
+## Evidence and limits
+
+This record links no measurement file. The relay's 55-second hops are sized to
+fit the MCP call's 60-second default timeout; the 45-second `waitSeconds` is
+only an upper bound on a wait. That a Claude Code routine
+fire starts a fresh session, and the `anthropic-version` its webhook receives,
+are as of 2026-11-01.
+
+## Revisit when
+
+- The MCP call timeout connected apps use changes from 60 seconds.
+- Claude Code routines can resume the thread that hired a worker.
+- Anthropic's routine webhook expects a different `anthropic-version`.

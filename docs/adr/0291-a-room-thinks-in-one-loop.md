@@ -130,3 +130,21 @@ run it.
 - Room sessions grow again and rely on Pi compaction. Its cost needs watching.
 - A long turn holds the room until the model forks it. The p95 check guards
   against a return of the pre-0229 tail.
+
+## Evidence and limits
+
+The [lane-folding record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-24-vuh-2796-lane-folding/README.md)
+holds the measurements in the context. Models and load differ between the
+periods before and after ADR 0229, so that comparison is a hint, not a result.
+Increment 1 is proven on a loopback model and the lanes eval smoke run; no real
+model has run it, and acceptance still waits on the before-and-after eval.
+
+## Revisit when
+
+- The lanes eval loses cases with the fold on, or room p95 latency rises above
+  the 285 s handoff baseline.
+- Context per room turn in `turn-settled.jsonl` grows until Pi compaction cost
+  outweighs the gain.
+- Owner DMs no longer wait behind fleet work in the lead's loop, and the lead
+  gains per-actor tool scoping for non-owner grants, which together reopen
+  folding rooms into the native lead.

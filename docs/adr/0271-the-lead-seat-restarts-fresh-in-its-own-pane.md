@@ -126,3 +126,17 @@ sequenceDiagram
   others are refused as `not_shell_launch`.
 - The token budget is independent of the model window. A smaller window
   compacts before it is reached, and the 12-hour rule still applies.
+
+## Evidence and limits
+
+This record links no measurement file. The context reports the seat's run:
+eight days and 22 compactions from 2026-10-07 to a manual `/clear` on
+2026-10-15, and on 2026-10-13, 828 turns at a per-hour median of ~516k tokens
+of context, up to ~958k in its 1M window. The home-trust guard rests on Claude
+Code 2.1.310 keeping home trust session-only. The current 250k / 12-hour budget
+and its evidence are in [ADR 0293](0293-a-seat-is-sized-by-its-work-not-its-window.md).
+
+## Revisit when
+
+- Claude Code lets a session clear its own context, or keeps trust for a
+  launch directory in home across sessions.

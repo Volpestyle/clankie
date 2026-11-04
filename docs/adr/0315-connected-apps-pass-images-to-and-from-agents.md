@@ -68,3 +68,16 @@ file's contents leave the machine this way.
 - An image sent to an agent stays in its persona thread's delivered files and
   in its git-ignored inbox, as an owner attachment does.
 - No new grant, route or setting. The connector's allowlist gains four ops.
+
+## Evidence and limits
+
+This record links no measurement. The 3.75 MB read cap follows the limit the decision
+cites: a model takes at most 5 MB of base64 per image. The bounds on fetched
+addresses (20 MiB, fifteen seconds, three redirects) are chosen limits, not
+measurements.
+
+## Revisit when
+
+- The models connected apps use change their per-image limit.
+- A model can send a large image's bytes in a tool call, so a lead no longer
+  needs a public address for one.
