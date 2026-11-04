@@ -21,6 +21,7 @@ import { fleetLinkFetch } from "../src/fleet-link.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
+import { RemoteObservationError } from "../src/remote-fleet-relay.ts";
 
 const exec = promisify(execFile);
 const cleanup: (() => Promise<void>)[] = [];
@@ -111,6 +112,7 @@ async function service() {
     shell: { pid: 1, startTime: "native-fixture" },
     processes: [{ pid: 2, startTime: "native-fixture" }],
   };
+  let admissionUnavailable = false;
   const app = await createClankieApp({
     captain: createStubCaptain({
       listFleetPeerSeats: (authority) => peers.list(authority),
@@ -136,7 +138,10 @@ async function service() {
         pane,
         current: () => true,
         validate: async () => true,
-        projectProof: async () => proof,
+        projectProof: async () => {
+          if (admissionUnavailable) throw new RemoteObservationError("process_exiting");
+          return proof;
+        },
       }),
     },
   });
@@ -172,7 +177,16 @@ async function service() {
     JSON.stringify({ schemaVersion: 2, authentication: "local-process", fleet: "pc", socket, url }),
   );
   const env = { PATH: process.env.PATH, HOME: root, HERDR_SOCKET_PATH: socket, HERDR_PANE_ID: pane };
-  return { root, url, env, store, delivered };
+  return {
+    root,
+    url,
+    env,
+    store,
+    delivered,
+    setAdmissionUnavailable: (value: boolean) => {
+      admissionUnavailable = value;
+    },
+  };
 }
 
 /** The worker bridge the PC runs, over stdio. */
@@ -319,6 +333,58 @@ it("pushes a PC pane's evidence over its fleet link with the file's sha256 store
     sha256(second),
   );
 }, 60_000);
+
+// #839: real stdio tool → pane link admission → evidence store, including the
+// display text the harness shows instead of only the retained structured JSON.
+it("surfaces an evidence tool admission refusal and keeps the same captioned upload recoverable (#839)", async () => {
+  const f = await service();
+  const repo = await repository(f.root);
+  const folder = join(repo, "docs/testing/run");
+  const bytes = Buffer.from("private capture data ".repeat(2000));
+  const file = join(folder, "capture.txt");
+  await writeFile(file, bytes);
+  const call = bridge(f.env);
+  await call("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "codex", version: "1" },
+  });
+  const args = {
+    path: folder,
+    issue: "VUH-2923",
+    caption: "Evidence caption survives fleet admission recovery.",
+  };
+  f.setAdmissionUnavailable(true);
+  const refused = await call("tools/call", { name: "evidence_push", arguments: args });
+  expect(refused.isError).toBe(true);
+  expect(refused.content[0]?.text).toContain("process_exiting");
+  expect(refused.content[0]?.text).toContain("fleet_admission_unavailable");
+  expect(decodeMcpResult(refused)).toMatchObject({
+    ok: false,
+    uploaded: 0,
+    failures: [
+      {
+        path: "capture.txt",
+        error: "fleet_admission_unavailable",
+        observation: "process_exiting",
+        status: 503,
+        retryable: true,
+      },
+    ],
+  });
+  expect(await readFile(file)).toEqual(bytes);
+  await expect(stat(join(folder, "evidence.json"))).rejects.toThrow();
+  expect(await f.store.list({ issueKey: "VUH-2923" })).toHaveLength(0);
+
+  f.setAdmissionUnavailable(false);
+  const recovered = await call("tools/call", { name: "evidence_push", arguments: args });
+  expect(recovered.isError, recovered.content[0]?.text).toBeUndefined();
+  expect(decodeMcpResult(recovered)).toMatchObject({ ok: true, uploaded: 1 });
+  const records = await f.store.list({ issueKey: "VUH-2923" });
+  expect(records).toHaveLength(1);
+  expect(records[0]).toMatchObject({ sha256: sha256(bytes), caption: args.caption });
+  expect(await readFile(join(repo, ".local/evidence/docs/testing/run/capture.txt"))).toEqual(bytes);
+});
 
 // VUH-2923: a PC worker could message only seats on the PC. One lead's seats
 // now reach each other on any fleet machine; another lead's never do.

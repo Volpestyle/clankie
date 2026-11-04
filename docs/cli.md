@@ -4278,7 +4278,13 @@ may expire sooner); manifests keep only stable `clankie://evidence` links.
   requires `--issue` and has no other commands; the worker bridge's
   `evidence_push({path, issue, caption?})` tool takes an absolute `path` and
   does the same. Records name the seat as their actor, with its worker name
-  and lead.
+  and lead. Tool failures show each file's cause, with public HTTP `status`,
+  `error`, `observation` and `retryable` fields retained when the service supplies
+  them. A `fleet_admission_unavailable` observation such as `process_exiting`
+  explains a blocked fleet request; the installed operator CLI uses a different
+  authorization path. Keep the same path, issue and caption when recovering an
+  upload, so its deterministic receipt identity stays the same. A refused
+  receipt lookup does not prove an earlier upload failed.
 - `clankie evidence backfill --database SQLITE [--repo PATH] [--apply]` repairs
   local SQLite records only. It opens the database read-only by default and
   prints proposed changes and before/after counts. `--repo` defaults to the
