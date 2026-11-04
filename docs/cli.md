@@ -10994,6 +10994,41 @@ The CLI, API client and app use `GET /v1/fleet/roster`,
 require the operator or an owner-paired Take Control device. Worker, support and
 visitor credentials do not grant access. See [ADR 0279](adr/0279-fleet-counts-come-from-the-host-roster.md).
 
+### `fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]`
+
+Let one other local account, such as the account a CI runner runs as, queue
+for this machine's heavy slots, so its builds wait with the fleet's instead of
+running beside them (#562). Off by default. Only the owner turns it on: the
+route is `GET`/`POST /v1/operator/foreign-heavy-permits` with operator or
+Take Control credentials, and fleet settings never carry it. macOS only.
+
+When on, the service creates `/Users/Shared/clankie-permits` (mode 0700, owned
+by the service user, refused if it is a symlink, someone else's or has group or
+other bits) with exactly one ACL entry, `USER` allowed search, read back and
+refused if anything else is there. It listens on `heavy.sock` inside it (mode
+0702: only someone who can reach the directory can connect). The service checks
+every connecting process's uid with the kernel (`getpeereid`) and refuses
+anyone but `USER`, the owner included.
+
+A client sends one line, at most 1 KiB, within 5 seconds:
+`{"op":"acquire","lane":"full","label":"NAME"}`. `full` is the only lane. The
+label is reduced to letters, digits and `._:/ -`, 64 characters at most, and
+becomes holder `ci-permit:NAME`. Replies are lines of `{"state":...}`:
+`waiting` (`reason`: `slots` when every heavy slot is held, `foreign_cap` when this account's own permits are all in use), `granted`, `lost` (`max_hold`, `holder_exited`,
+`disabled`) and `refused` (`peer_not_permitted`, `request_deadline`,
+`request_too_large`, `malformed`, `lane_not_allowed`, `queue_full`). The
+permit is held until the client closes the connection, at most
+`--max-hold-minutes` (1–240, default 60). At most `--max-leases` (1–4,
+default 1) foreign permits are held or requested at once; up to four more
+callers per lease wait in order, and further ones are refused. Turning it off
+closes the socket, ends held permits as `lost` and removes the socket file.
+
+`scripts/ci-heavy.mjs` is the client the CI workflows use when the socket
+exists: `node scripts/ci-heavy.mjs [--label NAME] -- COMMAND ARGS`. It runs the
+command in its own process group once granted and stops it if the permit is
+lost. If the socket is missing, refuses or the service is down, it runs the
+command without a permit and prints a warning.
+
 ### `fleet processes` / `fleet processes retire`
 
 `clankie fleet processes` reads the local host's Codex, Claude and Codex helper

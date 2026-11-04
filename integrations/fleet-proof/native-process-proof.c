@@ -18,6 +18,7 @@
 #include <sys/proc.h>
 #include <sys/proc_info.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/un.h>
 #include <time.h>
@@ -1412,7 +1413,33 @@ static int serve(void) {
   }
 }
 
+/* `--peer-uid`: the kernel's account of who is on the other end of the
+ * accepted unix socket passed as fd 3. A socket ACL decides who may connect;
+ * this decides who did. Prints {"uid":U,"gid":G,"pid":P}; exit 2 otherwise. */
+static int peer_uid(void) {
+  struct stat status;
+  if (fstat(3, &status) != 0 || !S_ISSOCK(status.st_mode)) {
+    fprintf(stderr, "{\"error\":\"not_a_socket\",\"errno\":%d}\n", errno);
+    return 2;
+  }
+  uid_t uid;
+  gid_t gid;
+  if (getpeereid(3, &uid, &gid) != 0) {
+    fprintf(stderr, "{\"error\":\"getpeereid\",\"errno\":%d}\n", errno);
+    return 2;
+  }
+  pid_t pid = 0;
+  socklen_t length = sizeof(pid);
+  if (getsockopt(3, SOL_LOCAL, LOCAL_PEERPID, &pid, &length) != 0 || length != sizeof(pid)) {
+    fprintf(stderr, "{\"error\":\"local_peerpid\",\"errno\":%d}\n", errno);
+    return 2;
+  }
+  printf("{\"uid\":%u,\"gid\":%u,\"pid\":%d}\n", (unsigned)uid, (unsigned)gid, (int)pid);
+  return 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && strcmp(argv[1], "--peer-uid") == 0) return peer_uid();
   proof_output = stdout;
   proof_error = stderr;
   if (argc == 2 && strcmp(argv[1], "--serve") == 0) return serve();

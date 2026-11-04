@@ -448,3 +448,43 @@ export const UpdateEvidenceStorageSchema = z
     configured: EvidenceSettingsSchema,
   })
   .strict();
+
+/**
+ * Heavy-work permits for one other local user (a CI runner account), lent by
+ * the owner's service over a permit-only socket. Owner routes only; it grants
+ * that user no other service, fleet or file access.
+ */
+export const FOREIGN_HEAVY_PERMITS_PATH = "/v1/operator/foreign-heavy-permits";
+/** A macOS/Linux short user name; never root, which the service refuses separately. */
+export const ForeignPermitUserSchema = z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/u);
+export const ForeignHeavyPermitsSettingsSchema = z
+  .object({
+    user: ForeignPermitUserSchema,
+    /** Heavy slots that user may hold at once; each takes a full slot. */
+    maxLeases: z.number().int().min(1).max(4).default(1),
+    /** A lease held longer than this is released and reported lost. */
+    maxHoldMinutes: z.number().int().min(1).max(240).default(60),
+  })
+  .strict();
+export type ForeignHeavyPermitsSettings = z.infer<typeof ForeignHeavyPermitsSettingsSchema>;
+export const ForeignHeavyPermitsSnapshotSchema = z.object({
+  schemaVersion: z.literal(1),
+  enabled: z.boolean(),
+  settings: ForeignHeavyPermitsSettingsSchema.optional(),
+  /** Whether this service is listening now, and why not when enabled. */
+  listening: z.boolean(),
+  unavailable: z.string().max(200).optional(),
+  socketPath: z.string().max(200).optional(),
+});
+export type ForeignHeavyPermitsSnapshot = z.infer<typeof ForeignHeavyPermitsSnapshotSchema>;
+export const UpdateForeignHeavyPermitsSchema = z.discriminatedUnion("enabled", [
+  z.object({ schemaVersion: z.literal(1), enabled: z.literal(false) }).strict(),
+  z
+    .object({
+      schemaVersion: z.literal(1),
+      enabled: z.literal(true),
+      settings: ForeignHeavyPermitsSettingsSchema,
+    })
+    .strict(),
+]);
+export type UpdateForeignHeavyPermits = z.infer<typeof UpdateForeignHeavyPermitsSchema>;

@@ -95,6 +95,15 @@ temporary registry and native simulators disabled;
 outside the live registry. The markers do not affect `clankie heavy` or worker
 governors. Run resource stress checks only manually or in the release gate.
 
+## Another account's builds
+
+A CI runner that runs as a different user cannot use `clankie heavy`: its
+registry would be its own. The owner can let that one account queue through
+`clankie fleet permits on --user USER`; its workflows then wrap heavy steps in
+`node scripts/ci-heavy.mjs --`. Workers never turn this on and never change a
+runner account; it is the owner's switch
+([CLI reference](../../../../docs/cli.md)).
+
 ## Platform notes
 
 The shared sizing functions accept host-measured `ResourceHostSpecs` for a

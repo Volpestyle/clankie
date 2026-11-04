@@ -146,7 +146,14 @@ jobs:
             echo "::warning::CLANKIE_MAC_TOOLS is set but is not a directory on this runner"
           fi
       - name: Share the machine's heavy-work permits
-        run: if command -v clankie >/dev/null; then echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"; fi
+        # A runner account other than the owner's asks the owner's Clankie
+        # through his permit socket once he has turned it on (#562).
+        run: |
+          if [ -S /Users/Shared/clankie-permits/heavy.sock ]; then
+            echo "HEAVY=node $GITHUB_WORKSPACE/scripts/ci-heavy.mjs --label ${GITHUB_RUN_ID}/${GITHUB_JOB} --" >> "$GITHUB_ENV"
+          elif command -v clankie >/dev/null; then
+            echo "HEAVY=clankie heavy --" >> "$GITHUB_ENV"
+          fi
       - run: $HEAVY pnpm install --frozen-lockfile --store-dir "$HOME/Library/pnpm/store"
       # The suites spawn the pinned Herdr by name and read processes through the
       # compiled helper; without the helper the observer refuses every pane.
