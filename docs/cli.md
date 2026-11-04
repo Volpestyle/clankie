@@ -1849,8 +1849,8 @@ Revoke one device. Human: `Revoked <id> (<name>).` JSON: `{ "ok": true, "device"
 ### `connector [status] [--json]` / `connector approve CODE` / `connector deny CODE` / `connector prompts [on|off APP]` / `connector detect [on|off herdr]` / `connector serve [on|off APP]` / `connector lead [clankie|apps]` / `connector wake [list | set LEAD | clear LEAD | send LEAD TEXT]`
 
 The Claude connector ([ADR 0301](adr/0301-claude-reaches-the-fleet-through-a-narrow-connector.md)):
-a remote MCP server that lets Claude list your agents, read their screens and
-message them, and nothing else. `clankie connector` prints the URL to add in
+a remote MCP server that lets a connected app work with your agents, within the
+access its sign-in page lists. `clankie connector` prints the URL to add in
 Claude (Settings > Connectors > Add custom connector) once remote access is
 signed in, and the sign-ins waiting. JSON: `{ "ok": true, "connectorUrl"?: URL,
 "signIns": [{ "code", "clientName", "redirectHost", "createdAt", "expiresAt" }] }`.

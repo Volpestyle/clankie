@@ -67,6 +67,16 @@ export const CLAUDE_CONNECTOR_CALLBACK_URLS = [
   "https://claude.com/api/mcp/auth_callback",
 ] as const;
 
+/**
+ * What approving an app gives it, in the owner's words, from the connector's tools
+ * and op allowlist. A change to either changes this too.
+ */
+export const CONNECTOR_ACCESS_SUMMARY =
+  "see your agents and read their screens, message them, pass images to and from them, start new ones in your projects, close finished agents that Clankie or an app hired, read your issues, write issues and comments under each project's posting setting, share notes with your other connected apps and wake a connected lead";
+/** Access an app gains only by the owner's later choice, and what it never has. */
+export const CONNECTOR_ACCESS_LIMITS =
+  "If you hand the lead to connected apps, it can also read held work and its own hires' reports. If you turn it on for this app, it can also answer prompts and press keys in agents' terminals. It can't read or change your settings.";
+
 /** Sign-in codes are short and typed by the owner on another screen. */
 export const ConnectorSignInCodeSchema = z
   .string()

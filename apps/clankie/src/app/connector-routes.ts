@@ -1,6 +1,8 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { CONNECTOR_GRANTS, type DomainEvent } from "@clankie/protocol";
 import {
+  CONNECTOR_ACCESS_LIMITS,
+  CONNECTOR_ACCESS_SUMMARY,
   CONNECTOR_AUTHORIZATION_SERVER_PATH,
   CONNECTOR_AUTHORIZE_PATH,
   CONNECTOR_AUTHORIZE_STATUS_PATH,
@@ -803,7 +805,8 @@ function page(title: string, body: string, script = ""): string {
 function approvalPage(signIn: PendingSignIn, statusUrl: string, nonce: string): string {
   const host = connectorRedirectHost(signIn.redirectUri);
   const body =
-    `<p>${escapeHtml(signIn.clientName)} is asking to see your agents, read their screens, message them and start new ones in your projects. It can't type into them, stop or close them, or change anything else.</p>` +
+    `<p>${escapeHtml(signIn.clientName)} is asking to ${escapeHtml(CONNECTOR_ACCESS_SUMMARY)}.</p>` +
+    `<p>${escapeHtml(CONNECTOR_ACCESS_LIMITS)}</p>` +
     `<p>To allow it, approve this code on your Mac:</p><p class="code">${escapeHtml(signIn.code)}</p>` +
     `<p>Run this on your Mac. This page carries on by itself once you do.</p>` +
     `<p class="command"><code id="command">clankie connector approve ${escapeHtml(signIn.code)}</code><button id="copy" type="button">Copy</button></p>` +

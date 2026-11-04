@@ -8,6 +8,7 @@ import {
   type CredentialStore,
 } from "@clankie/credential-broker";
 import {
+  CONNECTOR_ACCESS_SUMMARY,
   CONNECTOR_DETECTION_PATH,
   CONNECTOR_PROMPT_ANSWERS_PATH,
   CONNECTOR_SIGN_INS_PATH,
@@ -563,7 +564,7 @@ export async function runConnectorCommand(
     else
       stdout.write(
         decided.data.decision === "approved"
-          ? `Approved ${decided.data.code}. ${connectorShowableText(decided.data.clientName)} can now list your agents, read their screens and message them.\nIt shows in \`clankie devices\`; revoke it there to disconnect.\n`
+          ? `Approved ${decided.data.code}. ${connectorShowableText(decided.data.clientName)} can now ${CONNECTOR_ACCESS_SUMMARY}.\nIt shows in \`clankie devices\`; revoke it there to disconnect.\n`
           : `Denied ${decided.data.code}. Nothing was connected.\n`,
       );
     return 0;
