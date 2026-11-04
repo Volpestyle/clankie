@@ -1,7 +1,15 @@
 import { readPersistedConversation } from "./support/persisted-conversation.ts";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1330,6 +1338,12 @@ describe("a connector device's messages to an agent it started", () => {
 
   it("leaves a replacement occupant in the same pane unmarked", async () => {
     const f = await fixture({ appStarted: hiring, successor: true });
+    // The successor keeps who asked for display, but not the app's lead of the old occupant.
+    const record = JSON.parse(
+      readFileSync(join(f.root, "herdr-watches.json.owners.json"), "utf8"),
+    ).hires.find((hire: { seatId?: string }) => hire.seatId === f.agent.terminalId);
+    expect(record).toMatchObject({ startedBy: { kind: "app", deviceId: "phone-a" } });
+    expect(record).not.toHaveProperty("appLeadOccupantId");
     expect((await connectorSend(f, { appDeviceId: "phone-a", channel: "duet" }))?.fromLead).toBeUndefined();
   });
 

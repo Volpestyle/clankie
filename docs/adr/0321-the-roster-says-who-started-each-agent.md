@@ -73,6 +73,8 @@ brief told it not to act on unmarked "lead" messages.
 - **Not inherited.** The hire records the occupant the app's intent bound
   (`appLeadOccupantId`). A replacement in the same seat, including a journaled
   restart successor that keeps `startedBy` for display, is not that occupant.
+  Re-adopting the same native thread after a reattachment (`readopt`) keeps
+  the mark: the occupant is the same one, and it is not an adoption.
 - **Adoption ends it for good.** When Clankie's thread or any other
   conversation adopts the occupant (by messaging it with `message_seat`), the
   hire stops recording the app's lead, and the device's later sends are plain
