@@ -146,7 +146,8 @@ async function probeOllamaShow(
  * loaded runner's `context_length` in `/api/ps`. A model not yet loaded is
  * loaded first, with the same default options `/v1` requests get; the turn
  * about to run would load it anyway. Any other runtime answers with an error,
- * which returns undefined.
+ * which returns undefined, as does a redirect: this runs before every turn, and
+ * whatever holds the port must not be able to send it to another address.
  */
 export async function ollamaServedContext(
   baseURL: string,
@@ -155,7 +156,10 @@ export async function ollamaServedContext(
 ): Promise<number | undefined> {
   const base = normalizeLocalBaseUrl(baseURL);
   const loaded = async (): Promise<number | null | undefined> => {
-    const response = await fetchImpl(new URL("/api/ps", base), { signal: AbortSignal.timeout(3_000) });
+    const response = await fetchImpl(new URL("/api/ps", base), {
+      redirect: "error",
+      signal: AbortSignal.timeout(3_000),
+    });
     if (!response.ok) return undefined;
     const body = (await response.json()) as { models?: unknown };
     if (!Array.isArray(body.models)) return undefined;
@@ -174,6 +178,7 @@ export async function ollamaServedContext(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model, stream: false }),
+      redirect: "error",
       signal: AbortSignal.timeout(180_000),
     });
     if (!load.ok) return undefined;
