@@ -347,7 +347,11 @@ export function createHiring(ctx: HiringContext) {
             },
             (fleet, entry) => herdrWatches.hireRetained({ fleet, workingDirectory: entry.workingDirectory }),
           );
-        request = { ...request, workingDirectory: freshness.workingDirectory ?? freshness.path };
+        // A fresh intent follows the start folder's own receipts (#100). The worktree has none of
+        // them, so the hire there is admitted under the worktree's own key, as its first; its
+        // retry returns here and meets that key's receipt.
+        const { freshIntent: _startFolderIntent, ...moved } = request;
+        request = { ...moved, workingDirectory: freshness.workingDirectory ?? freshness.path };
         brief = [
           brief,
           `Your start checkout ${freshness.start} was left exactly as it was (${freshness.startReason}). You are in a new worktree at ${freshness.path}, on branch ${freshness.branch}, made from fetched origin/main ${freshness.remoteMain}. Work and commit here.`,
