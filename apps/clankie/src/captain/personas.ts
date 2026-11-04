@@ -97,12 +97,18 @@ const PersonaMarkersSchema = z
   .strict();
 
 /**
- * The pane each subject's occupant was last seen in, kept in its own file so that neither the
- * persona file nor the markers change shape for a rolled-back runtime. Missing or unreadable reads
- * as empty, which only keeps a character from moving by name (#349).
+ * The pane each subject's occupant was last seen in, and the v1 characters not yet restored, kept in
+ * their own file so that neither the persona file nor the markers change shape for a rolled-back
+ * runtime. Missing or unreadable reads as empty, which only keeps a character from moving by name
+ * and a v1 character from being restored again (#349).
  */
 const PersonaPanesSchema = z
-  .object({ schemaVersion: z.literal(1), panes: z.record(z.string(), z.string().min(1).max(512)) })
+  .object({
+    schemaVersion: z.literal(1),
+    panes: z.record(z.string(), z.string().min(1).max(512)),
+    /** v1 characters still waiting for their own occupant. Each is restored at most once. */
+    restorable: z.array(OperatorAgentPersonaIdSchema).optional(),
+  })
   .strict();
 
 const PendingRoleSchema = z
@@ -135,6 +141,8 @@ export class PersonaStore {
   /** Personas holding a project role in any project: the characters a name alone can't move (#349). */
   private roleHolders = new Set<string>();
   private readonly ownerNamed = new Set<string>();
+  /** v1 characters their own occupant may still restore; a restored one leaves for good (#349). */
+  private readonly restorable = new Set<string>();
   private unreadable = false;
   private loadedSource: string | undefined;
   private projectStore?: SettingsStore;
@@ -187,10 +195,17 @@ export class PersonaStore {
         for (const personaId of markers.ownerNamed)
           if (this.records.has(personaId)) this.ownerNamed.add(personaId);
       }
-      for (const [subject, paneId] of Object.entries(this.readPanes())) {
+      const sidecar = this.readPanes();
+      for (const [subject, paneId] of Object.entries(sidecar.panes)) {
         const binding = this.bindings.get(subject);
         if (binding !== undefined) this.bindings.set(subject, { ...binding, paneId });
       }
+      // Only a file no v2 runtime has saved yet, or the record of what is still waiting, makes a
+      // v1 character restorable: binding cleanup later can't make a restored one look new.
+      const waiting = sidecar.restorable ?? (state.schemaVersion === 1 ? [...this.records.keys()] : []);
+      const bound = new Set([...this.bindings.values()].map((binding) => binding.personaId));
+      for (const personaId of waiting)
+        if (this.records.has(personaId) && !bound.has(personaId)) this.restorable.add(personaId);
     } catch {
       this.unreadable = true;
     }
@@ -829,12 +844,14 @@ export class PersonaStore {
     if (binding === undefined) {
       // Compatibility only: v1 derived persona ids from occupants. Retaining a
       // matching record preserves its conversations; new ids are always minted.
-      // Only a record no binding holds yet is restored: one already bound is that binding's
-      // character, which moves only as mayTake allows (#349).
+      // A record is restored once, while it still waits for its occupant: after that it is its
+      // binding's character, which moves only as mayTake allows, whatever becomes of that binding (#349).
       const legacyPersonaId = `agent-${observed.occupantId.slice("session-".length)}`;
       const restorable =
+        this.restorable.has(legacyPersonaId) &&
         this.records.has(legacyPersonaId) &&
         ![...this.bindings.values()].some((entry) => entry.personaId === legacyPersonaId);
+      this.restorable.delete(legacyPersonaId);
       const personaId = restorable ? legacyPersonaId : `agent-${randomUUID()}`;
       binding = { subject, personaId, occupantId: observed.occupantId };
       this.bindings.set(subject, binding);
@@ -974,12 +991,12 @@ export class PersonaStore {
     };
   }
 
-  private readPanes(): Record<string, string> {
+  private readPanes(): { panes: Record<string, string>; restorable?: readonly string[] | undefined } {
     try {
-      if (!existsSync(this.panesPath)) return {};
-      return PersonaPanesSchema.parse(JSON.parse(readFileSync(this.panesPath, "utf8"))).panes;
+      if (!existsSync(this.panesPath)) return { panes: {} };
+      return PersonaPanesSchema.parse(JSON.parse(readFileSync(this.panesPath, "utf8")));
     } catch {
-      return {};
+      return { panes: {}, restorable: [] };
     }
   }
 
@@ -1023,6 +1040,7 @@ export class PersonaStore {
           binding.paneId === undefined ? [] : [[binding.subject, binding.paneId]],
         ),
       ),
+      restorable: [...this.restorable].filter((personaId) => this.records.has(personaId)),
     });
     durableJson(this.path, {
       schemaVersion: 2,

@@ -9,6 +9,8 @@ import {
   OperatorCodexAccountSchema,
   type OperatorConversation,
 } from "@clankie/protocol";
+import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
+import { SettingsStore } from "@clankie/settings";
 import { z } from "zod";
 import {
   subjectForHerdrName,
@@ -582,6 +584,99 @@ describe("PersonaStore", () => {
       expect(live[1]!.personaId).not.toBe(legacyId);
       expect(store.boundPersona(live, "w1:p2", OCCUPANT_TWO)?.role).toBeUndefined();
       expect(store.boundPersona(live, "w1:p1", OCCUPANT_ONE)?.role).toBe("reviewer");
+    });
+
+    it.each([false, true])(
+      "an older runtime's character is restored once, even after hire cleanup drops its binding (project roles: %s)",
+      async (projectRoles) => {
+        const root = fresh("clankie-personas-v1-once-");
+        const legacyId = `agent-${OCCUPANT_TWO.slice("session-".length)}`;
+        const at = "2026-11-04T00:00:00.000Z";
+        writeFileSync(
+          join(root, "personas.json"),
+          JSON.stringify({
+            schemaVersion: 1,
+            personas: [
+              {
+                schemaVersion: 1,
+                personaId: legacyId,
+                name: "Legacy character",
+                appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+                harness: "codex",
+                createdAt: at,
+                updatedAt: at,
+              },
+            ],
+          }),
+        );
+        const settings = new SettingsStore(join(root, "settings.json"));
+        if (projectRoles)
+          await settings.update((current) => ({
+            ...current,
+            projects: ProjectsSettingsSchema.parse({ projects: [{ id: "default", name: "Default" }] }),
+          }));
+        const stores: PersonaStore[] = [];
+        const open = async () => {
+          const store = new PersonaStore(root);
+          stores.push(store);
+          if (projectRoles) await store.ready(settings);
+          return store;
+        };
+        try {
+          // The older session restores its character in its own pane, unnamed.
+          const first = await open();
+          expect(first.reconcile([seen("w1:p1", OCCUPANT_TWO)])[0]!.personaId).toBe(legacyId);
+          await first.close();
+          // Another session replaces it there and is given a role.
+          const current = await open();
+          expect(current.reconcile([seen("w1:p1", OCCUPANT_ONE)])[0]!.personaId).toBe(legacyId);
+          if (projectRoles)
+            await current.setProjectRole({
+              schemaVersion: 1,
+              personaId: legacyId,
+              role: "reviewer",
+              projectId: "default",
+            });
+          else current.setRole({ schemaVersion: 1, personaId: legacyId, role: "reviewer" });
+          // The service hires that session under a new handle, retiring its pane binding.
+          expect(current.adoptSpawn(seen("w1:p3", OCCUPANT_ONE, "atlas-ab12"), "Atlas").personaId).not.toBe(
+            legacyId,
+          );
+          await current.close();
+          // After a restart the older session comes back in another pane under a fresh name.
+          const store = await open();
+          const live = store.reconcile([
+            seen("w1:p3", OCCUPANT_ONE, "atlas-ab12"),
+            seen("w1:p2", OCCUPANT_TWO, "fresh-name"),
+          ]);
+          expect(live[1]!.personaId).not.toBe(legacyId);
+          expect(store.boundPersona(live, "w1:p2", OCCUPANT_TWO)?.role).toBeUndefined();
+        } finally {
+          for (const store of stores) await store.close();
+        }
+      },
+    );
+
+    it("an older runtime's character still waiting for its session is restored after later restarts", () => {
+      const root = fresh("clankie-personas-v1-waiting-");
+      const at = "2026-11-04T00:00:00.000Z";
+      const record = (occupantId: string) => ({
+        schemaVersion: 1,
+        personaId: `agent-${occupantId.slice("session-".length)}`,
+        name: "Legacy character",
+        appearance: { variant: "teal", accessory: "planner", shape: "circle" },
+        harness: "codex",
+        createdAt: at,
+        updatedAt: at,
+      });
+      writeFileSync(
+        join(root, "personas.json"),
+        JSON.stringify({ schemaVersion: 1, personas: [record(OCCUPANT_ONE), record(OCCUPANT_TWO)] }),
+      );
+      new PersonaStore(root).reconcile([seen("w1:p1", OCCUPANT_ONE)]);
+      new PersonaStore(root).reconcile([seen("w1:p1", OCCUPANT_ONE)]);
+      const [waited] = new PersonaStore(root).reconcile([seen("w1:p2", OCCUPANT_TWO)]);
+      expect(waited!.personaId).toBe(record(OCCUPANT_TWO).personaId);
     });
 
     it("nor in a held character under any key it falls back to", () => {
