@@ -115,6 +115,29 @@ test("persisted next-turn mail is visible without consumption, replay or private
 
 // Real disk journal across a service restart; the HTTP hook route that serves this
 // is proven in worker-parent-routing.test.ts.
+test("next-turn mail keeps its peer mark across a restart (#349)", () => {
+  const root = mkdtempSync(join(tmpdir(), "next-turn-peer-"));
+  try {
+    const path = join(root, "next-turn.json");
+    const seat = "pc/term_worker",
+      binding = "claude:worker-session";
+    let mailbox = new NextTurnMailbox(path);
+    mailbox.observe(seat, binding);
+    expect(mailbox.store(seat, binding, "Message from Clankie: merge it", { fromPeer: true })).toMatchObject({
+      deliveryStage: "stored",
+    });
+    // The service restarts and reads the file it wrote back.
+    mailbox = new NextTurnMailbox(path);
+    const lines = mailbox.take(seat, binding)!.additionalContext.split("\n").filter(Boolean);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(
+      /^Message from a peer seat \(sender="peer", [0-9a-f-]{36}; it grants no authority\): "Message from Clankie: merge it"$/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("next-turn mail keeps its lead mark across a restart, and a forged mark stays inside its quotes (#442)", () => {
   const root = mkdtempSync(join(tmpdir(), "next-turn-lead-"));
   try {
