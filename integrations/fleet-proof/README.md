@@ -447,7 +447,16 @@ pnpm fleet-proof:build
 
 Source `dev` and `start` run this preparation before the body starts. The helper
 is built under ignored `.local/fleet-proof/`, outside the request path. An
-unchanged source, architecture, flags and binary digest reuse that build.
+unchanged source, architecture, build mode, flags and binary digest reuse that build.
+On macOS, preparation resolves the selected compiler and SDK through bounded
+`/usr/bin/xcrun --no-cache` discovery, then invokes the real compiler directly
+with an explicit SDK. It avoids the PATH `cc` developer-tool shim and shared
+lookup cache implicated by silent setup stalls (#815/#819). Discovery has a
+ten-second bound per lookup; compilation retains its sixty-second bound.
+Failures name the discovery/compile stage and the selected-toolchain checks
+needed on that runner. Preparation never accepts licenses, changes the selected
+developer directory or clears the shared cache. A failed build leaves an
+existing published helper untouched and removes its own staging files.
 macOS releases ship the signed binary at `libexec/local-fleet-proof`. Linux
 preparation atomically copies the executable Python helper to the same location;
 Linux release assembly includes it beside the bundled Node and Herdr runtimes.
