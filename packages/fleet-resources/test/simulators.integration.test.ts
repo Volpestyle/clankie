@@ -906,6 +906,65 @@ it("boot history prefers a warm exact device even when a cold one sorts first", 
   expect(lease(await f.http("/acquire", { ...f.request, exact: true })).deviceId).toBe(warm);
 });
 
+it("capture rounds reuse boot history, shut down promptly and retain the ten-minute backstop", async () => {
+  const f = await fixture();
+  const warm = randomUUID().toUpperCase();
+  const cold = randomUUID().toUpperCase();
+  await f.mutate((state) => {
+    state.devices[runtime] = [
+      {
+        udid: cold,
+        name: "A never booted",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+      },
+      {
+        udid: warm,
+        name: "Z previously booted",
+        state: "Shutdown",
+        isAvailable: true,
+        deviceTypeIdentifier: deviceType,
+        lastUsedAt: "2026-10-08T00:39:44Z",
+      },
+    ];
+  });
+  expect((await f.governor.snapshot()).policy.simulatorIdleMs).toBe(600_000);
+  for (let round = 0; round < 2; round++) {
+    const acquired = await f.http("/acquire", f.request);
+    expect(acquired.outcome).toBe("acquired");
+    const current = lease(acquired);
+    expect(current.deviceId).toBe(warm);
+    expect(await f.http("/acquire", f.request)).toMatchObject({
+      outcome: "acquired",
+      lease: { id: current.id, deviceId: warm },
+    });
+    expect((await f.commands()).filter((args) => args[0] === "bootstatus")).toHaveLength(round + 1);
+    expect(await f.http("/verify", { id: current.id, deviceId: warm, owner: f.owner })).toMatchObject({
+      outcome: "acquired",
+    });
+    expect((await f.http("/release", { id: current.id, owner: f.owner })).outcome).toBe("released");
+    expect((await f.governor.snapshot()).capacity.simulatorUsed).toBe(0);
+    expect((await f.read()).devices[runtime]!.every((device) => device.state === "Shutdown")).toBe(true);
+    // A new service instance must choose from native history, not an in-memory cache.
+    await f.restart();
+  }
+  // A lost caller still gets the unchanged idle backstop, rather than a warm device forever.
+  const abandoned = lease(await f.http("/acquire", f.request));
+  expect(abandoned.deviceId).toBe(warm);
+  f.advance(599_999);
+  await f.manager.tick();
+  expect((await f.governor.snapshot()).capacity.simulatorUsed).toBe(1);
+  f.advance(2);
+  await f.manager.tick();
+  expect((await f.governor.snapshot()).capacity.simulatorUsed).toBe(0);
+  expect((await f.read()).devices[runtime]!.find((device) => device.udid === warm)!.state).toBe("Shutdown");
+  const commands = await f.commands();
+  expect(commands.filter((args) => args[0] === "shutdown")).toHaveLength(3);
+  expect(commands.some((args) => args[0] === "create" || args[0] === "delete")).toBe(false);
+  expect(commands.filter((args) => args[0] === "bootstatus").every((args) => args[1] === warm)).toBe(true);
+});
+
 it("a waiter behind a queued ticket is told who is ahead of it, not an unknown holder", async () => {
   const f = await fixture();
   const a = lease(await f.http("/acquire", f.request));

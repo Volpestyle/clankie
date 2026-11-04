@@ -16,7 +16,12 @@ rules that matter on most turns:
 3. Dev servers and long-lived services use the server lane. Never launch one
    ungoverned, and stop it when you are done.
 4. Boot simulators only through `clankie simulator acquire`, verify the lease
-   before driving the device and release it after. Verified native activity or
+   before driving the device and release it after each capture or test round,
+   including on failure. Release shuts down the exact device and retains its
+   boot history for reuse; do not keep it warm between rounds. An idle repeat
+   boot still holds about 26.5 GiB of kernel footprint on iOS 27 (first boot:
+   about 36.9 GiB). The ten-minute idle deadline is an abandoned-lease backstop,
+   not the normal end of a round. Verified native activity or
    exact-holder heavy work retains supported holders without timer touches
    ([ADR 0249](../../../docs/adr/0249-simulator-leases-answer-promptly-and-name-their-holders.md),
    [ADR 0293](../../../docs/adr/0293-a-seat-is-sized-by-its-work-not-its-window.md)).

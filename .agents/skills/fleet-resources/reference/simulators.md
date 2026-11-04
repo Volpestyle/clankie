@@ -75,6 +75,21 @@ separately issued raw command.
 
 ## Cost and capacity
 
+Release after each capture or test round, including failed rounds, and wait for
+`released` or a native `Shutdown` observation before calling cleanup complete.
+The ten-minute idle deadline remains the backstop for an abandoned lease.
+Acquire reuses the current holder's booted lease; for a new lease it prefers
+stopped devices with native boot history. An unleased booted device still needs
+an explicit UDID: a booted device is not proof that this seat owns it.
+
+The #333 handoff measured an idle iPhone 17e on iOS 27 at about 26.5 GiB kernel
+footprint after a repeat boot and 36.9 GiB after its first boot. Repeat boot took
+about 20 seconds, with about two cores of CPU for two minutes; first boot used
+about four times the boot CPU. Keeping a device warm saves boot time but retains
+tens of GiB between rounds, so shut down and reuse its data instead. These are
+device/runtime observations, not a universal memory ceiling. No simulator system
+services are disabled or trimmed.
+
 Automatic simulator capacity gives simulators half the machine at the measured
 cost of one simulator under test (34 GiB footprint, two cores); memory, not CPU,
 usually binds. Heavy and simulator leases have independent slot budgets, and no

@@ -5235,7 +5235,11 @@ resource hook; new hooks need the session's native reload to affect existing sea
 `simulator status` lists leases and external devices with the processes and
 seats that name them; `clankie doctor` shows the same. The operator credential
 is required; native occupant, process proof and binding fields are rejected as
-caller input. Release, idle expiry or proven seat exit shuts down the leased
+caller input. Release after each capture or test round, including on failure;
+do not wait for the ten-minute abandoned-lease deadline between rounds. If release
+answers `held`, cleanup is still pending: retain the exact lease/device identity
+and check until it is released or native inventory confirms `Shutdown`.
+Release, idle expiry or proven seat exit shuts down the leased
 device and retains it for reuse, including one Clankie created. So does a
 settled `runaway`: past its three-minute boot window, an untouched device holding
 four cores for two minutes while the host is refused for load or memory. Each
