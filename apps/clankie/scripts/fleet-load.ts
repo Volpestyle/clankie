@@ -485,6 +485,9 @@ async function gate() {
       healthP95Ms: percentile(health, 0.95),
       healthRequests: health.length,
       toolP95Ms: percentile(tool, 0.95),
+      // A p95 of 40 calls is about the second-slowest; keep the median and every call to compare runs (#369).
+      toolP50Ms: percentile(tool, 0.5),
+      toolLatenciesMs: [...tool].sort((a, b) => a - b),
       toolCalls: tool.length,
       fleetP95Ms: percentile(fleet, 0.95),
       fleetRequests: fleet.length,
