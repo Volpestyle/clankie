@@ -41,6 +41,7 @@ const resources: ResourceSnapshot = {
     warnFreeDiskPercent: 10,
   },
   capacity: { heavySlots: 2, simulatorSlots: 1, used: 0, simulatorUsed: 0, lightSlots: 2, lightUsed: 0 },
+  pressure: { sampledAtMs: 1, loadRatio: 0.4, availableMemoryMb: 48_000, healthy: true },
   leases: [],
   queue: [],
   lightLeases: [],

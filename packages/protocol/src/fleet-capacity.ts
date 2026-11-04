@@ -214,7 +214,7 @@ export const FleetCapacitySchema = z
           queued: z.number().int().nonnegative(),
           lightSlots: knownCount,
           lightUsed: knownCount,
-          // Machine pressure, from services before #599, which gated admission on it.
+          // A plain machine reading kept for clients built before #599; never gates since. Optional only for #707-era servers.
           healthy: z.boolean().optional(),
           loadRatio: z.number().finite().nonnegative().optional(),
           availableMemoryMb: z.number().finite().nonnegative().optional(),

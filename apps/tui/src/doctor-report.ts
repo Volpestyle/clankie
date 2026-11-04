@@ -286,8 +286,10 @@ function formatResourceLines(resources: InstallDoctorReport["resources"]): strin
     (entry.seatId ? clean(entry.seatId) : entry.pid ? `PID ${entry.pid}` : "unattributed") +
     (entry.holderId ? ` / ${clean(entry.holderId)}` : "");
   return [
-    `  ${mark(resources.disk?.warning !== true)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued${resources.capacity.lightSlots === undefined ? "" : ` · ${resources.capacity.lightUsed ?? 0}/${resources.capacity.lightSlots} light, ${resources.lightQueue?.length ?? 0} queued`}`,
-    ...(resources.disk?.warning ? [`    ○ Low disk · ${resources.disk.freeDiskGb.toFixed(1)} GiB free`] : []),
+    `  ${mark(resources.pressure?.diskWarning !== true)} Fleet resources · ${resources.capacity.used}/${resources.capacity.heavySlots} heavy · ${resources.capacity.simulatorUsed ?? resources.leases.filter((lease) => lease.kind === "simulator").length}/${resources.capacity.simulatorSlots} simulators · ${resources.queue.length} queued${resources.capacity.lightSlots === undefined ? "" : ` · ${resources.capacity.lightUsed ?? 0}/${resources.capacity.lightSlots} light, ${resources.lightQueue?.length ?? 0} queued`}`,
+    ...(resources.pressure?.diskWarning
+      ? [`    ○ Low disk · ${resources.pressure.freeDiskGb?.toFixed(1) ?? "unknown"} GiB free`]
+      : []),
     ...resources.leases.map(
       (lease) =>
         `    ${holder(lease)} · ${lease.kind}${lease.executable ? ` ${clean(lease.executable)}` : ""}${lease.deviceId ? ` ${clean(lease.deviceId)}` : ""} · ${clean(lease.state)}`,

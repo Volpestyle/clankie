@@ -390,7 +390,10 @@ These are runtime inputs, never client flags or registry-selection authority.
 The existing POSIX governor continues to observe its local hardware. This seam
 alone supplies neither a Windows runtime nor native/WSL containment.
 
-Free disk is read on the registry volume when status is read. Doctor, status
+Free disk is read on the registry volume when status is read and reported in
+the snapshot's `pressure` object (`freeDiskGb`, `totalDiskGb`, `diskWarning`).
+That object keeps its pre-#599 shape, always `healthy`, because clients built
+earlier require it and reject unknown keys; nothing gates on it. Doctor, status
 and the lead's fleet round warn below either 200 GiB or 10% free
 (`warnFreeDiskGb`, `warnFreeDiskPercent`, set through the revision-guarded fleet
 settings API, `/fleet resources`, or

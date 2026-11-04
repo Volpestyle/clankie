@@ -176,7 +176,7 @@ function resourceDisplay(resources: FleetResourceSnapshot | undefined) {
     : {
         policy: resources.policy,
         capacity: resources.capacity,
-        lowDisk: resources.disk?.warning === true,
+        lowDisk: resources.pressure?.diskWarning === true,
         leases: resources.leases,
         queue: resources.queue,
       };

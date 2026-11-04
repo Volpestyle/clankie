@@ -243,8 +243,20 @@ export interface ResourceSnapshot {
     /** Aggregate sampled CPU budget for all server slots, in cores. */
     serverCpuCores?: number;
   };
-  /** Free space on the registry's volume against the owner's warning; informational, never gates (#599). */
-  disk?: { freeDiskGb: number; totalDiskGb: number; warning: boolean };
+  /**
+   * A plain machine reading in the shape clients built before #599 require: always
+   * healthy, never read for admission. Disk fields are the registry volume's free
+   * space against the owner's warning, absent when unreadable.
+   */
+  pressure: {
+    sampledAtMs: number;
+    loadRatio: number;
+    availableMemoryMb: number;
+    freeDiskGb?: number;
+    totalDiskGb?: number;
+    diskWarning?: boolean;
+    healthy: true;
+  };
   leases: {
     id: string;
     kind: "heavy" | "simulator";

@@ -4704,8 +4704,10 @@ leases against `heavySlots`; `simulatorUsed` counts simulator reservations
 against `simulatorSlots`; `lightUsed` counts light-lane jobs against
 `lightSlots`, whose holders and waiters are `lightLeases` and `lightQueue`.
 Starting, running and cleanup full leases count as held; light and server jobs
-use separate budgets. `disk` reports free space on the registry's volume and
-whether it is below the owner's warning; it never gates. Simulator status also
+use separate budgets. `pressure` is a plain machine reading in the shape
+clients built before #599 require: always `healthy`, with `loadRatio`,
+`availableMemoryMb`, and `freeDiskGb`, `totalDiskGb` and `diskWarning` for the
+registry's volume against the owner's warning. It never gates. Simulator status also
 reports external active devices against the simulator budget, and simulator
 cold boots still start one at a time.
 Server status adds `capacity.serverSlots`, `serverUsed`, `serverCpuCores`,

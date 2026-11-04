@@ -1,7 +1,7 @@
 import { observeSimulatorUsage, simulatorUsageFor } from "./simulator-usage.ts";
 import { randomUUID } from "node:crypto";
 import { statfs } from "node:fs/promises";
-import { constants, userInfo } from "node:os";
+import { availableParallelism, constants, freemem, loadavg, userInfo } from "node:os";
 import { basename, join } from "node:path";
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -408,10 +408,17 @@ export function createResourceGovernor(
       : new Map();
     // allow-swallowed-rejection -- an unreadable volume leaves the disk reading out; nothing gates on it.
     const volume = await statfs(directory).catch(() => undefined);
-    const disk = volume && {
-      freeDiskGb: (volume.bavail * volume.bsize) / 1024 ** 3,
-      totalDiskGb: (volume.blocks * volume.bsize) / 1024 ** 3,
-    };
+    const free = volume && (volume.bavail * volume.bsize) / 1024 ** 3;
+    const total = volume && (volume.blocks * volume.bsize) / 1024 ** 3;
+    const disk =
+      free !== undefined && total
+        ? {
+            freeDiskGb: free,
+            totalDiskGb: total,
+            warning:
+              free < state.policy.warnFreeDiskGb || (free / total) * 100 < state.policy.warnFreeDiskPercent,
+          }
+        : undefined;
     return {
       schemaVersion: 1,
       policy: state.policy,
@@ -426,16 +433,18 @@ export function createResourceGovernor(
         serverUsed: server.leases.length,
         serverCpuCores: serverCapacity.cpuCores,
       },
-      ...(disk && disk.totalDiskGb > 0
-        ? {
-            disk: {
-              ...disk,
-              warning:
-                disk.freeDiskGb < state.policy.warnFreeDiskGb ||
-                (disk.freeDiskGb / disk.totalDiskGb) * 100 < state.policy.warnFreeDiskPercent,
-            },
-          }
-        : {}),
+      // A plain machine reading, always healthy: nothing gates on it since #599. Its shape
+      // is the old one because clients built earlier (the installed app, older CLIs)
+      // require it and reject unknown keys.
+      pressure: {
+        sampledAtMs: Date.now(),
+        loadRatio: loadavg()[0]! / availableParallelism(),
+        availableMemoryMb: freemem() / 1024 ** 2,
+        ...(disk
+          ? { freeDiskGb: disk.freeDiskGb, totalDiskGb: disk.totalDiskGb, diskWarning: disk.warning }
+          : {}),
+        healthy: true,
+      },
       serverLeases: server.leases.flatMap((lease) =>
         lease.kind === "heavy"
           ? [
