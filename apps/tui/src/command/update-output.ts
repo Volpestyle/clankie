@@ -109,6 +109,7 @@ const reasons: Record<string, string> = {
 };
 const errors: Record<string, string> = {
   update_refused: "The update request was not admitted",
+  unknown_lead: "That lead has no wake webhook, so the update was not taken",
   update_status_unavailable: "Could not read update status. Reconnect and run clankie update status.",
   update_response_unreadable: "Could not read the update response.",
   update_record_unreadable:

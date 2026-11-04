@@ -4,7 +4,7 @@ import { FreeAgentIntentSchema } from "./free-agent.ts";
 import { MailIssueReferenceSchema } from "./mail-reference.ts";
 import { ClosedWorktreeSchema, CheckoutStatusSchema, WorktreeReconciliationSchema } from "./checkouts.ts";
 import { OperatorSeatEfficiencySchema, OperatorSeatWorkedOnSchema } from "./seat-efficiency.ts";
-import { WorkerReportSummarySchema } from "./worker-reports.ts";
+import { HireNotifySchema, WorkerReportSummarySchema } from "./worker-reports.ts";
 import { WorkerReportBridgeStatusSchema } from "./worker-report-health.ts";
 import { FleetSeatToolCatalogHealthSchema } from "./tool-catalog.ts";
 import { z } from "zod";
@@ -973,6 +973,8 @@ export const OperatorFleetSeatSchema = z
     parentSeatId: z.string().trim().min(1).max(OPERATOR_CONVERSATION_REF_MAX).optional(),
     /** Who started this agent, only on a fleet read that asked with `includeStarters` (ADR 0321). */
     startedBy: OperatorAgentStarterSchema.optional(),
+    /** Whether this hire's report wakes can reach their lead; beside `startedBy` (#735). */
+    notify: HireNotifySchema.optional(),
     workerReportRouting: WorkerReportRoutingSchema.optional(),
     workerReports: z.array(WorkerReportSummarySchema).max(100).optional(),
     /** Evidence for the leading conversation's periodic and watch-time review. */

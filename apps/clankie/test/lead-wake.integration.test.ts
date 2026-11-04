@@ -92,9 +92,11 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
   const hookUrl = `http://127.0.0.1:${(webhook.address() as AddressInfo).port}${hookPath}`;
 
   const captainToken = randomBytes(24).toString("hex");
+  const warnings: Array<{ fields: Record<string, unknown>; message: string }> = [];
   const wakes = createLeadWakes({
     store,
     coalesceMs: 1_000,
+    warn: (fields, message) => warnings.push({ fields, message }),
     // Keep the real HTTP transport, routing Anthropic's named host to our local routine server.
     fetchImpl: (input, init) =>
       fetch(new URL(String(input)).hostname === "api.anthropic.com" ? hookUrl : input, init),
@@ -255,6 +257,22 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
         )
       ).code,
     ).toBe(0);
+    // A wake name nobody stores is refused before anything starts, naming those that exist.
+    const unknownLead = await client.callTool({
+      name: "start_agent",
+      arguments: {
+        machine: "local",
+        workingDirectory: root,
+        harness: "codex",
+        prompt: "Report the result.",
+        notify: { lead: "finance", ref: "thread:proof-250" },
+      },
+    });
+    expect(unknownLead.isError).toBe(true);
+    expect(textOf(unknownLead)).toContain(
+      "unknown_lead: No lead goes by finance, so nothing started. notify can name: duet, grok.",
+    );
+    expect(worker.native.requests.filter((r) => r.method === "turn/start")).toEqual([]);
     const hire = await client.callTool({
       name: "start_agent",
       arguments: {
@@ -322,6 +340,14 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
       "second report",
       malicious,
     ]);
+    expect(reports.items[0].notify).toEqual({ lead: "duet", state: "sent" });
+    const hireNotify = async () =>
+      (
+        JSON.parse(textOf(await client!.callTool({ name: "list_agents", arguments: {} }))) as {
+          agents: Array<{ agent: string; notify?: unknown }>;
+        }
+      ).agents.find((listed) => listed.agent === agent)?.notify;
+    expect(await hireNotify()).toEqual({ lead: "duet", state: "sent" });
     expect(
       JSON.parse(
         textOf(
@@ -366,8 +392,15 @@ it("a connected app wakes a lead for jobs and its own workers, without relaying 
         textOf(
           await client.callTool({ name: "read_reports", arguments: { thread: "global-default", agent } }),
         ),
-      ).items[0].text,
-    ).toBe("webhook down");
+      ).items[0],
+    ).toMatchObject({ text: "webhook down", notify: { lead: "duet", state: "refused" } });
+    expect(await hireNotify()).toEqual({ lead: "duet", state: "refused" });
+    expect(warnings).toEqual([
+      {
+        fields: { lead: "duet", outcome: "refused" },
+        message: "Worker report wake failed; report remains in inbox",
+      },
+    ]);
     answer = 200;
 
     // Forgetting it stops the wakes.

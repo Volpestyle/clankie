@@ -115,6 +115,11 @@ with a reviewed reason; an override cannot bypass `blockedReason`. A confirmed
 `accepted: false` is a refusal, not an uncertain send. Never edit update journals
 or remove locks to recover, and never remove a maintenance lock by age.
 
+`clankie update now --notify LEAD` wakes that lead's stored webhook with the
+outcome (`passed`, `failed` or `rolled-back`); a name with no stored webhook
+refuses the update. While connected apps lead, every stored lead hears the
+outcome and canary alerts without being named.
+
 Thresholds, retention, canary policy, alert deadlines, `source-managed` harness
 refresh refusals and older-bridge behaviour are in the `update` section of
 `docs/cli.md`; search that file rather than reading it whole. Social turns cannot update the machine. A lost tool result is not

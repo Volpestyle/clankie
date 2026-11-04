@@ -103,6 +103,7 @@ export function createHerdrSessionSource(
           ...(doing === undefined ? {} : { doing }),
           ...(workedOn === undefined ? {} : { workedOn }),
           ...(seat.startedBy === undefined ? {} : { startedBy: starterWords(seat.startedBy) }),
+          ...(seat.notify === undefined ? {} : { notify: seat.notify }),
           canMessage: true,
         };
       });

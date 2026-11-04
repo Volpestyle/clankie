@@ -96,6 +96,8 @@ export interface RuntimeUpdateInitiator {
   /** CLI environment claims are attribution, never admission proof. */
   readonly claimedConversationId?: string;
   readonly claimedSeatSessionId?: string;
+  /** The lead that hears this update's outcome at its wake webhook (ADR 0355). */
+  readonly notifyLead?: string;
 }
 export function parseUpdateInitiator(input: unknown): RuntimeUpdateInitiator {
   const value = object(input);
@@ -104,7 +106,7 @@ export function parseUpdateInitiator(input: unknown): RuntimeUpdateInitiator {
   return {
     kind: value.kind as RuntimeUpdateInitiator["kind"],
     ...Object.fromEntries(
-      ["operatorId", "conversationId", "claimedConversationId", "claimedSeatSessionId"]
+      ["operatorId", "conversationId", "claimedConversationId", "claimedSeatSessionId", "notifyLead"]
         .filter((key) => value[key] !== undefined)
         .map((key) => [key, boundedString(value[key], 256)]),
     ),

@@ -18,7 +18,7 @@ import {
 } from "@clankie/protocol";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import { logger } from "../app/log.ts";
-import type { WorkerReportSummary } from "@clankie/protocol";
+import type { HireNotify, WorkerReportSummary } from "@clankie/protocol";
 import { projectsRevision, SettingsStore, type ClankieSettings } from "@clankie/settings";
 import { FleetMembershipReadError } from "../fleet-project-membership.ts";
 import { splitFleetQualified, type HerdrFleet } from "../herdr-fleet.ts";
@@ -123,6 +123,8 @@ export interface CreateOperatorServiceContext {
     occupantId: string,
     machineId: string,
   ) => import("@clankie/protocol/fleet-roster").FleetRosterStarter;
+  /** Where start receipts outlive a service restart; memory only when absent (#735). */
+  readonly connectorStartsPath?: string;
   /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0313). */
   readonly fleetCapacity?: () => Promise<
     Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]
@@ -189,7 +191,23 @@ export class ServiceShuttingDownError extends Error {
 export function createOperatorService(
   ctx: CreateOperatorServiceContext,
 ): CaptainPort["serveOperatorConversation"] {
-  const connectorStarts = new ConnectorStarts();
+  const connectorStarts = new ConnectorStarts({
+    ...(ctx.connectorStartsPath === undefined ? {} : { path: ctx.connectorStartsPath }),
+    hired: (seatId) => ctx.herdrWatches.hiredSeat(seatId),
+  });
+  /** One credential read per lead for a whole page of hires. */
+  const hireNotifyStates = () => {
+    const states = new Map<string, Promise<HireNotify["state"]>>();
+    return async (lead: string | undefined): Promise<{ notify?: HireNotify }> => {
+      if (lead === undefined) return {};
+      let state = states.get(lead);
+      if (state === undefined) {
+        state = ctx.deps.leadWakes?.state(lead) ?? Promise.resolve("not_set" as const);
+        states.set(lead, state);
+      }
+      return { notify: { lead, state: await state } };
+    };
+  };
   let reportCursor: string | undefined;
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   let defaultHerdrCore: HerdrCore | undefined;
@@ -420,7 +438,14 @@ export function createOperatorService(
             )
           : ctx.conversations.readInboundReports(request.conversationId, filter);
         await assertConversationAuthority(admitted);
-        return { op: request.op, schemaVersion: 1, page };
+        const notify = hireNotifyStates();
+        const items = await Promise.all(
+          page.items.map(async (item) => ({
+            ...item,
+            ...(await notify(ctx.herdrWatches.notifyLead(item.seatId, item.paneId))),
+          })),
+        );
+        return { op: request.op, schemaVersion: 1, page: { ...page, items } };
       }
       if (request.op === "acknowledge_worker_report_history") {
         if (!authority || authority.principal.kind !== "operator")
@@ -595,6 +620,7 @@ export function createOperatorService(
               },
             };
       const starters = request.includeStarters === true ? ctx.seatStarters?.(worked.snapshot) : undefined;
+      const notify = hireNotifyStates();
       const result =
         starters === undefined
           ? worked
@@ -602,10 +628,16 @@ export function createOperatorService(
               ...worked,
               snapshot: {
                 ...worked.snapshot,
-                seats: worked.snapshot.seats.map((seat) => ({
-                  ...seat,
-                  startedBy: starters(seat.seatId, seat.occupantId, seat.fleet ?? "local"),
-                })),
+                seats: await Promise.all(
+                  worked.snapshot.seats.map(async (seat) => {
+                    const starter = ctx.herdrWatches.seatStarter(seat.seatId, seat.occupantId);
+                    return {
+                      ...seat,
+                      startedBy: starters(seat.seatId, seat.occupantId, seat.fleet ?? "local"),
+                      ...(await notify(starter?.kind === "app" ? starter.notify?.lead : undefined)),
+                    };
+                  }),
+                ),
               },
             };
       return request.view === "home" ? { ...result, snapshot: operatorFleetHome(result.snapshot) } : result;
@@ -1036,6 +1068,31 @@ export function createOperatorService(
           detail:
             "That isn't one of the places an agent can start. Pick a machine and directory from the list.",
         });
+      // A wake name nobody stores would go nowhere, so it is refused before anything starts,
+      // as a note to an unknown lead is (#735).
+      if (request.notify !== undefined) {
+        const named = request.notify.lead;
+        const wakes = ctx.deps.leadWakes;
+        if (wakes === undefined)
+          return answer("refused", {
+            detail: "unknown_lead: This Clankie can't wake leads, so nothing started. Hire without notify.",
+          });
+        let leads: string[];
+        try {
+          leads = await wakes.leads();
+        } catch {
+          return answer("refused", {
+            detail: "Clankie couldn't read the lead webhooks just now, so nothing started. Try again.",
+          });
+        }
+        if (!leads.includes(named))
+          return answer("refused", {
+            detail:
+              leads.length === 0
+                ? `unknown_lead: No lead has a wake webhook yet, so nothing started. The owner stores one at the Mac with: clankie connector wake set ${named}. Or hire without notify and read the reports with read_reports.`
+                : `unknown_lead: No lead goes by ${named}, so nothing started. notify can name: ${leads.slice(0, 24).join(", ")}.`,
+          });
+      }
       // Clankie's own thread leads it, as his own hires are led; the caller only chose where and what to ask.
       const lead = "global-default";
       if (!ctx.conversations.runsCaptainTurns(lead))
