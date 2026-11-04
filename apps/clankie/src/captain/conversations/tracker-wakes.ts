@@ -14,6 +14,14 @@ import { LINEAR_REPLAY_RETENTION_MS, LINEAR_WAKE_EVENTS_MAX, ZERO_CURSOR } from 
 import type { ConversationStore } from "./store.ts";
 import { type ConversationRunner } from "./types.ts";
 
+/** Provider delivery receipts, one record per store: they outlive conversation history and target changes. */
+const linearEventReceipts = new WeakMap<ConversationStore, Record<string, number>>();
+function receipts(ctx: ConversationStore): Record<string, number> {
+  let held = linearEventReceipts.get(ctx);
+  if (!held) linearEventReceipts.set(ctx, (held = {}));
+  return held;
+}
+
 export function receiveTrackerActivity(
   ctx: ConversationStore,
   input: TrackerActivity,
@@ -26,7 +34,7 @@ export function receiveTrackerActivity(
   const eventId = input.eventId;
   if (
     eventId &&
-    ((ctx["linearEventReceipts"][eventId] ?? 0) > Date.now() - LINEAR_REPLAY_RETENTION_MS ||
+    ((receipts(ctx)[eventId] ?? 0) > Date.now() - LINEAR_REPLAY_RETENTION_MS ||
       [...ctx["metas"].keys()].some((id) =>
         ctx["readEvents"](id).some((event) => event.type === "message" && event.linear?.eventId === eventId),
       ))
@@ -35,8 +43,8 @@ export function receiveTrackerActivity(
   if (!following) {
     // Nonmatching activity stays in the service log only; the chat shows what woke it.
     // The retained receipt still keeps a replay from being promoted into a wake.
-    ctx["linearEventReceipts"][eventId] = Date.now();
-    ctx["saveTrackerEventReceipts"]();
+    receipts(ctx)[eventId] = Date.now();
+    saveTrackerEventReceipts(ctx);
     return true;
   }
   meta.revision += 1;
@@ -62,8 +70,8 @@ export function receiveTrackerActivity(
   meta.updatedAt = new Date().toISOString();
   ctx["saveMeta"](meta);
   if (eventId) {
-    ctx["linearEventReceipts"][eventId] = Date.now();
-    ctx["saveTrackerEventReceipts"]();
+    receipts(ctx)[eventId] = Date.now();
+    saveTrackerEventReceipts(ctx);
   }
   if (following) ctx["queueTrackerActivity"](conversationId);
   return true;
@@ -282,21 +290,23 @@ export function trackerWakeRecoveries(ctx: ConversationStore) {
 
 export function loadTrackerEventReceipts(ctx: ConversationStore): void {
   try {
-    ctx["linearEventReceipts"] = z
-      .record(z.string(), z.number().nonnegative())
-      .parse(JSON.parse(readFileSync(join(ctx["root"], "linear-event-receipts.json"), "utf8")));
+    linearEventReceipts.set(
+      ctx,
+      z
+        .record(z.string(), z.number().nonnegative())
+        .parse(JSON.parse(readFileSync(join(ctx["root"], "linear-event-receipts.json"), "utf8"))),
+    );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 
-export function saveTrackerEventReceipts(ctx: ConversationStore): void {
+function saveTrackerEventReceipts(ctx: ConversationStore): void {
   const cutoff = Date.now() - LINEAR_REPLAY_RETENTION_MS;
-  ctx["linearEventReceipts"] = Object.fromEntries(
-    Object.entries(ctx["linearEventReceipts"]).filter(([, at]) => at > cutoff),
-  );
+  const retained = Object.fromEntries(Object.entries(receipts(ctx)).filter(([, at]) => at > cutoff));
+  linearEventReceipts.set(ctx, retained);
   const path = join(ctx["root"], "linear-event-receipts.json");
-  writeFileSync(path + ".tmp", JSON.stringify(ctx["linearEventReceipts"]), { mode: 0o600 });
+  writeFileSync(path + ".tmp", JSON.stringify(retained), { mode: 0o600 });
   renameSync(path + ".tmp", path);
 }
 
@@ -310,7 +320,7 @@ export function retireLinearInbox(ctx: ConversationStore): void {
       const meta = JSON.parse(readFileSync(join(path, "meta.json"), "utf8"));
       if (typeof meta.linearReadCursor === "string") readCursor = meta.linearReadCursor;
       for (const [eventId, at] of Object.entries(meta.linearSeen ?? {}))
-        if (typeof at === "number") ctx["linearEventReceipts"][eventId] = at;
+        if (typeof at === "number") receipts(ctx)[eventId] = at;
     } catch {
       /* A damaged retired inbox is dropped with the same explicit notice. */
     }
@@ -320,9 +330,9 @@ export function retireLinearInbox(ctx: ConversationStore): void {
       if (event.type !== "message" || event.role !== "external") continue;
       if (event.cursor > readCursor) unread += 1;
       if (event.linear?.eventId)
-        ctx["linearEventReceipts"][event.linear.eventId] = Date.parse(event.occurredAt) || Date.now();
+        receipts(ctx)[event.linear.eventId] = Date.parse(event.occurredAt) || Date.now();
     }
-    ctx["saveTrackerEventReceipts"]();
+    saveTrackerEventReceipts(ctx);
     rmSync(path, { recursive: true, force: true });
     ctx["journal"].forget(id);
     console.info(
