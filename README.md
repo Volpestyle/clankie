@@ -21,6 +21,8 @@ already have, and see all of the work in one place.
 
 <p align="center">
   <picture>
+    <source media="(max-width: 600px) and (prefers-color-scheme: dark)" srcset="docs/assets/clankie-system-phone-dark.svg" />
+    <source media="(max-width: 600px)" srcset="docs/assets/clankie-system-phone-light.svg" />
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/clankie-system-dark.svg" />
     <img src="docs/assets/clankie-system-light.svg" width="720" alt="How Clankie fits together. You talk to always-on leads: the built-in lead, Claude Code, Codex, Grok Bot or your own bot. They connect to Clankie, one service on your Mac or Linux host. Leads hire workers such as Claude Code, Codex, OpenCode and Pi in real terminals on your Mac, Linux or Windows PC, and the workers report back. The iPhone and iPad app shows the work through the optional encrypted gateway at clankie.bot, which needs a free account, or directly on your LAN or tailnet with no account." />
   </picture>

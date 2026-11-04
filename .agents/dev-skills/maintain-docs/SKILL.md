@@ -41,9 +41,9 @@ needs a read of the other.
 
 Diagrams are Mermaid in the owning Markdown, never image exports or tldraw
 files, and they change in the same commit as the architecture they draw. The
-one exception is the README's system picture, a hand-edited SVG pair in
-`docs/assets/` (light and dark differ only in the colors in their `<style>`
-block); change both files and the README's alt text together.
+one exception is the README's system picture: hand-edited SVGs in
+`docs/assets/`, wide and phone, each light and dark (a theme pair differs only
+in its `<style>` colors). Change all four and the README's alt text together.
 Prefer a few diagrams that carry the whole picture over one per section:
 [`docs/architecture.md`](../../../docs/architecture.md) holds the system map,
 the message-to-turn flow and the fleet flow; a package or app README draws
