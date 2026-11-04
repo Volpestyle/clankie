@@ -4060,6 +4060,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
         const before = await census();
         await guard();
         const { inventory, held, shellOnly } = await census();
+        if (expectedAllocation) await guard();
         if (this.closed || this.activeProjectHires.has(receiptId) || unresolved())
           return refused(
             "Original allocation became active or acquired an unresolved native receipt; nothing released.",

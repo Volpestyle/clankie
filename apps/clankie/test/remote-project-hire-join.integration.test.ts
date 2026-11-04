@@ -121,6 +121,7 @@ async function fixture(pcCreateMs: number) {
   const controls: {
     authorized: boolean;
     afterSeal?: () => Promise<void>;
+    afterInventory?: () => Promise<void>;
     authorize?: () => Promise<void>;
     createGate?: Promise<void>;
   } = { authorized: true };
@@ -268,6 +269,11 @@ async function fixture(pcCreateMs: number) {
     ],
     runner: {
       ...createHerdrWatchRunner(() => true, run),
+      list: async (fleet) => {
+        const inventory = await createHerdrWatchRunner(() => true, run).list!(fleet);
+        await controls.afterInventory?.();
+        return inventory;
+      },
       get: async () => denied("get"),
       resolveTerminal: async () => denied("resolveTerminal"),
       wait: async () => denied("wait"),
@@ -722,6 +728,32 @@ nativeIt(
       await f.hire(directory, undefined, "Inspect a concurrent-link fixture issue.");
       expect(duplicated).toBe(true);
       expect((await f.allocations()).every((entry) => !entry.gone)).toBe(true);
+      expect(f.creates).toHaveLength(1);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
+  "revocation during the final allocation census prevents the automatic write",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "final-census-revocation-place");
+      await f.hire(directory, undefined, "Inspect a final-census fixture issue.");
+      const [, original] = f.receipt();
+      let censuses = 0;
+      f.controls.afterInventory = async () => {
+        if (!new DeliveryFence(f.nativePath).settlement(original.messageId)) return;
+        if (++censuses === 2) f.controls.authorized = false;
+      };
+      await f.hire(directory, undefined, "Inspect a final-census fixture issue.");
+      expect(censuses).toBe(2);
+      expect(f.controls.authorized).toBe(false);
+      expect((await f.allocations())[0]).toMatchObject({ gone: false });
       expect(f.creates).toHaveLength(1);
       expect(f.effects).toEqual([]);
     } finally {
