@@ -808,6 +808,10 @@ describe("public gateway Mac connector", () => {
         },
         delete: async () => false,
         list: async () => ({}),
+        update: async (_id, transform) => {
+          stored = await transform(stored);
+          return stored;
+        },
       },
       fetchImpl: async (input, init) => {
         if (String(input).endsWith("/gateway/v1/config"))

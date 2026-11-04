@@ -435,9 +435,8 @@ async function resolveClankieAccountAccessToken(input: {
   }
   let credential = stored;
   if (needsRefresh(stored)) {
-    if (input.store.update === undefined) {
-      throw new ClankieAccountAuthError("unexpected_response", "Credential store cannot refresh safely");
-    }
+    // Not an account error: signing in again would not give this store a lock.
+    if (input.store.update === undefined) throw new Error("Credential store cannot refresh safely");
     const fetchImpl = input.fetchImpl ?? fetch;
     const config = await discoverPublicGatewayAccount(input.gatewayUrl, fetchImpl);
     let failure: { readonly error: unknown } | undefined;
