@@ -829,8 +829,13 @@ export class PersonaStore {
     if (binding === undefined) {
       // Compatibility only: v1 derived persona ids from occupants. Retaining a
       // matching record preserves its conversations; new ids are always minted.
+      // Only a record no binding holds yet is restored: one already bound is that binding's
+      // character, which moves only as mayTake allows (#349).
       const legacyPersonaId = `agent-${observed.occupantId.slice("session-".length)}`;
-      const personaId = this.records.has(legacyPersonaId) ? legacyPersonaId : `agent-${randomUUID()}`;
+      const restorable =
+        this.records.has(legacyPersonaId) &&
+        ![...this.bindings.values()].some((entry) => entry.personaId === legacyPersonaId);
+      const personaId = restorable ? legacyPersonaId : `agent-${randomUUID()}`;
       binding = { subject, personaId, occupantId: observed.occupantId };
       this.bindings.set(subject, binding);
       changed = true;
@@ -1149,15 +1154,19 @@ function acquireJournalWriter(journal: string): { path: string; nonce: string } 
 /** The census's key for a pane whose agent Herdr has not named (subjectForHerdrPane). */
 const isPaneSubject = (subject: string) => subject.startsWith("adhoc-");
 /**
- * Where a seat refused a character is filed: its own pane's key, then a key from its own occupant,
- * then a fresh one. Each is checked like any other key, so none can hand over a held character.
+ * Where a seat refused a character is filed: its own pane's key, then keys from its own occupant,
+ * the same on every census so it keeps its character, and only after those a fresh one. Each is
+ * checked like any other key, so none can hand over a held character.
  */
+const REFUSED_OCCUPANT_KEYS = 8;
 const refusedKey = (observed: ObservedFleetSeat, refused: number) => {
   const own = subjectForHerdrPane(observed.paneId);
   if (refused === 0 && own !== observed.subject) return own;
   const tail =
-    refused <= 1
-      ? createHash("sha256").update(observed.occupantId).digest("hex")
+    refused <= REFUSED_OCCUPANT_KEYS
+      ? createHash("sha256")
+          .update(refused <= 1 ? observed.occupantId : `${observed.occupantId}:${refused}`)
+          .digest("hex")
       : randomUUID().replaceAll("-", "");
   return `${own}-${tail.slice(0, 5)}`;
 };
