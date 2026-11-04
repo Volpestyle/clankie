@@ -171,12 +171,19 @@ export class HarnessInstalls {
     let timedOut = false;
     let child: ChildProcess;
     try {
-      child = spawn(installer.command, [...installer.args], {
-        env: installerEnv(this.options.env),
-        stdio: ["ignore", "pipe", "pipe"],
-        // Its own process group, so a timeout also stops what the installer started.
-        detached: process.platform !== "win32",
-      });
+      // Read from two pipes, output written to both arrives stdout first whenever
+      // the service is busy. Joined at the source, it keeps the order it was written in.
+      const joined = process.platform !== "win32";
+      child = spawn(
+        joined ? "/bin/sh" : installer.command,
+        joined ? ["-c", 'exec "$@" 2>&1', "sh", installer.command, ...installer.args] : [...installer.args],
+        {
+          env: installerEnv(this.options.env),
+          stdio: ["ignore", "pipe", joined ? "ignore" : "pipe"],
+          // Its own process group, so a timeout also stops what the installer started.
+          detached: process.platform !== "win32",
+        },
+      );
     } catch (error) {
       take(`Could not start the installer: ${error instanceof Error ? error.message : String(error)}\n`);
       void this.finish(view, harness, null, false);
