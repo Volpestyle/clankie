@@ -10,7 +10,11 @@ import {
   type OperatorConversation,
 } from "@clankie/protocol";
 import { z } from "zod";
-import type { ObservedFleetSeat } from "../src/captain/herdr-census.ts";
+import {
+  subjectForHerdrName,
+  subjectForHerdrPane,
+  type ObservedFleetSeat,
+} from "../src/captain/herdr-census.ts";
 import { PersonaStore } from "../src/captain/personas.ts";
 
 const OCCUPANT_ONE = `session-${"a".repeat(64)}`;
@@ -424,6 +428,48 @@ describe("PersonaStore", () => {
     expect(again.adoptMoved(observed("term-4", `session-${"c".repeat(64)}`), "Atlas").personaId).toBe(
       hired.personaId,
     );
+  });
+
+  it("never hands a hired character to another hire whose ledger title matches its name (#349)", () => {
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-ledger-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    const first = store.adoptSpawn(observed("term-1", OCCUPANT_ONE, "atlas-ab12"), "Atlas");
+    store.setRole({ schemaVersion: 1, personaId: first.personaId, role: "reviewer" });
+    // A second, separate hire titled "Atlas" sits in another pane; its own ledger record is genuine.
+    const other = `session-${"c".repeat(64)}`;
+    const hireTitle = (seat: ObservedFleetSeat) => (seat.occupantId === other ? "Atlas" : undefined);
+    store.reconcile([observed("term-2", other, "atlas-cd34")], hireTitle);
+    // The first agent ends, and the second pane is renamed to the first one's key.
+    const [taken] = new PersonaStore(root).reconcile([observed("term-2", other, "atlas-ab12")], hireTitle);
+    expect(taken!.personaId).not.toBe(first.personaId);
+    const after = new PersonaStore(root).all([], () => undefined);
+    expect(after.find((entry) => entry.personaId === first.personaId)?.role).toBe("reviewer");
+    expect(after.find((entry) => entry.personaId === taken!.personaId)?.role).toBeUndefined();
+  });
+
+  it("keeps a chosen name out of the pane keys, and a stored key that reads like another pane's moves nobody (#349)", () => {
+    expect(subjectForHerdrName(subjectForHerdrPane("w1:p2"))).toMatch(/^named-adhoc-/u);
+    const root = mkdtempSync(join(tmpdir(), "clankie-personas-panekey-"));
+    roots.push(root);
+    const store = new PersonaStore(root);
+    // A role holder in pane 1 whose stored key is pane 2's own, as a name could make it before.
+    const holder = store.reconcile([observed("p1", OCCUPANT_ONE, subjectForHerdrPane("w1:pp2"))])[0]!;
+    store.setRole({ schemaVersion: 1, personaId: holder.personaId, role: "lead" });
+    // Pane 2's own unnamed occupant presents that key.
+    const [stranger] = new PersonaStore(root).reconcile([
+      observed("p2", OCCUPANT_TWO, subjectForHerdrPane("w1:pp2")),
+    ]);
+    expect(stranger!.personaId).not.toBe(holder.personaId);
+    // The stranger keeps its own character on the next census, and pane 1 restarting keeps the holder.
+    const again = new PersonaStore(root);
+    expect(again.reconcile([observed("p2", OCCUPANT_TWO, subjectForHerdrPane("w1:pp2"))])[0]!.personaId).toBe(
+      stranger!.personaId,
+    );
+    const back = again.reconcile([
+      observed("p1", `session-${"d".repeat(64)}`, subjectForHerdrPane("w1:pp2")),
+    ])[0]!;
+    expect(back.personaId).toBe(holder.personaId);
   });
 
   it("rejects malformed image bytes without replacing the current identity", () => {

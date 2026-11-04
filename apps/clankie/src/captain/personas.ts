@@ -476,8 +476,8 @@ export class PersonaStore {
         (subject) =>
           this.bindings.get(subject)?.hired === true ||
           (title !== undefined && mintedFrom(title, subject, observed.paneId)),
-        // The hire ledger names this pane's occupant under this very subject.
-        title !== undefined && mintedFrom(title, observed.subject, observed.paneId),
+        // A title the ledger holds proves which name a hire was given, never which character it is.
+        false,
       );
       changed ||= bound.changed;
       return bound.seat;
@@ -782,8 +782,10 @@ export class PersonaStore {
   private bindSeat(
     observed: ObservedFleetSeat,
     minted: (subject: string) => boolean,
-    /** The service's own record (its hire, its move, or this seat's hire title) proves this subject. */
+    /** The service's own hire or move of this exact seat proves this subject. */
     proven: boolean,
+    /** This subject is the one this seat's own pane derives, after a name was refused. */
+    refiled = false,
   ): { readonly seat: OperatorFleetSeat; readonly binding: PersonaBinding; changed: boolean } {
     let changed = false;
     // The key this seat is bound under: its observed subject, or its hire's when Herdr lost the name.
@@ -839,10 +841,17 @@ export class PersonaStore {
         binding.hired === true ||
         this.roleHolders.has(binding.personaId) ||
         this.records.get(binding.personaId)?.role !== undefined;
-      const own = subjectForHerdrPane(observed.paneId);
-      if (authority && !proven && binding.paneId !== observed.paneId && own !== observed.subject) {
+      // The recorded pane decides, whatever the key looks like: a key stored before names and
+      // panes had separate keys can still read like another pane's.
+      if (authority && !proven && !refiled && binding.paneId !== observed.paneId) {
+        const own = subjectForHerdrPane(observed.paneId);
         const { renamed: _renamed, ...unnamed } = observed;
-        return this.bindSeat({ ...unnamed, subject: own }, minted, false);
+        return this.bindSeat(
+          { ...unnamed, subject: own === observed.subject ? `${own}-p` : own },
+          minted,
+          false,
+          true,
+        );
       }
       binding = {
         subject: binding.subject,
