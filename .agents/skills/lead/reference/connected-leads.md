@@ -32,6 +32,16 @@ it; none takes precedence over another.
   keeps delivering the original brief after an HTTP disconnect. Never repeat
   the hire to check it. Receipts belong to the hiring app and the current service
   lifetime; after a restart, inspect `list_agents` before a new hire.
+- **Hear a pending start settle.** A `start_agent` with `notify` that answers
+  `pending` wakes that lead once the hire settles, so there's no need to poll its
+  `startId`. The wake goes at once, outside the report batch window, with kind
+  `start_finished`. Its text is
+  `start=STARTID ref=REF outcome=started|refused [agent=AGENT] time=TIME`. A
+  refused start adds a `reason="…"` line with the service's refusal sentence,
+  capped at 300 characters. The text never includes the brief. A start
+  that answered `started` or `refused` straight away sends no wake. A start cut
+  off by a service restart doesn't settle; read `list_agents` after a restart.
+  The receipt still answers `start_agent` with its `startId` either way.
 - **Read a refused start as stated.** A blocking hire names its allocation, native
   receipt when recorded, pane when observed, age and owner recovery commands.
   A blocking hire whose pane never appeared settles itself once it is five

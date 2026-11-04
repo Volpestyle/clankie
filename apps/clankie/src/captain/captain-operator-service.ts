@@ -194,6 +194,7 @@ export function createOperatorService(
   const connectorStarts = new ConnectorStarts({
     ...(ctx.connectorStartsPath === undefined ? {} : { path: ctx.connectorStartsPath }),
     hired: (seatId) => ctx.herdrWatches.hiredSeat(seatId),
+    finished: (notify, event) => ctx.deps.leadWakes?.startFinished(notify.lead, event),
   });
   /** One credential read per lead for a whole page of hires. */
   const hireNotifyStates = () => {
@@ -1882,11 +1883,15 @@ export function createOperatorService(
           `${authority?.principal.kind ?? "operator"}:${authority?.principal.id ?? "local"}`;
         if (request.startId !== undefined) return connectorStarts.read(request.startId, caller);
         if (request.machine !== undefined && request.workingDirectory !== undefined)
-          return await connectorStarts.start(caller, async (onPane) => {
-            const result = await serve(request, authority, undefined, onPane);
-            if (result.op !== "start_agent") throw new Error("Unexpected start result");
-            return result;
-          });
+          return await connectorStarts.start(
+            caller,
+            async (onPane) => {
+              const result = await serve(request, authority, undefined, onPane);
+              if (result.op !== "start_agent") throw new Error("Unexpected start result");
+              return result;
+            },
+            request.notify,
+          );
       }
       // Capture the exact occupant before a successful close removes it from the census.
       let target: { seatId: string; occupantId: string } | undefined;

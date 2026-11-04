@@ -11,7 +11,9 @@ import type { LeadWakeResult } from "@clankie/protocol/connector";
 // the report's done/blocked/update kind (#317); worker text stays in the durable inbox.
 // A blocked report wakes the lead at once, outside the batch window. A failed wake is a
 // warning and shows on the hire (#735); the inbox keeps the report either way. Update
-// outcomes (ADR 0355) go the same way: service-owned facts, never error text.
+// outcomes (ADR 0355) go the same way: service-owned facts, never error text. A
+// relay start_agent that answered pending wakes its notify lead once it settles (#725),
+// so the lead stops polling the startId.
 
 const TIMEOUT_MS = 15_000;
 /** Said to the lead with every job, so it knows where an answer is read. */
@@ -27,7 +29,21 @@ interface WorkerWakeEvent {
   readonly at: string;
 }
 
-type LeadWakeKind = "lead_wake" | "worker_report" | "board_note" | "update_outcome";
+/** How a start_agent that answered pending settled (#725): service facts only, never the brief. */
+export interface StartFinishedEvent {
+  readonly startId: string;
+  readonly ref: string;
+  readonly outcome: "started" | "refused";
+  /** The new agent's id once it has a pane. */
+  readonly agent?: string;
+  /** The service's own refusal sentence, as start_agent answers it. */
+  readonly reason?: string;
+  readonly at: string;
+}
+
+const START_REASON_MAX = 300;
+
+type LeadWakeKind = "lead_wake" | "worker_report" | "start_finished" | "board_note" | "update_outcome";
 
 export interface LeadWakes {
   /** The leads with a stored webhook, by name. */
@@ -44,6 +60,8 @@ export interface LeadWakes {
     readonly appsLead: boolean;
   }): Promise<"sent" | "none" | "failed">;
   workerReport(lead: string, event: WorkerWakeEvent): void;
+  /** Sent at once, outside the report batch window: the lead is waiting on this hire. */
+  startFinished(lead: string, event: StartFinishedEvent): void;
   close(): void;
   send(input: {
     readonly lead: string;
@@ -156,7 +174,9 @@ export function createLeadWakes(options: {
           from,
           text,
           sentAt: clock().toISOString(),
-          ...(kind === "worker_report" || kind === "update_outcome" ? {} : { reply: REPLY_HINT }),
+          ...(kind === "worker_report" || kind === "start_finished" || kind === "update_outcome"
+            ? {}
+            : { reply: REPLY_HINT }),
         }),
       });
     } catch {
@@ -216,6 +236,34 @@ export function createLeadWakes(options: {
         startWindow(lead);
         postReports(lead, [event]);
       }
+    },
+    startFinished(lead, { startId, ref, outcome, agent, reason, at }) {
+      const read =
+        agent === undefined
+          ? `Read start_agent {"startId":${JSON.stringify(startId)}}.`
+          : `Read read_agent {"agent":${JSON.stringify(agent)}}, or start_agent {"startId":${JSON.stringify(startId)}}.`;
+      void wakes
+        .send({
+          lead,
+          from: "clankie",
+          kind: "start_finished",
+          text:
+            `start=${startId} ref=${ref} outcome=${outcome}${agent === undefined ? "" : ` agent=${agent}`} time=${at}\n` +
+            (reason === undefined
+              ? ""
+              : `reason=${JSON.stringify(reason.length > START_REASON_MAX ? `${reason.slice(0, START_REASON_MAX - 1)}…` : reason)}\n`) +
+            read,
+        })
+        .then((result) => {
+          if (result.outcome !== "sent")
+            options.warn?.(
+              { lead, outcome: result.outcome },
+              "Start finished wake failed; its receipt still answers start_agent",
+            );
+        })
+        .catch(() =>
+          options.warn?.({ lead }, "Start finished wake failed; its receipt still answers start_agent"),
+        );
     },
     close() {
       for (const state of windows.values()) clearTimeout(state.timer);
