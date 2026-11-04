@@ -264,14 +264,15 @@ export function createHiring(ctx: HiringContext) {
           detail: `Earlier hire worktrees are unreadable: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
-      // A launch still fenced, or still being admitted, in the start folder itself is checked
+      // A launch still unresolved, or still being admitted, in the start folder itself is checked
       // there the old way, never moved, so its retry meets that folder's own allocation and
-      // receipt (ADR 0207). A launch under another harness is never this one's retry.
+      // receipt (ADR 0207). A launch under another harness is never this one's retry, and a
+      // settled one no longer holds the folder: its key stays fenced, new work moves (#721).
       const admitting = retained === undefined && (inPlaceStarts.get(scope) ?? 0) > 0;
       const fenced =
         retained === undefined &&
         !admitting &&
-        herdrWatches.hireRetained({
+        herdrWatches.hireUnresolved({
           fleet: request.fleet,
           workingDirectory: request.workingDirectory,
           harness: request.harness,

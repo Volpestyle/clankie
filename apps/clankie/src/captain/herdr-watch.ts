@@ -2588,11 +2588,13 @@ export class HerdrWatchStore implements HerdrWatchPort {
   }
   /**
    * Like `hireRetained`, but a settled original no longer counts: only a launch that may still
-   * be running unconfirmed (#614). A folder whose hire settled takes new work elsewhere.
+   * be running unconfirmed (#614). A folder whose hire settled takes new work elsewhere; its
+   * original key stays fenced against replay. With a harness, only that harness's launches count.
    */
   public hireUnresolved(input: {
     readonly fleet?: string | undefined;
     readonly workingDirectory: string;
+    readonly harness?: string | undefined;
   }): boolean {
     return this.launchHeld(input, (key) => this.hireReceipts.pending(key) !== undefined);
   }
