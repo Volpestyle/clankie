@@ -1266,8 +1266,34 @@ test.runIf(nativeResourcesSupported)(
         history: new UsageHistory(join(f.root, "usage.json")),
         machineResources: { ids: async () => ["local", id], status: (machine) => machines.status(machine) },
       });
-      expect(await readCapacity()).not.toHaveProperty("machineResources");
-      const capacity = await readCapacity(true);
+      const serveCapacity = createOperatorService({
+        shutdown: new AbortController(),
+        personas: { ready: async () => {} },
+        deps: {},
+        fleetCapacity: readCapacity,
+      } as unknown as CreateOperatorServiceContext);
+      const service = await createClankieApp({
+        captain: createStubCaptain({ serveOperatorConversation: serveCapacity }),
+        settings: f.settings,
+        eventLogPath: join(f.root, "capacity-events.jsonl"),
+        authenticateCaptain: async () => ({ captainId: "fixture", steerSourceLane: "api" }),
+      });
+      const dispatch = async (includeMachineResources?: boolean) => {
+        const response = await service.app.request(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+          method: "POST",
+          headers: { authorization: "Bearer synthetic-captain", "content-type": "application/json" },
+          body: JSON.stringify({
+            op: "fleet_capacity",
+            schemaVersion: 1,
+            ...(includeMachineResources === undefined ? {} : { includeMachineResources }),
+          }),
+        });
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { result: Awaited<ReturnType<typeof readCapacity>> }).result;
+      };
+      expect(await dispatch()).not.toHaveProperty("machineResources");
+      expect(await dispatch(false)).not.toHaveProperty("machineResources");
+      const capacity = await dispatch(true);
       expect(capacity.machineResources?.[id]).toMatchObject({
         status: "available",
         full: { slots: 1, used: 1, queued: 1, remaining: 0 },
@@ -1331,6 +1357,14 @@ test.each([
       expect(await joinedFleetResources(f.joins).status(credential.lease.machineId)).toMatchObject({
         unavailable: "unsupported-platform",
       });
+      const machines = createMachineFleetResources({
+        settings: () => f.settings.load(),
+        remote: joinedFleetResources(f.joins),
+        joined: f.joins,
+      });
+      const status = await machines.status(credential.lease.machineId);
+      expect(status).toMatchObject({ status: "unavailable", reason: "unsupported-platform" });
+      expect(status).not.toHaveProperty("snapshot");
     } finally {
       abort.abort();
       await channel;
