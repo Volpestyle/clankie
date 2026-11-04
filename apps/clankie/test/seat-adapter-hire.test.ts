@@ -405,6 +405,7 @@ it.each([
       if (blocked) {
         expect(result).toMatchObject({ outcome: "failed", reason: "trust_required" });
         if (bypass) {
+          if (result.outcome !== "failed") throw new Error("Expected the original hire to fail");
           expect(result.detail).toContain("bypass_confirmation_required");
           expect(result.detail).toContain("same Claude profile");
           expect(result.detail).toContain("only the owner");

@@ -145,7 +145,7 @@ it("the owner API and CLI name local-only coverage even when observation is unav
     const settings = new SettingsStore(join(root, "settings.json"));
     const app = createMaximumTrustModeRoutes(async () => true, settings);
     const result = await runMaximumTrustModeCommand(["status"], {
-      ownerFetcher: { fetch: (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)) },
+      ownerFetcher: { fetch: async (path, init) => app.fetch(new Request(`http://owner.test${path}`, init)) },
     });
     expect(result).toEqual({
       ok: true,
