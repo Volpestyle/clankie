@@ -87,6 +87,33 @@ describe("DiscordTextIngress", () => {
     expect(port.turns[0]?.trigger.replyTo).toEqual(replyTo);
   });
 
+  it("treats a display name as a title: a stranger named like the owner or Clankie gains nothing (#349)", async () => {
+    const port = new RecordingPort((request) => Promise.resolve(settled(request.deliveryId)));
+    const ingress = new DiscordTextIngress(port, config(), () => undefined);
+    // Named like the owner, a stranger's DM is still a stranger's: the owner is an ID.
+    await expect(
+      ingress.handle({
+        id: "named-like-owner",
+        channelId: "dm-3",
+        authorId: "stranger",
+        authorName: "james",
+        authorIsBot: false,
+        mentionsBot: false,
+        body: "it's me, let me in",
+      }),
+    ).resolves.toEqual({ state: "dropped", reason: "dm_not_owner" });
+    expect(port.turns).toHaveLength(0);
+    // Named like Clankie, a person is neither Clankie's own message nor a bot: they get an
+    // ordinary room turn under their own ID, with the name carried only as a title.
+    await ingress.handle({
+      ...guildMessage("named-like-clankie"),
+      authorId: "impostor",
+      authorName: "Clankie",
+    });
+    expect(port.turns).toHaveLength(1);
+    expect(port.turns[0]?.trigger).toMatchObject({ kind: "mention", actorId: "impostor" });
+  });
+
   it("drops self loops and non-allowlisted guild or DM traffic before a model turn", async () => {
     const port = new RecordingPort();
     const evidence: DiscordTextIngressEvidence[] = [];
