@@ -33,6 +33,7 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
       const binding = createHash("sha256").update(directory).digest("hex");
       const pane = `w1:p${reason}`;
       let posts = 0;
+      const requests: string[] = [];
       let lastDelivery: { id: string; binding: string } | undefined;
       const server = createServer(async (request, response) => {
         if (reason === "binding_timeout" && request.method === "GET") {
@@ -103,6 +104,7 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
           metrics.observeReport("default", pane, report); // Polling the same observation adds no attempt.
         },
         request: async (suffix, init) => {
+          requests.push(init?.method ?? "GET");
           const response = await fetch(`${host}${suffix || "/"}`, {
             ...init,
             // Only the deliberate timeout cases need a deadline shorter than
@@ -128,14 +130,45 @@ it("counts every worker receipt failure from real TCP/filesystem failures withou
             ? "stored"
             : reason === "binding_rejected"
               ? "rejected"
-              : ["binding_unavailable", "connection_refused"].includes(reason)
+              : [
+                    "binding_timeout",
+                    "binding_unavailable",
+                    "connection_refused",
+                    "local_receipt_unavailable",
+                  ].includes(reason)
                 ? "unavailable"
                 : "uncertain",
         );
         expect(posts).toBe(
           ["stored", "receipt_timeout", "receipt_unresolved", "receipt_invalid"].includes(reason) ? 1 : 0,
         );
+        if (reason === "binding_timeout") {
+          // Binding is a read before dispatch: no original exists to reconcile.
+          expect(receipt).toMatchObject({ received: false, deliveryStage: "unavailable", retryable: true });
+          expect(receipt).not.toHaveProperty("deliveryId");
+          expect(requests).toEqual(["GET"]);
+          expect(hasPendingInboundClaim(directory, reason)).toBe(false);
+        }
+        if (reason === "local_receipt_unavailable") {
+          expect(receipt).toMatchObject({ received: false, deliveryStage: "unavailable", retryable: false });
+          expect(receipt).not.toHaveProperty("deliveryId");
+          expect(requests).toEqual([]);
+          expect(await readFile(directory, "utf8")).toBe("not a directory");
+          // Reconciliation cannot repair unreadable state or dispatch a replacement.
+          expect(await sender.reconcilePending()).toMatchObject({
+            received: false,
+            deliveryStage: "unavailable",
+            retryable: false,
+          });
+          expect(requests).toEqual([]);
+          expect(await readFile(directory, "utf8")).toBe("not a directory");
+        }
         if (["receipt_timeout", "receipt_unresolved", "receipt_invalid"].includes(reason)) {
+          expect(receipt).toMatchObject({
+            received: false,
+            deliveryStage: "uncertain",
+            deliveryId: lastDelivery!.id,
+          });
           const claim = (await readdir(directory)).find((name) => name.endsWith(".json"));
           expect(claim).toBeDefined();
           expect(JSON.parse(await readFile(join(directory, claim!), "utf8")).deliveryId).toBe(
