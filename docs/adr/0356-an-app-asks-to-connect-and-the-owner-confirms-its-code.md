@@ -110,7 +110,7 @@ tempting, and neither closes this on its own:
   [assertion verification](https://www.w3.org/TR/webauthn-3/#sctn-verifying-assertion)
   checks the challenge and the origin. That doesn't prove the owner started this OAuth
   request, or stop whoever prepared it from collecting the result. RFC 10027's proximity
-  text concerns CTAP hybrid transport over BLE, not OAuth consent pages in general.
+  text concerns CTAP hybrid transport's BLE proximity check, not OAuth consent pages in general.
 - **A client that proves a key at the token endpoint** (option I). Possession of a
   self-registered key doesn't establish the intended recipient or the owner's intent.
   PKCE already proves a requester-chosen secret, and it didn't solve this.
@@ -289,8 +289,8 @@ determined flood, and a requester with many addresses is held only by the shared
 
 - **Requester metadata.** The gateway computes the requester's identity from the
   address it verified (through the trusted proxy), hashes it per host, and sets it on
-  the sign-in route only (#776). That a caller can't set it through the doorway depends
-  on #776's encrypted-path fix, which is still under review. The Mac's tunnel passes it
+  the sign-in route only (#776). A caller can't set it through the doorway: #776's encrypted-path fix passed independent
+  review at 9f411df and merged as 93b15f2b. The Mac's tunnel passes it
   to the service over loopback. A sign-in without it counts only toward the shared cap.
   The service doesn't authenticate it, so a direct caller can set their own. That local
   access is trusted is an assumption here, not something any check establishes.
