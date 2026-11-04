@@ -211,7 +211,7 @@ test("native Pi file path reattaches exact UUID for messaging and harvests into 
   await vi.waitFor(() => expect(wake).toHaveBeenCalledOnce());
   expect(wake.mock.calls[0]![0]).toBe("discord:fixture-room");
   expect(wake.mock.calls[0]![1]).toContain(
-    "<seat-final-message>\nNative Pi final report\n</seat-final-message>",
+    '<seat-final-message>\n"Native Pi final report"\n</seat-final-message>',
   );
   expect(f.adapter.attach).toHaveBeenCalledWith({
     harness: "pi",
