@@ -194,6 +194,7 @@ it("derives each release's items from the commits since the previous published r
     statePath: join(root, "tracker", "owner-loop.json"),
     logger: { info() {}, warn() {} },
   });
+  onTestFinished(stopLoop);
   const settle = async () => {
     // The owner loop runs in-process and serially; let its queued steps finish.
     for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -256,7 +257,7 @@ it("derives each release's items from the commits since the previous published r
         CLANKIE_OPERATOR_TOKEN: "tracker-owner",
         CLANKIE_CONTROL_PLANE_URL: "http://fixture.invalid",
       },
-      fetchImpl: (input, init) => app.app.request(new URL(String(input)).pathname, init),
+      fetchImpl: async (input, init) => app.app.request(new URL(String(input)).pathname, init),
     });
     expect(reply.ok, JSON.stringify(reply.body)).toBe(true);
     return (reply.body as { result: any }).result;
@@ -405,5 +406,4 @@ it("derives each release's items from the commits since the previous published r
     stage: "owner-verified",
     statusType: "completed",
   });
-  await stopLoop();
 });
