@@ -4846,6 +4846,8 @@ paths:
         immediately. A current cursor parks until the projected sources change,
         sampled within 500 ms, or the wait expires. Unreachable is a client
         transport state, never a mood. Paired hosted devices may read it.
+        includeQuiet true opts in to quiet (the owner's quiet hours are in effect)
+        and, while quiet, quietUntil; both change the cursor (legacy reads omit them).
         includeFace true opts in to an optional face (legacy reads omit it).
         It drives the desktop screen separately from mood/body:
         needs_you, error, new_message, working or voice, in that precedence.

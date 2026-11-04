@@ -39,3 +39,18 @@ it("rejects overflow, unknown kinds, raw prompts and invalid source timestamps",
     }).success,
   ).toBe(true);
 });
+
+it("carries quiet hours only for a reader that opted in, with a real end time", () => {
+  expect(
+    OperatorPresenceRequestSchema.parse({ op: "presence", schemaVersion: 1 }).includeQuiet,
+  ).toBeUndefined();
+  expect(
+    OperatorPresenceRequestSchema.parse({ op: "presence", schemaVersion: 1, includeQuiet: true })
+      .includeQuiet,
+  ).toBe(true);
+  const quiet = { ...snapshot, quiet: true, quietUntil: "2026-11-04T13:00:00.000Z" };
+  expect(OperatorPresenceSnapshotSchema.parse(quiet)).toEqual(quiet);
+  expect(OperatorPresenceSnapshotSchema.parse({ ...snapshot, quiet: false }).quietUntil).toBeUndefined();
+  expect(OperatorPresenceSnapshotSchema.safeParse({ ...snapshot, quiet: "yes" }).success).toBe(false);
+  expect(OperatorPresenceSnapshotSchema.safeParse({ ...snapshot, quietUntil: "7am" }).success).toBe(false);
+});

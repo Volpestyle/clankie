@@ -112,7 +112,9 @@ export async function statusCommand(options: StatusCommandOptions): Promise<Stat
           body: JSON.stringify({
             op: "presence",
             schemaVersion: 1,
-            ...(current && owner ? { includeCurrentActivity: true, includeToolActivity: true } : {}),
+            ...(current && owner
+              ? { includeCurrentActivity: true, includeToolActivity: true, includeQuiet: true }
+              : {}),
           }),
           signal: AbortSignal.timeout(3000),
         });

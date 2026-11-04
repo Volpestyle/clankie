@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { DesktopExpressions, desktopTools } from "../src/captain/desktop.ts";
 import { DesktopExpressionSchema } from "../../../packages/protocol/src/presence.ts";
-import { DesktopSettingsSchema, desktopIsQuiet } from "../../../packages/settings/src/desktop.ts";
+import {
+  DesktopSettingsSchema,
+  desktopIsQuiet,
+  desktopQuietUntil,
+  type DesktopSettings,
+} from "../../../packages/settings/src/desktop.ts";
 import { pollPresence, projectPresence } from "../src/captain/presence.ts";
 
 const idle = { thinking: false, inVoice: false, playing: false, activeSeats: 0 };
@@ -80,5 +85,33 @@ describe("desktop expressions", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("when quiet hours end", () => {
+  const chicago = (start: string, end: string) => ({
+    quietHours: { start, end, timeZone: "America/Chicago" },
+  });
+  const until = (settings: DesktopSettings, at: string) =>
+    desktopQuietUntil(settings, new Date(at))?.toISOString();
+
+  it("is unknown outside the window and with no window", () => {
+    expect(until({}, "2026-11-04T12:00:00.000Z")).toBeUndefined();
+    expect(until(chicago("22:00", "07:00"), "2026-11-04T20:00:00.000Z")).toBeUndefined();
+  });
+
+  it("finds the end the same day, overnight, and at its last minute", () => {
+    expect(until(chicago("09:00", "17:00"), "2026-11-04T15:30:00.000Z")).toBe("2026-11-04T23:00:00.000Z");
+    expect(until(chicago("22:00", "07:00"), "2026-11-04T05:00:00.000Z")).toBe("2026-11-04T13:00:00.000Z");
+    expect(until(chicago("22:00", "07:00"), "2026-11-04T12:59:30.000Z")).toBe("2026-11-04T13:00:00.000Z");
+  });
+
+  it("follows the owner's clock across daylight saving changes", () => {
+    // 22:30 CDT on 2026-10-31; the clock falls back overnight, so 07:00 is CST.
+    expect(until(chicago("22:00", "07:00"), "2026-11-01T03:30:00.000Z")).toBe("2026-11-01T13:00:00.000Z");
+    // 22:30 CST on 2026-03-07; the clock springs forward overnight, so 07:00 is CDT.
+    expect(until(chicago("22:00", "07:00"), "2026-03-08T04:30:00.000Z")).toBe("2026-03-08T12:00:00.000Z");
+    // The clock skips 02:30 on 2026-03-08, so the window ends at the jump to 03:00.
+    expect(until(chicago("22:00", "02:30"), "2026-03-08T04:30:00.000Z")).toBe("2026-03-08T08:00:00.000Z");
   });
 });
