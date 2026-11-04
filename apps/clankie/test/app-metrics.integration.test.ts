@@ -40,67 +40,75 @@ async function paired(host: Awaited<ReturnType<typeof createQaService>>, automat
   return (await complete.json()) as { deviceId: string; deviceToken: string };
 }
 
-it("a real paired device reports content-free rolling timings and the operator reads them through metrics --app", async () => {
-  const host = await createQaService();
-  try {
-    const device = await paired(host);
-    const post = (value: unknown, token: string | undefined = device.deviceToken) =>
-      fetch(host.baseUrl + APP_METRICS_POST_PATH, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(token ? { authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify(value),
+it.each(["messages", "feed", "work", "mailbox"] as const)(
+  "a real paired device reports %s timings and the operator reads them through metrics --app",
+  async (destination) => {
+    const summary = { ...report.summaries[0]!, destination };
+    const destinationReport: AppMetricsReport = { ...report, summaries: [summary] };
+    const host = await createQaService();
+    try {
+      const device = await paired(host);
+      const post = (value: unknown, token: string | undefined = device.deviceToken) =>
+        fetch(host.baseUrl + APP_METRICS_POST_PATH, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(value),
+        });
+      expect((await post(destinationReport, "")).status).toBe(401);
+      expect((await post(destinationReport, host.operatorToken)).status).toBe(401);
+      expect(
+        (
+          await fetch(host.baseUrl + APP_METRICS_PATH, {
+            headers: { authorization: `Bearer ${device.deviceToken}` },
+          })
+        ).status,
+      ).toBe(401);
+      expect((await post(destinationReport)).status).toBe(202);
+      expect((await post(destinationReport)).status).toBe(429);
+      const read = () =>
+        runMetricsCommand(["--app"], {
+          host: host.baseUrl,
+          env: { CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+        });
+      expect(await read()).toEqual({
+        ok: true,
+        app: { devices: [{ deviceId: device.deviceId, ...destinationReport }] },
       });
-    expect((await post(report, "")).status).toBe(401);
-    expect((await post(report, host.operatorToken)).status).toBe(401);
-    expect(
-      (
-        await fetch(host.baseUrl + APP_METRICS_PATH, {
-          headers: { authorization: `Bearer ${device.deviceToken}` },
-        })
-      ).status,
-    ).toBe(401);
-    expect((await post(report)).status).toBe(202);
-    expect((await post(report)).status).toBe(429);
-    const read = () =>
-      runMetricsCommand(["--app"], {
-        host: host.baseUrl,
-        env: { CLANKIE_OPERATOR_TOKEN: host.operatorToken },
+      for (const invalid of [
+        { ...destinationReport, deviceId: "spoofed" },
+        { ...destinationReport, text: "content" },
+        { ...destinationReport, summaries: [{ ...summary, destination: "private-project" }] },
+        { ...destinationReport, summaries: [{ ...summary, count: 65 }] },
+        { ...destinationReport, summaries: [{ ...summary, slowCount: 13 }] },
+        { ...destinationReport, summaries: [{ ...summary, firstFrameMs: { p50: 200, p95: 100 } }] },
+        { ...destinationReport, summaries: [{ ...summary, longTaskMs: { p50: -1, p95: 100 } }] },
+        { ...destinationReport, summaries: [summary, summary] },
+      ])
+        expect((await post(invalid)).status).toBe(400);
+      expect((await post({ padding: "x".repeat(4096) })).status).toBe(413);
+      host.advance(1000);
+      const replacement = {
+        platform: "ios",
+        summaries: [{ ...summary, count: 1, longTaskMs: null, slowCount: 0 }],
+      };
+      expect((await post(replacement)).status).toBe(202);
+      expect(await read()).toEqual({
+        ok: true,
+        app: { devices: [{ deviceId: device.deviceId, ...replacement }] },
       });
-    expect(await read()).toEqual({ ok: true, app: { devices: [{ deviceId: device.deviceId, ...report }] } });
-    for (const invalid of [
-      { ...report, deviceId: "spoofed" },
-      { ...report, text: "content" },
-      { ...report, summaries: [{ ...summary, destination: "private-project" }] },
-      { ...report, summaries: [{ ...summary, count: 65 }] },
-      { ...report, summaries: [{ ...summary, slowCount: 13 }] },
-      { ...report, summaries: [{ ...summary, firstFrameMs: { p50: 200, p95: 100 } }] },
-      { ...report, summaries: [{ ...summary, longTaskMs: { p50: -1, p95: 100 } }] },
-      { ...report, summaries: [summary, summary] },
-    ])
-      expect((await post(invalid)).status).toBe(400);
-    expect((await post({ padding: "x".repeat(4096) })).status).toBe(413);
-    host.advance(1000);
-    const replacement = {
-      platform: "ios",
-      summaries: [{ ...summary, count: 1, longTaskMs: null, slowCount: 0 }],
-    };
-    expect((await post(replacement)).status).toBe(202);
-    expect(await read()).toEqual({
-      ok: true,
-      app: { devices: [{ deviceId: device.deviceId, ...replacement }] },
-    });
-    expect(publicGatewayTargetFor("POST", APP_METRICS_POST_PATH)).toBe("control");
-    expect(publicGatewayTargetFor("GET", APP_METRICS_PATH)).toBeUndefined();
-    expect((await host.operator(`/v1/devices/${device.deviceId}/revoke`)).status).toBe(200);
-    expect((await post(report)).status).toBe(401);
-    expect(await read()).toEqual({ ok: true, app: { devices: [] } });
-  } finally {
-    await host.close();
-  }
-});
+      expect(publicGatewayTargetFor("POST", APP_METRICS_POST_PATH)).toBe("control");
+      expect(publicGatewayTargetFor("GET", APP_METRICS_PATH)).toBeUndefined();
+      expect((await host.operator(`/v1/devices/${device.deviceId}/revoke`)).status).toBe(200);
+      expect((await post(destinationReport)).status).toBe(401);
+      expect(await read()).toEqual({ ok: true, app: { devices: [] } });
+    } finally {
+      await host.close();
+    }
+  },
+);
 
 it("bounds device/platform windows, evicts the oldest, expires idle data and resets after service restart", async () => {
   const host = await createQaService();

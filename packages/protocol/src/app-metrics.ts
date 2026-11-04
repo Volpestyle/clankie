@@ -9,6 +9,7 @@ export const APP_METRICS_DEVICE_PLATFORM_LIMIT = 64;
 export const AppMetricDestinationSchema = z.enum([
   "world",
   "messages",
+  "feed",
   "work",
   "terminal",
   "settings",

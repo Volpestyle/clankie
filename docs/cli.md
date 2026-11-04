@@ -7767,7 +7767,8 @@ frames over 100 ms). A null long-task measurement means unsupported, never zero.
 These are client-reported last-64 windows, not averaged fleet percentiles.
 
 Paired clients POST complete snapshots to `/v1/devices/self/app-metrics`.
-Only fixed destinations, timings and counts are accepted; the current session
+Fixed destinations include `feed`; older clients may still report `work` and
+`mailbox`. Only destinations, timings and counts are accepted; the current session
 supplies the device ID. Reports are at most 4 KiB and eight destinations.
 Updates faster than once per second per device/platform return 429. The service
 keeps at most 64 device/platform snapshots, evicts the oldest, drops snapshots
