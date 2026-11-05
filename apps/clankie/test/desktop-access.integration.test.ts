@@ -1,9 +1,9 @@
 import { runMachinesCommand } from "../../tui/src/command/machines.ts";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { machineJoinHash } from "../src/machine-join-crypto.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -14,6 +14,7 @@ import { DESKTOP_ACCESS_PATH, DesktopAccessSnapshotSchema } from "@clankie/proto
 import { hostedOperatorAllows } from "@clankie/protocol/hosted-operator";
 import { publicGatewayTargetFor } from "@clankie/protocol/public-gateway";
 import { createClankieApp } from "../src/app.ts";
+import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { ExecutionConnections } from "../src/herdr-session.ts";
 import { runComputerCommand } from "../../tui/src/command/computer.ts";
@@ -23,7 +24,7 @@ afterEach(async () => {
   for (const close of cleanups.splice(0).reverse()) await close();
 });
 
-async function fixture() {
+async function fixture(withAccountRecords = false) {
   const root = await mkdtemp(join(tmpdir(), "desktop-access-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const settings = new SettingsStore(join(root, "settings.json"));
@@ -45,6 +46,41 @@ async function fixture() {
   });
   runtimes.machines.setJoinedProvider(joins);
   let now = Date.now();
+  if (withAccountRecords) {
+    const records = [
+      { deviceId: "account", mintedBy: "hosted-account" },
+      { deviceId: "account-child", mintedBy: "device:account" },
+      { deviceId: "account-grandchild", mintedBy: "device:account-child" },
+    ].flatMap(({ deviceId, mintedBy }) => {
+      const event = (type: string, data: object) => ({
+        id: randomUUID(),
+        type,
+        occurredAt: new Date(now).toISOString(),
+        missionId: `device:${deviceId}`,
+        correlationId: "desktop-owner-device",
+        profileHash: "fixture",
+        data: { schemaVersion: 1, deviceId, ...data },
+      });
+      return [
+        event("device.pairing.redeemed", {
+          offerId: deviceId,
+          name: deviceId,
+          platform: "macos",
+          mintedBy,
+          offeredGrants: TAKE_CONTROL_GRANTS,
+          pendingExpiresAt: new Date(now + 60000).toISOString(),
+        }),
+        event("device.activated", {
+          grants: TAKE_CONTROL_GRANTS,
+          sessionExpiresAt: new Date(now + 3600000).toISOString(),
+        }),
+      ];
+    });
+    await writeFile(
+      join(root, "events.jsonl"),
+      records.map((record) => JSON.stringify(record)).join("\n") + "\n",
+    );
+  }
   let authorized = true;
   let authCalls = 0;
   let revokeAt = Infinity;
@@ -57,6 +93,7 @@ async function fixture() {
       eventLogPath: join(root, "events.jsonl"),
       deviceSessionKey: new Uint8Array(32).fill(19),
       clock: () => new Date(now),
+      isSameMacRequest: (request) => new URL(request.url).hostname === "127.0.0.1",
       authenticateOperator: async (request) =>
         authorized && ++authCalls < revokeAt && request.headers.get("authorization") === "Bearer owner"
           ? { operatorId: "owner" }
@@ -85,6 +122,25 @@ async function fixture() {
       headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }),
     });
+  const pair = async (grants: typeof TAKE_CONTROL_GRANTS, parent = "owner") => {
+    const offer = await (await request("/v1/pairing/offer", {}, parent)).json();
+    const pending = await (
+      await request(
+        "/v1/pairing/redeem",
+        { code: offer.code, device: { name: "Fixture owner", platform: "macos" } },
+        "",
+      )
+    ).json();
+    return (
+      await (
+        await request(
+          "/v1/pairing/complete",
+          { completionToken: pending.completionToken, acceptedGrants: grants },
+          "",
+        )
+      ).json()
+    ).deviceToken as string;
+  };
   const cli = (...args: string[]) =>
     runComputerCommand(args, { host, env: { CLANKIE_OPERATOR_TOKEN: "owner" } });
   const state = async (query = "") =>
@@ -92,6 +148,11 @@ async function fixture() {
   return {
     settings,
     joins,
+    pair,
+    token: (deviceId: string) =>
+      new DeviceSessionSigner(new Uint8Array(32).fill(19)).issue(
+        mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
+      ),
     request,
     cli,
     machineCli: () =>
@@ -200,27 +261,8 @@ it("reports only named actor observations, expires them and never treats them as
 
 it("paired owner control can choose a mode; a supervise device cannot; neither can publish terminal observations", async () => {
   const f = await fixture();
-  const pair = async (grants: typeof TAKE_CONTROL_GRANTS) => {
-    const offer = await (await f.request("/v1/pairing/offer", {})).json();
-    const pending = await (
-      await f.request(
-        "/v1/pairing/redeem",
-        { code: offer.code, device: { name: "Fixture owner", platform: "macos" } },
-        "",
-      )
-    ).json();
-    return (
-      await (
-        await f.request(
-          "/v1/pairing/complete",
-          { completionToken: pending.completionToken, acceptedGrants: grants },
-          "",
-        )
-      ).json()
-    ).deviceToken as string;
-  };
-  const supervise = await pair(SUPERVISE_GRANTS);
-  const owner = await pair(TAKE_CONTROL_GRANTS);
+  const supervise = await f.pair(SUPERVISE_GRANTS);
+  const owner = await f.pair(TAKE_CONTROL_GRANTS);
   const initial = await f.state();
   const body = { schemaVersion: 1, expectedRevision: initial.revision, mode: "host" };
   expect((await f.request(DESKTOP_ACCESS_PATH, body, supervise)).status).toBe(403);
@@ -304,4 +346,52 @@ it("adds desktop status to opted-in machine inventory while preserving strict ol
     desktopAccess: { desktopMode: "host", permissions: { state: "unavailable" } },
   });
   expect(extended.machines.every((machine: unknown) => MachineSchema.safeParse(machine).success)).toBe(true);
+});
+
+it.each(["account", "account-child", "account-grandchild"])(
+  "desktop choices use the shared owner-device decision (%s)",
+  async (deviceId) => {
+    const f = await fixture(true);
+    const initial = await f.state();
+    const token = f.token(deviceId);
+    const read = await f.request(DESKTOP_ACCESS_PATH, undefined, token);
+    const write = await f.request(
+      DESKTOP_ACCESS_PATH,
+      {
+        schemaVersion: 1,
+        expectedRevision: initial.revision,
+        mode: "host",
+      },
+      token,
+    );
+    expect({ read: read.status, write: write.status }).toEqual({ read: 403, write: 403 });
+    expect((await f.settings.load()).computer.machines).toEqual({});
+    expect((await f.request(`${DESKTOP_ACCESS_PATH}/permissions`, {}, token)).status).toBe(401);
+  },
+);
+
+it("owner desktop choices remain available to a real owner pairing and its child", async () => {
+  const f = await fixture();
+  const owner = await f.pair(TAKE_CONTROL_GRANTS);
+  const child = await f.pair(TAKE_CONTROL_GRANTS, owner);
+  for (const token of [owner, child]) {
+    const read = await f.request(DESKTOP_ACCESS_PATH, undefined, token);
+    expect(read.status).toBe(200);
+    const state = DesktopAccessSnapshotSchema.parse(await read.json());
+    expect(
+      (
+        await f.request(
+          DESKTOP_ACCESS_PATH,
+          {
+            schemaVersion: 1,
+            expectedRevision: state.revision,
+            mode: "host",
+          },
+          token,
+        )
+      ).status,
+    ).toBe(200);
+  }
+  expect((await f.settings.load()).machineAccess).toEqual({ pc: "workers" });
+  expect((await f.state()).desktopMode).toBe("host");
 });
