@@ -1,3 +1,4 @@
+import { PROJECT_TRACKING_PATH, ProjectTrackingRequestSchema } from "./project-tracking.ts";
 import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
 import {
   DESKTOP_ACCESS_PATH,
@@ -62,6 +63,15 @@ function discordAllows(method: string, path: string): boolean {
 
 /** The single hosted-device authority seam. Lifecycle belongs to the account/control plane. */
 export function hostedOperatorAllows(method: string, path: string, body?: string): boolean {
+  if (method === "GET" && /^\/v1\/operator\/project-tracking\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
+    return true;
+  if (method === "POST" && path === PROJECT_TRACKING_PATH) {
+    try {
+      return ProjectTrackingRequestSchema.safeParse(JSON.parse(body ?? "null")).success;
+    } catch {
+      return false;
+    }
+  }
   if (method === "GET" && isDesktopAccessRoute(path)) return true;
   if (method === "POST" && (path === DESKTOP_ACCESS_PATH || path === REFRESH_DESKTOP_PERMISSIONS_PATH))
     return true;

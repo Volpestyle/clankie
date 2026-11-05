@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectTrackingSchema } from "./project-tracking.ts";
 import { FleetGatesSchema } from "./fleet-gates.ts";
 import { HireProfileSchema, HireEffortSchema, withoutNoPreference } from "./hire-profile.ts";
 import { OPERATOR_AGENT_ROLES, OperatorAgentRoleSchema, operatorAgentRoleKey } from "./agent-roles.ts";
@@ -137,6 +138,9 @@ export const ProjectSchema = z
     worktreeRoots: z.array(ProjectWorktreeRootSchema).max(32).default([]),
     /** Another project's workspaces this project's reviews and churn may read; never ownership. */
     linkedRepos: ProjectLinkedReposSchema.optional(),
+    /** Product repos and public/private work destinations; grants no workspace membership. */
+    tracking: ProjectTrackingSchema.optional(),
+    trackingConfirmedAt: z.string().datetime().optional(),
     trackerRef: z
       .object({ workspaceId: ProjectIdSchema, path: z.literal(".clankie/tracking.json") })
       .strict()

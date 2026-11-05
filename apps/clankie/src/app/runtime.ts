@@ -3,6 +3,7 @@ import { DesktopAccess } from "../desktop-access.ts";
 import { createDesktopAccessRoutes } from "../desktop-access-routes.ts";
 import { machineAccessLevel } from "../machine-access.ts";
 import { createPiSettingsRoutes } from "../pi-settings-routes.ts";
+import { createProjectTrackingRoutes } from "../project-tracking.ts";
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
 import { createMachineJoinRoutes } from "../machine-join-routes.ts";
@@ -844,6 +845,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ...(dependencies.builtInTracker ? { tracker: dependencies.builtInTracker } : {}),
     }),
   );
+  if (dependencies.projectTracking)
+    app.route("/", createProjectTrackingRoutes(authorizeOwnerSecrets, dependencies.projectTracking));
   app.route("/", createReviewRoutes(dependencies.captain.reviews, authorizeOwnerSecrets));
   app.route(
     "/",

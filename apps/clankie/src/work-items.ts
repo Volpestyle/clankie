@@ -1,3 +1,4 @@
+import { trackingConventionAt } from "./project-tracking-convention.ts";
 import { leadChangePulls } from "./lead-change-pulls.ts";
 import { observeLandedBranch } from "./landed-branch.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
@@ -43,7 +44,7 @@ import {
   type ExportIssue,
   type FilesExportResult,
   discoverConvention,
-  readConvention,
+  readConvention as readFileConvention,
   resolveTracker,
   readProjectDetails,
   readProjectWork,
@@ -552,6 +553,10 @@ function fenceRouteFile(fence: TrackerRouteFence | undefined, path: string, vers
 }
 
 export function createWorkItemsService(options: WorkItemsServiceOptions) {
+  const readConvention = async (path: string) => {
+    const projects = await options.projects?.();
+    return (projects ? trackingConventionAt(projects, path) : undefined) ?? (await readFileConvention(path));
+  };
   const projectReader =
     options.projects && options.localMachineId
       ? createProjectWorkReader({
@@ -1116,6 +1121,20 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     beforeWrite?: () => Promise<void>,
   ) => {
     try {
+      const projects = await options.projects?.();
+      const configured = projects ? trackingConventionAt(projects, path) : undefined;
+      if (configured) {
+        const dependencies = {
+          ...(await deps(path, local)),
+          ...(beforeWrite === undefined ? {} : { beforeWrite }),
+        };
+        return {
+          convention: configured,
+          recorded: true,
+          backend: backendFor(path, configured, dependencies),
+          tools: trackerToolsFor(path, configured, dependencies),
+        };
+      }
       return await resolveTracker(
         path,
         { ...(await deps(path, local)), ...(beforeWrite === undefined ? {} : { beforeWrite }) },

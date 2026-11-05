@@ -47,6 +47,9 @@ function projectSnapshot(
 ) {
   const projects = current.projects.projects.map((saved) => {
     const project = { ...saved };
+    // Dedicated owner tracking route; older strict project clients retain their wire shape.
+    delete project.tracking;
+    delete project.trackingConfirmedAt;
     if (!includeAutonomy) {
       delete project.autonomy;
       delete project.trackerProjectId;

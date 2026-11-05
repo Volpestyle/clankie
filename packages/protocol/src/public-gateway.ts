@@ -1,3 +1,4 @@
+import { PROJECT_TRACKING_PATH } from "./project-tracking.ts";
 import { PROJECT_CI_STARTER_PATH } from "./project-ci-starter.ts";
 import {
   DESKTOP_ACCESS_PATH,
@@ -240,6 +241,8 @@ export const PUBLIC_GATEWAY_ROUTES = [
   { method: "POST", path: LINEAR_FOLLOW_PATH, target: "relay" },
   { method: "GET", path: LINEAR_WAKE_PATH, target: "relay" },
   { method: "POST", path: LINEAR_WAKE_PATH, target: "relay" },
+  { method: "GET", path: PROJECT_TRACKING_PATH, target: "relay" },
+  { method: "POST", path: PROJECT_TRACKING_PATH, target: "relay" },
   { method: "GET", path: WORK_TRACKER_SETTINGS_PATH, target: "relay" },
   { method: "POST", path: WORK_TRACKER_SETTINGS_PATH, target: "relay" },
   { method: "GET", path: FLEET_SETTINGS_PATH, target: "relay" },
@@ -478,6 +481,8 @@ export function publicGatewayTargetFor(
   additionalRoutes: readonly PublicGatewayRoute[] = [],
 ): PublicGatewayTarget | undefined {
   if (method === "POST" && /^\/v1\/devices\/[A-Za-z0-9_-]{1,128}\/revoke$/u.test(path)) return "control";
+  if (method === "GET" && /^\/v1\/operator\/project-tracking\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
+    path = PROJECT_TRACKING_PATH;
   if (method === "GET" && /^\/v1\/operator\/work-tracker\?projectId=[a-z][a-z0-9_-]{0,63}$/u.test(path))
     path = WORK_TRACKER_SETTINGS_PATH;
   if (method === "GET" && path === "/v1/devices?grouped=true") path = "/v1/devices";

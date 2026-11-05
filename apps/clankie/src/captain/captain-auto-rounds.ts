@@ -1,3 +1,4 @@
+import { trackingRepositoryPaths } from "../project-tracking-repositories.ts";
 import { join } from "node:path";
 import type { FleetRoomParty, OperatorFleetSeat } from "@clankie/protocol";
 import type { ProjectVelocity } from "@clankie/protocol/auto-rounds";
@@ -102,10 +103,12 @@ export function createAutoRounds(ctx: AutoRoundsContext) {
       options.projectOutcomes ??
       (async () => ({ state: "unavailable" as const, reason: "no tracker outcome reader in this service" })),
     history: (project) => projectMirrors.history(project),
-    linkedRepos: async (project) =>
-      readableLinkedRepos((await settings()).projects, project)
+    linkedRepos: async (project) => [
+      ...readableLinkedRepos((await settings()).projects, project)
         .filter((repo) => repo.machineId === "local")
         .map((repo) => repo.path),
+      ...(await trackingRepositoryPaths(project)),
+    ],
     churn: readRepositoryChurn,
   };
   const settleAutoRound = (

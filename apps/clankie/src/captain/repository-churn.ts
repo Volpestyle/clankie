@@ -112,7 +112,14 @@ function churnBucket(path: string, productPaths: readonly string[] | undefined, 
 
 /** Tracker identifiers, including built-in `LOCAL-TEAM-n` keys whole, never as `TEAM-n`. */
 const issueKeys = (message: string) => [
-  ...new Set(message.match(/\b(?:LOCAL-[A-Z][A-Z0-9]*|[A-Z][A-Z0-9]*)-\d+\b/gu) ?? []),
+  ...new Set([
+    ...(message.match(/\b(?:LOCAL-[A-Z][A-Z0-9]*|[A-Z][A-Z0-9]*)-\d+\b/gu) ?? []),
+    ...[
+      ...message.matchAll(
+        /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)\b|(?<![\w./-])([\w.-]+\/[\w.-]+)#([1-9]\d*)\b/gu,
+      ),
+    ].map((match) => `${(match[1] ?? match[3])!.toLowerCase()}#${match[2] ?? match[4]}`),
+  ]),
 ];
 
 async function git(repository: string, args: readonly string[]) {

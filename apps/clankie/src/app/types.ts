@@ -230,6 +230,7 @@ export interface ClankieAppDependencies {
   agentSessions?: AgentSessions;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   workItems?: WorkItemsService;
+  projectTracking?: import("../project-tracking.ts").ProjectTrackingService;
   /** "Posting to your tracker" (ADR 0302): waiting writes and their decisions. */
   trackerPosting?: import("../tracker-posting.ts").TrackerPostingGate;
   /** Media embedded in returned work items, resolved to evidence blobs (VUH-2666). */

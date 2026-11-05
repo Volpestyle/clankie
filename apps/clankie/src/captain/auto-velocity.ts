@@ -127,9 +127,29 @@ async function readCommits(
       continue;
     }
     read++;
-    for (const commit of churn.commits)
+    const target = project.tracking?.tracker;
+    const primary = project.workspaces.find((workspace) => workspace.id === project.trackerRef?.workspaceId);
+    const visibility =
+      project.tracking?.repositories.find((repo) => repo.localPath === primary?.path)?.visibility ?? "public";
+    const githubRepo = target?.backend === "github" ? target[visibility].repository.toLowerCase() : undefined;
+    for (const original of churn.commits) {
+      // Only the configured issue repo can turn a qualified GitHub reference into its #n key.
+      // A sibling's own Merge pull request #n, or another repo's same number, never matches.
+      const commit = githubRepo
+        ? {
+            ...original,
+            issueKeys: [
+              ...new Set(
+                original.issueKeys.flatMap((key) =>
+                  key.startsWith(githubRepo + "#") ? [key, key.slice(githubRepo.length)] : [key],
+                ),
+              ),
+            ],
+          }
+        : original;
       if (!source.linked || commit.issueKeys.some((key) => issueKeys!.has(key)))
         commits.set(commit.sha, commit);
+    }
   }
   if (read === 0) return { state: "unknown", reason: reasons.join("; ") || "no repository" };
   return { state: "known", commits: [...commits.values()] };

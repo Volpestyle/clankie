@@ -1,3 +1,4 @@
+import { projectTrackingConvention } from "./project-tracking-convention.ts";
 import { createHash } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, normalize } from "node:path";
@@ -16,9 +17,15 @@ export function createProjectWorkReader(options: {
   trackerProject?: (id: string) => Promise<() => Promise<void>>;
 }) {
   const bound = async () =>
-    (await options.projects()).projects.filter((project) => project.trackerRef !== undefined);
+    (await options.projects()).projects.filter(
+      (project) => project.trackerRef !== undefined || project.tracking !== undefined,
+    );
   const prepare = async (project: Project) => {
-    const workspace = project.workspaces.find((entry) => entry.id === project.trackerRef?.workspaceId);
+    const workspace =
+      project.workspaces.find((entry) => entry.id === project.trackerRef?.workspaceId) ??
+      (project.tracking
+        ? project.workspaces.find((entry) => entry.machineId === options.localMachineId)
+        : undefined);
     if (
       !workspace ||
       workspace.machineId !== options.localMachineId ||
@@ -32,6 +39,9 @@ export function createProjectWorkReader(options: {
       if ((await realpath(path)) !== path) throw new Error("Workspace path changed");
       const directory = await stat(path);
       if (!directory.isDirectory()) throw new Error("Workspace unavailable");
+      const declared = project.tracking?.repositories.find((repo) => repo.localPath === path);
+      const configured = projectTrackingConvention(project, declared?.visibility ?? "public");
+      if (configured) return { directory: [directory.dev, directory.ino], convention: configured };
       const file = join(path, ".clankie", "tracking.json");
       if ((await realpath(file)) !== file) throw new Error("Tracker path changed");
       const convention = await readConvention(path);

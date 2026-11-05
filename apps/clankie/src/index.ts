@@ -298,6 +298,8 @@ import {
 import { createTrackerPosting, trackerPostingExecutor } from "./tracker-posting.ts";
 import { projectLeadConversation } from "./feed-drops.ts";
 import { recordDropPosted } from "@clankie/work-items";
+import { ProjectTrackingService } from "./project-tracking.ts";
+import { githubRestApi } from "@clankie/work-items";
 import { createWorkItemsService } from "./work-items.ts";
 import {
   collectLinearImport,
@@ -2416,7 +2418,24 @@ extensions.add(personaExtension({ receipts: discordTurnReceipts, appearance: per
 });
 extensions.add(minecraftSwitch, { enabled: minecraftOn, settings: undefined });
 await extensions.start();
+const projectTracking = new ProjectTrackingService(settingsStore, async () => {
+  const fenced = await githubConnectionFenced(operatorCredentialStore);
+  if (!fenced.connection) throw new Error("GitHub connection unavailable");
+  return {
+    api: githubRestApi({ token: fenced.connection.token }),
+    assertCurrent: () => fenced.assertCurrent(),
+  };
+});
+const trackingTimer = setInterval(() => {
+  void projectTracking
+    .sweep()
+    .catch(() =>
+      logger.warn({ event: "project.tracking.sweep_unavailable" }, "Project tracking sweep unavailable"),
+    );
+}, 15 * 60_000);
+trackingTimer.unref();
 const clankie = await createClankieApp({
+  projectTracking,
   ...(worldOn
     ? {
         streamWatch: new DiscordStreamWatchProjection(
@@ -2899,6 +2918,7 @@ let shutdownStarted = false;
 function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   if (shutdownStarted) return;
   shutdownStarted = true;
+  clearInterval(trackingTimer);
   // Fence new admissions immediately; retain rejection until the existing drain chain awaits it.
   const admissionsClosed = nativeFixtureAdmissions.close().then(
     () => ({ ok: true as const }),
