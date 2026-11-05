@@ -520,3 +520,13 @@ currently remain held after Stop whenever quiescence cannot be proved. Hosted
 routing and rollout have separate private evidence; no deployment is part of
 this public landing. Decision: [ADR 0255](adr/0255-a-lent-screen-keeps-consent-and-stops-on-its-host.md) and
 [ADR 0256](adr/0256-lent-input-needs-native-drain-proof.md).
+
+## Fresh terminal checks
+
+The owner can request a fresh non-prompting permission observation through the
+computer API. The service uses its configured local terminal runtime to start
+one fixed diagnostic in a new, unfocused tab; it never types into an existing
+worker or owner shell. The diagnostic identifies its actual application through
+process ancestry and refuses when that context cannot be established. Requests
+are bounded, do not retry an uncertain launch, and never grant permission or
+change a desktop choice. Unavailable context remains unavailable.
