@@ -96,7 +96,7 @@ async function fixture() {
   );
   cleanups.push(() => captain.close());
 
-  const trees = new Map<string, string>();
+  const trees = new Map<string, string | undefined>();
   const hire = async (seatId: string) => {
     const tree = join(agents, `wt-${seatId}`);
     await git(repo, ["worktree", "add", "--quiet", "-b", `clankie/${seatId}`, tree, "main"]);
@@ -105,7 +105,7 @@ async function fixture() {
   };
   const agent = (seatId: string) => {
     const tree = trees.get(seatId);
-    if (tree === undefined) throw new Error("no terminal");
+    if (!trees.has(seatId)) throw new Error("no terminal");
     return {
       paneId: `w1:${seatId}`,
       terminalId: seatId,
@@ -176,7 +176,8 @@ async function fixture() {
     OperatorConversationServiceResultSchema.parse(
       await serve({ op: "close_seat", schemaVersion: 1, seatId }),
     );
-  return { hire, hired, close, exits };
+  const observeWithoutDirectory = (seatId: string) => trees.set(seatId, undefined);
+  return { hire, hired, close, exits, observeWithoutDirectory };
 }
 
 it("closing a landed hire that outlived a restart removes its worktree", async () => {
@@ -203,11 +204,31 @@ it("a close that prunes nothing still says why the tree stayed", async () => {
     worktree: { outcome: "unavailable", path: tree, reason: "provenance_unknown" },
   });
   expect((await stat(tree)).isDirectory()).toBe(true);
-  // No live terminal to read the tree from.
-  const gone = await f.close("gone");
-  expect(gone, JSON.stringify(gone)).toMatchObject({
+  // The native occupant is known, but it has no observed working directory.
+  f.observeWithoutDirectory("no-directory");
+  const unknownDirectory = await f.close("no-directory");
+  expect(unknownDirectory, JSON.stringify(unknownDirectory)).toMatchObject({
     closed: true,
-    worktree: { outcome: "unavailable", path: "", reason: "agent_unresolved" },
+    worktree: { outcome: "unavailable", path: "", reason: "working_directory_unknown" },
   });
-  expect(f.exits).toEqual(["by-hand", "gone"]);
+  expect(f.exits).toEqual(["by-hand", "no-directory"]);
+});
+
+it("an unresolved native occupant refuses before the close adapter or prune", async () => {
+  const f = await fixture();
+  const tree = await f.hire("by-hand");
+  const gone = await f.close("gone");
+  expect(gone).toEqual({
+    op: "close_seat",
+    schemaVersion: 1,
+    seatId: "gone",
+    closed: false,
+    refusal: {
+      reason: "main_unknown",
+      failingJobs: [],
+      detail: "Native close occupant could not be resolved",
+    },
+  });
+  expect(f.exits).toEqual([]);
+  expect((await stat(tree)).isDirectory()).toBe(true);
 });
