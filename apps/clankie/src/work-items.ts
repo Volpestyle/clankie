@@ -1,4 +1,5 @@
 import { leadChangePulls } from "./lead-change-pulls.ts";
+import { observeLandedBranch } from "./landed-branch.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
@@ -2013,6 +2014,21 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       });
     },
     mergedPull,
+    landedBranch: async (
+      repository: string,
+      launch: { branchRef: string; startHead: string; hiredAt: string },
+    ) => {
+      const snapshot = await githubSnapshot();
+      const binding = deliveryFingerprint(JSON.stringify(snapshot ?? null));
+      const access = checkpointAccess(snapshot?.token);
+      const observation = await observeLandedBranch(access.api, repository, launch, access.cache);
+      const revalidate = async () => {
+        await observation.revalidate();
+        if (deliveryFingerprint(JSON.stringify((await githubSnapshot()) ?? null)) !== binding)
+          throw new MainCheckpointRefused(checkpointUnknown("GitHub connection changed during close proof"));
+      };
+      return { proof: observation.proof, revalidate };
+    },
     checkIssueCheckpoint,
     handleOwnerWrite,
     /**

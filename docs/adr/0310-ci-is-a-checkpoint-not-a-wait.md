@@ -145,7 +145,7 @@ commit baseline or relocated worktree's initial main SHA. Without that record,
 Git's fork point against `origin/main` is used (with the worktree's initial HEAD
 reflog as a fallback). With no commits beyond that base, there is no job merge
 to check; research and abandoned starts are not charged with another job's red
-main. Existing report, draft and unlanded-work guards still apply. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown; other retirement guards still apply.
+main. Existing report, draft and unlanded-work guards still apply. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown unless a positively missing checkout has the separate controller/provider landed-work proof in [ADR 0280](0280-automatic-tidy-requires-positive-work-proof.md#missing-worktree-provider-proof-885); other retirement guards still apply.
 
 CI results are shared per merge SHA and bug searches per run URL/merge SHA,
 within the GitHub connection, for three minutes. Concurrent checks share the

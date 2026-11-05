@@ -55,6 +55,36 @@ export class HireWorktrees {
     return this.read()[scope];
   }
 
+  /** Exact controller-created relocation; ambiguity or reused launch paths cannot prove a close. */
+  public closeRelocation(claim: { workingDirectory: string; harness?: string | undefined; hiredAt: string }) {
+    const matches = () =>
+      Object.entries(this.read()).filter(([scope, entry]) => {
+        const key = JSON.parse(scope) as unknown[];
+        return (
+          key.length === 4 &&
+          key[0] === "local" &&
+          key[1] === entry.start &&
+          key[2] === claim.harness &&
+          entry.path === claim.workingDirectory &&
+          entry.workingDirectory === claim.workingDirectory &&
+          Number.isFinite(Date.parse(entry.at)) &&
+          Date.parse(entry.at) <= Date.parse(claim.hiredAt)
+        );
+      });
+    const all = matches();
+    if (all.length !== 1) return undefined;
+    const [key, entry] = all[0]!;
+    const saved = JSON.stringify(entry);
+    return {
+      entry: structuredClone(entry),
+      validate: () => {
+        const latest = matches();
+        if (latest.length !== 1 || latest[0]![0] !== key || JSON.stringify(latest[0]![1]) !== saved)
+          throw new Error("Original worktree relocation changed");
+      },
+    };
+  }
+
   /** Initial main SHA for this exact relocated worktree, on its own machine. */
   public baseFor(fleet: string | undefined, path: string): string | undefined {
     return Object.entries(this.read()).find(

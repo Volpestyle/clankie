@@ -177,7 +177,9 @@ export interface CaptainDeps {
     Partial<Pick<AgentSessions, "resolve" | "subagents" | "readSubagent">>;
   /** Work items in each repo's own tracking convention (ADR 0191). */
   readonly workItems?: Pick<WorkItemsService, "handle"> &
-    Partial<Pick<WorkItemsService, "prepareSeatIssueTracker" | "mainCheckpoint" | "mergedPull">>;
+    Partial<
+      Pick<WorkItemsService, "prepareSeatIssueTracker" | "mainCheckpoint" | "mergedPull" | "landedBranch">
+    >;
   /** Tools on his connected MCP servers. The lane is passed on every call. */
   readonly mcp: Pick<McpHost, "catalog" | "catalogStatus" | "call">;
   /** The mail tools only; the account catalog owns status and disconnect. */

@@ -523,6 +523,8 @@ export function createHiring(ctx: HiringContext) {
 
   return {
     hireSeat,
+    closeWorktreeRelocation: (claim: Parameters<HireWorktrees["closeRelocation"]>[0]) =>
+      hireWorktrees.closeRelocation(claim),
     hireWorktreeBase: (fleet: string | undefined, path: string) => hireWorktrees.baseFor(fleet, path),
   };
 }

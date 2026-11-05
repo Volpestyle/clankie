@@ -774,6 +774,54 @@ export class ProjectHires {
       ...(entry.role === undefined ? {} : { role: entry.role }),
     };
   }
+  /** Close evidence only: never confirms or adopts an uncertain launch. */
+  public missingWorktreeClaim(fleet: string, pane: string, seat: string, occupantId: string) {
+    const candidates = () =>
+      this.read().allocations.filter(
+        (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane === pane,
+      );
+    const all = candidates(),
+      entry = all[0];
+    if (
+      all.length !== 1 ||
+      !entry?.started ||
+      entry.operatorRelease ||
+      !entry.proof ||
+      entry.seat !== seat ||
+      entry.occupantId !== occupantId ||
+      entry.proof.nativeOccupantId !== occupantId ||
+      entry.proof.fleet !== fleet ||
+      entry.proof.pane !== pane ||
+      !Number.isFinite(entry.beganAt) ||
+      !entry.request.workingDirectory ||
+      entry.request.fleet !== undefined
+    )
+      return undefined;
+    const exclusive = () =>
+      this.read().allocations.filter(
+        (a) =>
+          !a.gone &&
+          a.started &&
+          a.request.fleet === undefined &&
+          a.request.workingDirectory === entry.request.workingDirectory,
+      ).length === 1;
+    if (!exclusive()) return undefined;
+    const saved = structuredClone(entry);
+    return {
+      allocation: entry.id,
+      occupantId,
+      projectId: entry.projectId,
+      workingDirectory: entry.request.workingDirectory,
+      harness: entry.request.harness,
+      hiredAt: new Date(entry.beganAt!).toISOString(),
+      validate: () => {
+        const current = candidates();
+        if (current.length !== 1 || !exclusive() || !isDeepStrictEqual(current[0], saved))
+          throw new Error("Original close allocation changed");
+      },
+    };
+  }
+
   /**
    * Capture a confirmed original hire for its later exit bookkeeping. This is
    * not live membership: complete inventory may mark the hire gone before its

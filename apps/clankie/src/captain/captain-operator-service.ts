@@ -1,4 +1,5 @@
 import { recommendHire } from "./hire-recommendation.ts";
+import { MainCheckpointRefused } from "@clankie/work-items";
 import { ConnectorStarts } from "./connector-starts.ts";
 import { WatchingError } from "../watch.ts";
 import {
@@ -1418,6 +1419,41 @@ export function createOperatorService(
       }
       // The same hold as close_worker_pane: unlanded work stays unless a reason is recorded.
       const tidy = ctx.herdrWatches.tidy;
+      const closingAgent = await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => {
+        logger.warn(
+          { event: "connector.close_agent.native_observation_unavailable" },
+          "Close native observation unavailable",
+        );
+        return undefined;
+      });
+      if (!closingAgent)
+        return {
+          op: "close_seat",
+          schemaVersion: 1,
+          seatId: request.seatId,
+          closed: false,
+          refusal: {
+            reason: "main_unknown",
+            failingJobs: [],
+            detail: "Native close occupant could not be resolved",
+          },
+        };
+      let missingGuard: (() => Promise<() => void>) | undefined;
+      try {
+        if (authority) await authorizeQuestion(authority);
+        missingGuard = closingAgent ? await tidy?.prepareMissingClose?.(closingAgent) : undefined;
+      } catch (error) {
+        return {
+          op: "close_seat",
+          schemaVersion: 1,
+          seatId: request.seatId,
+          closed: false,
+          refusal:
+            error instanceof MainCheckpointRefused
+              ? { ...error.hold, failingJobs: [...error.hold.failingJobs] }
+              : { reason: "main_unknown", failingJobs: [], detail: "Missing worktree proof unavailable" },
+        };
+      }
       const held = (await tidy?.seatWorktreeHold(request.seatId)) ?? [];
       if (held.length && request.unlandedReason === undefined) {
         if (app !== undefined) logAppClose(false, "unlanded_work");
@@ -1429,7 +1465,6 @@ export function createOperatorService(
           refusal: { reason: "unlanded_work", worktrees: held.slice(0, 8) },
         };
       }
-      const closingAgent = await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined);
       const checkpoint = closingAgent ? await tidy?.mainCheckpointHold(closingAgent) : undefined;
       if (checkpoint) {
         if (app !== undefined) logAppClose(false, checkpoint.reason);
@@ -1468,6 +1503,21 @@ export function createOperatorService(
           busy((await ctx.herdrRunner.resolveTerminal(request.seatId).catch(() => undefined))?.status)
         )
           throw new Error("busy");
+        try {
+          const assertMissing = await missingGuard?.();
+          await refuseWhileWatching();
+          if (missingGuard && authority) await authorizeQuestion(authority);
+          assertMissing?.();
+        } catch (error) {
+          if (error instanceof MainCheckpointRefused) checkpointAtExit = error.hold;
+          else if (missingGuard)
+            checkpointAtExit = {
+              reason: "main_unknown",
+              failingJobs: [],
+              detail: "Close authority or landed proof changed",
+            };
+          throw error;
+        }
       });
       const worktree =
         closed && closeWorktree && tidy

@@ -1,3 +1,6 @@
+import { MissingWorktreeProofSchema, positivelyMissing } from "./missing-worktree-close.ts";
+import { MainCheckpointRefused } from "@clankie/work-items";
+import type { MissingWorktreeProof, MissingWorktreeObservation } from "./missing-worktree-close.ts";
 import type { MainCheckpointHold } from "@clankie/work-items";
 import { randomUUID } from "node:crypto";
 import {
@@ -52,8 +55,9 @@ const HandoffSchema = z
     commits: z.array(z.string()),
     /** parked: clean unlanded commits preserved on a local keep/ branch at close (VUH-2802). */
     // merge_queue receipts came from the retired integrate queue; older history still holds them.
-    kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop", "parked"]),
+    kind: z.enum(["merge_queue", "remote_ref", "worth_landing", "safe_to_drop", "parked", "merged_pull"]),
     reference: z.string(),
+    landed: MissingWorktreeProofSchema.optional(),
   })
   .strict();
 type Handoff = z.infer<typeof HandoffSchema>;
@@ -223,6 +227,10 @@ export class PaneTidy {
     ): Promise<{ results: import("./prune-worktree.ts").PruneWorktreeResult[] }>;
     provenance(agent: HerdrAgentSnapshot): ConversationOwner | "unknown" | "owner_interactive";
     retirementGuard?(agent: HerdrAgentSnapshot): Promise<RetirementGuard>;
+    landedMissingWorktree?(
+      agent: HerdrAgentSnapshot,
+      path: string,
+    ): Promise<MissingWorktreeObservation | undefined>;
     mainCheckpoint?(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined>;
     /** Overrides how long a close waits on mainCheckpoint; tests shorten it. */
     checkpointMs?: number;
@@ -681,6 +689,25 @@ export class PaneTidy {
     if (fleet !== undefined && fleet !== DESKTOP_SEAT_FLEET)
       return { held: worktrees.filter((work) => work.state !== "reconciled"), handoffs };
     for (const work of worktrees) {
+      if (work.state === "unknown" && this.ports.landedMissingWorktree) {
+        try {
+          const observation = await this.ports.landedMissingWorktree(agent, work.path);
+          const proof = observation?.proof;
+          if (proof) {
+            handoffs.push({
+              path: work.path,
+              head: proof.head,
+              commits: [proof.head],
+              kind: "merged_pull",
+              reference: proof.url,
+              landed: proof,
+            });
+            continue;
+          }
+        } catch {
+          /* Unknown or red work proof remains held below. */
+        }
+      }
       if (work.state === "unknown" || work.dirtyFiles !== 0 || !work.head) {
         held.push(work);
         continue;
@@ -802,6 +829,48 @@ export class PaneTidy {
     }
     return { held, handoffs };
   }
+  /** Pins a missing-checkout proof for one close attempt, then rechecks it at the native guard. */
+  async prepareMissingClose(agent: HerdrAgentSnapshot): Promise<(() => Promise<() => void>) | undefined> {
+    if (!this.ports.landedMissingWorktree) return undefined;
+    const paths = [
+      ...new Set(
+        [agent.workingDirectory, agent.foregroundWorkingDirectory].filter(
+          (p): p is string => p !== undefined,
+        ),
+      ),
+    ];
+    const saved: MissingWorktreeProof[] = [];
+    for (const path of paths)
+      if (positivelyMissing(path)) {
+        const proof = await this.ports.landedMissingWorktree(agent, path);
+        if (proof) saved.push(proof.proof);
+      }
+    if (!saved.length) return undefined;
+    return async () => {
+      const latest = await this.fresh(agent.paneId);
+      if (latest.terminalId !== agent.terminalId || tidySessionKey(latest) !== tidySessionKey(agent))
+        throw new MainCheckpointRefused({
+          reason: "main_unknown",
+          failingJobs: [],
+          detail: "Close occupant changed",
+        });
+      const assertions: (() => void)[] = [];
+      for (const proof of saved) {
+        const current = await this.ports.landedMissingWorktree!(latest, proof.path);
+        if (JSON.stringify(current?.proof) !== JSON.stringify(proof))
+          throw new MainCheckpointRefused({
+            reason: "main_unknown",
+            failingJobs: [],
+            detail: "Landed close proof changed",
+          });
+        assertions.push(current!.assertCurrent);
+      }
+      return () => {
+        for (const assert of assertions) assert();
+      };
+    };
+  }
+
   async mainCheckpointHold(agent: HerdrAgentSnapshot): Promise<MainCheckpointHold | undefined> {
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -911,6 +980,7 @@ export class PaneTidy {
       reportPath = this.state.reports.find((report) => report.sessionKey === key)!.reportPath;
       // Restart resumes the same thread in the same directory, so nothing is left behind.
       const checkWorktrees = input.automatic || !input.nativeOnly;
+      const missingGuard = checkWorktrees ? await this.prepareMissingClose(agent) : undefined;
       let checked = checkWorktrees
         ? await this.worktreeHandoffs(agent, input.automatic)
         : { held: [], handoffs: [] };
@@ -980,7 +1050,9 @@ export class PaneTidy {
           const checkpoint = await this.mainCheckpointHold(latest);
           if (checkpoint) throw new Failure({ outcome: "refused", ...checkpoint });
         }
+        const assertMissing = await missingGuard?.();
         await this.authority(authority);
+        assertMissing?.();
         if (input.automatic && (this.keptPane(latest) || this.keepVersion(latest) !== keepVersion))
           return refuse("pane_kept");
       };
@@ -1104,7 +1176,11 @@ export class PaneTidy {
           /* Keep the previously persisted pending record. */
         }
       }
-      return error instanceof Failure ? error.result : { outcome: "failed", reason: "history_unavailable" };
+      return error instanceof MainCheckpointRefused
+        ? { outcome: "refused", ...error.hold }
+        : error instanceof Failure
+          ? error.result
+          : { outcome: "failed", reason: "history_unavailable" };
     } finally {
       if (lock) this.pending.delete(lock);
     }
@@ -1146,7 +1222,18 @@ export class PaneTidy {
   async seatWorktreeHold(seatId: string): Promise<WorktreeReconciliation[]> {
     const agent = await this.ports.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent) return [];
-    const held = await workerWorktreeHold(agent);
+    const observed = await workerWorktreeHold(agent);
+    const held: WorktreeReconciliation[] = [];
+    for (const work of observed) {
+      if (work.state === "unknown" && this.ports.landedMissingWorktree) {
+        try {
+          if (await this.ports.landedMissingWorktree(agent, work.path)) continue;
+        } catch {
+          /* Missing proof remains held, even if a worker says its PR merged. */
+        }
+      }
+      held.push(work);
+    }
     // The same exact-HEAD decided drop that admits the guarded prune. Dirt and unknown
     // state still hold the close; a decision never covers a later commit or edited file.
     return held.filter(

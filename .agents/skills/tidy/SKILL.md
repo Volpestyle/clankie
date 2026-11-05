@@ -47,6 +47,16 @@ its old pane id.
 
 ## Closing panes
 
+A missing local checkout can be proved landed without fabricating a launch
+baseline. The service binds the original native allocation to its controller
+relocation, then checks the allocated branch against canonical GitHub PR and
+main state. A surviving local ref must agree. This covers only that missing
+checkout; other work, unknown provenance, changed refs, provider failures and
+main checkpoints still hold. Worker text and `leave_unlanded` cannot supply
+this proof. Verified evidence is retained in private close history and
+`captain/landed-close-proofs.jsonl`; it never confirms a failed hire or repairs
+native admission.
+
 For a GitHub job with its own landed commits, close-out also needs main's post-merge checkpoint:
 `landing`, `checkpoint` and `mac` must all complete green, or a repository
 issue (open or closed) must name the red run URL or merge SHA. The merge is the
@@ -57,7 +67,7 @@ running, missing or unreachable evidence holds the pane. `main_red`,
 failing jobs when known. Repositories whose 20 recent main push runs have none
 of those jobs have no checkpoint to wait for. A worker with no commits beyond
 its recorded hire/worktree base (or Git fork point) is not charged with someone
-else's main commit. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown; other retirement guards still apply. CI and bug reads share a three-minute connection-scoped
+else's main commit. A directory positively identified by Git as non-Git also has no merge to check unless the hire recorded a Git baseline. Missing or inaccessible directories remain unknown unless the exact missing-checkout provider proof above succeeds; other retirement guards still apply. CI and bug reads share a three-minute connection-scoped
 cache, so retry after expiry when a bug was just filed. Unreadable or rate-limited
 reads still hold. File and link the red-run bug, then retry; an
 `unlandedReason` never overrides this hold. The same guard covers auto-tidy and

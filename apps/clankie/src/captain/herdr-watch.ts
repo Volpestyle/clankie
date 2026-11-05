@@ -2726,6 +2726,18 @@ export class HerdrWatchStore implements HerdrWatchPort {
     const fleet = nativeProofLocation(seat.paneId).fleet;
     return this.projectHires.attempt(fleet, projectHirePane(fleet, seat.paneId));
   }
+  /** Original allocation evidence for the exact currently observed native occupant. */
+  public missingWorktreeClaim(agent: HerdrAgentSnapshot) {
+    if (!agent.session) return undefined;
+    const location = nativeProofLocation(agent.paneId);
+    return this.projectHires.missingWorktreeClaim(
+      location.fleet,
+      location.pane,
+      agent.terminalId,
+      occupantIdForHerdrSession(agent.session),
+    );
+  }
+
   /**
    * The exact attempt allocation this pane's current occupant holds, captured before a
    * close releases it (#602). Undefined unless the ledger's occupant is this session.
