@@ -1,11 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createPiSeatControl } from "./pi-seat-control.ts";
 import { realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import type {
   HarnessSeatAdapter,
   PreparedSeatLaunch,
   SeatControl,
-  SeatEvent,
   SeatLaunch,
   SeatRef,
   SeatView,
@@ -41,12 +40,6 @@ const Session = z.object({
   runtime: z.object({ executable: z.string(), argv: z.array(z.string()).length(2), node: z.string() }),
 });
 class PiTurnedOff extends Error {}
-
-const Delivery = z.discriminatedUnion("outcome", [
-  z.object({ outcome: z.literal("accepted"), messageId: z.string().uuid(), state: z.literal("started") }),
-  z.object({ outcome: z.literal("unconfirmed"), messageId: z.string().uuid(), detail: z.string() }),
-  z.object({ outcome: z.literal("unavailable"), detail: z.string() }),
-]);
 
 export function createPiSeatAdapter(deps: {
   readonly repoRoot: string;
@@ -228,125 +221,15 @@ export function createPiSeatAdapter(deps: {
             await view.bound?.(ref);
             await verify(ref);
             const selected = ref;
-            let lastMessageId: string | undefined;
-            const control: SeatControl = {
-              ref: selected,
-              verify: () => verify(selected),
-              async status() {
-                try {
-                  await verify(selected);
-                  const status = Status.parse(await native.request("status"));
-                  await root!.report(descriptor!, status);
-                  return status;
-                } catch {
-                  return "offline";
-                }
-              },
-              async send(text, options) {
-                const earlier = native.pending();
-                if (earlier)
-                  return {
-                    outcome: "unconfirmed",
-                    messageId: earlier.messageId,
-                    deliveryStage: "uncertain",
-                    detail: "Original native delivery remains uncertain; no resend",
-                  };
-                const messageId = randomUUID();
-                let attempted = false;
-                try {
-                  await verify(selected);
-                  attempted = true;
-                  const result = Delivery.parse(
-                    await native.request(
-                      "send",
-                      {
-                        messageId,
-                        text,
-                        deliverAs: "followUp",
-                        timeoutMs: options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS,
-                      },
-                      (options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS) + 1000,
-                      options?.beforeDispatch,
-                    ),
-                  );
-                  if (result.outcome === "unavailable")
-                    return { outcome: "offline", detail: result.detail, deliveryStage: "unavailable" };
-                  if (result.messageId !== messageId) throw new Error("Native Pi receipt mismatch");
-                  lastMessageId = messageId;
-                  if (result.outcome === "accepted") {
-                    await verify(selected);
-                    await native.acknowledge(messageId);
-                  }
-                  return {
-                    ...result,
-                    deliveryStage: result.outcome === "accepted" ? "consumed" : "uncertain",
-                  };
-                } catch {
-                  if (!attempted)
-                    return {
-                      outcome: "offline",
-                      detail: "Original native Pi control unavailable before dispatch",
-                      deliveryStage: "unavailable",
-                    };
-                  return {
-                    outcome: "unconfirmed",
-                    messageId,
-                    detail: "Native Pi delivery unconfirmed; inspect original session before retrying",
-                    deliveryStage: "uncertain",
-                  };
-                }
-              },
-              async settled(abort): Promise<SeatEvent> {
-                while (true) {
-                  abort?.throwIfAborted();
-                  const state = await control.status();
-                  const at = new Date().toISOString();
-                  if (state === "offline") return { type: "released", at };
-                  if (state === "blocked")
-                    return { type: "blocked", at, reason: "A native Pi owner decision is pending" };
-                  if (state === "idle") {
-                    try {
-                      const result = z
-                        .discriminatedUnion("state", [
-                          z.object({ state: z.literal("pending") }),
-                          z.object({
-                            state: z.literal("completed"),
-                            ok: z.boolean(),
-                            text: z.string().max(32_768),
-                            stopReason: z.string(),
-                          }),
-                        ])
-                        .parse(await native.request("settlement", { messageId: lastMessageId }));
-                      if (result.state === "completed") {
-                        await verify(selected);
-                        return {
-                          type: "turn_completed",
-                          at,
-                          ok: result.ok,
-                          text: result.text,
-                          stopReason: result.stopReason,
-                          ...(lastMessageId ? { messageId: lastMessageId } : {}),
-                        };
-                      }
-                    } catch {
-                      return { type: "released", at };
-                    }
-                  }
-                  await new Promise((resolve) => setTimeout(resolve, 100));
-                }
-              },
-              async interrupt() {
-                try {
-                  await verify(selected);
-                  return (
-                    (await native.request("interrupt", { timeoutMs: deps.timeoutMs ?? 10_000 })) === true
-                  );
-                } catch {
-                  return false;
-                }
-              },
-              close: dispose,
-            };
+            const control = createPiSeatControl({
+              selected,
+              native,
+              verify,
+              root,
+              descriptor,
+              dispose,
+              timeoutMs: deps.timeoutMs,
+            });
             owned = control;
             controls.set(selected.sessionId, control);
             // Since Pi 1.2 a brief's run first passes before_agent_start, where
