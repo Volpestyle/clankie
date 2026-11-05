@@ -14,7 +14,12 @@ import type {
 } from "@clankie/agent-hosts";
 import { bundledSkills } from "@clankie/settings";
 import { MAXIMUM_TRUST_HARNESS_ARGS } from "@clankie/protocol";
-import { admitGrokRelease, connectGrokNative, type GrokNativeController } from "./grok-native-controller.ts";
+import {
+  admitGrokRelease,
+  connectGrokNative,
+  type GrokNativeController,
+  type GrokNativeOptions,
+} from "./grok-native-controller.ts";
 import type { GrokNativeHost } from "./grok-native-host.ts";
 import type { PreparedNativeRoot } from "./prepared-native-host.ts";
 
@@ -84,6 +89,9 @@ export function createGrokSeatAdapter(options: {
   stateDir: string;
   native: GrokNativeHost;
   processHelper: string;
+  /** Host discovery/observations, supplied only by trusted adapter construction. */
+  discover?: typeof discoverGrok;
+  readProcess?: GrokNativeOptions["readProcess"];
 }): HarnessSeatAdapter {
   const controls = new Map<string, SeatControl>();
   return {
@@ -118,7 +126,7 @@ export function createGrokSeatAdapter(options: {
           "Grok saved-history resume or extra argv lacks original controller proof; use the existing live seat",
         );
       const env = { ...process.env, ...launch.env };
-      const { executable, version } = await discoverGrok(env);
+      const { executable, version } = await (options.discover ?? discoverGrok)(env);
       const cwd = await realpath(launch.cwd);
       const directory = await realpath(await mkdtemp(join(tmpdir(), "clankie-grok-")));
       const sessionId = randomUUID();
@@ -203,6 +211,7 @@ export function createGrokSeatAdapter(options: {
               socketPath,
               sessionId,
               processHelper: options.processHelper,
+              ...(options.readProcess ? { readProcess: options.readProcess } : {}),
               receiptsPath: join(options.stateDir, "grok-workers", `${sessionId}.json`),
               guard: async () => {
                 signal?.throwIfAborted();

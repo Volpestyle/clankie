@@ -53,12 +53,17 @@ export interface GrokNativeOptions {
   sessionId: string;
   receiptsPath: string;
   timeoutMs?: number;
+  /** Trusted host process observations; defaults to the macOS kernel helpers. */
+  readProcess?: (file: string, args: string[]) => Promise<string>;
   /** The original visible native process and its admitted conversation. */
   guard(): Promise<void>;
 }
 
 /** Attach to an existing TUI-owned leader. Never spawn ACP stdio/headless, reconnect, or replay. */
 export async function connectGrokNative(options: GrokNativeOptions) {
+  const readProcess =
+    options.readProcess ??
+    (async (file: string, args: string[]) => (await exec(file, args, { timeout: 5000 })).stdout);
   GrokSessionId.parse(options.sessionId);
   const timeout = options.timeoutMs ?? 20_000;
   const deadline = Date.now() + timeout;
@@ -225,22 +230,15 @@ export async function connectGrokNative(options: GrokNativeOptions) {
   });
   const observe = async (pid: number) =>
     Birth.parse(
-      JSON.parse(
-        (await exec("/usr/bin/python3", ["-I", options.processHelper, String(pid)], { timeout: 5000 }))
-          .stdout,
-      ),
+      JSON.parse(await readProcess("/usr/bin/python3", ["-I", options.processHelper, String(pid)])),
     );
   const checkLeader = async (requireConnection = true) => {
     if (!leader || (requireConnection && (closed || peer.destroyed)))
       throw new Error("Original Grok leader unavailable");
     const facts = await observe(leader.pid);
     const file = await stat(options.socketPath);
-    const opened = (
-      await exec("/usr/sbin/lsof", ["-a", "-p", String(leader.pid), "-U", "-Fn"], { timeout: 5000 })
-    ).stdout;
-    const cwd = (
-      await exec("/usr/sbin/lsof", ["-a", "-p", String(leader.pid), "-d", "cwd", "-Fn"], { timeout: 5000 })
-    ).stdout;
+    const opened = await readProcess("/usr/sbin/lsof", ["-a", "-p", String(leader.pid), "-U", "-Fn"]);
+    const cwd = await readProcess("/usr/sbin/lsof", ["-a", "-p", String(leader.pid), "-d", "cwd", "-Fn"]);
     if (
       JSON.stringify(facts) !== JSON.stringify(leader) ||
       !file.isSocket() ||

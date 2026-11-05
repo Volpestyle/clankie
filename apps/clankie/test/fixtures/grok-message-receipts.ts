@@ -18,10 +18,6 @@ export async function grokReceiptFixture() {
   const executable = join(bin, "grok");
   await writeFile(executable, "#!/bin/sh\nprintf 'grok 1.0.46 (fixture)\\n'\n", { mode: 0o700 });
   const processHelper = join(root, "process.py");
-  await writeFile(
-    processHelper,
-    `import json\nprint(json.dumps(${JSON.stringify({ pid: process.pid, uid: process.getuid!(), birth: ["1", "1"], executable })}))\n`,
-  );
   let sessionId = "",
     admitted = 0,
     hook = async () => {},
@@ -55,7 +51,34 @@ export async function grokReceiptFixture() {
     register: () => () => {},
     allows: async () => true,
   };
-  const adapter = createGrokSeatAdapter({ repoRoot: root, stateDir: root, native, processHelper });
+  // Record only the macOS host observations. The real adapter, socket/inode
+  // checks, native protocol and final sender admission run on every CI host.
+  const adapter = createGrokSeatAdapter({
+    repoRoot: root,
+    stateDir: root,
+    native,
+    processHelper,
+    discover: async () => ({ executable, version: "1.0.46" }),
+    readProcess: async (file, args) => {
+      if (
+        file === "/usr/bin/python3" &&
+        JSON.stringify(args) === JSON.stringify(["-I", processHelper, String(process.pid)])
+      )
+        return JSON.stringify({
+          pid: process.pid,
+          uid: process.getuid!(),
+          birth: ["1", "1"],
+          executable,
+        });
+      if (file === "/usr/sbin/lsof" && args[2] === String(process.pid)) {
+        if (JSON.stringify(args) === JSON.stringify(["-a", "-p", String(process.pid), "-U", "-Fn"]))
+          return `p${process.pid}\nn${socketPath}\n`;
+        if (JSON.stringify(args) === JSON.stringify(["-a", "-p", String(process.pid), "-d", "cwd", "-Fn"]))
+          return `p${process.pid}\nn${cwd}\n`;
+      }
+      throw new Error(`Unrecorded Grok process observation: ${file} ${args.join(" ")}`);
+    },
+  });
   const prepared = await adapter.prepare!({
     harness: "grok",
     cwd,
