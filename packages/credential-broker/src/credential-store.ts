@@ -3,7 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { z } from "zod";
 import lockfile from "proper-lockfile";
 import { EvidenceCredentialSchema } from "./evidence-credential.ts";
@@ -131,6 +131,8 @@ export interface CredentialStore {
   health?(): CredentialStoreHealth;
   observeHealth?(listener: (health: CredentialStoreHealth) => void): () => void;
   get(providerId: string): Promise<ProviderCredential | undefined>;
+  /** Capture before an async read; validate synchronously at publication. No credential material leaves this fence. */
+  readFence?(providerId: string): { assertCurrent(): void };
   set(providerId: string, credential: ProviderCredential): Promise<void>;
   /** Revoke the exact current credential under the mutation lock before deleting it; callback must not call this store again. */
   delete(providerId: string, beforeDelete?: (current: ProviderCredential) => Promise<void>): Promise<boolean>;
@@ -209,6 +211,34 @@ function withCredentialLock<T>(path: string, operation: (assertHeld: () => void)
   });
 }
 
+/** Canonical stores publish through a lock and atomic file/revision replacement. */
+function credentialReadFence(path: string, lockPath: string, revision = false) {
+  const version = () => {
+    try {
+      const value = statSync(path, { bigint: true });
+      return `${value.dev}:${value.ino}:${value.size}:${value.mtimeNs}:${value.ctimeNs}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
+      throw error;
+    }
+  };
+  const before = version();
+  const assertCurrent = () => {
+    try {
+      statSync(`${lockPath}.lock`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if (version() !== before) throw new Error("Credential publication changed");
+      if (revision && before !== "absent" && readFileSync(path, "utf8").startsWith("pending:"))
+        throw new Error("Credential change in progress");
+      return;
+    }
+    throw new Error("Credential change in progress");
+  };
+  assertCurrent();
+  return { assertCurrent };
+}
+
 /**
  * Fallback store: a single JSON file (`Record<providerId, ProviderCredential>`) with
  * 0600 permissions inside a 0700 parent directory. Writes are atomic (temp file +
@@ -220,6 +250,11 @@ export class FileCredentialStore implements CredentialStore {
 
   public constructor(filePath: string) {
     this.filePath = resolve(filePath);
+  }
+
+  public readFence(providerId: string) {
+    normalizeProviderId(providerId);
+    return credentialReadFence(this.filePath, this.filePath);
   }
 
   public async get(providerId: string): Promise<ProviderCredential | undefined> {
@@ -553,6 +588,20 @@ export class KeychainCredentialStore implements CredentialStore {
     this.execFile =
       options.execFile ??
       ((file, args) => defaultExecFile(file, args, options.keychain, options.observeCommand));
+  }
+
+  public readFence(providerId: string) {
+    const fence = credentialReadFence(
+      this.accountRevisionPath(normalizeProviderId(providerId)),
+      this.lockPath,
+      true,
+    );
+    return {
+      assertCurrent: () => {
+        fence.assertCurrent();
+        if (this.state.health.state !== "ready") throw new Error("Credential store unavailable");
+      },
+    };
   }
 
   public get(providerId: string): Promise<ProviderCredential | undefined> {

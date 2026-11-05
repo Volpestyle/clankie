@@ -109,6 +109,36 @@ function operatorStores(options: OperatorCredentialOptions): readonly Credential
   return hasProtectedKeychain(env) ? [protectedStore(env), legacy] : [legacy];
 }
 
+/** Synchronous publication witness for the effective operator credential and its source selection. */
+export function operatorCredentialReadFence(options: OperatorCredentialOptions & { store: CredentialStore }) {
+  const env = options.env ?? process.env;
+  const token = readEnvironmentToken(env);
+  const protectedFirst = token === undefined && options.protectedFirst === true;
+  const protectedPath = protectedFirst ? protectedKeychainPath(env) : undefined;
+  const protectedPresent = protectedFirst ? hasProtectedKeychain(env) : undefined;
+  const passwords = protectedFirst ? env.CLANKIE_PROTECTED_KEYCHAIN_PASSWORDS : undefined;
+  const fences =
+    token !== undefined
+      ? []
+      : operatorStores(options).map((store) => {
+          if (!store.readFence) throw new Error("Operator credential publication cannot be fenced");
+          return store.readFence(OPERATOR_CREDENTIAL_PROVIDER_ID);
+        });
+  return {
+    assertCurrent: () => {
+      if (
+        readEnvironmentToken(env) !== token ||
+        (protectedFirst &&
+          (protectedKeychainPath(env) !== protectedPath ||
+            hasProtectedKeychain(env) !== protectedPresent ||
+            env.CLANKIE_PROTECTED_KEYCHAIN_PASSWORDS !== passwords))
+      )
+        throw new Error("Operator credential source changed");
+      for (const fence of fences) fence.assertCurrent();
+    },
+  };
+}
+
 /** Reads the effective token without creating one. The environment is an explicit override. */
 export async function resolveOperatorCredential(
   options: OperatorCredentialOptions = {},

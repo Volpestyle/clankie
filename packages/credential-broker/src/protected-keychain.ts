@@ -114,6 +114,10 @@ export class ProtectedKeychainStore implements CredentialStore {
     return action();
   }
 
+  readFence(providerId: string) {
+    return this.store.readFence(providerId);
+  }
+
   get(providerId: string) {
     return this.unlocked(() => this.store.get(providerId));
   }

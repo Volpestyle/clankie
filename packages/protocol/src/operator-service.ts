@@ -1,3 +1,4 @@
+import { LeadChangesReadSchema, LeadChangesResultSchema } from "./lead-changes.ts";
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
 import {
   IssueWriteResultSchema,
@@ -347,6 +348,13 @@ const CloseSeatRefusalSchema = z.discriminatedUnion("reason", [
 ]);
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  LeadChangesReadSchema.extend({
+    op: z.literal("lead_changes"),
+    schemaVersion: z.literal(1),
+    appDeviceId: z.string().min(1).max(256).optional(),
+    /** Relay-stamped deadline of the exact authenticated device session, never supplied by a connector. */
+    appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+  }).strict(),
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
   FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),
   /** The owner drops a screenshot, bug or idea into a project: a private issue file. Owner authority. */
@@ -1181,6 +1189,9 @@ export const SendReceiptRecordSchema = z.strictObject({
 export type SendReceiptRecord = z.infer<typeof SendReceiptRecordSchema>;
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z
+    .object({ op: z.literal("lead_changes"), schemaVersion: z.literal(1), result: LeadChangesResultSchema })
+    .strict(),
   z
     .object({ op: z.literal("feed_list"), schemaVersion: z.literal(1), result: FeedListResultSchema })
     .strict(),

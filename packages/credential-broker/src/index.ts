@@ -179,6 +179,7 @@ export {
   OperatorCredentialError,
   protectOperatorCredential,
   resolveOperatorCredential,
+  operatorCredentialReadFence,
   rotateOperatorCredential,
   type OperatorCredentialConsistency,
   type OperatorCredentialErrorCode,

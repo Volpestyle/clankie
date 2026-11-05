@@ -72,7 +72,8 @@
     "./runtime-health": "./src/runtime-health.ts",
     "./agent-roles": "./src/agent-roles.ts",
     "./app-metrics": "./src/app-metrics.ts",
-    "./captain-seat": "./src/captain-seat.ts"
+    "./captain-seat": "./src/captain-seat.ts",
+    "./lead-changes": "./src/lead-changes.ts"
   },
   "scripts": {
     "typecheck": "node ../../scripts/typecheck.mjs tsconfig.json",

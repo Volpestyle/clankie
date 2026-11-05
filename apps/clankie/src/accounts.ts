@@ -324,6 +324,40 @@ export interface GithubConnection {
   readonly installUrl?: string;
 }
 
+/** A host-only broker witness for reads whose account scope must remain current until publication. */
+export async function githubConnectionFenced(
+  store: Pick<CredentialStore, "get" | "update" | "readFence">,
+  options: GithubConnectionOptions = {},
+): Promise<{ connection: GithubConnection | undefined; assertCurrent(): void }> {
+  if (!store.readFence) throw new Error("GitHub credential publication cannot be fenced");
+  const fence = store.readFence(GITHUB_PROVIDER_ID);
+  let expiresAt: number | undefined;
+  const observe = (credential: ProviderCredential | undefined) => {
+    expiresAt = credential?.type === "oauth" && credential.expires !== 0 ? credential.expires : undefined;
+    return credential;
+  };
+  const connection = await githubConnection(
+    {
+      get: async (id) => observe(await store.get(id)),
+      ...(store.update
+        ? {
+            update: async (id: string, transform: Parameters<NonNullable<CredentialStore["update"]>>[1]) =>
+              observe(await store.update!(id, transform)),
+          }
+        : {}),
+    },
+    options,
+  );
+  return {
+    connection,
+    assertCurrent: () => {
+      fence.assertCurrent();
+      if (expiresAt !== undefined && (options.now ?? Date.now)() >= expiresAt)
+        throw new Error("GitHub connection expired");
+    },
+  };
+}
+
 /** The GitHub connection's token alone, for callers that pin no account. */
 export async function githubConnectionToken(
   store: Pick<CredentialStore, "get" | "update">,

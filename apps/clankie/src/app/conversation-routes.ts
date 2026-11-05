@@ -1,3 +1,5 @@
+import { collectLeadChanges } from "../lead-change-read.ts";
+import { LeadChangesRefusal } from "../lead-changes.ts";
 import { withPresenceCursor } from "../captain/presence.ts";
 import {
   FLEET_REPORT_LEADS_PATH,
@@ -100,6 +102,7 @@ export interface RegisterConversationRoutesContext {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
+  readonly detection: import("./connector-detection.ts").ConnectorDetection;
   readonly authorizeOwner: (request: Request) => Promise<true | "authentication_required" | "forbidden">;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers?: ConnectorPromptAnswers;
@@ -657,6 +660,103 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const owner = await questionOwnerAuthority(context.req.raw);
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
+    if (parsed.success && parsed.data.op === "lead_changes") {
+      const request = parsed.data;
+      const deviceId = request.appDeviceId;
+      const sessionDeadline =
+        request.appSessionExpiresAt === undefined ? Number.NaN : Date.parse(request.appSessionExpiresAt);
+      const authorityKind = deviceId === undefined ? owner?.principal.kind : "relay";
+      if (authorityKind === undefined) return context.json({ error: "lead_changes_forbidden" }, 403);
+      let authenticationFence: { assertCurrent(): void };
+      try {
+        if (!ctx.dependencies.leadChangesAuthorityFence) throw new Error("Authentication fence unavailable");
+        authenticationFence = ctx.dependencies.leadChangesAuthorityFence(context.req.raw, authorityKind);
+      } catch {
+        return context.json({ error: "lead_changes_unavailable" }, 503);
+      }
+      const discovery = ctx.detection.multiplexer("herdr");
+      const current = () => {
+        if (context.req.raw.signal.aborted || ctx.detection.multiplexer("herdr") !== discovery) return false;
+        if (deviceId === undefined) return owner?.current() === true;
+        const record = ctx.devices.get(deviceId);
+        return (
+          ctx.dependencies.captain.leadChangesCurrent?.() === true &&
+          workerReportDevice(record, ctx.clock()) &&
+          ctx.clock().getTime() < sessionDeadline &&
+          ctx.detection.served(deviceId)
+        );
+      };
+      const authorized = async () => {
+        if (context.req.raw.signal.aborted) return false;
+        if (deviceId === undefined)
+          return Boolean(owner && owner.current() && (await owner.authorize()) && owner.current());
+        const relay = await authenticateCaptain(context.req.raw, ctx.dependencies);
+        if (!relay || relay === "unavailable" || relay.steerSourceLane !== "api") return false;
+        const lead = await ctx.dependencies.captain.serveOperatorConversation({
+          op: "lead",
+          schemaVersion: 1,
+          command: { action: "status" },
+        });
+        return lead.op === "lead" && lead.result.status.lead === "apps" && current();
+      };
+      if (!(await authorized())) return context.json({ error: "lead_changes_forbidden" }, 403);
+      const changes = ctx.dependencies.leadChanges;
+      if (!changes) return context.json({ error: "lead_changes_unavailable" }, 503);
+      try {
+        const visibility = async () =>
+          JSON.stringify({
+            work: await ctx.dependencies.workItems?.leadChangeScope(),
+            herdr: ctx.detection.multiplexer("herdr"),
+          });
+        const scope = await visibility();
+        const mayRead = async () =>
+          (await authorized()) && (await visibility()) === scope && (await authorized());
+        const result = await changes.read({
+          scope:
+            (deviceId === undefined
+              ? "owner:" + owner!.principal.kind + ":" + owner!.principal.id
+              : "connector:" + deviceId) +
+            ":" +
+            scope,
+          request: {
+            ...(request.since === undefined ? {} : { since: request.since }),
+            ...(request.limit === undefined ? {} : { limit: request.limit }),
+          },
+          authorize: mayRead,
+          snapshot: () =>
+            collectLeadChanges({
+              captain: ctx.dependencies.captain,
+              signal: context.req.raw.signal,
+              ...(ctx.dependencies.workItems ? { work: ctx.dependencies.workItems } : {}),
+              ...(deviceId === undefined ? {} : { deviceId }),
+              herdr: discovery,
+            }),
+        });
+        if (!(await mayRead())) throw new LeadChangesRefusal("not_authorized");
+        const publication = await ctx.dependencies.workItems?.prepareLeadChangeScope();
+        const finalCheck = () => {
+          try {
+            publication?.assertCurrent();
+            authenticationFence.assertCurrent();
+          } catch {
+            throw new LeadChangesRefusal("not_authorized");
+          }
+          const visible = JSON.stringify({
+            work: publication?.stamp,
+            herdr: ctx.detection.multiplexer("herdr"),
+          });
+          if (visible !== scope || !current()) throw new LeadChangesRefusal("not_authorized");
+        };
+        // One synchronous authority + scope fence for pages and resets; no awaits below.
+        finalCheck();
+        return context.json({ op: "lead_changes", schemaVersion: 1, result });
+      } catch (error) {
+        if (error instanceof LeadChangesRefusal)
+          return context.json({ error: error.code }, error.code === "state_unavailable" ? 503 : 403);
+        return context.json({ error: "lead_changes_unavailable" }, 503);
+      }
+    }
+
     // Narrow work refusals are typed receipts, so a device can render the reason
     // without confusing known non-dispatch with transport uncertainty.
     if (typeof body === "object" && body !== null && (body as { op?: unknown }).op === "feed_check") {

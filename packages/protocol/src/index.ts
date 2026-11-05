@@ -1,3 +1,4 @@
+export * from "./lead-changes.ts";
 export * from "./work-handoff.ts";
 export * from "./settings-proposals.ts";
 export * from "./free-agent.ts";

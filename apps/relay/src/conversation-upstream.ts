@@ -1,3 +1,4 @@
+import { LeadChangesRefusalCodeSchema } from "../../../packages/protocol/src/lead-changes.ts";
 import { HOSTED_OPERATOR_PATH } from "../../../packages/protocol/src/hosted-operator.ts";
 import {
   OPERATOR_CONVERSATION_DISPATCH_PATH,
@@ -37,6 +38,20 @@ export function createCaptainConversationDispatch(
       signal: dispatchSignal(signal, request.op),
     });
     if (!response.ok) {
+      if (
+        request.op === "lead_changes" &&
+        (response.status === 400 || response.status === 403 || response.status === 503)
+      ) {
+        const body: unknown = await response
+          .clone()
+          .json()
+          // allow-swallowed-rejection -- malformed upstream JSON falls through to the existing HTTP error.
+          .catch(() => undefined);
+        const parsed = LeadChangesRefusalCodeSchema.safeParse(
+          typeof body === "object" && body !== null && "error" in body ? body.error : undefined,
+        );
+        if (parsed.success) throw new LeadChangesUpstreamRefusal(response.status, parsed.data);
+      }
       const restarting = await upstreamRestarting(response);
       if (restarting) throw restarting;
       throw new Error(`Captain conversation service returned HTTP ${response.status}`);
@@ -236,4 +251,15 @@ function requireHttpBase(value: string): URL {
     throw new Error("Captain URL must use http or https");
   }
   return url;
+}
+
+/** Typed new-feed refusals only; other captain upstream error contracts stay unchanged. */
+export class LeadChangesUpstreamRefusal extends Error {
+  readonly status: 400 | 403 | 503;
+  readonly code: string;
+  constructor(status: 400 | 403 | 503, code: string) {
+    super(code);
+    this.status = status;
+    this.code = code;
+  }
 }

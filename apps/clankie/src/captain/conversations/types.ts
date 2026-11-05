@@ -39,6 +39,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "lead_chats" }
   | { op: "fleet_room" }
   | { op: "app_notes" }
+  | { op: "lead_changes" }
   | { op: "prompt_answer" }
   | { op: "key_press" }
   | { op: "lead_wake" }
@@ -102,6 +103,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "lead_chats" }
   | { op: "fleet_room" }
   | { op: "app_notes" }
+  | { op: "lead_changes" }
   | { op: "prompt_answer" }
   | { op: "key_press" }
   | { op: "lead_wake" }
