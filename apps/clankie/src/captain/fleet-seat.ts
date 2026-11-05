@@ -1,3 +1,4 @@
+import type { AgentMessageDispatch } from "../agent-message-dispatch.ts";
 /**
  * A fleet seat's mailbox (ADR 0161): a DM or room turn rides a `SeatOutbox` as
  * a channel event while a `clankie mcp --seat` bridge is polling. An unavailable
@@ -11,6 +12,7 @@ export interface FleetSeatMessageContext {
   readonly conversationId: string;
   readonly channelContent?: string;
   readonly source: string;
+  readonly agentMessage?: AgentMessageDispatch;
   /**
    * The sender is this worker's own lead: the conversation that hired it or now
    * owns it, proven by adoption at send time, never by the message text (#442).

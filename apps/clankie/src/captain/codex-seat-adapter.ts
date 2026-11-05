@@ -1,3 +1,4 @@
+import { currentOf, withCurrent, type CurrentCheck } from "./peer-seat-messages.ts";
 import type { LocalCodexRegistration } from "../local-codex-seats.ts";
 import type {
   HarnessSeatAdapter,
@@ -551,16 +552,22 @@ export function createCodexSeatAdapter(
                 const initialGuard = initialDispatch ? view.guard : undefined;
                 const guard =
                   initialGuard || options?.beforeDispatch
-                    ? async () => {
-                        try {
-                          await initialGuard?.();
-                          if (options?.beforeDispatch && !(await options.beforeDispatch()))
-                            throw new Error("Peer authority changed; nothing was sent.");
-                        } catch (error) {
-                          denied = true;
-                          throw error;
-                        }
-                      }
+                    ? withCurrent(
+                        async () => {
+                          try {
+                            await initialGuard?.();
+                            if (options?.beforeDispatch && !(await options.beforeDispatch()))
+                              throw new Error("Peer authority changed; nothing was sent.");
+                          } catch (error) {
+                            denied = true;
+                            throw error;
+                          }
+                        },
+                        currentOf(
+                          initialGuard as ((() => Promise<void>) & CurrentCheck) | undefined,
+                          options?.beforeDispatch,
+                        ),
+                      )
                     : undefined;
                 initialDispatch = false;
                 const accepted = guard ? await seat!.send(message, guard) : await seat!.send(message);

@@ -1,3 +1,5 @@
+import { AgentMessageReceiptReadSchema } from "../../../packages/protocol/src/agent-message-receipts.ts";
+import { randomUUID } from "node:crypto";
 import { LeadChangesReadSchema } from "../../../packages/protocol/src/lead-changes.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -283,6 +285,16 @@ function connectorServer(
           properties: {
             agent: { type: "string", description: "Agent id from list_agents." },
             message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX },
+            receipt: {
+              type: "boolean",
+              description: "Opt into a durable receipt ID; legacy send statuses stay the same.",
+            },
+            requestId: {
+              type: "string",
+              format: "uuid",
+              description:
+                "With receipt:true, recover this original after uncertainty. Never change the message or recipient under this ID.",
+            },
             images: {
               type: "array",
               minItems: 1,
@@ -308,6 +320,19 @@ function connectorServer(
           idempotentHint: false,
           openWorldHint: false,
         },
+      },
+      {
+        name: "message_agent_status",
+        title: "Read an agent message receipt",
+        description:
+          "Read your app's original message receipt without resending, waking or acknowledging it. Native progress requires exact input correlation; missing progress stays unknown. A busy or idle pane and matching text prove nothing.",
+        inputSchema: {
+          type: "object" as const,
+          properties: { receiptId: { type: "string", format: "uuid" } },
+          required: ["receiptId"],
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true, openWorldHint: false },
       },
       {
         name: "read_image",
@@ -855,6 +880,8 @@ function connectorServer(
   };
   server.setRequestHandler(CallToolRequestSchema, async (call, extra) => {
     const args = (call.params.arguments ?? {}) as Record<string, unknown>;
+    let receiptRequestId: string | undefined;
+    let receiptDispatchStarted = false;
     try {
       const tool = tools.find((entry) => entry.name === call.params.name);
       if (tool) {
@@ -877,7 +904,21 @@ function connectorServer(
             );
       if (channel !== undefined && channel.length === 0)
         return failure("channel is 1–64 characters after trimming.");
-      const sessions = connectorSessions(options.operator, bearer, channel);
+      if (
+        call.params.name === "message_agent" &&
+        args.receipt !== undefined &&
+        typeof args.receipt !== "boolean"
+      )
+        return failure("receipt must be a boolean.");
+      receiptRequestId =
+        call.params.name === "message_agent" && args.receipt === true
+          ? args.requestId === undefined
+            ? randomUUID()
+            : AgentMessageReceiptReadSchema.parse({ receiptId: args.requestId }).receiptId
+          : undefined;
+      if (call.params.name === "message_agent" && args.requestId !== undefined && args.receipt !== true)
+        return failure("requestId requires receipt:true.");
+      const sessions = connectorSessions(options.operator, bearer, channel, receiptRequestId);
       const gate = await detectionGate(options, device);
       if (typeof gate === "string") return failure(gate);
       const herdrBlocked = (id: string) => !gate.herdr && id.startsWith("herdr:");
@@ -914,9 +955,14 @@ function connectorServer(
           );
         const message = requiredString(args.message, "message", MESSAGE_MAX);
         const images = await connectorImages(args.images, options.images);
+        receiptDispatchStarted = receiptRequestId !== undefined;
         const { id, ...sent } = await sessions.send(agent, message, images);
-        if (sent.status === "not_delivered") return failure(sent.detail);
-        return text({ agent: id, ...sent });
+        if (sent.status === "not_delivered" && sent.receiptId === undefined) return failure(sent.detail);
+        return text({
+          agent: id,
+          ...sent,
+          ...(receiptRequestId === undefined ? {} : { requestId: receiptRequestId }),
+        });
       }
       if (call.params.name === "read_image") {
         const agent = requiredString(args.agent, "agent");
@@ -1120,6 +1166,18 @@ function connectorServer(
         });
         if (result.outcome !== "posted") return failure(unavailableNotes(result));
         return text({ posted: result.note });
+      }
+      if (call.params.name === "message_agent_status") {
+        const result = await options.operator.dispatch(
+          {
+            op: "agent_message_status",
+            schemaVersion: 1,
+            receiptId: requiredString(args.receiptId, "receiptId"),
+          },
+          bearer,
+        );
+        if (result.op !== "agent_message_status") throw new Error("Unexpected agent message receipt result");
+        return text(result.result);
       }
       if (call.params.name === "read_changes") {
         const parsed = LeadChangesReadSchema.safeParse(args);
@@ -1417,6 +1475,10 @@ function connectorServer(
           `${detail} I couldn't tell whether the agent started; it may still be starting. Call list_agents and look for a new agent in that place before you try again, so two don't start.`,
         );
       }
+      if (receiptDispatchStarted && receiptRequestId !== undefined && !(error instanceof SessionRefusal))
+        return failure(
+          `The receipt send did not confirm. Original requestId: ${receiptRequestId}. It may have happened; reconcile only this unchanged request key or a known receipt, never resend with a fresh key. ${error instanceof ConnectorRefusal ? refusalText(error) : "The host answer is unavailable."}`,
+        );
       if (error instanceof ConnectorRefusal) return failure(refusalText(error));
       if (error instanceof SessionRefusal) return failure(error.message);
       if (error instanceof ConnectorImageRefusal) return failure(error.message);
@@ -1450,6 +1512,7 @@ function connectorSessions(
   operator: ConnectorOperatorPort,
   bearer: string,
   channel?: string,
+  receiptRequestId?: string,
 ): SessionSources {
   const dispatch = (request: OperatorConversationServiceRequest) =>
     operator.dispatch(
@@ -1470,7 +1533,7 @@ function connectorSessions(
         terminalTail: (request, signal) => operator.terminalTail(request, bearer, signal),
         tailRefusal: async (response) => new ConnectorRefusal(response.status, await errorCode(response)),
       },
-      { surfaceClientId: SURFACE_CLIENT_ID },
+      { surfaceClientId: SURFACE_CLIENT_ID, ...(receiptRequestId === undefined ? {} : { receiptRequestId }) },
     ),
     // The Herdr desktop app's agents: listed and read beside Herdr's, never messaged.
     createHerdrCoreSessionSource({ dispatch }),

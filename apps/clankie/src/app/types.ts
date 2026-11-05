@@ -172,6 +172,7 @@ export interface ClankieAppDependencies {
   ) => { assertCurrent(): void };
   /** Durable, caller-scoped connected lead observation checkpoints. */
   leadChanges?: import("../lead-changes.ts").LeadChanges;
+  agentMessageReceipts?: import("../agent-message-receipts.ts").AgentMessageReceipts;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
   /** Sends a job to a connected lead's stored wake webhook (ADR 0336). */

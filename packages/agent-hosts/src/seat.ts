@@ -267,7 +267,7 @@ export interface SeatControl {
     message: string,
     options?: {
       readonly timeoutMs?: number;
-      readonly beforeDispatch?: () => Promise<boolean>;
+      readonly beforeDispatch?: (() => Promise<boolean>) & { readonly current?: () => boolean | undefined };
       readonly source?: string;
       readonly recipientBinding?: string;
       readonly delivery?: "steer" | "queue";

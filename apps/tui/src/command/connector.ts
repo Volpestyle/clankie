@@ -1,3 +1,4 @@
+import { AgentMessageReceiptReadSchema } from "@clankie/protocol";
 import { LeadChangesReadSchema } from "@clankie/protocol/lead-changes";
 import { createInterface } from "node:readline";
 import {
@@ -52,7 +53,7 @@ import { commandHost, outputJson, type Writable } from "./io.ts";
 // leads and how each one was woken (#179).
 
 const CONNECTOR_USAGE =
-  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json] | clankie connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json] | clankie connector changes [--since CURSOR] [--limit 1..100] [--json] | clankie connector notes [SINCE] [--json]";
+  "Usage: clankie connector [status] [--json] | clankie connector approve CODE [--json] | clankie connector deny CODE [--json] | clankie connector prompts [on|off APP] [--json] | clankie connector detect [on|off herdr] [--json] | clankie connector serve [on|off APP] [--json] | clankie connector lead [clankie|apps] [--json] | clankie connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json] | clankie connector changes [--since CURSOR] [--limit 1..100] [--json] | clankie connector message-status RECEIPT_ID [--json] | clankie connector notes [SINCE] [--json]";
 const TIMEOUT_MS = 10_000;
 
 export interface ConnectorCliCommandOptions {
@@ -151,6 +152,12 @@ function parse(args: readonly string[]) {
     positional.length === 2
   )
     return { json, subcommand: "lead" as const, lead: positional[1] };
+  if (positional[0] === "message-status" && positional.length === 2)
+    return {
+      json,
+      subcommand: "message-status" as const,
+      ...AgentMessageReceiptReadSchema.parse({ receiptId: positional[1] }),
+    };
   if (positional[0] === "changes") {
     const fields: Record<string, unknown> = {};
     for (let index = 1; index < positional.length; index += 2) {
@@ -421,6 +428,25 @@ export async function runConnectorCommand(
       if (parsed.json) outputJson(stdout, { ok: wake.outcome === "sent", ...wake });
       else (wake.outcome === "sent" ? stdout : stderr).write(`${formatWake(wake)}\n`);
       return wake.outcome === "sent" ? 0 : 1;
+    }
+    if (parsed.subcommand === "message-status") {
+      const response = await operatorRequest(
+        OPERATOR_CONVERSATION_DISPATCH_PATH,
+        "POST",
+        request,
+        ConnectorCommandError,
+        {
+          jsonBody: { op: "agent_message_status", schemaVersion: 1, receiptId: parsed.receiptId },
+          contentType: "application/json",
+        },
+      );
+      if (response.status === 401 || response.status === 403) throw new ConnectorCommandError("unauthorized");
+      if (!response.ok) throw new ConnectorCommandError("unavailable");
+      const result = OperatorConversationServiceResultSchema.parse(await response.json());
+      if (result.op !== "agent_message_status") throw new ConnectorCommandError("malformed");
+      if (parsed.json) outputJson(stdout, result.result);
+      else stdout.write(JSON.stringify(result.result, null, 2) + "\n");
+      return result.result.outcome === "found" ? 0 : 1;
     }
     if (parsed.subcommand === "changes") {
       const response = await operatorRequest(

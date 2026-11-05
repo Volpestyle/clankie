@@ -23,7 +23,7 @@ import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { HerdrWatchStore } from "./herdr-watch.ts";
 import { NextTurnMailbox } from "./next-turn-mailbox.ts";
-import { type PeerDeliveryOptions } from "./peer-seat-messages.ts";
+import { currentOf, withCurrent, type PeerDeliveryOptions } from "./peer-seat-messages.ts";
 import { PersonaStore } from "./personas.ts";
 import { type SeatLedger } from "./seat-ledger.ts";
 import { SeatOutbox } from "./seat-outbox.ts";
@@ -144,6 +144,11 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
     context: FleetSeatMessageContext,
     deliveryOptions?: PeerDeliveryOptions,
   ): Promise<FleetSeatDelivery> {
+    const agentMessage = context.agentMessage;
+    if (agentMessage !== undefined) {
+      const { agentMessage: _receipt, ...ordinaryContext } = context;
+      context = ordinaryContext;
+    }
     if (context.workHandoff) {
       const intent = context.workHandoff;
       if (
@@ -257,6 +262,40 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
         ? {}
         : { recipientBinding: ctx.inboundBinding(current)! }),
     };
+    if (agentMessage) {
+      const previous = deliveryOptions;
+      const guard = withCurrent(
+        async () => {
+          await previous?.guard?.();
+          await agentMessage.authorize();
+        },
+        currentOf(previous?.guard, { current: agentMessage.current }),
+      );
+      deliveryOptions = {
+        ...previous,
+        guard,
+        stableReceiptKey: previous?.stableReceiptKey ?? agentMessage.receiptId,
+        fence: withCurrent(
+          async (agent: import("./herdr-watch.ts").HerdrAgentSnapshot | undefined) => {
+            if (previous?.fence && !(await previous.fence(agent))) return false;
+            const observed = await herdrRunner.resolveTerminal(agentMessage.binding.seatId, { fresh: true });
+            await guard();
+            return (
+              agentMessage.current() &&
+              !!agent?.session &&
+              !!observed?.session &&
+              agent.terminalId === agentMessage.binding.seatId &&
+              observed.terminalId === agent.terminalId &&
+              observed.paneId === agent.paneId &&
+              occupantIdForHerdrSession(agent.session) === agentMessage.binding.instanceId &&
+              occupantIdForHerdrSession(observed.session) === agentMessage.binding.instanceId
+            );
+          },
+          currentOf(previous?.fence, guard),
+        ),
+      };
+      await guard();
+    }
     if (
       context.delivery &&
       current?.agent === "claude" &&
@@ -421,6 +460,7 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
       seatLedger.promptSent(seatId);
       fleetChanges.touch();
     }
+    if (delivery) agentMessage?.delivered(delivery);
     return delivery!;
   }
 

@@ -35,6 +35,9 @@ export interface HerdrSessionSourceOptions {
   readonly surfaceClientId: string;
   /** What a session on the local fleet reads as its machine. */
   readonly localMachine?: string;
+  /** Preserve internal attribution for receipt-aware callers; legacy send results stay unchanged. */
+  readonly includeSendIdentity?: boolean;
+  readonly receiptRequestId?: string;
 }
 
 /** One line for a lead choosing who takes related work (#425): newest three, compactly. */
@@ -239,6 +242,7 @@ export function createHerdrSessionSource(
         const sent = await port.dispatch({
           op: "send",
           schemaVersion: 1,
+          ...(options.receiptRequestId === undefined ? {} : { receiptRequestId: options.receiptRequestId }),
           turn: {
             schemaVersion: 1,
             conversationId: created.conversation.conversationId,
@@ -251,10 +255,34 @@ export function createHerdrSessionSource(
         });
         if (sent.op !== "send") throw new Error("The send answered with something else.");
         const result = sent.result;
+        const receipt = sent.receiptId === undefined ? {} : { receiptId: sent.receiptId };
         if (result.status === "revision_conflict") {
+          if (sent.receiptId !== undefined)
+            return {
+              id,
+              ...receipt,
+              status: "not_delivered",
+              detail:
+                "The thread changed before dispatch. Nothing was sent; inspect the receipt before a new request.",
+            };
           revision = result.currentRevision;
           continue;
         }
+        const identity =
+          options.includeSendIdentity === true
+            ? {
+                identity: {
+                  seatId: seat.seatId,
+                  occupantId: seat.occupantId,
+                  ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+                  conversationId: created.conversation.conversationId,
+                  ...(result.status === "accepted" ? { runId: result.runId } : {}),
+                  ...(result.status === "seat_delivery_unconfirmed" && result.messageId !== undefined
+                    ? { messageId: result.messageId }
+                    : {}),
+                },
+              }
+            : {};
         // The agent's own session already holds it: it has the message, busy or not.
         if (
           result.status === "accepted" &&
@@ -264,31 +292,44 @@ export function createHerdrSessionSource(
         )
           return {
             id,
+            ...identity,
+            ...receipt,
             status: "delivered",
             detail: `${name} has the message in its session. Read the agent to see it respond.`,
           };
         if (result.status === "accepted" && result.seatDelivery?.state === "queued")
           return {
             id,
+            ...identity,
+            ...receipt,
             status: "queued",
             detail:
               result.seatDelivery.detail ??
               `${name} has the message waiting in its native queue. Read the agent to see it respond.`,
           };
         if (result.status === "accepted")
-          return { id, status: "delivered", detail: `Sent to ${name}. Read the agent to see it respond.` };
+          return {
+            id,
+            ...identity,
+            ...receipt,
+            status: "delivered",
+            detail: `Sent to ${name}. Read the agent to see it respond.`,
+          };
         if (result.status === "seat_offline")
           return {
             id,
+            ...receipt,
             status: "offline",
             detail: `${name} isn't running in a pane right now. Nothing was sent.`,
           };
         if (result.status === "seat_undelivered")
-          return { id, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
+          return { id, ...receipt, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
         if (result.status === "seat_delivery_unconfirmed")
-          return { id, status: "unconfirmed", detail: result.detail };
+          return { id, ...identity, ...receipt, status: "unconfirmed", detail: result.detail };
         return {
           id,
+          ...identity,
+          ...receipt,
           status: "unconfirmed",
           detail: `The message may have reached ${name} but wasn't confirmed. Read the agent before sending it again.`,
         };

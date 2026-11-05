@@ -1,3 +1,4 @@
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 import { createConnection, type Socket } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -451,7 +452,7 @@ export async function connectGrokNative(options: GrokNativeOptions) {
       },
       async send(
         text: string,
-        beforeDispatch?: () => Promise<boolean>,
+        beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
         waitMs = timeout,
       ): Promise<SeatDelivery> {
         const unresolved = fence.pending(receiptKey);
@@ -464,7 +465,7 @@ export async function connectGrokNative(options: GrokNativeOptions) {
           };
         const messageId = randomUUID();
         await verify();
-        if (beforeDispatch && !(await beforeDispatch()))
+        if (beforeDispatch && (!(await beforeDispatch()) || beforeDispatch.current?.() === false))
           return {
             outcome: "offline",
             detail: "Grok dispatch authority changed",

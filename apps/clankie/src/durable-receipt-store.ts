@@ -7,6 +7,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   statSync,
@@ -234,6 +235,23 @@ export class DurableReceiptStore<Record extends DurableReceipt> {
     const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(temporary, `${JSON.stringify([...this.records.values()])}\n`, { mode: 0o600 });
     renameSync(temporary, this.path);
+  }
+
+  /** Rewrite loaded records atomically, including sanitized legacy data, rather than appending. */
+  public checkpoint(): void {
+    this.validated = undefined;
+    this.save();
+  }
+
+  /** Only this journal's obsolete generation files; never records or other state. */
+  public pruneObsolete(): void {
+    if (!this.sharded || !this.path || !this.manifest) return;
+    const retained = new Set([...Object.values(this.manifest.shards), ...(this.log ? [this.log.file] : [])]);
+    const directory = `${this.path}.d`;
+    for (const file of readdirSync(directory)) {
+      if (!retained.has(file) && /^(?:[a-f0-9]{2}-[a-f0-9]{64}\.json|log-[a-f0-9-]{36}\.jsonl)$/u.test(file))
+        rmSync(join(directory, file));
+    }
   }
 
   /** The root manifest's generation and, when it names one, its log's. */

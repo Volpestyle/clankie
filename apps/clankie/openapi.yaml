@@ -4939,7 +4939,7 @@ paths:
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
         `fork`, `close`, `send`, `cancel`, `pending_messages`, `stop_task`, `replay`, `subagent_replay`, `tail`, `autonomy`,
-        `terminal_tail`, `readopt_seat`, `lead_changes`, `worker_reports`, and
+        `terminal_tail`, `readopt_seat`, `lead_changes`, `agent_message_status`, `worker_reports`, and
         `acknowledge_worker_reports`. `worker_reports` optionally selects 1–100 exact
         UUID `deliveryIds` within the requested conversation, with the existing
         full-page byte budget and offered-only acknowledgment. Without that
@@ -4968,6 +4968,19 @@ paths:
         the Mac and are bound to caller and current visibility scope. Invalid
         cursors or revoked authority return 403; unavailable local state returns
         503. An unavailable source is explicit and never asserts completion.
+        Connected app sends may opt into a durable receipt with UUID
+        `receiptRequestId`; the response adds `receiptId` alongside the existing
+        send result. This opt-in is for ordinary persona messages; explicit
+        delivery modes or native handoff intents are refused rather than queued
+        without the receipt authority fence. Reusing the original key never
+        redispatches it. The read-only
+        `agent_message_status` op takes only `receiptId` from the caller. The relay
+        stamps the authenticated app and exact session deadline; caller stamps
+        are refused. Apps read only their own receipts; the current local owner
+        may inspect them through the same lookup operation. Receipt lookup never
+        resends, starts a worker or acknowledges a message. Native progress needs
+        exact original occupant/input correlation; unsupported progress is absent,
+        and unknown/expired never proves non-delivery.
         Built-in tracker sync uses additive op `tracker_sync`: bootstrap, batch,
         subscribe, list_issue_views, list_issue_view_issues and keyed atomic
         transaction commands. Saved-view reads name an exact storeId and project

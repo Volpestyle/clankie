@@ -1,3 +1,4 @@
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 import { RESOURCE_HOLDER_RESET_ENV } from "@clankie/fleet-resources";
 import type { StopNativeTaskResult } from "@clankie/protocol";
 import type { RemoteCodexRegistration } from "../remote-codex-seats.ts";
@@ -451,7 +452,7 @@ export interface CodexAppServerSeat {
   viewArgs: readonly string[];
   send(
     message: string,
-    guard?: () => Promise<void>,
+    guard?: (() => Promise<void>) & CurrentCheck,
   ): Promise<{ turnId: string; state: "started" | "steered" }>;
   /** Controller-owned catalog expectation; never an authorization credential. */
   expectTools?(names: readonly string[]): void;
@@ -1253,7 +1254,7 @@ export async function startCodexAppServerSeat(options: {
     let sending: Promise<unknown> = Promise.resolve();
     const sendNative = (
       message: string,
-      guard?: () => Promise<void>,
+      guard?: (() => Promise<void>) & CurrentCheck,
       answer?: { requestId: string | number; clientUserMessageId: string },
     ) => {
       let dispatched = false;
@@ -1293,6 +1294,8 @@ export async function startCodexAppServerSeat(options: {
           }
         }
         await guard?.();
+        if (guard?.current?.() === false)
+          throw new CodexNotSentError(new Error("Dispatch authority changed; nothing was sent"));
         if (
           (answer === undefined && client!.hasPendingQuestion(threadId!)) ||
           (answer !== undefined &&

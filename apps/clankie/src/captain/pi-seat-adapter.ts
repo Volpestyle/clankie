@@ -266,6 +266,7 @@ export function createPiSeatAdapter(deps: {
                         timeoutMs: options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS,
                       },
                       (options?.timeoutMs ?? deps.timeoutMs ?? SEND_RECEIPT_MS) + 1000,
+                      options?.beforeDispatch,
                     ),
                   );
                   if (result.outcome === "unavailable")

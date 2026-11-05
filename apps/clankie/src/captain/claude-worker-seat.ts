@@ -946,7 +946,10 @@ class ClaudeWorkerSeatControl implements SeatControl {
           deliveryStage: "unavailable",
           detail: "The seat binding changed before dispatch",
         };
-      if (options?.beforeDispatch && !(await options.beforeDispatch().catch(() => false)))
+      if (
+        options?.beforeDispatch &&
+        (!(await options.beforeDispatch().catch(() => false)) || options.beforeDispatch.current?.() === false)
+      )
         return {
           outcome: "offline",
           deliveryStage: "unavailable",

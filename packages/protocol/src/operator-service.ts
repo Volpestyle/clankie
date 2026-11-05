@@ -1,3 +1,4 @@
+import { AgentMessageReceiptLookupSchema } from "./agent-message-receipts.ts";
 import { LeadChangesReadSchema, LeadChangesResultSchema } from "./lead-changes.ts";
 import { LeadChatsResultSchema, type LeadChatsResult } from "./lead-chats.ts";
 import {
@@ -349,6 +350,17 @@ const CloseSeatRefusalSchema = z.discriminatedUnion("reason", [
 ]);
 
 export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op", [
+  z.strictObject({
+    op: z.literal("agent_message_status"),
+    schemaVersion: z.literal(1),
+    receiptId: z.string().uuid(),
+    appDeviceId: z.string().min(1).max(256).optional(),
+    appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+    appSessionId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+  }),
   LeadChangesReadSchema.extend({
     op: z.literal("lead_changes"),
     schemaVersion: z.literal(1),
@@ -502,6 +514,12 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        */
       appDeviceId: z.string().min(1).max(256).optional(),
       turn: SubmitOperatorConversationTurnSchema,
+      receiptRequestId: z.string().uuid().optional(),
+      appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+      appSessionId: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
     })
     .strict(),
   // Read the relay's retained result for the exact original send. Never dispatches it.
@@ -1192,6 +1210,11 @@ export const SendReceiptRecordSchema = z.strictObject({
 export type SendReceiptRecord = z.infer<typeof SendReceiptRecordSchema>;
 
 export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op", [
+  z.strictObject({
+    op: z.literal("agent_message_status"),
+    schemaVersion: z.literal(1),
+    result: AgentMessageReceiptLookupSchema,
+  }),
   z
     .object({ op: z.literal("lead_changes"), schemaVersion: z.literal(1), result: LeadChangesResultSchema })
     .strict(),
@@ -1374,6 +1397,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       op: z.literal("send"),
       schemaVersion: z.literal(1),
       result: SubmitOperatorConversationTurnResultSchema,
+      receiptId: z.string().uuid().optional(),
     })
     .strict(),
   z.strictObject({

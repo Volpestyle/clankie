@@ -1,3 +1,4 @@
+import type { AgentMessageDispatch } from "../agent-message-dispatch.ts";
 import type { Huddle, StartHuddle } from "@clankie/protocol/huddles";
 import type { FleetProgressObservation } from "../fleet-progress.ts";
 import type { FleetEfficiencyResult, FleetEfficiencyReview } from "./fleet-efficiency-tools.ts";
@@ -458,6 +459,7 @@ export interface CaptainPort {
     readSignal?: AbortSignal,
     /** Host-verified sender of a `send` without question authority (ADR 0350). */
     leadOwner?: LeadOwnerProof,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<OperatorConversationServiceResult>;
   /** Service-only, after remote lead launch approves the exact linked-machine directory. */
   createRemoteWorkspaceConversation(input: {

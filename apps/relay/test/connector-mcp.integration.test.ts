@@ -672,6 +672,7 @@ describe("Claude connector MCP endpoint", () => {
       "list_agents",
       "read_agent",
       "message_agent",
+      "message_agent_status",
       "read_image",
       "fleet_capacity",
       "list_places",

@@ -330,6 +330,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]
                            A connected lead's wake webhook (address and key on stdin), and a job for it
   connector changes [--since CURSOR] [--limit N] [--json]  What changed for a lead since its last read
+  connector message-status RECEIPT_ID [--json]  Read a durable agent-message receipt
   connector notes [SINCE] [--json]   The apps' note board, with each addressed lead and how it was woken
   support [list | create read-state|shell --hours 1..72 --ref REFERENCE]
   support revoke ID | offer ID   Owner-issued support access (JSON)
@@ -2451,6 +2452,21 @@ also carry `status.clankie`: `{ "state": "on" | "off" | "cant_start", "reason"?:
 "no_model" | "no_credential" | "unavailable", "message"? }`, where `cant_start`
 and the reason come only from Clankie's own model readiness (`clankie doctor`'s
 `captain`).
+
+`clankie connector message-status RECEIPT_ID --json` is the owner's read-only
+inspection of a connected app's durable agent-message receipt. Connected leads
+request one with `message_agent({agent, message, receipt: true})`, preserving the
+usual delivered/queued/offline/unconfirmed status and adding `receiptId`.
+An optional UUID `requestId` recovers the same original; changing its target,
+message or committed attachments is refused. `message_agent_status({receiptId})`
+uses the operator dispatch's `agent_message_status` operation, scoped to the
+sending app. Other apps cannot inspect it. Lookup neither resends nor marks read.
+Native progress requires the original occupant and exact input ID; absent native
+proof stays unknown. Pane activity, text matches and service bookkeeping never
+prove read/action/answer. A native final answer may have an occurrence timestamp
+without a separately observed read timestamp. Unknown/expired receipts do not
+prove non-delivery. Receipts and native completion evidence survive restart;
+unsupported native evidence remains absent.
 
 `clankie connector changes [--since CURSOR] [--limit 1..100] --json` reads a
 bounded "what changed" feed. Omit the cursor for a bootstrap, retain `next` in
