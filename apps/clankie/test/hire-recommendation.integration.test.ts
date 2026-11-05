@@ -14,6 +14,9 @@ import {
   type FleetCapacityAccountSource,
   type FleetCapacitySeatSource,
 } from "../src/app/fleet-capacity.ts";
+import { hireAdmissionReport } from "../src/captain/hire-admission.ts";
+import { allocateAccounts } from "../src/captain/account-allocation.ts";
+import type { WorkerAccountStatus } from "../src/captain/harness-accounts.ts";
 import { recommendHire } from "../src/captain/hire-recommendation.ts";
 
 type Account = FleetCapacityAccountSource;
@@ -317,4 +320,54 @@ it("uses context aliases, load and disk to break ties and leaves unidentified pa
     snapshot: { ...local.snapshot, pressure: { ...local.snapshot.pressure!, freeDiskGb: 1000 } },
   };
   expect(await f.advise()).toMatchObject({ account: "backup" });
+});
+
+it("never recommends account usage the real hire gate reserves or budgets for running work", async () => {
+  const f = await fixture();
+  const now = Date.now();
+  for (const [remaining, stopAtPercent, permitted] of [
+    [0.11, undefined, true],
+    [0.1, undefined, false],
+    [0.05, undefined, false],
+    [0.5, 50, false],
+    [0.51, 50, true],
+    [0.05, 99, true],
+    [0.01, 99, false],
+  ] as const) {
+    const account: WorkerAccountStatus = {
+      harness: "codex",
+      label: "remote",
+      home: "/fixture/account",
+      signedIn: true,
+      usable: true,
+      headroom: remaining,
+      plan: "pro",
+      ...(stopAtPercent === undefined ? {} : { budget: { stopAtPercent } }),
+      usage: {
+        source: "codex-rate-limits",
+        observedAt: new Date(now).toISOString(),
+        windows: [
+          {
+            id: "week",
+            label: "Week",
+            usedPercent: (1 - remaining) * 100,
+            resetsAt: new Date(now + 60_000).toISOString(),
+            windowMinutes: 10_080,
+          },
+        ],
+      },
+    };
+    const report = {
+      machine: "pc",
+      shell: "posix" as const,
+      observedAt: new Date(now).toISOString(),
+      accounts: [account],
+    };
+    const allocation = allocateAccounts(report, now);
+    expect(allocation.accounts[0]?.sparePerDay).toBeGreaterThan(0);
+    expect(hireAdmissionReport(report, undefined, [], now).accounts[0]?.usable).toBe(permitted);
+    f.accounts.pc = [account];
+    f.spare.remote = allocation.accounts[0]!.sparePerDay;
+    expect((await f.advise({ machine: "pc" })).status).toBe(permitted ? "recommended" : "unavailable");
+  }
 });

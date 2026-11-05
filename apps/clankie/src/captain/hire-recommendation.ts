@@ -68,6 +68,15 @@ export function recommendHire(
         now - Date.parse(account.usage.observedAt) > 60_000
       )
         return [];
+      // The account reader's usable flag does not include hire policy. Advice must not
+      // count the existing hire reserve/budget as spare; the actual hire still
+      // applies hireAdmissionReport with its current project/model/owner proof.
+      if (
+        account.stopAtPercent === undefined
+          ? account.remaining <= 0.1
+          : (1 - account.remaining) * 100 + 1e-9 >= account.stopAtPercent
+      )
+        return [];
       const panes = capacity.panes.filter(
         (pane) =>
           pane.harness === account.harness &&
