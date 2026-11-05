@@ -151,7 +151,9 @@ set. The CLI uses `clankie discord set --managed-guild-id ID` and also accepts
 `--swarm-guild-id` for existing commands. Both name the same selected server.
 
 The worker entry point is `bin/worker-mcp.mjs`; `bin/swarm-mcp.mjs` forwards to
-it for existing registrations. Retired enrollment/refusal keys, environment
+it for existing registrations. New joined Codex hires also launch the canonical
+`worker-mcp.mjs` path; already registered legacy paths keep working.
+Retired enrollment/refusal keys, environment
 scrubbers, historical channel receipts and frozen eval fixtures keep their
 original strings so compatibility checks and recorded evidence remain valid.
 The baseline retirement catalogue above is unchanged by this naming migration.

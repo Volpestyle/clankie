@@ -45,7 +45,7 @@ const NativeRead = z.object({
 /** How long a worker bridge waits for its harness's first session report (#492). */
 const SESSION_REPORT_WAIT_MS = 15_000;
 /** This install's worker bridge; its joined branch serves the worker over the join channel. */
-const WORKER_BRIDGE = shippedWorkerFile("bin", "swarm-mcp.mjs");
+const WORKER_BRIDGE = shippedWorkerFile("bin", "worker-mcp.mjs");
 /** What the bridge needs from the pane; Codex passes an MCP server only the variables it names. */
 const CODEX_BRIDGE_ENV = [
   "HERDR_PANE_ID",
