@@ -2,7 +2,7 @@ import { leadChangePulls } from "./lead-change-pulls.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
@@ -1888,8 +1888,13 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
-  const leadRepoSnapshot = async () => {
-    const projects = await options.projects?.();
+  const leadRepoSnapshot = async (fenced = false) => {
+    if (fenced && options.projects && !options.projectsFence)
+      throw new Error("Project visibility cannot be fenced here");
+    const registryVersion = fileVersion(registryPath);
+    const workspace = options.workspace?.();
+    const projectFence = fenced ? await options.projectsFence?.() : undefined;
+    const projects = projectFence?.projects ?? (await options.projects?.());
     const registry = await known();
     const roots = new Map(registry.map((entry) => [entry.path, { id: entry.id, path: entry.path }]));
     for (const project of projects?.projects ?? [])
@@ -1899,14 +1904,18 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       }
     const repos: { id: string; slug: string }[] = [];
     const origins: [string, string][] = [];
+    const observedOrigins: [string, string | undefined][] = [];
+    const noRemote = (error: unknown) => /not a git repository|No such remote/iu.test(String(error));
     for (const entry of [...roots.values()].sort((a, b) => a.path.localeCompare(b.path))) {
       let remote: string;
       try {
         remote = (await run("git", ["remote", "get-url", "origin"], entry.path)).trim();
       } catch (error) {
-        if (/not a git repository|No such remote/iu.test(String(error))) continue;
-        throw error;
+        if (!noRemote(error)) throw error;
+        observedOrigins.push([entry.path, undefined]);
+        continue;
       }
+      observedOrigins.push([entry.path, remote]);
       origins.push([entry.id, remote]);
       const slug =
         /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
@@ -1916,8 +1925,32 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         repos.push({ id: entry.id, slug });
     }
     const connection = await githubSnapshot();
+    const assertCurrent = () => {
+      projectFence?.assertCurrent();
+      if (fileVersion(registryPath) !== registryVersion || options.workspace?.() !== workspace)
+        throw new Error("Saved work repository scope changed");
+      // Git resolves includes, worktree configuration and URL rewrites itself. These
+      // local reads must be synchronous: publication cannot yield after its fence.
+      for (const [path, expected] of observedOrigins) {
+        let remote: string | undefined;
+        try {
+          remote = execFileSync("git", ["remote", "get-url", "origin"], {
+            cwd: path,
+            encoding: "utf8",
+            timeout: 1000,
+            maxBuffer: 64 * 1024,
+            stdio: ["ignore", "pipe", "pipe"],
+          }).trim();
+        } catch (error) {
+          if (!noRemote(error)) throw error;
+        }
+        if (remote !== expected) throw new Error("Project repository scope changed");
+      }
+      projectFence?.assertCurrent();
+    };
     return {
       repos,
+      assertCurrent,
       stamp: deliveryFingerprint(
         JSON.stringify({
           projects,
@@ -1933,6 +1966,11 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     mainCheckpoint: checkpointForCheckout,
     async leadChangeScope(): Promise<string> {
       return (await leadRepoSnapshot()).stamp;
+    },
+    /** Host-only publication fence, prepared after the last async authority read. */
+    async prepareLeadChangeScope() {
+      const snapshot = await leadRepoSnapshot(true);
+      return { stamp: snapshot.stamp, assertCurrent: snapshot.assertCurrent };
     },
     async leadChangePulls(signal?: AbortSignal) {
       const snapshot = await leadRepoSnapshot();

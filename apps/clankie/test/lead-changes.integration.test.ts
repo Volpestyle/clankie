@@ -232,10 +232,14 @@ async function fixture() {
     return new Promise<void>((done) => github.close(() => done()));
   });
   const githubUrl = "http://127.0.0.1:" + (github.address() as { port: number }).port;
+  let githubConnectionHook: undefined | (() => Promise<void>);
   const work = createWorkItemsService({
     stateDirectory: join(root, "work"),
     workspace: () => repo,
-    githubToken: async () => "fixture-github-token",
+    githubToken: async () => {
+      await githubConnectionHook?.();
+      return "fixture-github-token";
+    },
     githubApiBase: githubUrl,
   });
   const detection = new ConnectorDetection();
@@ -287,6 +291,13 @@ async function fixture() {
       fleetRoundIntervalMs: 3600_000,
     });
   let captain = makeCaptain();
+  let leadStatusHook: undefined | (() => Promise<void>);
+  const originalServe = captain.serveOperatorConversation.bind(captain);
+  captain.serveOperatorConversation = async (...args) => {
+    const result = await originalServe(...args);
+    if (args[0].op === "lead" && args[0].command.action === "status") await leadStatusHook?.();
+    return result;
+  };
   const asked = await captain.requestOwnerAsk(
     "global-default",
     {
@@ -404,6 +415,12 @@ async function fixture() {
     detection,
     githubRequests,
     nativeMethods,
+    hookGithubConnection: (hook: () => Promise<void>) => {
+      githubConnectionHook = hook;
+    },
+    hookLeadStatus: (hook: () => Promise<void>) => {
+      leadStatusHook = hook;
+    },
     holdGithub,
     mergePr: () => {
       prStatus = "merged";
@@ -737,6 +754,59 @@ it("rechecks authority before publishing an early retained-history reset", async
   checkpointReadFence.callback = () => f.detection.setServed("app-a", false);
   const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
   expect(checkpointReadFence.callback).toBeUndefined();
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("a repository visibility change during the last async authority read refuses publication", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read());
+  f.mergePr();
+  let reads = 0;
+  cleanupFence.callback = async () => {
+    f.hookLeadStatus(async () => {
+      if (++reads === 4)
+        await exec("git", [
+          "-C",
+          f.repo,
+          "remote",
+          "set-url",
+          "origin",
+          "https://github.com/fixture/other.git",
+        ]);
+    });
+  };
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  expect(reads).toBe(4);
+  expect(response.status).toBe(403);
+});
+
+it("the synchronous publication fence detects an origin changed during scope preparation", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read());
+  f.mergePr();
+  let reads = 0,
+    changed = false;
+  cleanupFence.callback = async () => {
+    f.hookLeadStatus(async () => {
+      if (++reads === 4)
+        f.hookGithubConnection(async () => {
+          if (changed) return;
+          changed = true;
+          await exec("git", [
+            "-C",
+            f.repo,
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/fixture/other.git",
+          ]);
+        });
+    });
+  };
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  expect(reads).toBe(4);
+  expect(changed).toBe(true);
   expect(response.status).toBe(403);
   expect(await response.json()).toEqual({ error: "not_authorized" });
 });

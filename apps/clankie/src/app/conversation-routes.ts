@@ -722,8 +722,22 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
               herdr: discovery,
             }),
         });
-        if (!(await mayRead()) || !current()) throw new LeadChangesRefusal("not_authorized");
-        // No awaits below: the live authority/discovery fences cover both pages and resets.
+        if (!(await mayRead())) throw new LeadChangesRefusal("not_authorized");
+        const publication = await ctx.dependencies.workItems?.prepareLeadChangeScope();
+        const finalCheck = () => {
+          try {
+            publication?.assertCurrent();
+          } catch {
+            throw new LeadChangesRefusal("not_authorized");
+          }
+          const visible = JSON.stringify({
+            work: publication?.stamp,
+            herdr: ctx.detection.multiplexer("herdr"),
+          });
+          if (visible !== scope || !current()) throw new LeadChangesRefusal("not_authorized");
+        };
+        // One synchronous authority + scope fence for pages and resets; no awaits below.
+        finalCheck();
         return context.json({ op: "lead_changes", schemaVersion: 1, result });
       } catch (error) {
         if (error instanceof LeadChangesRefusal)
