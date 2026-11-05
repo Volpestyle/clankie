@@ -167,8 +167,9 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
   };
   const setAccess = runtimes.machines.setAccess.bind(runtimes.machines);
   runtimes.machines.setAccess = async (id, input) => {
-    commands.push({ action: "set_machine_access", id, accessLevel: input.accessLevel });
-    return setAccess(id, input);
+    const changed = await setAccess(id, input);
+    commands.push({ action: "set_machine_access", id: changed.id, accessLevel: changed.accessLevel });
+    return changed;
   };
   const connect = runtimes.connect.bind(runtimes);
   runtimes.connect = async (input) => {
