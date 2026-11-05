@@ -52,7 +52,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
     readonly webhookToken: string;
   }>;
   listRooms(): Promise<readonly DiscordGuildRoom[]>;
-  swarmGuildId(): string | undefined;
+  managedGuildId(): string | undefined;
 } {
   if (process.env.DISCORD_USER_TOKEN) {
     throw new Error(
@@ -159,7 +159,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
      * Not a secret — a guild id names a place, it does not open one — but it is
      * answered here because this module is what decides the question.
      */
-    swarmGuildId: () => discordManagedGuildId(),
+    managedGuildId: () => discordManagedGuildId(),
     /**
      * The managed server's rooms, so the operator picks one instead of copying a
      * webhook URL out of Server Settings. Same guild-scoped grant as
@@ -177,7 +177,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
      * allowlist is the fence — nothing here
      * can reach a server the owner has not approved, and a `room` handed in is
      * checked against that guild's own rooms rather than trusted, so a
-     * room in a merely-inhabited guild cannot be reached through the swarm one.
+     * room in a merely-inhabited guild cannot be reached through the managed one.
      */
     async provisionChannel(input) {
       const guildId = await provisionGuildId(env);
@@ -228,7 +228,7 @@ export function createDiscordPresenceRuntime(options: { rest?: REST; env?: NodeJ
             candidate.channelId === requestedRoom.channelId && candidate.kind === requestedRoom.kind,
         );
         if (room === undefined) {
-          throw new Error("discord_channel_not_in_swarm_guild");
+          throw new Error("discord_channel_not_in_managed_guild");
         }
         channelId = room.channelId;
         if (!(await discordOwnerAudience(authority, guildId, channelId, request)))
@@ -303,11 +303,11 @@ async function provisionGuildId(env: NodeJS.ProcessEnv = process.env): Promise<s
       throw new Error("discord_channel_provision_requires_admin");
     throw new Error("discord_fleet_disabled");
   }
-  const swarm = discordManagedGuildId(env);
-  if (!swarm) throw new Error("discord_swarm_guild_unset");
-  if (authority.servers.find((entry) => entry.serverId === swarm)?.role !== "admin")
+  const managed = discordManagedGuildId(env);
+  if (!managed) throw new Error("discord_managed_guild_unset");
+  if (authority.servers.find((entry) => entry.serverId === managed)?.role !== "admin")
     throw new Error("discord_channel_provision_requires_admin");
-  return swarm;
+  return managed;
 }
 
 /**

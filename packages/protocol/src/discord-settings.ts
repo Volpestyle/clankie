@@ -159,7 +159,7 @@ export const DiscordSettingsSchema = z
      * projection at all — not even a pasted webhook, which would otherwise be
      * the way into a server nobody named.
      */
-    swarmGuildId: SnowflakeSchema.optional(),
+    managedGuildId: SnowflakeSchema.optional(),
     /** Reversible team display gate. Omitted means visible; hiding retains the selected server. */
     teamVisible: z.boolean().optional(),
     ambientRoleIds: SnowflakeListSchema,
@@ -303,7 +303,7 @@ export const DISCORD_OPTIONAL_SETTING_WRITERS = {
   wakeTrigger: ["ambientChannelIds"],
   applicationId: [],
   guildId: [],
-  swarmGuildId: [],
+  managedGuildId: [],
   ownerUserId: [],
   voiceChannelId: [],
   activityApplicationIdGba: [],
@@ -321,11 +321,16 @@ const RETIRED_DISCORD_SETTINGS: readonly string[] = ["possessorVoiceEnabled", "o
 
 export function withoutRetiredDiscordSettings(settings: unknown): unknown {
   if (settings === null || typeof settings !== "object" || Array.isArray(settings)) return settings;
-  return Object.fromEntries(
-    Object.entries(settings as Record<string, unknown>).filter(
-      ([key]) => !RETIRED_DISCORD_SETTINGS.includes(key),
+  const record = settings as Record<string, unknown>;
+  const normalized = Object.fromEntries(
+    Object.entries(record).filter(
+      ([key]) => !RETIRED_DISCORD_SETTINGS.includes(key) && key !== "swarmGuildId",
     ),
   );
+  // Explicit canonical input wins, including a clear or an invalid value; validation still follows.
+  if (!Object.hasOwn(record, "managedGuildId") && Object.hasOwn(record, "swarmGuildId"))
+    normalized.managedGuildId = record["swarmGuildId"];
+  return normalized;
 }
 
 /** Project the server role model into the existing body configuration without granting machine access. */
@@ -335,7 +340,7 @@ function legacyDiscordServerSettings(settings: DiscordSettings, previous?: Disco
       ? {
           ...settings,
           guildId: undefined,
-          swarmGuildId: undefined,
+          managedGuildId: undefined,
           teamVisible: false,
           textIngressEnabled: false,
           ingressGuildIds: [],
@@ -360,7 +365,7 @@ function legacyDiscordServerSettings(settings: DiscordSettings, previous?: Disco
     role,
     servers,
     guildId: settings.serverId,
-    swarmGuildId: role === "admin" ? settings.serverId : undefined,
+    managedGuildId: role === "admin" ? settings.serverId : undefined,
     teamVisible: settings.fleetEnabled,
     textIngressEnabled: true,
     ingressGuildIds: guilds,
@@ -459,7 +464,7 @@ export function discordServerSettings(
     fleetChannelId: policy?.fleetChannelId,
     trackingLevel: policy?.trackingLevel ?? "off",
     guildId: primary,
-    swarmGuildId: primary && policy?.role === "admin" ? primary : undefined,
+    managedGuildId: primary && policy?.role === "admin" ? primary : undefined,
     teamVisible: policy?.fleetEnabled ?? false,
     textIngressEnabled: ids.length > 0,
     ingressGuildIds: ids,
@@ -486,7 +491,7 @@ export function discordGuildSettings(settings: DiscordSettings, guildId: string)
     fleetChannelId: policy?.fleetChannelId,
     trackingLevel: policy?.trackingLevel ?? "off",
     teamVisible: policy?.fleetEnabled ?? false,
-    swarmGuildId: policy?.role === "admin" ? guildId : undefined,
+    managedGuildId: policy?.role === "admin" ? guildId : undefined,
   };
 }
 
@@ -502,13 +507,13 @@ export function migrateDiscordOwnership(raw: unknown): unknown {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
   const value = raw as Record<string, unknown>;
   if (!value.discord || typeof value.discord !== "object" || Array.isArray(value.discord)) return raw;
-  const discord = value.discord as Record<string, unknown>;
+  const discord = withoutRetiredDiscordSettings(value.discord) as Record<string, unknown>;
   if (Object.hasOwn(discord, "servers")) return raw;
   const list = (key: string): string[] => (Array.isArray(discord[key]) ? (discord[key] as string[]) : []);
   const ids = new Set([
     ...list("ingressGuildIds"),
     ...list("systemActorGuildIds"),
-    ...[discord.serverId, discord.swarmGuildId, discord.guildId].filter(
+    ...[discord.serverId, discord.managedGuildId, discord.guildId].filter(
       (id): id is string => typeof id === "string",
     ),
   ]);
@@ -527,7 +532,7 @@ export function migrateDiscordOwnership(raw: unknown): unknown {
             ? "admin"
             : serverId === "1052402897645752351"
               ? "participant"
-              : serverId === discord.swarmGuildId
+              : serverId === discord.managedGuildId
                 ? "admin"
                 : serverId === discord.serverId
                   ? (discord.role ?? "participant")

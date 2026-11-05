@@ -37,7 +37,7 @@ export const DISCORD_SETTING_GROUPS: readonly { title: string; fields: readonly 
       { key: "applicationId", label: "Application ID", kind: "text" },
       { key: "guildId", label: "Command server ID", kind: "text" },
       {
-        key: "swarmGuildId",
+        key: "managedGuildId",
         label: "Managed server ID",
         kind: "text",
         help: "The server where Clankie can create rooms.",

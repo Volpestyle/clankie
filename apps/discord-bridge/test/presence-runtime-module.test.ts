@@ -153,7 +153,7 @@ describe("channel provisioning against the managed server", () => {
 
   it("provisions only into the managed server, never the command server or an inhabited guild", async () => {
     const { runtime, calls } = await runtimeWithFakeRest();
-    expect(runtime.swarmGuildId()).toBe("20202");
+    expect(runtime.managedGuildId()).toBe("20202");
     // Every route it builds names the managed server, though the command server and
     // an inhabited presence guild are both configured and one of them would
     // have answered before the managed server existed as its own field.
@@ -170,8 +170,8 @@ describe("channel provisioning against the managed server", () => {
     const unset = createDiscordPresenceRuntime({ rest: {} as never });
     // No managed server is no room, rather than falling back to a guild he is only
     // a member of.
-    await expect(unset.listRooms()).rejects.toThrow(/discord_swarm_guild_unset/);
-    expect(unset.swarmGuildId()).toBeUndefined();
+    await expect(unset.listRooms()).rejects.toThrow(/discord_managed_guild_unset/);
+    expect(unset.managedGuildId()).toBeUndefined();
   });
 
   it("offers only the rooms a webhook can post into", async () => {
@@ -234,9 +234,9 @@ describe("channel provisioning against the managed server", () => {
         name: "Atlas slowness",
         room: { kind: "channel", channelId: "999" },
       }),
-    ).rejects.toThrow(/discord_channel_not_in_swarm_guild/);
+    ).rejects.toThrow(/discord_channel_not_in_managed_guild/);
     // The guild-scoped grant would otherwise reach a room in a guild Clankie
-    // only inhabits, which the swarm fence is supposed to be the whole of.
+    // only inhabits, which the managed-server fence is supposed to be the whole of.
     expect(calls.filter((call) => call.startsWith("POST ") || call.endsWith("/channels"))).toEqual([
       "GET /guilds/20202/channels",
     ]);

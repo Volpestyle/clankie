@@ -54,7 +54,7 @@ function environment(text, key) {
   return new RegExp(`(?:^| )${key}=([^]*?)(?= [A-Za-z_][A-Za-z0-9_]*=|$)`, "u").exec(text)?.[1];
 }
 function bridgeKind(command) {
-  // Match argv at the start, not a shell's embedded command or unrelated swarm-mcp.
+  // Match argv at the start, not a shell's embedded command or unrelated MCP servers.
   const launcher =
     /^(?:\S*\/)?(?:node|bun|clankie)(?:\s+\S*\/clankie(?:\.(?:ts|js))?)?\s+mcp(?:\s|$)(.*)$/u.exec(command);
   if (launcher) {
@@ -67,8 +67,10 @@ function bridgeKind(command) {
       return "operator";
   }
   if (
-    /^(?:\S*\/)?node\s+\S*\/(?:clankie-worker|worker)\/[^ ]*bin\/swarm-mcp\.mjs(?:\s|$)/u.test(command) ||
-    /^(?:\S*\/)?node\s+\S*\/clankie-worker\/[^ ]*\/swarm-mcp\.mjs(?:\s|$)/u.test(command)
+    /^(?:\S*\/)?node\s+\S*\/(?:clankie-worker|worker)\/[^ ]*bin\/(?:worker|swarm)-mcp\.mjs(?:\s|$)/u.test(
+      command,
+    ) ||
+    /^(?:\S*\/)?node\s+\S*\/clankie-worker\/[^ ]*\/(?:worker|swarm)-mcp\.mjs(?:\s|$)/u.test(command)
   )
     return "worker";
   return undefined;

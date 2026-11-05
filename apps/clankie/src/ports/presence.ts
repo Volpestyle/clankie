@@ -160,5 +160,5 @@ export interface DiscordPresenceRuntimePort {
    * the command server: a guild he merely inhabits may be on every ingress,
    * presence, and voice allowlist and still never host a room.
    */
-  swarmGuildId?(): string | undefined;
+  managedGuildId?(): string | undefined;
 }

@@ -367,7 +367,10 @@ restart the seat. A missing native mod/API remains an explicit failure in
 `clankie-worker` serves native hired seats and linked fleet agents. Claude loads it
 for one session as `clankie-worker@inline` (ADR 0317); Codex installs it as
 `clankie-worker@clankie-fleet`.
-Its MCP server key is `clankie`; older `swarm` registrations require updating.
+The shipped worker registers its MCP server as `worker` through
+`bin/worker-mcp.mjs`. Existing `bin/swarm-mcp.mjs` paths forward to that same
+bootstrap, including already-started joined hires. Retired `swarm` server keys
+still need the normal profile update.
 it runs the native seat mailbox or fleet link, with no coordinator runtime.
 
 - **Clankie hire** (VUH-1458): inside the hire's herdr pane it runs

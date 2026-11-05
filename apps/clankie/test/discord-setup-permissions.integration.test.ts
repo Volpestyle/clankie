@@ -163,7 +163,7 @@ async function fixture() {
       presenceGuildIds: ["10001"],
       ingressChannelIds: ["20001"],
       presenceChannelIds: ["20001"],
-      swarmGuildId: "10001",
+      managedGuildId: "10001",
     },
   }));
   const operatorEnv: NodeJS.ProcessEnv = { CLANKIE_OPERATOR_TOKEN: "fixture-owner" };

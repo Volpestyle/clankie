@@ -57,7 +57,7 @@ describe("channel conversations", () => {
         },
         parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: async () => ({ guildId: "guild-1", channelId: "channel-1" }),
-        swarmGuildId: () => "guild-1",
+        managedGuildId: () => "guild-1",
       });
       try {
         const created = await store.serve({
@@ -203,7 +203,7 @@ describe("channel conversations", () => {
         },
         parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
-        swarmGuildId: () => "guild-1",
+        managedGuildId: () => "guild-1",
       },
       sendToSeat,
     );
@@ -271,7 +271,7 @@ describe("channel conversations", () => {
       },
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const before: Record<string, unknown>[] = [];
     // Nothing ever answers, so the run is still accepted when the lights go out.
@@ -344,7 +344,7 @@ describe("channel conversations", () => {
         // never types a guild or channel id.
         parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: () => Promise.resolve({ guildId: "guild-1", channelId: "discord-channel-1" }),
-        swarmGuildId: () => "guild-1",
+        managedGuildId: () => "guild-1",
       },
       sendToSeat,
     );
@@ -435,7 +435,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
 
     const created = await upsertChannel(store, {
@@ -477,7 +477,7 @@ describe("channel conversations", () => {
       resolve: vi.fn(),
       provision,
       rooms,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
 
     // The picker reads the guild's own rooms, so choosing one is a pick rather
@@ -519,7 +519,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
-      swarmGuildId: () => "oathkeeper",
+      managedGuildId: () => "oathkeeper",
     });
 
     const created = await upsertChannel(store, {
@@ -575,7 +575,7 @@ describe("channel conversations", () => {
       post: vi.fn(() => Promise.resolve()),
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const listed = await store.serve({ op: "discord_rooms", schemaVersion: 1 });
     if (listed.op !== "discord_rooms") throw new Error("discord_rooms expected");
@@ -588,7 +588,7 @@ describe("channel conversations", () => {
       post: vi.fn(() => Promise.resolve()),
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     await expect(
       upsertChannel(store, {
@@ -596,7 +596,7 @@ describe("channel conversations", () => {
         members: ["atlas"],
         discord: { kind: "provision" },
       }),
-    ).rejects.toThrow("paste one from your swarm server instead");
+    ).rejects.toThrow("paste one from your managed server instead");
   });
 
   it("gives one seat reply to one room, so a shared member is not echoed into both", async () => {
@@ -614,7 +614,7 @@ describe("channel conversations", () => {
         parseWebhookUrl: parseDiscordWebhookUrl,
         resolve: (credential) =>
           Promise.resolve({ guildId: "guild-1", channelId: `discord-${credential.webhookId}` }),
-        swarmGuildId: () => "guild-1",
+        managedGuildId: () => "guild-1",
       },
       vi.fn(() => Promise.resolve(true)),
     );
@@ -664,7 +664,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
 
     await expect(
@@ -689,7 +689,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const created = await upsertChannel(store, { title: "Atlas slowness", members: ["atlas"] });
     if (created.op !== "channel") throw new Error("channel expected");
@@ -726,7 +726,7 @@ describe("channel conversations", () => {
           webhookToken: "made-secret",
         }),
       remove,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const upsert = (channel: Omit<UpsertOperatorChannel, "schemaVersion">) => upsertChannel(store, channel);
 
@@ -776,7 +776,7 @@ describe("channel conversations", () => {
           webhookToken: "made-secret",
         }),
       remove,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const made = await upsertChannel(store, {
       title: "release",
@@ -811,7 +811,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(),
       provision,
-      swarmGuildId: () => "guild-1",
+      managedGuildId: () => "guild-1",
     });
     const first = await upsertChannel(store, {
       title: "Atlas slowness",
@@ -859,7 +859,7 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve,
       provision: vi.fn(),
-      swarmGuildId: () => "oathkeeper",
+      managedGuildId: () => "oathkeeper",
     });
 
     await expect(
@@ -868,7 +868,7 @@ describe("channel conversations", () => {
         members: ["atlas"],
         discord: { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" },
       }),
-    ).rejects.toThrow(/swarm server/);
+    ).rejects.toThrow(/managed server/);
     // A guild he is merely in cannot acquire a room by any path, so the refusal
     // leaves no channel behind either.
     const listed = await store.serve({ op: "channels", schemaVersion: 1 });
@@ -885,7 +885,7 @@ describe("channel conversations", () => {
       rooms: vi.fn(() =>
         Promise.resolve([{ kind: "forum" as const, channelId: "forum-1", name: "field-notes" }]),
       ),
-      swarmGuildId: () => "oathkeeper",
+      managedGuildId: () => "oathkeeper",
     });
     await expect(
       upsertChannel(store, {
@@ -905,14 +905,14 @@ describe("channel conversations", () => {
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve,
       provision,
-      swarmGuildId: () => undefined,
+      managedGuildId: () => undefined,
     });
     for (const discord of [
       { kind: "webhook", webhookUrl: "https://discord.com/api/webhooks/42/tok" } as const,
       { kind: "provision" } as const,
     ]) {
       await expect(upsertChannel(store, { title: "nowhere", members: ["atlas"], discord })).rejects.toThrow(
-        /no swarm server set/,
+        /no managed server set/,
       );
     }
     // Unset is not "no opinion". Neither path is even attempted, so a paste
@@ -929,7 +929,7 @@ describe("channel conversations", () => {
       post,
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(() => Promise.resolve({ guildId: "blinker-city", channelId: "77" })),
-      swarmGuildId: (): string | undefined => "blinker-city",
+      managedGuildId: (): string | undefined => "blinker-city",
     };
     const store = channelStore(root, projection);
     const created = await upsertChannel(store, {
@@ -943,10 +943,10 @@ describe("channel conversations", () => {
     // The record outlives the setting that admitted it, so the invariant has to
     // hold at use: the moment that guild stops being the managed server, the room
     // stops taking guild text and stops posting into it.
-    projection.swarmGuildId = () => "oathkeeper";
+    projection.managedGuildId = () => "oathkeeper";
     expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeUndefined();
     post.mockClear();
-    projection.swarmGuildId = () => undefined;
+    projection.managedGuildId = () => undefined;
     expect(store.submitProjectedMessage("blinker-city", "77", "still listening?")).toBeUndefined();
     expect(post).not.toHaveBeenCalled();
   });
@@ -957,7 +957,7 @@ describe("channel conversations", () => {
       post: vi.fn(() => Promise.resolve()),
       parseWebhookUrl: parseDiscordWebhookUrl,
       resolve: vi.fn(() => Promise.resolve({ guildId: "oathkeeper", channelId: "77" })),
-      swarmGuildId: () => "oathkeeper",
+      managedGuildId: () => "oathkeeper",
     });
     const created = await upsertChannel(store, {
       title: "Atlas slowness",

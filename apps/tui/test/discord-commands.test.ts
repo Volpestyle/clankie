@@ -114,7 +114,7 @@ describe("Discord server allowlist resolution", () => {
 
 describe("managed server in /discord", () => {
   /** One pass through "Server, application, and roles" with the managed-server answer given. */
-  async function editSwarmHome(
+  async function editManagedServer(
     fixture: Awaited<ReturnType<typeof ownerSettingsFixture>>,
     setup: DiscordSetupApi,
     answer: string,
@@ -146,7 +146,7 @@ describe("managed server in /discord", () => {
   }
 
   it("sets the server agent channels may be projected into, keeps it on blank, and clears it on none", async () => {
-    const root = await mkdtemp(join(tmpdir(), "clankie-discord-swarm-"));
+    const root = await mkdtemp(join(tmpdir(), "clankie-discord-managed-"));
     const settings = new SettingsStore(join(root, "settings.json"));
     const fixture = await ownerSettingsFixture({}, settings);
     try {
@@ -156,12 +156,12 @@ describe("managed server in /discord", () => {
       });
       if (!credential) throw new Error("Fixture owner credential unavailable");
       const api = new ClankieApiClient({ baseUrl: fixture.options.host, operatorToken: credential.token });
-      await editSwarmHome(fixture, api, "123456789012345678");
-      expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
-      await editSwarmHome(fixture, api, "");
-      expect((await settings.load()).discord.swarmGuildId).toBe("123456789012345678");
-      await editSwarmHome(fixture, api, "none");
-      expect((await settings.load()).discord.swarmGuildId).toBeUndefined();
+      await editManagedServer(fixture, api, "123456789012345678");
+      expect((await settings.load()).discord.managedGuildId).toBe("123456789012345678");
+      await editManagedServer(fixture, api, "");
+      expect((await settings.load()).discord.managedGuildId).toBe("123456789012345678");
+      await editManagedServer(fixture, api, "none");
+      expect((await settings.load()).discord.managedGuildId).toBeUndefined();
     } finally {
       await fixture.close();
       await rm(root, { recursive: true, force: true });
@@ -178,16 +178,16 @@ describe("managed server in /discord", () => {
       const api = new ClankieApiClient({ baseUrl: fixture.options.host, operatorToken: credential.token });
       let changed = false;
       await expect(
-        editSwarmHome(fixture, api, "123456789012345678", async () => {
+        editManagedServer(fixture, api, "123456789012345678", async () => {
           if (changed) return;
           changed = true;
           await fixture.settings.update((current) => ({
             ...current,
-            discord: { ...current.discord, swarmGuildId: "987654321098765432" },
+            discord: { ...current.discord, managedGuildId: "987654321098765432" },
           }));
         }),
       ).rejects.toThrow(/409|Settings changed/);
-      expect((await fixture.settings.load()).discord.swarmGuildId).toBe("987654321098765432");
+      expect((await fixture.settings.load()).discord.managedGuildId).toBe("987654321098765432");
     } finally {
       await fixture.close();
     }

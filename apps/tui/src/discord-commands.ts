@@ -768,14 +768,14 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
 
   // The one server he controls, and the only one agent channels may be
   // projected into (ADR 0146). Never inferred from the servers he inhabits.
-  const swarmGuildId = await flow.readText({
+  const managedGuildId = await flow.readText({
     message:
       "Managed server server id — where agent channels may get Discord rooms. Blank keeps, `none` clears.",
-    placeholder: current.swarmGuildId ?? "blank = no server he may make rooms in",
+    placeholder: current.managedGuildId ?? "blank = no server he may make rooms in",
     validate: (value) => (value.trim().toLowerCase() === "none" ? undefined : validateSnowflake(true)(value)),
   });
-  if (swarmGuildId === undefined) return;
-  const swarmHome = swarmGuildId.trim();
+  if (managedGuildId === undefined) return;
+  const managedServer = managedGuildId.trim();
 
   const ambient = await flow.readText({
     message: "Ambient role ids (comma separated) — the ambient command tier",
@@ -794,14 +794,18 @@ async function editCore(shell: ClankieFaceShell, services: DiscordCommandService
   });
   if (ambientUsers === undefined) return;
 
-  await apply(services, snapshot, ({ swarmGuildId: currentSwarmHome, ...discord }) => {
-    const nextSwarmHome =
-      swarmHome.toLowerCase() === "none" ? undefined : swarmHome ? swarmHome : currentSwarmHome;
+  await apply(services, snapshot, ({ managedGuildId: currentManagedServer, ...discord }) => {
+    const nextManagedServer =
+      managedServer.toLowerCase() === "none"
+        ? undefined
+        : managedServer
+          ? managedServer
+          : currentManagedServer;
     return {
       ...discord,
       ...(applicationId.trim() ? { applicationId: applicationId.trim() } : {}),
       ...(guildId.trim() ? { guildId: guildId.trim() } : {}),
-      ...(nextSwarmHome === undefined ? {} : { swarmGuildId: nextSwarmHome }),
+      ...(nextManagedServer === undefined ? {} : { managedGuildId: nextManagedServer }),
       ...(ambient.trim() ? { ambientRoleIds: splitList(ambient) } : {}),
       ...(ambientUsers.trim() ? { ambientUserIds: splitList(ambientUsers) } : {}),
     };
