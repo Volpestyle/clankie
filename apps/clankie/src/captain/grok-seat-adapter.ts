@@ -211,7 +211,7 @@ export function createGrokSeatAdapter(options: {
               socketPath,
               sessionId,
               processHelper: options.processHelper,
-              readProcess: options.readProcess,
+              ...(options.readProcess ? { readProcess: options.readProcess } : {}),
               receiptsPath: join(options.stateDir, "grok-workers", `${sessionId}.json`),
               guard: async () => {
                 signal?.throwIfAborted();
