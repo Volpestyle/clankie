@@ -11,7 +11,7 @@ export async function collectLeadChanges(input: {
   readonly signal?: AbortSignal;
 }): Promise<readonly LeadChangeSnapshot[]> {
   const [canonical, fleet, pulls] = await Promise.allSettled([
-    input.captain.leadChangeSources?.(input.deviceId) ?? Promise.resolve([]),
+    input.captain.leadChangeSources?.(input.deviceId, input.herdr) ?? Promise.resolve([]),
     input.herdr
       ? input.captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 })
       : Promise.resolve(undefined),
@@ -20,8 +20,8 @@ export async function collectLeadChanges(input: {
   ]);
   const sources: LeadChangeSnapshot[] = canonical.status === "fulfilled" ? [...canonical.value] : [];
   const desktop = sources.find((source) => source.source === "pane");
-  const records = [...(desktop?.records ?? [])];
-  let unavailable = desktop?.unavailable;
+  const records = input.herdr ? [...(desktop?.records ?? [])] : [];
+  let unavailable = input.herdr ? desktop?.unavailable : "discovery_disabled";
   if (input.herdr) {
     if (fleet.status !== "fulfilled" || fleet.value?.op !== "fleet") unavailable = "fleet_unavailable";
     else {

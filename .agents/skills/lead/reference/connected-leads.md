@@ -71,7 +71,9 @@ it; none takes precedence over another.
   identity, and PR facts come from GitHub for configured local Git origins.
   Pending owner asks expose references only where your current worker binding
   permits; their private question bodies are withheld. Unavailable sources are
-  marked explicitly and never imply completion. Text previews stop at 2,000
+  marked explicitly and never imply completion. Disabling Herdr discovery also
+  withholds desktop panes; an unreadable held journal makes inbox unavailable
+  until a complete read succeeds. Text previews stop at 2,000
   characters: use `read_inbox`, `read_reports`, `read_notes` or the PR URL for
   detail. Reading this feed never offers or acknowledges a report or answers an
   ask. Continue to acknowledge only the ids returned by a full `read_reports`.

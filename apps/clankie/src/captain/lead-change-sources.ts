@@ -11,6 +11,7 @@ export async function leadChangeSources(input: {
   readonly lead: LeadStore;
   readonly notes: (input: AppNotesReadInput) => Promise<AppNotesResult>;
   readonly deviceId?: string;
+  readonly herdr: boolean;
   readonly visibleQuestion?: (
     question: NonNullable<ReturnType<ConversationStore["pendingLeadQuestions"]>[number]["question"]>,
   ) => Promise<boolean>;
@@ -49,9 +50,10 @@ export async function leadChangeSources(input: {
     },
     {
       source: "inbox",
+      ...(inbox.error ? { unavailable: "inbox_unavailable" } : {}),
       position: inbox.next,
       ...(inbox.items.length ? { floor: inbox.items[0]!.seq - 1 } : {}),
-      records: inbox.items
+      records: (inbox.error ? [] : inbox.items)
         .filter((item) => visible(item.conversationId))
         .map((item) =>
           leadChangeRecord(
@@ -134,6 +136,6 @@ export async function leadChangeSources(input: {
   } catch {
     result.push({ source: "board_note", records: [], unavailable: "notes_unavailable" });
   }
-  result.push(await readDesktopLeadChanges());
+  if (input.herdr) result.push(await readDesktopLeadChanges());
   return result;
 }

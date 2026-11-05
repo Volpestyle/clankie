@@ -2459,7 +2459,9 @@ source/id/revision and apply `resolved`, `superseded` or `unknown` observations;
 This coalesces observations rather than archiving every transition. Closed PRs
 are queried for seven days; falling behind that window requires a reset.
 Unavailable sources are explicit, and previously observed items become unknown
-rather than falsely complete. Text previews are capped at 2,000 characters;
+rather than falsely complete. Herdr discovery off withholds desktop panes too;
+an unreadable held journal leaves inbox unavailable until a complete read succeeds.
+Text previews are capped at 2,000 characters;
 use the existing inbox, report and note reads, or the PR URL, for details.
 Feed reads never offer or acknowledge reports or answer owner asks. An owner
 ask disappearing supersedes the reference without claiming which answer won.

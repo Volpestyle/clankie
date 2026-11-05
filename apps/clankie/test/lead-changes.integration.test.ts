@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer as httpServer } from "node:http";
 import { createServer as socketServer } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -34,9 +34,45 @@ import { createOperatorConversationRelayHandler } from "../../relay/src/operator
 import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../relay/src/connector-mcp.ts";
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 
+const checkpointReadFence = vi.hoisted(() => ({ callback: undefined as undefined | (() => void) }));
+const cleanupFence = vi.hoisted(() => ({ callback: undefined as undefined | (() => Promise<void>) }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      const value = await actual.readFile(...args);
+      if (
+        String(args[0]).includes("/changes/") &&
+        String(args[0]).endsWith(".json") &&
+        checkpointReadFence.callback
+      ) {
+        const callback = checkpointReadFence.callback;
+        checkpointReadFence.callback = undefined;
+        callback();
+      }
+      return value;
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      await actual.rm(...args);
+      if (
+        String(args[0]).includes("/changes/") &&
+        String(args[0]).endsWith(".tmp") &&
+        cleanupFence.callback
+      ) {
+        const callback = cleanupFence.callback;
+        cleanupFence.callback = undefined;
+        await callback();
+      }
+    },
+  };
+});
+
 const exec = promisify(execFile);
 const cleanups: Array<() => Promise<unknown> | unknown> = [];
 afterEach(async () => {
+  cleanupFence.callback = undefined;
+  checkpointReadFence.callback = undefined;
   for (const close of cleanups.splice(0).reverse()) await close();
   vi.unstubAllEnvs();
 });
@@ -92,6 +128,7 @@ async function fixture() {
 
   let desktopSession = "native-finished-session",
     desktopIdle = false;
+  const nativeMethods: string[] = [];
   const native = socketServer((socket) => {
     let buffer = "";
     socket.on("data", (bytes) => {
@@ -101,6 +138,7 @@ async function fixture() {
           line = buffer.slice(0, end);
         buffer = buffer.slice(end + 1);
         const rpc = JSON.parse(line) as { id: number; method: string };
+        nativeMethods.push(rpc.method);
         const result =
           rpc.method === "hello"
             ? { generation: 1, methods: ["terminal.list"] }
@@ -365,6 +403,7 @@ async function fixture() {
     questionId,
     detection,
     githubRequests,
+    nativeMethods,
     holdGithub,
     mergePr: () => {
       prStatus = "merged";
@@ -621,4 +660,83 @@ it("refuses an in-flight source read after serving or device revocation", async 
   revokeGate.release();
   expect((await revokedReading).status).toBe(403);
   expect((await f.post({ op: "lead_changes", schemaVersion: 1, since: recovered.next })).status).toBe(401);
+});
+
+it("discovery off must hide desktop panes in a fresh scope", async () => {
+  const f = await fixture();
+  const enabled = f.ready(await f.read());
+  expect(enabled.entries.some((e) => e.item.kind === "pane")).toBe(true);
+  f.detection.setMultiplexer("herdr", false);
+  const before = [...f.nativeMethods];
+  expect((await f.post({ op: "lead_changes", schemaVersion: 1, since: enabled.next })).status).toBe(403);
+  const page = f.ready(await f.read());
+  expect(page.entries.filter((e) => e.item.kind === "pane")).toEqual([]);
+  expect(page.sources).toContainEqual({
+    source: "pane",
+    status: "unavailable",
+    reason: "discovery_disabled",
+  });
+  expect(f.nativeMethods).toEqual(before);
+});
+
+it("corrupt held journal is unavailable, not a complete empty inbox", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read());
+  expect(initial.entries.some((e) => e.item.kind === "inbox")).toBe(true);
+  const journal = join(f.state, "lead-held.json");
+  const saved = await readFile(journal, "utf8");
+  await writeFile(journal, "{broken");
+  await f.restart();
+  const page = f.ready(await f.read(initial.next));
+  expect(page.sources.find((s) => s.source === "inbox")?.status).toBe("unavailable");
+  expect(
+    page.entries.filter((e) => e.item.kind === "inbox").every((e) => e.state === "unknown" && !e.removed),
+  ).toBe(true);
+  const retained = f.ready(await f.read());
+  expect(retained.entries.filter((e) => e.item.kind === "inbox")).toEqual(
+    initial.entries
+      .filter((e) => e.item.kind === "inbox")
+      .map((e) => ({ ...e, sequence: expect.any(Number) })),
+  );
+  await writeFile(journal, saved);
+  await f.restart();
+  const recovered = f.ready(await f.read(page.next));
+  expect(recovered.sources).toContainEqual({ source: "inbox", status: "ready" });
+  expect(recovered.entries.some((e) => e.item.kind === "inbox" && e.removed)).toBe(false);
+});
+
+it("serving revocation during real checkpoint cleanup must refuse publication", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read());
+  f.mergePr();
+  cleanupFence.callback = async () => {
+    f.detection.setServed("app-a", false);
+  };
+  try {
+    const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+    expect(cleanupFence.callback).toBeUndefined();
+    expect(response.status).toBe(403);
+  } finally {
+    cleanupFence.callback = undefined;
+  }
+});
+
+it("rechecks authority before publishing an early retained-history reset", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read(undefined, 1));
+  expect(initial.more).toBe(true);
+  const files = await readdir(join(f.root, "changes"));
+  expect(files).toHaveLength(1);
+  const path = join(f.root, "changes", files[0]!);
+  const checkpoint = JSON.parse(await readFile(path, "utf8"));
+  // A valid retained checkpoint whose older observations have been pruned.
+  checkpoint.floor = checkpoint.head;
+  checkpoint.history = [];
+  await writeFile(path, JSON.stringify(checkpoint));
+  expect(await f.read(initial.next)).toEqual({ outcome: "reset_required", reason: "retained_history_gap" });
+  checkpointReadFence.callback = () => f.detection.setServed("app-a", false);
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  expect(checkpointReadFence.callback).toBeUndefined();
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
 });

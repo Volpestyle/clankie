@@ -94,7 +94,10 @@ export class LeadChanges {
     });
     await before;
     try {
-      return await this.readSerial(input);
+      const result = await this.readSerial(input);
+      // Covers cleanup and both early reset paths before handing a result to the route.
+      if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
+      return result;
     } finally {
       release();
     }

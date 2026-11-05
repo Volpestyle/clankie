@@ -5430,8 +5430,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareFreeAgentIntent,
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
-    leadChangeSources: (deviceId) =>
+    leadChangesCurrent: () => lead.status().lead === "apps",
+    leadChangeSources: (deviceId, herdr = true) =>
       leadChangeSources({
+        herdr,
         conversations,
         lead,
         ...(deviceId === undefined ? {} : { deviceId }),

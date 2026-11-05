@@ -663,6 +663,19 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     if (parsed.success && parsed.data.op === "lead_changes") {
       const request = parsed.data;
       const deviceId = request.appDeviceId;
+      const discovery = ctx.detection.multiplexer("herdr");
+      const current = () => {
+        if (context.req.raw.signal.aborted || ctx.detection.multiplexer("herdr") !== discovery) return false;
+        if (deviceId === undefined) return owner?.current() === true;
+        const record = ctx.devices.get(deviceId);
+        return (
+          ctx.dependencies.captain.leadChangesCurrent?.() === true &&
+          record?.status === "active" &&
+          record.scope === "connector" &&
+          record.grants.steer &&
+          ctx.detection.served(deviceId)
+        );
+      };
       const authorized = async () => {
         if (context.req.raw.signal.aborted) return false;
         if (deviceId === undefined)
@@ -674,14 +687,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           schemaVersion: 1,
           command: { action: "status" },
         });
-        const record = ctx.devices.get(deviceId);
-        return (
-          lead.op === "lead" &&
-          lead.result.status.lead === "apps" &&
-          record?.status === "active" &&
-          record.scope === "connector" &&
-          ctx.detection.served(deviceId)
-        );
+        return lead.op === "lead" && lead.result.status.lead === "apps" && current();
       };
       if (!(await authorized())) return context.json({ error: "lead_changes_forbidden" }, 403);
       const changes = ctx.dependencies.leadChanges;
@@ -693,6 +699,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             herdr: ctx.detection.multiplexer("herdr"),
           });
         const scope = await visibility();
+        const mayRead = async () =>
+          (await authorized()) && (await visibility()) === scope && (await authorized());
         const result = await changes.read({
           scope:
             (deviceId === undefined
@@ -704,17 +712,18 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             ...(request.since === undefined ? {} : { since: request.since }),
             ...(request.limit === undefined ? {} : { limit: request.limit }),
           },
-          authorize: async () =>
-            (await authorized()) && (await visibility()) === scope && (await authorized()),
+          authorize: mayRead,
           snapshot: () =>
             collectLeadChanges({
               captain: ctx.dependencies.captain,
               signal: context.req.raw.signal,
               ...(ctx.dependencies.workItems ? { work: ctx.dependencies.workItems } : {}),
               ...(deviceId === undefined ? {} : { deviceId }),
-              herdr: deviceId === undefined || ctx.detection.multiplexer("herdr"),
+              herdr: discovery,
             }),
         });
+        if (!(await mayRead()) || !current()) throw new LeadChangesRefusal("not_authorized");
+        // No awaits below: the live authority/discovery fences cover both pages and resets.
         return context.json({ op: "lead_changes", schemaVersion: 1, result });
       } catch (error) {
         if (error instanceof LeadChangesRefusal)

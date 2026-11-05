@@ -32,6 +32,7 @@ const PersistedHeldSchema = z
 export class LeadStore {
   private lead: OperatorLead;
   private unreadable = false;
+  private heldUnreadable = false;
   private held: z.infer<typeof PersistedHeldSchema>;
   private readonly path: string;
   private readonly heldPath: string;
@@ -109,10 +110,18 @@ export class LeadStore {
   }
 
   /** Held items after `after`, oldest first; `next` is the `after` that reads on from here. */
-  public inbox(after = 0, limit = 50): { items: OperatorLeadHeldItem[]; next: number; more: boolean } {
+  public inbox(
+    after = 0,
+    limit = 50,
+  ): { items: OperatorLeadHeldItem[]; next: number; more: boolean; error?: "state_unreadable" } {
     const newer = this.held.items.filter((item) => item.seq > after);
     const items = newer.slice(0, limit);
-    return { items, next: items.at(-1)?.seq ?? after, more: newer.length > items.length };
+    return {
+      items,
+      next: items.at(-1)?.seq ?? after,
+      more: newer.length > items.length,
+      ...(this.heldUnreadable ? { error: "state_unreadable" as const } : {}),
+    };
   }
 
   private readLead(): OperatorLead {
@@ -127,10 +136,10 @@ export class LeadStore {
 
   private readHeld(): z.infer<typeof PersistedHeldSchema> {
     try {
-      if (existsSync(this.heldPath))
-        return PersistedHeldSchema.parse(JSON.parse(readFileSync(this.heldPath, "utf8")));
-    } catch {
-      // A damaged list of held turns starts over; the setting itself is kept apart.
+      return PersistedHeldSchema.parse(JSON.parse(readFileSync(this.heldPath, "utf8")));
+    } catch (error) {
+      // Missing state is a new inbox; unreadable state is not evidence of an empty inbox.
+      this.heldUnreadable = !(error instanceof Error && "code" in error && error.code === "ENOENT");
     }
     return { schemaVersion: 1, nextSeq: 1, items: [] };
   }
