@@ -87,6 +87,7 @@ export function createJoinedWorkers(input: {
   const journal = new JoinedWorkerRecords(input.workerRecordDirectory);
   const hash = (token: string) => createHash("sha256").update(token).digest("hex");
   const workers = new Map<string, Worker>();
+  let closed = false;
   const close = (worker: Worker, revoke = false) => {
     const held = journal.records.get(worker.token);
     if (revoke && held) journal.remove(held);
@@ -95,6 +96,7 @@ export function createJoinedWorkers(input: {
     worker.outbox.close();
   };
   const authority = async (token: string, machine?: JoinedSeatMachine) => {
+    if (closed) return undefined;
     const key = hash(token);
     let worker = workers.get(key);
     if (!worker) {
@@ -121,7 +123,8 @@ export function createJoinedWorkers(input: {
     if (
       !worker ||
       (machine !== undefined && worker.machineId !== machine.machineId) ||
-      !(await worker.authorize())
+      !(await worker.authorize()) ||
+      !worker.current()
     )
       return undefined;
     worker.touchedAt = Date.now();
@@ -129,6 +132,7 @@ export function createJoinedWorkers(input: {
     return worker;
   };
   const admit = async (worker: Worker, raw: unknown) => {
+    if (!worker.current()) throw Error("joined_worker_revoked");
     const value = z
       .strictObject({
         paneId: z.string().min(1).max(256),
@@ -206,6 +210,7 @@ export function createJoinedWorkers(input: {
       signal: abort.signal,
       touchedAt: record.touchedAt,
       current: () =>
+        !closed &&
         workers.get(token) === worker &&
         input.joins.has(machine.machineId) &&
         input.captain.joinedWorkerReportDestination(record.conversationId) &&
@@ -342,6 +347,7 @@ export function createJoinedWorkers(input: {
   }) => {
     const { machine, directory } = args;
     await input.joins.refuseWatching(machine.machineId);
+    if (closed) throw Error("joined_workers_closed");
     for (const held of journal.records.values())
       if (Date.now() - held.touchedAt >= 60 * 60_000) {
         const worker = workers.get(held.tokenHash);
@@ -536,7 +542,7 @@ export function createJoinedWorkers(input: {
   return {
     authority,
     manageReportLeads: async (request: ManageWorkerReportLeads, authorize: () => Promise<boolean>) => {
-      if (!request.joinedHireId || !(await authorize())) throw Error("joined_worker_grant_refused");
+      if (closed || !request.joinedHireId || !(await authorize())) throw Error("joined_worker_grant_refused");
       const held = [...journal.records.values()].find((record) => record.id === request.joinedHireId);
       const machine = held && input.joins.seatMachine(held.machineId);
       if (!held || !machine) throw Error("joined_worker_unknown");
@@ -591,6 +597,7 @@ export function createJoinedWorkers(input: {
         }
     },
     close: () => {
+      closed = true;
       for (const worker of workers.values()) close(worker);
     },
   };

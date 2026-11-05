@@ -510,6 +510,12 @@ it.each(["claude", "codex"] as const)(
       await client!.close();
       await bridged;
       await service.close();
+      const retired = await service.app.request("/v1/fleet/report-leads", {
+        method: "POST",
+        headers: { authorization: "Bearer fixture-owner", "content-type": "application/json" },
+        body: JSON.stringify({ joinedHireId: id, change: { op: "list" } }),
+      });
+      expect(retired.status).toBe(403);
       await captain.close();
       captain = makeCaptain();
       await captain.pollSeatEvents(1, undefined, "global-default");
