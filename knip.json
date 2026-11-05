@@ -36,6 +36,7 @@
         "scripts/testing/landing-graph-reporter.mjs",
         "scripts/testing/release-test-reporter.mjs",
         "scripts/manual/tracker-peak-day/generate-store.ts",
+        "integrations/claude-plugin/worker/bin/worker-mcp.mjs",
         "integrations/claude-plugin/worker/bin/swarm-mcp.mjs",
         "integrations/claude-plugin/worker/bin/fleet-mcp.mjs",
         "integrations/claude-plugin/worker/bin/clankie-cli.mjs",
