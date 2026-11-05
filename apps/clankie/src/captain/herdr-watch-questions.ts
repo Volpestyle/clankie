@@ -40,6 +40,7 @@ type Context = Pick<
 export function createHerdrWatchQuestions(ctx: Context) {
   /** Host-observed native question, bound to the original occupant; model text is never evidence. */
   async function observedSeatQuestion(seatId: string, requestId: string | number) {
+    // allow-swallowed-rejection -- An unreadable native seat refuses the question before any answer can be sent.
     const agent = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) throw new Error("worker_question_unavailable");
     const sessionId = nativeSessionId(agent);
@@ -47,6 +48,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     const control = await ctx.seatControl.attachQuestion(agent);
     const pending = await control?.pendingQuestion?.(requestId);
     if (!pending) throw new Error("worker_question_resolved_or_unavailable");
+    // allow-swallowed-rejection -- An unreadable current occupant fails the exact-question identity check below.
     const current = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       !current?.session ||
@@ -93,6 +95,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     if (ctx.closed) return { outcome: "offline", detail: "Native hire service is closed." };
     const authority = captureConversationAuthority(source);
     await assertConversationAuthority(authority);
+    // allow-swallowed-rejection -- An unreadable native seat returns offline before any answer can be sent.
     const agent = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return { outcome: "offline", detail: "The exact native seat is unavailable." };
     if (expectedSessionId !== undefined && nativeSessionId(agent) !== expectedSessionId)
@@ -107,6 +110,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     } catch {
       /* A replaced occupant fails the dispatch guard below; nothing is sent. */
     }
+    // allow-swallowed-rejection -- An unavailable question controller returns undelivered below.
     const control = await ctx.seatControl.attachQuestion(agent).catch(() => undefined);
     if (!control?.answerQuestion)
       return {

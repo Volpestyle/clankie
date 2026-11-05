@@ -272,6 +272,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
             throw new Error(`The session is live in ${live.paneId}; message its existing seat explicitly`);
           if (receiptKey !== undefined) {
             const receipt = ctx.hireReceipts.pending(receiptKey)!;
+            // allow-swallowed-rejection -- A missing transcript leaves no read-back evidence on the original receipt.
             const before = await ctx.runner.transcript?.(live).catch(() => undefined);
             ctx.hireReceipts.update(receiptKey, receipt.messageId, {
               paneId: live.paneId,
@@ -348,6 +349,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
       ctx.projectHires.pane(allocation, agent.paneId);
       const proof =
         preparedProof ??
+        // allow-swallowed-rejection -- Missing process proof is rejected below whenever this binding requires proof.
         (await ctx.projectPolicy?.proof?.(input.fleet ?? "default", agent.paneId).catch(() => undefined));
       if (
         requireProof &&
@@ -434,6 +436,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
     // move re-hires a seat it has just closed under the same name, so it is
     // not a new agent and is never refused for capacity.
     if (subjectOverride === undefined) {
+      // allow-swallowed-rejection -- This optional capacity hint remains unavailable on failure; existing launch admission still runs.
       const capacity = await ctx.hireCapacity?.().catch(() => undefined);
       if (capacity !== undefined && capacity.live >= capacity.limit) {
         return {
@@ -584,6 +587,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
       ctx.workerAccounts &&
       ctx.nativeLaunchPolicy?.prepare === undefined
     ) {
+      // allow-swallowed-rejection -- An unreadable remote account report refuses startup below.
       const report = await ctx.workerAccounts(remote, identityHarness).catch(() => undefined);
       if (!report)
         return {
@@ -679,6 +683,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
     if (identityAccount) {
       if (remote !== undefined) remoteAccountEnv = identityEnv;
       else if (identityHarness === "claude") {
+        // allow-swallowed-rejection -- An unreadable Claude account home refuses startup below.
         const home = await realpath(identityAccount.home).catch(() => undefined);
         claudeLabel = identityAccount.label;
         if (!home)
@@ -713,6 +718,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
           reason: "harness_unavailable",
           detail: `No home is signed into Claude account ${claudeLabel}; sign in to the intended account. No other account was tried.`,
         };
+      // allow-swallowed-rejection -- An unreadable selected account home refuses startup below.
       claudeHome = await realpath(selected.home).catch(() => undefined);
       if (!claudeHome)
         return {
@@ -835,6 +841,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
       }
       if (claudeHome && !identityAccount) {
         const current = ((await ctx.claudeAccounts?.()) ?? []).find((a) => a.label === claudeLabel);
+        // allow-swallowed-rejection -- An unreadable current account home fails the unchanged-profile fence.
         if (!current || (await realpath(current.home).catch(() => undefined)) !== claudeHome)
           throw new Error("Claude account profile changed during startup");
       }
@@ -963,6 +970,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
       if (authority?.onHirePane !== undefined) {
         // A pending receipt names the seat by the same terminal ID `started` and list_agents use;
         // a pane ID is only a layout address.
+        // allow-swallowed-rejection -- This optional lookup only projects the allocated terminal into the owner callback.
         const allocated = await ctx.runner.get(paneId).catch(() => undefined);
         if (allocated !== undefined) authority.onHirePane(allocated.terminalId);
       }
@@ -1132,6 +1140,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
           await nativePrepared?.dispose();
           const failure = await ctx.startupFailure(paneId, input.harness, started.detail, started.reason);
           if (started.reason === "harness_unavailable" && !nativePrepared) {
+            // allow-swallowed-rejection -- Startup already failed; closing its unprepared pane is best-effort cleanup.
             await ctx.runner.closePane?.(paneId).catch(() => undefined);
             return { ...failure, control };
           }
@@ -1382,6 +1391,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
         // A prepared initial command may already be alive; never treat its pane
         // as an empty shell or close it on an unproved controller result.
         await nativePrepared?.dispose();
+        // allow-swallowed-rejection -- Startup already failed; only an unprepared pane is eligible for this cleanup.
         if (!nativePrepared) await ctx.runner.closePane?.(paneId).catch(() => undefined);
         return {
           outcome: "failed",
@@ -1441,6 +1451,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
           detail: `${failure.detail ?? reasonDetail(caught)}; inspect pane ${paneId} before retrying`,
           ...(control === undefined ? {} : { control }),
         };
+      // allow-swallowed-rejection -- The original startup failure is returned even if empty-pane cleanup also fails.
       await ctx.runner.closePane?.(paneId).catch(() => undefined);
       return { ...failure, ...(control === undefined ? {} : { control }) };
     }
@@ -1453,6 +1464,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
     detail: string,
     reason: HerdrSeatSpawnFailure["reason"] = spawnFailureReason(detail),
   ): Promise<HerdrSeatSpawnFailure> {
+    // allow-swallowed-rejection -- A failed diagnostic screen read preserves the original startup failure.
     const visible = await ctx.runner.read?.(paneId, harness, "visible").catch(() => undefined);
     let failure: HerdrSeatSpawnFailure = { outcome: "failed", reason, detail };
     if (
@@ -1481,6 +1493,7 @@ export function createHerdrWatchLaunch(ctx: Context) {
       };
     else if (harness === "claude" && visible?.includes(CHANNEL_DIALOG_MARKER))
       failure = { outcome: "failed", reason: "not_ready", detail: CLAUDE_CHANNEL_CONSENT_REQUIRED };
+    // allow-swallowed-rejection -- A failed diagnostic seat read omits optional session metadata from the failure log.
     const agent = await ctx.runner.get(paneId).catch(() => undefined);
     const session = agent?.session;
     console.warn(

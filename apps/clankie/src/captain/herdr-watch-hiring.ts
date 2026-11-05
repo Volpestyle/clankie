@@ -193,6 +193,7 @@ export function createHerdrWatchHiring(ctx: Context) {
     try {
       if (authority) await assertConversationAuthority(authority);
       if (input.fleet === undefined) {
+        // allow-swallowed-rejection -- An unreadable directory is refused as unknown_directory below.
         const canonicalDirectory = await realpath(input.workingDirectory).catch(() => undefined);
         if (canonicalDirectory === undefined)
           return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
@@ -270,6 +271,7 @@ export function createHerdrWatchHiring(ctx: Context) {
       let live: HerdrAgentSnapshot | undefined;
       if (ctx.runner.list) {
         const candidates = ctx.projectHires.inventoryCandidates(input.fleet ?? "default");
+        // allow-swallowed-rejection -- Unavailable inventory cannot reconcile allocations or prove a reusable live seat.
         const inventory = await ctx.runner.list(input.fleet).catch(() => undefined);
         if (inventory && resume) live = existingNativeSession(inventory, resume);
         if (inventory)
@@ -484,6 +486,7 @@ export function createHerdrWatchHiring(ctx: Context) {
     // our own adoption writes outside these before/after policy snapshots;
     // external policy changes still fail the unchanged revision fence.
     const result = ctx.projectPolicyQueue.then(action, action);
+    // allow-swallowed-rejection -- The returned result carries the failure to its caller; the queue remains usable for later policy actions.
     ctx.projectPolicyQueue = result.catch(() => {});
     return result;
   }
@@ -801,7 +804,8 @@ export function createHerdrWatchHiring(ctx: Context) {
       try {
         const agent =
           pending.paneId !== undefined
-            ? await ctx.runner.get(pending.paneId).catch(() => undefined)
+            ? // allow-swallowed-rejection -- A missing native occupant cannot prove the pending receipt was delivered.
+              await ctx.runner.get(pending.paneId).catch(() => undefined)
             : undefined;
         const matchingOwner =
           authority === undefined ||
@@ -825,7 +829,8 @@ export function createHerdrWatchHiring(ctx: Context) {
             occupantIdForHerdrSession(agent.session) === pending.occupantId);
         const transcript =
           exact && agent !== undefined
-            ? await ctx.runner.transcript?.(agent).catch(() => undefined)
+            ? // allow-swallowed-rejection -- An unavailable transcript cannot acknowledge the pending brief.
+              await ctx.runner.transcript?.(agent).catch(() => undefined)
             : undefined;
         // A brief that went by file (claude-worker-seat) arrives as a pointer to the
         // service's own brief file; the brief it names is what was delivered (#615).
@@ -904,6 +909,7 @@ export function createHerdrWatchHiring(ctx: Context) {
           ctx.hireReceipts.reconcile(receiptKey, pending.messageId, input.fleet !== undefined);
           // Adoption and the exact delivery receipt commit synchronously above.
           // Its own metadata flush must precede a watch's project policy probes.
+          // allow-swallowed-rejection -- The durable native receipt is already reconciled; a failed association flush stays pending.
           if (flushAdoption) await ctx.runProjectPolicy(flushAdoption).catch(() => {});
           if (watch) ctx.launch(watch);
           return { ...recovered, deliveryStage: hireDeliveryStage(recovered, brief !== undefined) };
@@ -1021,6 +1027,7 @@ export function createHerdrWatchHiring(ctx: Context) {
         );
       if (result.outcome === "spawned") {
         // A failed association write stays pending; the native seat already exists.
+        // allow-swallowed-rejection -- The native seat already exists; a failed association flush stays pending without replay.
         if (flushAdoption) await ctx.runProjectPolicy(flushAdoption).catch(() => {});
         if (watch) ctx.launch(watch);
       }

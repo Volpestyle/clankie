@@ -59,6 +59,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
     const entries = ctx.seatControl.unresolvedDeliveries();
     return Promise.all(
       entries.map(async (entry) => {
+        // allow-swallowed-rejection -- A missing live seat leaves only the persisted delivery scope visible.
         const agent = await ctx.runner.resolveTerminal(entry.seatId).catch(() => undefined);
         let owner: ConversationOwner | undefined;
         try {
@@ -78,6 +79,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
     const original = await ctx.seatControl.locateDelivery(id);
     if (!original) return undefined;
     const [key, receipt] = original;
+    // allow-swallowed-rejection -- Persisted receipt scope still applies when its live seat cannot be read.
     const agent = await ctx.runner.resolveTerminal(receipt.seatId ?? key).catch(() => undefined);
     let owner: ConversationOwner | undefined;
     try {
@@ -203,6 +205,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
         }
         if (nextPrompt >= 0) return;
       }
+      // allow-swallowed-rejection -- This background reply tail is optional; failure leaves the already accepted send unchanged.
     })().catch(() => undefined);
     return true;
   }
@@ -217,6 +220,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
       }
     | undefined
   > {
+    // allow-swallowed-rejection -- An unavailable live read may use only the previously attributed native chat cache.
     const live = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     const agent = live ?? previous;
     if (agent === undefined || (live === undefined && agent.session === undefined)) return undefined;
@@ -321,6 +325,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
   /** Controller observations and actions retain the exact native occupant. */
   async function inputCapabilities(agent: HerdrAgentSnapshot): Promise<FleetSeatInputCapabilities> {
     const capabilities = await ctx.seatControl.inputCapabilities(agent, { displayOnly: true });
+    // allow-swallowed-rejection -- An unreadable current occupant yields no input capabilities below.
     const current = await ctx.runner.resolveTerminal(agent.terminalId).catch(() => undefined);
     return current?.paneId === agent.paneId &&
       current.agent === agent.agent &&
@@ -335,12 +340,14 @@ export function createHerdrWatchDelivery(ctx: Context) {
     holderId?: string,
   ): Promise<{ binding: string; status: string; queueSupported: boolean } | undefined> {
     if (ctx.closed) return undefined;
+    // allow-swallowed-rejection -- An unreadable native seat grants no task activity or lease renewal.
     const agent = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (!agent?.session) return undefined;
     // allow-swallowed-rejection -- A failed native read grants no activity or lease renewal.
     const observation = await ctx.seatControl.observeNativeTask(agent, holderId).catch(() => undefined);
     if (!observation) return undefined;
     const { status } = observation;
+    // allow-swallowed-rejection -- An unreadable current occupant invalidates this task observation below.
     const current = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       !current?.session ||
@@ -364,6 +371,7 @@ export function createHerdrWatchDelivery(ctx: Context) {
   ): Promise<StopNativeTaskResult> {
     if (ctx.closed) return { outcome: "unavailable" };
     await authorize();
+    // allow-swallowed-rejection -- An unreadable native seat returns unavailable before any stop action.
     const agent = await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     if (
       !agent?.session ||
@@ -444,7 +452,8 @@ export function createHerdrWatchDelivery(ctx: Context) {
       return uncontrolled?.() ?? { outcome: "offline", detail: "Native hire service is closed." };
     const before = options?.fence
       ? undefined
-      : await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
+      : // allow-swallowed-rejection -- This optional read only arms a completion watch; seat control proves the delivery occupant.
+        await ctx.runner.resolveTerminal(seatId).catch(() => undefined);
     // The lead only arms a follow-up's completion harvest below. A stale claim on this pane or
     // terminal (an earlier occupant's) names no lead for the current one, and must not stop the
     // message: the seat control proves the occupant it delivers to on its own.

@@ -785,7 +785,8 @@ export function createHerdrWatchRecovery(ctx: Context) {
       if (!owner) throw new Error(`No conversation's hire holds pane ${paneId}`);
       const proof =
         allocation && !allocation.confirmed
-          ? await ctx.projectPolicy?.proof?.("default", paneId).catch(() => undefined)
+          ? // allow-swallowed-rejection -- Missing process proof refuses adoption of an unconfirmed allocation below.
+            await ctx.projectPolicy?.proof?.("default", paneId).catch(() => undefined)
           : undefined;
       if (
         allocation &&

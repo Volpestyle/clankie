@@ -316,9 +316,11 @@ export function createHerdrWatchLifecycle(ctx: Context) {
     try {
       const current = await ctx.runner.resolveTerminal(seatId);
       if (current === undefined) return false;
+      // allow-swallowed-rejection -- Missing simulator proof omits optional resource bookkeeping; native close keeps its own guards.
       const resourceOwner = await ctx.fleetResources?.proveSimulatorSeat({ seatId }).catch(() => undefined);
       const noteVerifiedExit = () => {
         if (resourceOwner)
+          // allow-swallowed-rejection -- Best-effort exit observation cannot substitute for the governor independently proving release.
           void ctx.fleetResources?.observeVerifiedSeatExit(resourceOwner).catch(() => undefined);
       };
       const fleet = splitFleetQualified(current.paneId)?.fleet;
@@ -371,10 +373,12 @@ export function createHerdrWatchLifecycle(ctx: Context) {
         await control.verify();
         await guard?.();
         // A lost reply may follow the native exit. Observe; do not retry.
+        // allow-swallowed-rejection -- A lost exit reply is observed below; the exit is never retried.
         await control.exit(guard).catch(() => undefined);
         const deadline = Date.now() + SPAWN_SESSION_WAIT_MS;
         do {
           if ((await ctx.runner.resolveTerminal(seatId)) === undefined) {
+            // allow-swallowed-rejection -- Cleanup failure cannot bypass the complete confirmGone inventory below.
             await control.close().catch(() => undefined);
             if (!(await confirmGone())) return false;
             noteVerifiedExit();
@@ -394,6 +398,7 @@ export function createHerdrWatchLifecycle(ctx: Context) {
       // The manager independently checks this original process tuple. A pane
       // close reply alone cannot reclaim a still-live or replaced occupant.
       if (!(await confirmGone())) return false;
+      // allow-swallowed-rejection -- The original occupant is already confirmed gone; closing its controller is best-effort cleanup.
       await control?.close().catch(() => undefined);
       noteVerifiedExit();
       return true;

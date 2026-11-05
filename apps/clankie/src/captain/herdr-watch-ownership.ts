@@ -65,6 +65,7 @@ export function createHerdrWatchOwnership(ctx: Context) {
   async function nativeRouteAvailable(agent: HerdrAgentSnapshot): Promise<boolean> {
     if (ctx.closed || !agent.session) return false;
     const control = await ctx.seatControl.attach(agent);
+    // allow-swallowed-rejection -- Missing adapter status grants no route through this status check.
     const status = await control?.status().catch(() => undefined);
     if (status === "idle" || status === "working" || status === "blocked") return true;
     // Unowned Codex sessions already have a native queue path (ADR 0185/0207).
@@ -122,7 +123,9 @@ export function createHerdrWatchOwnership(ctx: Context) {
         });
         if (control === undefined) return seat;
         const [status, reason, stopped] = await Promise.all([
+          // allow-swallowed-rejection -- An unavailable adapter status leaves the observed seat status unchanged.
           control.status().catch(() => undefined),
+          // allow-swallowed-rejection -- An unreadable status reason omits only its optional display detail.
           control.statusReason?.().catch(() => undefined),
           // allow-swallowed-rejection -- an unreadable stop reason leaves the seat's own status shown.
           control.stopped?.().catch(() => undefined),
@@ -405,6 +408,7 @@ export function createHerdrWatchOwnership(ctx: Context) {
 
   /** The herdr status an adapter-held seat's own status reads as; undefined when no adapter holds it. */
   async function adapterStatus(agent: HerdrAgentSnapshot): Promise<string | undefined> {
+    // allow-swallowed-rejection -- An unreadable adapter status remains unknown rather than reporting it idle.
     const status = await (await ctx.seatControl.attach(agent))?.status().catch(() => undefined);
     return status === "working" || status === "idle" || status === "blocked" ? status : undefined;
   }
@@ -418,6 +422,7 @@ export function createHerdrWatchOwnership(ctx: Context) {
     const deadline = Date.now() + timeoutMs;
     let status = "unknown";
     while (!ctx.closed) {
+      // allow-swallowed-rejection -- An unreadable pickup observation is reported offline below.
       status = (await ctx.runner.resolveTerminal(seatId).catch(() => undefined))?.status ?? "offline";
       if (status !== "idle" || Date.now() >= deadline) return status;
       await delay(SPAWN_SESSION_POLL_MS);

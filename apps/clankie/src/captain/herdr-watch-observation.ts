@@ -543,6 +543,7 @@ export function createHerdrWatchObservation(ctx: Context) {
             harvestMessageId ??= event.messageId;
             completion = event;
           }
+          // allow-swallowed-rejection -- A failed follow-up read retains the original completion observation and native-change checks.
           const after = await ctx.runner.resolveTerminal(record.terminalId).catch(() => undefined);
           if (ctx.endsOnNativeChange(record, after)) return;
           prompt = watchPrompt(record, after ?? current, undefined, event);
@@ -558,6 +559,7 @@ export function createHerdrWatchObservation(ctx: Context) {
             : await ctx.runner.wait(current.paneId, signal);
           if (ctx.endsOnNativeChange(record, settled)) return;
           // A transcript that cannot be read leaves the ordinary no-report wake.
+          // allow-swallowed-rejection -- An unreadable transcript leaves the ordinary no-report completion wake.
           const reply = await ctx.lastReply?.(settled).catch(() => undefined);
           prompt = watchPrompt(record, settled, undefined, undefined, reply?.trim() || undefined);
           observedPane = settled;
