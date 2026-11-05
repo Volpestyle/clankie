@@ -158,6 +158,28 @@ Replacing either account token requires restarting the process that logged into
 that gateway. Revoking the lab opt-in blocks the next privileged action without
 waiting for a restart.
 
+## Sign-in requests
+
+When a hired worker reaches a sign-in page in Clankie's private browser, it
+asks with `clankie_request_credential` (origin and field shape only) instead of
+asking you for a password
+([ADR 0342](adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md#implementation-boundary-245-first-slice)).
+Answer in the console with `/credentials`, or in a shell:
+
+```sh
+clankie credentials                      # open requests: origin, worker, fields
+clankie credentials answer REQUEST_ID    # prompts for each value with echo off
+clankie credentials decline REQUEST_ID
+```
+
+A value is never a command argument; to pipe one, send one value per line in
+the request's field order. The broker reloads the page, fills and submits the
+form only when the page, its fields and its form's action are on the exact
+origin the worker named, then retires the tab. The worker reads only `filled`,
+`declined` or `failed` with a reason code. Requests live in the service's
+memory; a restart, or ten minutes without an answer, closes them. Nothing is
+saved yet.
+
 ## Local Clankie bearers
 
 Local bearers authenticate Clankie processes to each other. They are not

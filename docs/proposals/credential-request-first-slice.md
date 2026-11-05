@@ -1,34 +1,32 @@
 # Credential request first slice
 
-Work in progress for [#245](https://github.com/Volpestyle/clankie/issues/245)
-and [ADR 0342](../adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md).
-This is an implementation plan, not an available sign-in feature.
+Built for [#245](https://github.com/Volpestyle/clankie/issues/245) under
+[ADR 0342](../adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md#implementation-boundary-245-first-slice);
+the ADR's implementation boundary records the post-fill decision and what is
+not built. The operator guide is [sign-in requests](../credentials.md#sign-in-requests).
 
-The first slice covers a hired worker asking for a credential, an owner answering
-in the Clankie TUI or plain shell, and the credential broker filling an exact-origin
-field in Clankie's own private browser. App, pet, Discord DM, guest desktop and
-password-manager integrations remain later work.
+```mermaid
+sequenceDiagram
+  participant W as Hired worker
+  participant S as Service (broker)
+  participant B as Private Chrome
+  participant O as Owner (TUI / shell)
+  W->>S: clankie_request_credential(conversation, origin, fields)
+  S->>B: seal current tab if its origin is exact; end every REPL
+  S-->>W: pending
+  O->>S: GET /v1/credential-requests (no values)
+  O->>S: POST .../answer {values} (masked, local API)
+  S->>B: fresh load, exact-origin checks, type, submit, close tab
+  S->>B: new tab, same session, landing page
+  S-->>O: filled | failed(reason)
+  W->>S: clankie_request_credential(requestId)
+  S-->>W: filled | declined | failed(reason)
+```
 
-The worker supplies the origin and field shape, never a credential value. Its
-result is only `filled`, `declined`, `saved` or `failed`. The owner prompt names
-the site and request. TUI input is masked; `clankie credentials answer` uses a
-local no-echo prompt. Values go through the local owner API to the broker and
-never enter chat, model input, transcripts, logs, scrollback or API responses.
-One-time codes are never saved. Saved entries belong to the broker and are
-scoped to the exact origin and username.
-
-The broker binds each request to the original hire, browser target, document and
-field. Wrong origins, redirects, foreign-origin frames, closed or replaced
-requests and stale authority must refuse. Filling does not grant the worker new
-authority. Browser observation and recording must remain outside credential
-entry. The post-fill handoff is still a design decision: keep the target sealed
-until an owner closes it, or explicitly include broker-controlled submission and
-retirement of the credential-bearing document before agent access resumes.
-No form submission is implied by this plan.
-
-Proof will use an owned loopback sign-in page and isolated private browser,
-without real sites or accounts. It must exercise the actual worker request,
-local owner API, broker and browser path; cover the refusal cases above; and
-search every fixture transcript, log, receipt and terminal output for the test
-credential. Credential and authority code requires independent review before
-rebase or merge.
+Proof: `apps/clankie/test/credential-request.integration.test.ts` runs the real
+worker MCP, owner API and CLI, broker and a real Chrome against loopback sign-in
+pages it owns. It covers a fill and fresh-tab handoff; refusal of a wrong
+origin, a redirect to another origin, a form inside another origin's frame and
+a form posting to another origin; refused read-backs while sealed; withdrawn and
+replaced requests; and a decline. It then searches every captured tool result,
+API response, log line and file under its state root for the test secret.

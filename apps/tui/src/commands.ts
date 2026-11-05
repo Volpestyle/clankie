@@ -242,6 +242,32 @@ export function buildConsoleCommands(context: ConsoleCommandContext): FaceShellC
       },
     });
 
+  commands.push({
+    name: "credentials",
+    aliases: ["sign-in"],
+    description: "Answer a worker's sign-in request in a masked prompt; Clankie's browser fills it",
+    takesArgument: false,
+    async run(_argument, shell) {
+      try {
+        const { credentialsPrompt } = await import("./credentials-prompt.ts");
+        shell.insertCommandResult(
+          "/credentials",
+          await credentialsPrompt(
+            shell.setupFlow,
+            context.ownerFetcher === undefined ? {} : { ownerFetcher: context.ownerFetcher },
+          ),
+          "success",
+        );
+      } catch (error) {
+        shell.insertCommandResult(
+          "/credentials",
+          error instanceof Error ? error.message : String(error),
+          "error",
+        );
+      }
+    },
+  });
+
   if (conversations?.feed)
     commands.push({
       name: "feed",

@@ -292,6 +292,14 @@ const HEADLESS_COMMAND_HELP = [
     ],
   },
   {
+    nouns: ["credentials"],
+    lines: [
+      "  credentials [list] [--all]   Workers' open sign-in requests for Clankie's private browser",
+      "  credentials answer REQUEST_ID   Type the sign-in with echo off (or pipe one value per line); the broker fills it",
+      "  credentials decline REQUEST_ID   Refuse a sign-in request; the worker's tab comes back untouched",
+    ],
+  },
+  {
     nouns: ["huddle"],
     lines: [
       "  huddle [list | ID] [--json]   Recent huddles, or one huddle's board: seats, blockers, landing order",

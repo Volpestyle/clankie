@@ -129,8 +129,42 @@ export interface BrowserHost {
   ): Promise<CallBrowserToolResult>;
   close(): Promise<void>;
 }
+/** The signed-in browser as the credential broker sees it (#245, ADR 0342). */
+export interface CredentialBrowser {
+  /**
+   * Seal a conversation's current tab for one credential request when its top
+   * document is exactly `origin`. From then until the seal settles, no browser
+   * tool reaches that tab, and no conversation runs browser JavaScript.
+   */
+  sealForCredential(conversationId: string, origin: string): Promise<CredentialSeal | { refused: string }>;
+}
+export interface CredentialSeal {
+  /**
+   * Load the bound page fresh, type each value into its field, submit the
+   * field's form and retire the tab. The conversation gets a new tab in the same
+   * session at the landing page, or a blank one when anything failed. The
+   * outcome carries a reason code, never page or value text.
+   */
+  fill(
+    fields: readonly CredentialFillField[],
+    values: Readonly<Record<string, string>>,
+  ): Promise<{ outcome: "filled" } | { outcome: "failed"; reason: string }>;
+  /** Hand the same tab back; only for a seal no value ever reached. */
+  release(): Promise<void>;
+}
+interface CredentialFillField {
+  readonly kind: "username" | "password" | "code";
+  readonly selector: string;
+}
 
-export async function createBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
+interface BrowserWorkspace extends BrowserHost {
+  /** The tab this workspace's tools act on, once a session has attached. */
+  currentTarget(): string | undefined;
+}
+
+export async function createBrowserHost(
+  options: BrowserHostOptions,
+): Promise<BrowserHost & CredentialBrowser> {
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
   const env = options.environment ?? process.env;
@@ -138,15 +172,21 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     string,
     {
       tail: Promise<void>;
-      workspace?: BrowserHost | undefined;
+      workspace?: BrowserWorkspace | undefined;
       targets: Set<string>;
       contextId?: string | undefined;
       isolated: boolean;
       /** A turn without machine access: the public-web Chrome, never the owner's profile. */
       restricted: boolean;
       idle?: NodeJS.Timeout;
+      /** Set while a credential request holds this lane's tab; every tool refuses. */
+      sealed?: { targetId: string } | undefined;
+      /** The tab a recreated workspace resumes on instead of opening a blank one. */
+      resumeTarget?: string | undefined;
     }
   >();
+  /** Open credential seals; while any is open, no conversation runs browser JavaScript. */
+  let seals = 0;
   let owner: BrowserUse | undefined;
   let connection: CDP | undefined;
   let endpoint: string | undefined;
@@ -212,6 +252,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       lane.workspace = undefined;
       lane.targets.clear();
       lane.contextId = undefined;
+      lane.resumeTarget = undefined;
     }
   }
   async function ensureChrome() {
@@ -320,7 +361,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     }
     lane.targets.clear();
     lane.contextId = undefined;
-    const browsing = [...lanes.values()].filter((other) => other.workspace);
+    lane.resumeTarget = undefined;
+    // A sealed lane has no workspace while it waits, but its tab must outlive other lanes' cleanup.
+    const browsing = [...lanes.values()].filter((other) => other.workspace || other.sealed);
     if (!browsing.some((other) => !other.restricted)) await stopChrome();
     if (!browsing.some((other) => other.restricted)) await stopPublicChrome();
   }
@@ -331,6 +374,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   ) {
     clearTimeout(lane.idle);
     lane.idle = setTimeout(() => {
+      // The credential broker settles a sealed lane; idle cleanup waits for it.
+      if (lane.sealed) return armLaneIdle(id, lane, delay);
       let failed = false;
       const cleanup = lane.tail
         .then(() => locked(() => retire(id, lane)))
@@ -357,6 +402,155 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     "catalog",
     new Set(),
   );
+  const modeChange = (request: CallBrowserToolRequest) =>
+    request.tool === "browser_use_open" &&
+    typeof request.arguments.headed === "boolean" &&
+    request.arguments.headed !== headed;
+  /** Settle a seal: the lane resumes on `resume`, and the sealed tab is closed unless it is that tab. */
+  async function unseal(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    sealedTarget: string,
+    resume: string | undefined,
+  ) {
+    if (lane.sealed?.targetId !== sealedTarget) return;
+    lane.sealed = undefined;
+    seals -= 1;
+    if (resume !== sealedTarget) lane.targets.delete(sealedTarget);
+    if (resume !== undefined) lane.targets.add(resume);
+    lane.resumeTarget = resume;
+  }
+  /** Close the tab that held a credential and open a fresh one in the same session. */
+  async function retireSealedTab(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    targetId: string,
+    landing: string,
+  ): Promise<string | undefined> {
+    const cdp = connection;
+    if (!cdp) return undefined;
+    // allow-swallowed-rejection -- a tab already gone is retired; the fresh tab is still made.
+    await cdp.send("Target.closeTarget", { targetId }).catch(() => undefined);
+    const remaining = await cdp.send("Target.getTargets");
+    if (remaining.targetInfos.some((target) => target.targetId === targetId))
+      throw new Error("credential tab did not close");
+    const contexts = lane.contextId ? (await cdp.send("Target.getBrowserContexts")).browserContextIds : [];
+    const { targetId: fresh } = await cdp.send("Target.createTarget", {
+      url: landing,
+      ...(lane.contextId && contexts.includes(lane.contextId) ? { browserContextId: lane.contextId } : {}),
+    });
+    return fresh;
+  }
+  async function sealForCredential(
+    conversationId: string,
+    origin: string,
+  ): Promise<CredentialSeal | { refused: string }> {
+    if (closing) return { refused: "browser_closed" };
+    const lane = lanes.get(conversationId);
+    if (!lane || lane.restricted) return { refused: "no_signed_in_browser" };
+    if (lane.sealed) return { refused: "already_sealed" };
+    // Refuse new calls on this lane and machine JavaScript everywhere from now on.
+    lane.sealed = { targetId: "" };
+    seals += 1;
+    const abandon = () => {
+      lane.sealed = undefined;
+      seals -= 1;
+    };
+    try {
+      await lane.tail;
+      const sealed = await locked(async () => {
+        const targetId = lane.workspace?.currentTarget() ?? lane.resumeTarget;
+        if (!connection || !targetId) return { refused: "no_open_tab" };
+        const info = await connection.send("Target.getTargetInfo", { targetId }).catch(() => undefined);
+        if (!info || exactOrigin(info.targetInfo.url) !== origin) return { refused: "wrong_origin" };
+        lane.sealed = { targetId };
+        // End every signed-in workspace: its Node REPL (with any background code it
+        // started), recording and CDP sessions. Each resumes on its own tab later.
+        for (const other of lanes.values()) {
+          if (other.restricted || !other.workspace) continue;
+          const workspace = other.workspace;
+          other.workspace = undefined;
+          if (other !== lane) other.resumeTarget = workspace.currentTarget();
+          // close() drains the workspace's accepted call before ending its session.
+          await workspace.close();
+        }
+        return { targetId, url: info.targetInfo.url };
+      });
+      if (sealed.refused !== undefined) {
+        abandon();
+        return { refused: sealed.refused };
+      }
+      return credentialSeal(lane, sealed.targetId, sealed.url, origin);
+    } catch (error) {
+      if (lane.sealed) abandon();
+      options.logger.warn(
+        { event: "browser.credential.seal_failed", detail: errorText(error) },
+        "credential seal failed",
+      );
+      return { refused: "browser_unavailable" };
+    }
+  }
+  function credentialSeal(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    targetId: string,
+    boundUrl: string,
+    origin: string,
+  ): CredentialSeal {
+    let settled = false;
+    const settle = () => {
+      if (settled) throw new Error("credential seal already settled");
+      settled = true;
+    };
+    return {
+      async release() {
+        settle();
+        await locked(async () => unseal(lane, targetId, targetId));
+      },
+      async fill(fields, values) {
+        settle();
+        return locked(async () => {
+          let reason = "browser_unavailable";
+          let landing = "about:blank";
+          try {
+            const cdp = connection;
+            if (!cdp) throw new CredentialFillError("browser_unavailable");
+            const filled = await fillCredentialForm(cdp, targetId, boundUrl, origin, fields, values);
+            if ("reason" in filled) reason = filled.reason;
+            else {
+              // A landing address that echoes a value (a GET form slipping past) is never handed back.
+              const echoes = Object.values(values).some(
+                (value) =>
+                  filled.landing.includes(value) || filled.landing.includes(encodeURIComponent(value)),
+              );
+              landing = /^https?:/u.test(filled.landing) && !echoes ? filled.landing : "about:blank";
+              reason = "";
+            }
+          } catch (error) {
+            reason = error instanceof CredentialFillError ? error.reason : "browser_unavailable";
+            options.logger.warn(
+              {
+                event: "browser.credential.fill_failed",
+                reason,
+                // CDP errors name methods, never the params that carried a value.
+                detail: error instanceof CredentialFillError ? undefined : errorText(error),
+              },
+              "credential fill failed",
+            );
+          }
+          let fresh: string | undefined;
+          try {
+            fresh = await retireSealedTab(lane, targetId, reason === "" ? landing : "about:blank");
+          } catch (error) {
+            reason ||= "retire_failed";
+            options.logger.warn(
+              { event: "browser.credential.retire_failed", detail: errorText(error) },
+              "credential tab retirement failed",
+            );
+          }
+          await unseal(lane, targetId, fresh);
+          return reason === "" ? { outcome: "filled" as const } : { outcome: "failed" as const, reason };
+        });
+      },
+    };
+  }
   async function publicWebRefusal(
     tool: string,
     args: Record<string, unknown>,
@@ -374,6 +568,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       : `A turn without machine access browses only public http(s) addresses: ${refusal}.`;
   }
   return {
+    sealForCredential,
     catalog: (signal) =>
       closing
         ? Promise.resolve({ schemaVersion: 1, available: false, tools: [] })
@@ -407,6 +602,20 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           };
         const tool = tools[request.tool as ToolName];
         if (!tool) return { outcome: "refused", tool: request.tool, reason: "unknown_tool" };
+        // A tab holding a credential entry is the broker's alone, and machine JavaScript
+        // can reach every tab through root CDP, so none runs anywhere until it settles.
+        if (
+          current.sealed ||
+          (seals > 0 && !restricted && (request.tool === "browser_use_javascript" || modeChange(request)))
+        )
+          return {
+            outcome: "refused",
+            tool: request.tool,
+            reason: "browser_unavailable",
+            detail: current.sealed
+              ? "This tab is waiting for the owner to answer a sign-in. Check the credential request; the browser comes back when it settles."
+              : "A sign-in is in progress in the browser; browser JavaScript and mode changes wait until it settles.",
+          };
         if ("requiresShell" in tool && authority?.shell !== true)
           return {
             outcome: "refused",
@@ -477,10 +686,19 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
                 current.contextId = (
                   await cdp.send("Target.createBrowserContext", { disposeOnDetach: true })
                 ).browserContextId;
-              const { targetId } = await cdp.send("Target.createTarget", {
-                url: "about:blank",
-                ...(current.contextId ? { browserContextId: current.contextId } : {}),
-              });
+              const resume = current.resumeTarget;
+              current.resumeTarget = undefined;
+              const live = resume
+                ? (await cdp.send("Target.getTargets")).targetInfos.some(
+                    (target) => target.targetId === resume,
+                  )
+                : false;
+              const { targetId } = live
+                ? { targetId: resume! }
+                : await cdp.send("Target.createTarget", {
+                    url: "about:blank",
+                    ...(current.contextId ? { browserContextId: current.contextId } : {}),
+                  });
               current.targets.add(targetId);
               current.workspace = await createBrowserWorkspace(
                 options,
@@ -538,7 +756,7 @@ async function createBrowserWorkspace(
   contextId?: string,
   /** The public-web Chrome's endpoint; set only for turns without machine access. */
   publicEndpoint?: string,
-): Promise<BrowserHost> {
+): Promise<BrowserWorkspace> {
   const restricted = publicEndpoint !== undefined;
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
@@ -871,6 +1089,7 @@ async function createBrowserWorkspace(
     return { outcome: "ok", tool: name, content, isError, artifacts: await images(result.images, name) };
   }
   return {
+    currentTarget: () => page?.targetId,
     async catalog() {
       return { schemaVersion: 1, available: !closing, tools: closing ? [] : catalog };
     },
@@ -898,4 +1117,123 @@ async function createBrowserWorkspace(
 }
 function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
+}
+
+/** `scheme://host[:port]` for an http(s) address, or undefined. */
+function exactOrigin(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+class CredentialFillError extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+const FILL_TIMEOUT_MS = 15_000;
+/** Checks the bound form inside the broker's isolated world; returns a reason code or "ok". */
+const CHECK_FORM = `(spec) => {
+  if (location.origin !== spec.origin) return "wrong_origin";
+  if (window.top !== window) return "framed";
+  const elements = spec.fields.map((field) => {
+    try { return document.querySelector(field.selector); } catch { return null; }
+  });
+  const types = { username: ["text", "email"], password: ["password"], code: ["text", "tel", "number", "password"] };
+  for (let i = 0; i < elements.length; i++) {
+    const element = elements[i];
+    if (!(element instanceof HTMLInputElement)) return "field_not_found";
+    if (!types[spec.fields[i].kind].includes(element.type)) return "field_shape_mismatch";
+    if (element.disabled || element.readOnly) return "field_not_editable";
+  }
+  const form = elements[0].form;
+  if (!form || elements.some((element) => element.form !== form)) return "form_mismatch";
+  if (form.method.toLowerCase() !== "post") return "form_not_post";
+  const target = form.getAttribute("target");
+  if (target && target !== "_self") return "form_target";
+  let action;
+  try { action = new URL(form.action, document.baseURI); } catch { return "form_action_origin"; }
+  if (action.origin !== spec.origin) return "form_action_origin";
+  return "ok";
+}`;
+
+/**
+ * The broker's own fill: a fresh load of the bound page (dropping anything an
+ * agent left in the old document), exact-origin top document and form, typed
+ * input, and the form's own submit, all through a CDP session no agent holds.
+ */
+async function fillCredentialForm(
+  cdp: CDP,
+  targetId: string,
+  boundUrl: string,
+  origin: string,
+  fields: readonly CredentialFillField[],
+  values: Readonly<Record<string, string>>,
+): Promise<{ landing: string } | { reason: string }> {
+  const live = await cdp.send("Target.getTargets");
+  if (!live.targetInfos.some((target) => target.targetId === targetId)) return { reason: "tab_closed" };
+  if (exactOrigin(boundUrl) !== origin) return { reason: "wrong_origin" };
+  for (const field of fields) if (!values[field.kind]) return { reason: "missing_value" };
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  try {
+    await cdp.send("Page.enable", undefined, sessionId);
+    // Service workers an agent could have registered on this origin would see the submit.
+    await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "service_workers" }, sessionId);
+    const loaded = cdp.waitFor("Page.loadEventFired", { sessionId, timeoutMs: FILL_TIMEOUT_MS });
+    const navigated = await cdp.send("Page.navigate", { url: boundUrl }, sessionId);
+    if (navigated.errorText) return { reason: "page_unavailable" };
+    await loaded;
+    // The top document's origin is checked inside the page, before typing and before submitting.
+    const { frameTree } = await cdp.send("Page.getFrameTree", undefined, sessionId);
+    const { executionContextId } = await cdp.send(
+      "Page.createIsolatedWorld",
+      { frameId: frameTree.frame.id, worldName: "clankie-credential-broker" },
+      sessionId,
+    );
+    const run = async (expression: string) => {
+      const result = await cdp.send(
+        "Runtime.evaluate",
+        { expression, contextId: executionContextId, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
+      if (result.exceptionDetails) throw new CredentialFillError("page_script_failed");
+      return result.result.value as unknown;
+    };
+    const spec = JSON.stringify({ origin, fields });
+    const checked = await run(`(${CHECK_FORM})(${spec})`);
+    if (checked !== "ok") return { reason: typeof checked === "string" ? checked : "form_check_failed" };
+    for (const field of fields) {
+      const selector = JSON.stringify(field.selector);
+      const focused = await run(
+        `(() => { const e = document.querySelector(${selector}); e.focus(); e.select(); return document.activeElement === e && location.origin === ${JSON.stringify(origin)}; })()`,
+      );
+      if (focused !== true) return { reason: "focus_lost" };
+      // Real input, so the page's own handlers see typing; the value goes only to Chrome.
+      await cdp.send("Input.insertText", { text: values[field.kind]! }, sessionId);
+    }
+    // Re-check the whole form after typing, then submit it from the broker's world.
+    const rechecked = await run(`(${CHECK_FORM})(${spec})`);
+    if (rechecked !== "ok")
+      return { reason: typeof rechecked === "string" ? rechecked : "form_check_failed" };
+    const settled = cdp.waitFor("Page.loadEventFired", { sessionId, timeoutMs: FILL_TIMEOUT_MS }).then(
+      () => true,
+      () => false,
+    );
+    const submitted = await run(
+      `(() => { const f = document.querySelector(${JSON.stringify(fields[0]!.selector)}).form; f.requestSubmit(); return true; })()`,
+    );
+    if (submitted !== true) return { reason: "submit_failed" };
+    await settled;
+    const info = await cdp.send("Target.getTargetInfo", { targetId });
+    return { landing: info.targetInfo.url };
+  } finally {
+    // allow-swallowed-rejection -- the tab is retired next whether or not the session detaches.
+    await cdp.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
+  }
 }

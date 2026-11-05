@@ -333,6 +333,8 @@ export interface ClankieAppDependencies {
   /** Live still and journal story of the asked playthrough (ADR 0099). */
   playSight?: { still(): PlayStillRead; story(): PlayStoryRead };
   browserTools?: BrowserToolPort;
+  /** Sign-in requests the credential broker fills into the private browser (#245). */
+  credentialRequests?: import("../credential-requests.ts").CredentialRequests;
   streamWatch?: import("../ports/world.ts").StreamWatchPort;
   resolveBodyVoiceTarget?: (input: {
     guildId: string;

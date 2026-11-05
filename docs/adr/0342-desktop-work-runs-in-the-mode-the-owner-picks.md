@@ -230,3 +230,32 @@ named actor report from the acting terminal; unavailable status stays unknown.
 Neither a report nor a choice raises a machine ceiling. This does not claim the
 proposed hire routing, guest manager or credential vault is built. Those remain
 separate work; no VM is created or started by saving a choice.
+
+## Implementation boundary (#245, first slice)
+
+Sign-in requests for Clankie's own private browser are built: the
+`clankie_request_credential` worker tool (a hire admitted on this Mac names the
+browser conversation, the exact origin and the field shape), `/credentials` in
+the TUI and `clankie credentials answer` in a plain shell (masked, echo off,
+over the local owner API), and the broker fill
+([`credential-requests.ts`](../../apps/clankie/src/credential-requests.ts),
+[`browser-host.ts`](../../apps/clankie/src/browser-host.ts)). The guide is
+[sign-in requests](../credentials.md#sign-in-requests).
+
+The post-fill handoff is broker-controlled submit plus retirement (lead
+decision): while a request is open its tab is sealed (no browser tool reaches
+it, and no conversation runs browser JavaScript, whose root CDP reaches every
+tab). On an answer, the broker loads the bound page fresh, checks the top
+document, every field and the form's action are the exact origin and the form
+posts, types the values, submits the form itself and closes the tab. The worker
+gets a new tab in the same session at the landing page, or a blank one on any
+failure; access to the tab that held the secret never returns. A decline,
+withdrawal or expiry returns the untouched tab.
+
+Not built in this slice: the app, pet and Discord cards, saving a login
+("save for this site" and the `saved` result), `clankie credentials
+list|revoke|log` over saved logins, the guest fill and password managers. Two
+gaps are left for review: any process of the owner's user can still reach the
+private Chrome's DevTools port directly (a pipe transport would close it), and
+Chrome's own password manager in a headed window may offer to save what was
+typed.

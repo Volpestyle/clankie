@@ -4,6 +4,7 @@ import type { PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway
 import type { SettingsStore } from "@clankie/settings";
 import type { BrowserToolPort, ClankieAppDependencies } from "./app/types.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
+import type { CredentialBrowser } from "./browser-host.ts";
 import type { MachineJoins } from "./machine-joins.ts";
 import type { DeliveredFileStore } from "./delivered-files.ts";
 import type { AppearancePort } from "./ports/appearance.ts";
@@ -74,6 +75,8 @@ export interface CoreProjection {
   readonly diagrams?: DiagramPort;
   /** The browser extension's tools, from its host's catalog and calls. */
   readonly browser?: BrowserToolPort;
+  /** The same browser as the credential broker fills it (#245). */
+  readonly credentialBrowser?: CredentialBrowser;
   /** Image and video generation and skin drafts, while the media extension runs. */
   readonly media?: MediaProjection;
   /** His look, from the persona extension's images. */
@@ -133,6 +136,11 @@ export function routesOf(extensions: CoreExtensions): readonly ExtensionRoutes[]
 /** The browser tools a running extension adds, if any. */
 export function browserOf(extensions: CoreExtensions): BrowserToolPort | undefined {
   return extensions.projections().find((projection) => projection.browser !== undefined)?.browser;
+}
+
+export function credentialBrowserOf(extensions: CoreExtensions): CredentialBrowser | undefined {
+  return extensions.projections().find((projection) => projection.credentialBrowser !== undefined)
+    ?.credentialBrowser;
 }
 
 /** The first projection that carries a doorway, if any extension added one. */
