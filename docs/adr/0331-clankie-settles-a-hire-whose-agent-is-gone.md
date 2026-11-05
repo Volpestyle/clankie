@@ -65,7 +65,7 @@ place held for the owner or its lead to judge.
 
 The native receipt can settle while its project allocation still fences the
 folder. Recovery must therefore run before both the captain's checkout decision
-and the store's project reservation. Ordinary remote project starts persist a
+and the store's project reservation. Remote project starts, including fresh intents, persist a
 causal native receipt UUID and key before dispatch. After the host's immutable
 not-launched seal, the same project's allocation can release automatically
 through the existing complete double-census path. It must be inactive,
@@ -73,8 +73,17 @@ unobserved, uniquely linked and unchanged at the final locked write; current
 conversation authority is checked across asynchronous evidence collection.
 
 No timeout or current absence alone proves a dead launch. Legacy allocations
-without that link, fresh intents, live or potentially starting workers and
+without that link, live or potentially starting workers and
 changed evidence remain held for explicit recovery. The original launch history
 is retained and its key remains fenced. This does not retry a hire or close a
 pane. Loopback joined-machine coverage proves this service boundary; Windows/WSL
 acceptance on real PCs remains separate.
+
+A fresh intent that fails at the same pre-command boundary uses its own native
+receipt key, including the intent UUID, and its own authenticated no-launch seal.
+The settled predecessor never supplies release evidence for the new attempt.
+The same double census and synchronous authority check under the allocation lock
+apply. Old fresh allocations without a recorded link stay held; recovery does
+not backfill provenance from current absence or replay any brief. Retrying the
+same fresh intent stays held; automatic recovery runs for a later request
+without that intent, before new work is considered.

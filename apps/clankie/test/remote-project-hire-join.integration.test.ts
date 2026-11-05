@@ -437,6 +437,121 @@ nativeIt(
 );
 
 nativeIt(
+  "a fresh remote project attempt whose create never answered settles and releases its own allocation without replay",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "fresh-project-place");
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      const next = f.store.nextFreshIntent("pc", "claude", directory);
+      expect(next).toBeDefined();
+      const fresh = await f.hire(directory, next, "Inspect a distinct fresh fixture issue.");
+      expect(fresh).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      const [, original] = f.receipt();
+      expect(original).toMatchObject({
+        freshHire: { id: next!.id },
+        remoteLaunchCommitted: true,
+        remoteCommandUnsent: true,
+      });
+      const allocation = (await f.allocations()).find((a) => !a.gone)!;
+      expect(allocation).toMatchObject({ started: true, gone: false });
+      f.restart();
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toMatchObject({
+        journal: "launch-committed-command-unsent",
+      });
+      expect((await f.allocations()).find((a) => a.id === allocation.id)).toMatchObject({ gone: true });
+      expect(f.creates).toHaveLength(2);
+      expect(f.effects).toEqual([]);
+      const following = f.store.nextFreshIntent("pc", "claude", directory);
+      expect(following).toMatchObject({ afterReceiptId: original.messageId });
+      expect(following!.id).not.toBe(next!.id);
+      const third = await f.hire(directory, following, "Inspect a third distinct fixture issue.");
+      expect(third).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(f.creates).toHaveLength(3);
+      expect(f.receipt()[1].messageId).not.toBe(original.messageId);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt.each([
+  "late-pane",
+  "revoked-final-census",
+  "missing-link",
+  "wrong-intent",
+  "wrong-predecessor",
+  "wrong-launch",
+  "duplicate-link",
+  "possible-command",
+] as const)(
+  "a failed fresh attempt with %s keeps its allocation and never replays",
+  async (mode) => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "held-fresh-place");
+      await f.hire(directory, undefined, "Inspect the initial held fixture issue.");
+      await f.hire(directory, undefined, "Inspect the initial held fixture issue.");
+      const next = f.store.nextFreshIntent("pc", "claude", directory);
+      expect(next).toBeDefined();
+      await f.hire(directory, next, "Inspect a distinct held fresh fixture issue.");
+      const [key, original] = f.receipt();
+      expect(original.freshHire?.id).toBe(next!.id);
+      if (mode === "late-pane")
+        await f.herdrCli(["workspace", "create", "--cwd", directory, "--label", "late", "--no-focus"]);
+      if (
+        mode === "missing-link" ||
+        mode === "wrong-intent" ||
+        mode === "wrong-predecessor" ||
+        mode === "wrong-launch" ||
+        mode === "duplicate-link"
+      ) {
+        const state = JSON.parse(await readFile(f.allocationPath, "utf8"));
+        const allocation = state.allocations.find((a: { gone: boolean }) => !a.gone);
+        if (mode === "missing-link") delete allocation.nativeReceipt;
+        if (mode === "wrong-intent") allocation.request.freshIntent.id = randomUUID();
+        if (mode === "wrong-predecessor") allocation.request.freshIntent.afterReceiptId = randomUUID();
+        if (mode === "wrong-launch") allocation.request.title = "Another recorded launch";
+        if (mode === "duplicate-link")
+          state.allocations.push({ ...structuredClone(allocation), id: randomUUID() });
+        await writeFile(f.allocationPath, `${JSON.stringify(state)}\n`);
+      }
+      if (mode === "possible-command") {
+        const state = JSON.parse(await readFile(f.nativePath, "utf8"));
+        delete state[key].remoteCommandUnsent;
+        await writeFile(f.nativePath, JSON.stringify(state));
+      }
+      f.restart();
+      let censuses = 0;
+      if (mode === "revoked-final-census")
+        f.controls.afterInventory = async () => {
+          if (!new DeliveryFence(f.nativePath).settlement(original.messageId)) return;
+          if (++censuses === 2) f.controls.authorized = false;
+        };
+      const ledger = await readFile(f.allocationPath, "utf8");
+      await f.hire(directory, undefined, "Inspect the initial held fixture issue.");
+      if (mode === "revoked-final-census") {
+        expect(censuses).toBe(2);
+        expect(f.controls.authorized).toBe(false);
+      }
+      if (mode === "late-pane" || mode === "possible-command")
+        expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toBeUndefined();
+      expect(await readFile(f.allocationPath, "utf8")).toBe(ledger);
+      expect((await f.allocations()).filter((a) => !a.gone).length).toBeGreaterThan(0);
+      expect(f.creates).toHaveLength(2);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
   "a create that landed late keeps the original receipt and allocation held",
   async () => {
     const f = await fixture(PC_SILENT);

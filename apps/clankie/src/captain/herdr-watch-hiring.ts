@@ -942,8 +942,7 @@ export function createHerdrWatchHiring(ctx: Context) {
         allocation &&
         input.fleet !== undefined &&
         !thisMachineReceiptFleet(input.fleet) &&
-        resume === undefined &&
-        !fresh
+        resume === undefined
       )
         ctx.projectHires.bindNativeReceipt(allocation, { id: receipt.messageId, key: receiptKey });
     } catch (error) {
