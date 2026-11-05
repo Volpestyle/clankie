@@ -10,7 +10,7 @@ import {
   CLAUDE_WORKER_PLUGIN_ID,
 } from "@clankie/protocol";
 import { SEAT_PLUGIN_ID } from "./seat.ts";
-import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
+import { JoinedWorkerLaunchSchema, JoinedWorkerProofSchema } from "@clankie/protocol/machine-join";
 import { MAXIMUM_TRUST_CODEX_CONFIG } from "@clankie/protocol/owner-settings";
 import {
   claudeTrackerDenyRules,
@@ -78,7 +78,17 @@ export function joinedWorkerPorts(
         .stdout);
   const layout = createHireLayout((args) => run(args));
   return async (request, directory, signal) => {
-    const launch = JoinedWorkerLaunchSchema.parse(JSON.parse(request));
+    const raw: unknown = JSON.parse(request);
+    const proof = JoinedWorkerProofSchema.safeParse(raw);
+    if (proof.success) {
+      signal.throwIfAborted();
+      const observed = Native.parse(JSON.parse(await run(["agent", "get", proof.data.paneId], signal)));
+      const session = observed.result.agent.agent_session;
+      if (session.agent !== proof.data.harness || session.value !== proof.data.nativeSessionId)
+        throw Error("joined_worker_native_session_mismatch");
+      return JSON.stringify(proof.data);
+    }
+    const launch = JoinedWorkerLaunchSchema.parse(raw);
     const harness = launch.harness ?? "claude";
     const wire = joinedSeatTransport(credential, options.fetchImpl ?? fetch);
     const check = async () => {

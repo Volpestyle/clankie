@@ -57,6 +57,10 @@ paths:
         expired app destinations are unavailable. Granting report
         access never adopts the worker or grants control. Grants are bound to
         the current native occupant and survive service replacement for it.
+        Select exactly one paneId (local/linked native hire) or joinedHireId
+        (joined-machine hire). Joined hires require the active approved adapter's
+        fresh native proof, including after restart. Grants confer report access
+        only and never enter the native control ownership journal.
       requestBody:
         required: true
         content:
@@ -64,9 +68,20 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [paneId, change]
+              required: [change]
+              oneOf:
+                - required: [paneId]
+                  not: { required: [joinedHireId] }
+                - required: [joinedHireId]
+                  not: { required: [paneId] }
               properties:
                 paneId: { type: string, minLength: 1, maxLength: 512 }
+                joinedHireId:
+                  {
+                    type: string,
+                    format: uuid,
+                    description: Host-issued joinedHireId returned by a joined worker hire,
+                  }
                 change:
                   oneOf:
                     - type: object

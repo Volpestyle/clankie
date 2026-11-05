@@ -765,10 +765,15 @@ call-time revocation checks still apply.
   revision-guarded conversation archive while retaining its machine/folder scope.
   `joined-workers.ts` gives each lead hire a separate machine/chat/session grant;
   the bounded local adapter starts Claude or Codex in a new Herdr pane and admits only its
-  observed session. Its MCP bank exposes report/status tools; reports enter the
-  existing durable inbound receipt and lead inbox path. Replies use a worker
-  outbox over join, not terminal typing. Every request rechecks current consent;
-  reset and home restart revoke grants without terminating panes. Legacy SSH
+  observed session. Its MCP bank exposes report destination listing, report and
+  status tools. A separate host-owned joined-hire journal binds owner-granted
+  destinations to that native identity; report grants never enter the native
+  control/adoption journal. Explicit targets and text share one durable receipt
+  through lost replies and restart. The approved adapter supplies fresh read-only
+  native proof before delivery and restart recovery. Replies use a worker outbox
+  over join, not terminal typing. Every request rechecks current consent; reset
+  revokes grants without terminating panes, and restart cannot revive a grant
+  without the same admitted native session. Legacy SSH
   chat migration and Windows installer/production-gateway proof remain follow-ups.
   A joined screen is selected explicitly through `/v1/computer`'s `machineId`,
   so a body without a local desktop can borrow it. Encrypted join traffic

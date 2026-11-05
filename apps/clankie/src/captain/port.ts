@@ -627,6 +627,9 @@ export interface CaptainPort {
       conversationId: string;
       text: string;
       deliveryId: string;
+      target?: string;
+      reportLeads?: () => readonly import("./hire-owners.ts").HireReportLead[];
+      reportDeviceAvailable?: (deviceId: string) => boolean;
       urgent?: boolean;
       kind?: import("@clankie/protocol").WorkerReportKind;
     },
@@ -638,6 +641,11 @@ export interface CaptainPort {
     binding: string,
     deliveryId: string,
   ): Promise<FleetSeatMessageStatus | undefined>;
+  joinedWorkerReportDestination(conversationId: string): boolean;
+  joinedWorkerReportLeads(
+    leads: readonly import("./hire-owners.ts").HireReportLead[],
+    reportDeviceAvailable?: (deviceId: string) => boolean,
+  ): Promise<import("@clankie/protocol").WorkerReportLead[]>;
   manageWorkerReportLeads(
     input: import("@clankie/protocol").ManageWorkerReportLeads,
     authorize: () => Promise<boolean>,
@@ -853,6 +861,8 @@ export function createStubCaptain(overrides: Partial<CaptainPort> = {}): Captain
       binding: delivery.binding,
       fingerprint,
     }),
+    joinedWorkerReportDestination: () => false,
+    joinedWorkerReportLeads: async () => [],
     manageWorkerReportLeads: async () => [],
     workerReportLeads: async () => [],
     receiveFleetSeatMessage: async () => false,

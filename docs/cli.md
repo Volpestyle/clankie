@@ -416,7 +416,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   maximum-trust-mode [status|on|off]
                            Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you (JSON)
   fleet leads [--json]  Read active Clankie and connected app leads
-  fleet report-leads PANE [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]
+  fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
   fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
                            Owner-only: let one other local account (a CI runner) queue for heavy slots
@@ -5416,7 +5416,7 @@ with 200.
 Specs live in `~/.clankie/views/views.json`. Schemas are in
 `packages/protocol/src/views.ts`. Hosted share links are not part of this repository.
 
-### `fleet report-leads PANE [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]`
+### `fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]`
 
 Read or manage the report destinations for an exact native worker hire. This
 owner-only command uses `POST /v1/fleet/report-leads`; it requires this machine's owner
@@ -5432,6 +5432,18 @@ are bound to one receipt; an uncertain original can only be reconciled, never
 retargeted. Grants survive a service restart for the same native occupant and
 are not inherited by a replacement. Reports stay attributed worker output;
 receiving one does not adopt the worker or make anyone a lead.
+
+For a joined-machine worker, use `clankie fleet report-leads --joined-hire ID`
+with the `joinedHireId` returned by its hire. Joined workers have the same
+`list_report_leads` and explicit `target` selection, using a separate report-only
+journal rather than native fleet control ownership. The active joined adapter
+must support read-only native proof; older adapters refuse these reports until
+updated. The current machine registration, approved folder, workers ceiling,
+original lead lifecycle and exact native pane/session remain required. Watch
+refuses delivery. A home restart restores the same report identity only after a
+fresh native proof; an expired, reset or replaced hire cannot inherit its grants.
+The per-hire token is stored only as a hash on the home machine. An empty grant
+list remains empty across restart; default reports still address the hiring chat.
 
 ### `fleet room [--older CURSOR] [--limit N] [--follow]`
 
@@ -6394,7 +6406,8 @@ brief is staged in a private file under that machine's Clankie state and named b
 Claude's one-line startup prompt. The adapter admits the exact native session
 Claude reports, without waiting for its first turn to finish, so a report from
 inside that turn is accepted. The worker gets
-only `message_clankie` (text, a caller-chosen UUID `deliveryId`, optional `urgent` and
+only `list_report_leads`, `message_clankie` (text, a caller-chosen UUID `deliveryId`,
+optional opaque `target`, optional `urgent` and
 optional `kind`: `done`, `blocked` or `update`) and
 `message_clankie_status` (`deliveryId`). Reports are durable in its lead chat;
 the lead reads and acknowledges them through `worker_reports` and
@@ -6402,7 +6415,8 @@ the lead reads and acknowledges them through `worker_reports` and
 `message` reaches that worker's native channel. There is no SSH fleet link,
 owner bearer, connected-account grant or general shell in this transport.
 Uncertain launches and reports must be reconciled, never repeated. Grant expiry,
-reset, access downgrade, leave and home restart refuse later traffic; existing
+reset, access downgrade and leave refuse later traffic; a home restart requires
+fresh native proof for the same worker identity. Existing
 native panes remain open. Keep `join` / `join resume` running for worker launches.
 
 Clankie himself hires there too: at `workers` or above, his own `hire_agent` with

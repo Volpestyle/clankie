@@ -186,7 +186,15 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
           )
             return context.json({ error: "report_lead_refused" }, 403);
           try {
-            const leads = await ctx.dependencies.captain.manageWorkerReportLeads(parsed.data, authorize);
+            const guard = async () =>
+              (await authorize()) &&
+              (parsed.data.change.op !== "grant" ||
+                parsed.data.change.deviceId === undefined ||
+                workerReportDevice(ctx.devices.get(parsed.data.change.deviceId), ctx.clock()));
+            const leads =
+              parsed.data.joinedHireId !== undefined
+                ? await ctx.dependencies.machineJoins?.manageWorkerReportLeads(parsed.data, guard)
+                : await ctx.dependencies.captain.manageWorkerReportLeads(parsed.data, guard);
             return context.json(WorkerReportLeadsSchema.parse({ schemaVersion: 1, leads }));
           } catch {
             return context.json({ error: "report_lead_refused" }, 403);

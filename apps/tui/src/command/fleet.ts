@@ -56,7 +56,7 @@ const FLEET_USAGE = [
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
   "       clankie fleet leads [--json]",
-  "       clankie fleet report-leads PANE [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
+  "       clankie fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
   "       clankie fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]",
   "       clankie fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]",
   "       clankie fleet processes [retire]",

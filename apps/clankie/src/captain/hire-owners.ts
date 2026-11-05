@@ -27,7 +27,7 @@ const HireStarterSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export type HireStarter = z.infer<typeof HireStarterSchema>;
-const ReportLeadSchema = z
+export const ReportLeadSchema = z
   .object({
     id: z.string().min(1).max(512),
     owner: ConversationOwnerSchema,
