@@ -426,7 +426,7 @@ export type MinecraftSettings = z.infer<typeof MinecraftSettingsSchema>;
  * persona can.
  *
  * Beside the notes, two small enums state the owner's budget, because budget is
- * one of the few things that is not conditional: the swarm size to aim for
+ * one of the few things that is not conditional: the fleet size to aim for
  * (`size`) and how a model and effort are picked per job (`models`). Both are
  * targets the lead sizes to, never enforced caps: nothing counts seats against
  * them, and an owner who wants a thousand agents says `max` or says so in the
@@ -438,7 +438,7 @@ export type FleetSize = (typeof FLEET_SIZES)[number];
 export const FLEET_MODEL_MODES = ["optimal", "efficient"] as const;
 export type FleetModelMode = (typeof FLEET_MODEL_MODES)[number];
 
-/** The plan each size fits and the swarm it aims for: one text for the CLI, the TUI and his prompt. */
+/** The plan each size fits and the fleet it aims for: one text for the CLI, the TUI and his prompt. */
 export const FLEET_SIZE_GUIDANCE: Readonly<Record<FleetSize, string>> = {
   max: "Several top-tier plans (for example four or five $200/month subscriptions): aim for maximum bandwidth, one worker per separable deliverable plus independent reviewers, as far as the work and the machines can use them. No ceiling.",
   large: "One or two top-tier plans: aim for around six concurrent workers, reviewers included.",
