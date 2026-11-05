@@ -272,7 +272,7 @@ export function createGrokSeatAdapter(options: {
                   };
                 }
               },
-              settled: (abort) => controller.settled(abort),
+              settled: (abort, messageId) => controller.settled(abort, messageId),
               async interrupt() {
                 try {
                   await verify(selected);

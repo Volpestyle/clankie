@@ -1,6 +1,7 @@
 import { AgentMessageRefusalCodeSchema } from "@clankie/protocol";
 import { lookupAgentMessageReceipt } from "../agent-message-receipt-service.ts";
 import { sendAgentMessageWithReceipt } from "../agent-message-send.ts";
+import { AgentMessageObservations } from "../agent-message-observations.ts";
 import { collectLeadChanges } from "../lead-change-read.ts";
 import { LeadChangesRefusal } from "../lead-changes.ts";
 import { withPresenceCursor } from "../captain/presence.ts";
@@ -120,6 +121,9 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  const receiptObservations = ctx.dependencies.agentMessageReceipts
+    ? new AgentMessageObservations(ctx.dependencies.agentMessageReceipts)
+    : undefined;
   const feedDrops = ctx.dependencies.workItems
     ? createFeedDrops({
         workItems: ctx.dependencies.workItems,
@@ -780,6 +784,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
                 request,
                 captain: ctx.dependencies.captain,
                 receipts,
+                ...(receiptObservations ? { observations: receiptObservations } : {}),
                 authorize,
                 current,
               });
@@ -2174,7 +2179,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       );
     }
   });
-  return { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite };
+  return {
+    questionOwnerAuthority,
+    workOwnerAuthority,
+    serveWorkWrite,
+    closeReceiptObservations: () => receiptObservations?.close(),
+  };
 }
 
 const TRACKER_RELEASE_SYNC_PATH = "/v1/tracker/releases/sync";

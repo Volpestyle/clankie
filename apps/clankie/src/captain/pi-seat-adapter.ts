@@ -296,9 +296,15 @@ export function createPiSeatAdapter(deps: {
                   };
                 }
               },
-              async settled(abort): Promise<SeatEvent> {
+              async settled(abort, messageId = lastMessageId): Promise<SeatEvent> {
                 while (true) {
                   abort?.throwIfAborted();
+                  if (messageId !== lastMessageId)
+                    return {
+                      type: "settlement_unconfirmed",
+                      at: new Date().toISOString(),
+                      reason: "message_correlation_unavailable",
+                    };
                   const state = await control.status();
                   const at = new Date().toISOString();
                   if (state === "offline") return { type: "released", at };
@@ -316,7 +322,7 @@ export function createPiSeatAdapter(deps: {
                             stopReason: z.string(),
                           }),
                         ])
-                        .parse(await native.request("settlement", { messageId: lastMessageId }));
+                        .parse(await native.request("settlement", { messageId }));
                       if (result.state === "completed") {
                         await verify(selected);
                         return {
@@ -325,7 +331,7 @@ export function createPiSeatAdapter(deps: {
                           ok: result.ok,
                           text: result.text,
                           stopReason: result.stopReason,
-                          ...(lastMessageId ? { messageId: lastMessageId } : {}),
+                          ...(messageId ? { messageId } : {}),
                         };
                       }
                     } catch {

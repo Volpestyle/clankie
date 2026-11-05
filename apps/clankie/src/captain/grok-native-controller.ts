@@ -543,10 +543,10 @@ export async function connectGrokNative(options: GrokNativeOptions) {
         return { outcome: "accepted", messageId, state: "queued", deliveryStage: "consumed" };
       },
       status: (): SeatStatus => state,
-      async settled(signal?: AbortSignal): Promise<SeatEvent> {
+      async settled(signal?: AbortSignal, messageId = lastMessageId): Promise<SeatEvent> {
         while (true) {
           signal?.throwIfAborted();
-          const completed = lastMessageId ? events.get(lastMessageId) : undefined;
+          const completed = messageId ? events.get(messageId) : undefined;
           if (completed) return completed;
           if (state === "offline") return { type: "released", at: new Date().toISOString() };
           if (state === "blocked")

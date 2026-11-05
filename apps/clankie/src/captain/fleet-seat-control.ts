@@ -578,6 +578,7 @@ export function createFleetSeatControl(
       if (authorized && !(await authorized())) return refused();
       begin();
       try {
+        const armedAt = new Date(now()).toISOString();
         const delivery =
           authorized || options?.delivery || options?.recipientBinding !== undefined || options?.fromLead
             ? await control.send(text, {
@@ -593,7 +594,33 @@ export function createFleetSeatControl(
                   : { recipientBinding: options.recipientBinding }),
               })
             : await control.send(text);
-        if (delivery.outcome === "accepted")
+        if (delivery.outcome === "accepted") {
+          if (options?.nativeObservation && current) {
+            const key = JSON.stringify([current.paneId, current.terminalId, current.agent, current.session]);
+            const original = current;
+            const guard = async (signal: AbortSignal) => {
+              signal.throwIfAborted();
+              const live = await runner.resolveTerminal(original.terminalId ?? original.paneId);
+              if (JSON.stringify(live && [live.paneId, live.terminalId, live.agent, live.session]) !== key)
+                throw new Error("Original native receipt occupant changed");
+              if (authorized && (!(await authorized()) || authorized.current?.() === false))
+                throw new Error("Original native receipt authority changed");
+              signal.throwIfAborted();
+            };
+            try {
+              options.nativeObservation({
+                messageId: delivery.messageId,
+                read: async (signal) => {
+                  await guard(signal);
+                  const event = await control.settled(signal, delivery.messageId, armedAt);
+                  await guard(signal);
+                  return event;
+                },
+              });
+            } catch {
+              // allow-swallowed-rejection -- Observation cannot erase confirmed native acceptance or authorize a resend.
+            }
+          }
           return {
             outcome: "delivered",
             messageId: delivery.messageId,
@@ -601,6 +628,7 @@ export function createFleetSeatControl(
             ...(delivery.deliveryStage === undefined ? {} : { deliveryStage: delivery.deliveryStage }),
             ...(delivery.detail === undefined ? {} : { detail: delivery.detail }),
           };
+        }
         if (delivery.outcome === "unconfirmed" || delivery.outcome === "offline") return delivery;
         return {
           outcome: "undelivered",

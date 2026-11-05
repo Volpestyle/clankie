@@ -1,5 +1,12 @@
 import type { FleetSeatDelivery } from "./captain/fleet-seat.ts";
 import type { AgentMessageBinding } from "./agent-message-receipts.ts";
+import type { SeatEvent } from "@clankie/agent-hosts";
+
+/** A host-captured original control, with no send or retarget capability. */
+export interface NativeMessageObservation {
+  readonly messageId: string;
+  readonly read: (signal: AbortSignal) => Promise<SeatEvent>;
+}
 
 /** Host-only capture for the original native send. It is never decoded from request JSON. */
 export interface AgentMessageDispatch {
@@ -8,4 +15,5 @@ export interface AgentMessageDispatch {
   readonly authorize: () => Promise<void>;
   readonly current: () => boolean;
   readonly delivered: (result: FleetSeatDelivery) => void;
+  readonly nativeObservation?: (source: NativeMessageObservation) => void;
 }
