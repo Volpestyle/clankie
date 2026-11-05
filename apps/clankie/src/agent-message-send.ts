@@ -1,3 +1,4 @@
+import { fleetDeliveryStage } from "@clankie/protocol";
 import type {
   OperatorConversationServiceRequest,
   OperatorConversationServiceResult,
@@ -110,7 +111,8 @@ export async function sendAgentMessageWithReceipt(input: {
         receiptId,
         binding,
         delivery.outcome === "delivered"
-          ? delivery.state === "queued"
+          ? delivery.state === "queued" &&
+            !(delivery.detail === undefined && fleetDeliveryStage(delivery) === "consumed")
             ? "queued"
             : "delivered"
           : delivery.outcome === "offline"

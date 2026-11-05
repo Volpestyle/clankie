@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -77,7 +77,8 @@ async function fixture() {
   const settings = new SettingsStore(join(root, "settings.json"));
   let nativeId = randomUUID(),
     sends = 0,
-    queued = true;
+    queued = true,
+    queueDetail = true;
   let beforeNative: undefined | (() => Promise<void>);
   const originalMessages: string[] = [];
   const live = (): HerdrAgentSnapshot => ({
@@ -110,7 +111,7 @@ async function fixture() {
         outcome: "accepted",
         state: queued ? "queued" : "started",
         messageId: "fixture-input-" + sends,
-        ...(queued ? { detail: "The native queue is waiting for its turn." } : {}),
+        ...(queued && queueDetail ? { detail: "The native queue is waiting for its turn." } : {}),
       };
     },
   };
@@ -323,6 +324,13 @@ async function fixture() {
     post,
     client,
     receiptsPath,
+    receiptSnapshot: async () => {
+      const files = [
+        receiptsPath,
+        ...(await readdir(receiptsPath + ".d")).sort().map((file) => join(receiptsPath + ".d", file)),
+      ];
+      return Promise.all(files.map(async (file) => [file, await readFile(file, "utf8")]));
+    },
     seat,
     originalMessages,
     advanceClock: (ms: number) => {
@@ -336,6 +344,9 @@ async function fixture() {
         title: "Fixture",
       }),
     sends: () => sends,
+    consumedQueue: () => {
+      queueDetail = false;
+    },
     immediate: () => {
       queued = false;
     },
@@ -445,7 +456,7 @@ it("carries the original receipt through real service, signed relay, MCP and CLI
     (await f.post({ op: "agent_message_status", schemaVersion: 1, receiptId: sent.receiptId }, "relay"))
       .status,
   ).toBe(403);
-  const before = await readFile(f.receiptsPath, "utf8");
+  const before = await f.receiptSnapshot();
   await f.nativeProof("unrelated-input", "Run the fixture check");
   expect((await lookup()).receipt.progress.map((entry: { stage: string }) => entry.stage)).toEqual([
     "queued",
@@ -464,7 +475,7 @@ it("carries the original receipt through real service, signed relay, MCP and CLI
     "acted_on",
     "answered",
   ]);
-  expect(await readFile(f.receiptsPath, "utf8")).toBe(before);
+  expect(await f.receiptSnapshot()).toEqual(before);
   const cli = await exec(
     process.execPath,
     [
@@ -521,6 +532,29 @@ it("carries the original receipt through real service, signed relay, MCP and CLI
     "acted_on",
     "answered",
   ]);
+});
+
+it("reports a consumed native queue acknowledgment as delivered without claiming it was read", async () => {
+  const f = await fixture(),
+    client = await f.client();
+  f.consumedQueue();
+  const sent = decoded(
+    await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Consumed input",
+        receipt: true,
+      },
+    }),
+  );
+  expect(sent.status).toBe("delivered");
+  const status = decoded(
+    await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+  );
+  expect(status.receipt.delivery).toBe("delivered");
+  expect(status.receipt.progress.map((entry: { stage: string }) => entry.stage)).toEqual(["delivered"]);
+  expect(f.sends()).toBe(1);
 });
 
 it("preserves ordinary results and refuses changed keyed originals without another native mutation", async () => {
