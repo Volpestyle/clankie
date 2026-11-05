@@ -46,7 +46,7 @@ it("loads the recorded legacy household as a skill grant, retains owners, and pe
       ownerUserId: OWNER,
       systemActorUserIds: [OWNER],
       ingressGuildIds: [SERVER],
-      swarmGuildId: "866430493889134672",
+      managedGuildId: "866430493889134672",
       systemActorGuildIds: [SERVER],
       systemActorChannelIds: [ROOM],
     },

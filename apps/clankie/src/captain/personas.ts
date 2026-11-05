@@ -47,7 +47,7 @@ import { adoptedName, herdrAgentName } from "./hire-name.ts";
 
 function retiredPersona(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-  const { swarm: _swarm, ...persona } = input as Record<string, unknown>;
+  const { swarm: _retiredCoordination, ...persona } = input as Record<string, unknown>;
   return persona;
 }
 

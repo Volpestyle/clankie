@@ -503,7 +503,7 @@ it("existing Admin fleet groups provision once, retain their mirror across toggl
     fetch: nativeFetch,
     ownerAudience: (_guild, channel) => f.audience(channel),
     fleetSettings: async () => resolveDiscordSettings((await f.settings.load()).discord, {}).settings,
-    swarmGuildId: () => SERVER,
+    managedGuildId: () => SERVER,
     provision: async ({ name }) => {
       const channel = await f.execute({
         method: "POST",

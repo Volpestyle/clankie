@@ -458,7 +458,7 @@ export interface ChannelProjection {
    * existing container named by `room`. A forum container gets one new post.
    * Absent where the bot lacks
    * `Manage Webhooks` in the managed server, which is the one case the manual
-   * pasted webhook is for; a host with no Discord runtime at all has no swarm
+   * pasted webhook is for; a host with no Discord runtime at all has no managed server
    * home either, and projects nothing by any path.
    */
   provision?: (input: { readonly name: string; readonly room?: DiscordGuildRoomTarget }) => Promise<{
@@ -471,7 +471,7 @@ export interface ChannelProjection {
   /** The managed server's rooms, so an existing one can be picked to project onto. */
   rooms?: () => Promise<readonly DiscordGuildRoom[]>;
   /** The one guild rooms may live in, which a pasted webhook is held to. */
-  swarmGuildId?: () => string | undefined;
+  managedGuildId?: () => string | undefined;
   /** Refresh the connected server before any explicit or automatic projection mutation. */
   currentGuildId?: () => Promise<string | undefined>;
   /** Current cached policy, refreshed by settings reads before resolving or posting. */

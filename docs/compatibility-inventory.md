@@ -135,3 +135,23 @@ strict-schema drop lists (S1/S7/S12): deleting a drop entry can make an otherwis
 readable old file fail validation. Retain migrations introduced after v0.4.11:
 that release's files can be the very inputs they upgrade. Hosted-client mode
 and managed-model cleanup remain separately tracked in #150.
+
+## Current managed-server and worker names (#336)
+
+Current settings use `discord.managedGuildId`; an existing settings file with
+`discord.swarmGuildId` loads the same value through the normal settings-store
+migration. A later ordinary save writes the canonical key. If both file keys
+are present, the explicit canonical key wins; invalid canonical input is still
+refused rather than falling back to the old value.
+
+`DISCORD_MANAGED_GUILD_ID` is preferred, and `DISCORD_SWARM_GUILD_ID` remains an
+input alias. Explicit environment values retain their existing precedence over
+stored settings, with the canonical environment name preferred when both are
+set. The CLI uses `clankie discord set --managed-guild-id ID` and also accepts
+`--swarm-guild-id` for existing commands. Both name the same selected server.
+
+The worker entry point is `bin/worker-mcp.mjs`; `bin/swarm-mcp.mjs` forwards to
+it for existing registrations. Retired enrollment/refusal keys, environment
+scrubbers, historical channel receipts and frozen eval fixtures keep their
+original strings so compatibility checks and recorded evidence remain valid.
+The baseline retirement catalogue above is unchanged by this naming migration.

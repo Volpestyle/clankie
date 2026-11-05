@@ -100,10 +100,10 @@ describe("clankie claude plugin", () => {
 /** ADR 0194: the worker channel plugin is its own identity, apart from the seat. */
 describe("clankie-worker claude plugin", () => {
   const workerRoot = join(pluginRoot, "worker");
-  const shim = join(workerRoot, "bin", "swarm-mcp.mjs");
-  const run = (env: NodeJS.ProcessEnv, input = "") =>
+  const shim = join(workerRoot, "bin", "worker-mcp.mjs");
+  const run = (env: NodeJS.ProcessEnv, input = "", entry = shim) =>
     new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-      const child = spawn(process.execPath, [shim], {
+      const child = spawn(process.execPath, [entry], {
         env: { PATH: process.env.PATH, ...env },
       });
       let stdout = "",
@@ -126,7 +126,7 @@ describe("clankie-worker claude plugin", () => {
       mcpServers: {
         worker: {
           command: "node",
-          args: ["${CLAUDE_PLUGIN_ROOT}/bin/swarm-mcp.mjs"],
+          args: ["${CLAUDE_PLUGIN_ROOT}/bin/worker-mcp.mjs"],
         },
       },
     });
@@ -209,21 +209,28 @@ describe("clankie-worker claude plugin", () => {
     }
   });
 
-  it("serves a Clankie hire's mailbox through clankie mcp --seat, with Claude's argv handed over", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "clankie-worker-bin-"));
-    await writeFile(
-      join(bin, "clankie"),
-      `#!/bin/sh\nprintf '%s|%s|%s' "$*" "$CLANKIE_SEAT_PARENT_ARGV" "$HERDR_PANE_ID"\n`,
-      { mode: 0o755 },
-    );
-    const served = await run({ HOME: bin, PATH: `${bin}:${process.env.PATH ?? ""}`, HERDR_PANE_ID: "w1:p1" });
-    expect(served.code).toBe(0);
-    const [args, parent, pane] = served.stdout.split("|");
-    expect(args).toBe("mcp --seat");
-    // The test runner is this wrapper's parent here, as Claude is in a real launch.
-    expect(parent).toContain("node");
-    expect(pane).toBe("w1:p1");
-  });
+  it.each(["worker-mcp.mjs", "swarm-mcp.mjs"])(
+    "serves a Clankie hire through %s with the original parent argv",
+    async (entry) => {
+      const bin = await mkdtemp(join(tmpdir(), "clankie-worker-bin-"));
+      await writeFile(
+        join(bin, "clankie"),
+        `#!/bin/sh\nprintf '%s|%s|%s' "$*" "$CLANKIE_SEAT_PARENT_ARGV" "$HERDR_PANE_ID"\n`,
+        { mode: 0o755 },
+      );
+      const served = await run(
+        { HOME: bin, PATH: `${bin}:${process.env.PATH ?? ""}`, HERDR_PANE_ID: "w1:p1" },
+        "",
+        join(workerRoot, "bin", entry),
+      );
+      expect(served.code).toBe(0);
+      const [args, parent, pane] = served.stdout.split("|");
+      expect(args).toBe("mcp --seat");
+      // The test runner is this wrapper's parent here, as Claude is in a real launch.
+      expect(parent).toContain("node");
+      expect(pane).toBe("w1:p1");
+    },
+  );
 
   it("reports hooks only from a Clankie hire's pane", async () => {
     const hook = join(workerRoot, "bin", "seat-hook.mjs");

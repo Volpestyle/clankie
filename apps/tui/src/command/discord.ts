@@ -100,7 +100,7 @@ export function formatDiscordSettings(settings: DiscordSettings): string[] {
     `command server: ${settings.guildId ?? "— (commands register globally)"}`,
     // Separate from the command server on purpose: this is the one server he
     // controls, and the only one his agents can be given rooms in.
-    `managed server: ${settings.swarmGuildId ?? "— (no server he may make rooms in)"}`,
+    `managed server: ${settings.managedGuildId ?? "— (no server he may make rooms in)"}`,
     showList("ambient roles", settings.ambientRoleIds),
     showList("ambient users", settings.ambientUserIds),
     showList("approval roles", settings.approvalRoleIds),
@@ -195,12 +195,12 @@ type DiscordField = keyof DiscordSettings;
 
 function fieldForFlag(flag: string): DiscordField {
   if (!flag.startsWith("--")) throw new Error(DISCORD_USAGE);
-  const field = flag
-    .slice(2)
-    .replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase()) as DiscordField;
-  if (!(field in DiscordSettingsSchema.shape))
+  const field = flag.slice(2).replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
+  // Keep an owner's existing command spelling usable while storing only the current name.
+  const canonical = field === "swarmGuildId" ? "managedGuildId" : field;
+  if (!(canonical in DiscordSettingsSchema.shape))
     throw new Error(`Unknown Discord field ${flag}.\n${DISCORD_USAGE}`);
-  return field;
+  return canonical as DiscordField;
 }
 
 export function parseDiscordSettingValue(

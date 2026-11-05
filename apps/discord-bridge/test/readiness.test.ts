@@ -149,7 +149,7 @@ describe("Discord text readiness", () => {
     const env = {
       DISCORD_APPLICATION_ID: "111111111111111111",
       DISCORD_GUILD_ID: "222222222222222222",
-      DISCORD_SWARM_GUILD_ID: "555555555555555555",
+      DISCORD_MANAGED_GUILD_ID: "555555555555555555",
     };
     const report = await inspectDiscordTextReadiness({
       env,
@@ -163,13 +163,13 @@ describe("Discord text readiness", () => {
                   id: env.DISCORD_APPLICATION_ID,
                   flags: ApplicationFlagsBitField.Flags.GatewayMessageContent,
                 }
-              : route === `/guilds/${env.DISCORD_SWARM_GUILD_ID}/members/${env.DISCORD_APPLICATION_ID}`
+              : route === `/guilds/${env.DISCORD_MANAGED_GUILD_ID}/members/${env.DISCORD_APPLICATION_ID}`
                 ? { roles: [] }
                 : {
                     name: "private-guild-must-not-appear",
                     // Send Messages only: the text lane is healthy and rooms
                     // still cannot be made, which is the failure worth naming.
-                    roles: [{ id: env.DISCORD_SWARM_GUILD_ID, permissions: String(1n << 11n) }],
+                    roles: [{ id: env.DISCORD_MANAGED_GUILD_ID, permissions: String(1n << 11n) }],
                   },
           ),
       },
@@ -193,7 +193,7 @@ describe("Discord text readiness", () => {
     store.credentials.set(DISCORD_BOT_PROVIDER_ID, { type: "api", key: "bot-secret-marker" });
     const env = {
       DISCORD_APPLICATION_ID: "111111111111111111",
-      DISCORD_SWARM_GUILD_ID: "555555555555555555",
+      DISCORD_MANAGED_GUILD_ID: "555555555555555555",
     };
     const report = await inspectDiscordTextReadiness({
       env,
@@ -207,9 +207,9 @@ describe("Discord text readiness", () => {
                   id: env.DISCORD_APPLICATION_ID,
                   flags: ApplicationFlagsBitField.Flags.GatewayMessageContent,
                 }
-              : route === `/guilds/${env.DISCORD_SWARM_GUILD_ID}/members/${env.DISCORD_APPLICATION_ID}`
+              : route === `/guilds/${env.DISCORD_MANAGED_GUILD_ID}/members/${env.DISCORD_APPLICATION_ID}`
                 ? { roles: [] }
-                : { roles: [{ id: env.DISCORD_SWARM_GUILD_ID, permissions: String(1n << 3n) }] },
+                : { roles: [{ id: env.DISCORD_MANAGED_GUILD_ID, permissions: String(1n << 3n) }] },
           ),
       },
       clock: () => new Date("2026-07-25T16:00:00.000Z"),

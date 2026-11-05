@@ -80,7 +80,7 @@ async function fixture(beforeReply?: (path: string) => Promise<void>) {
       ...current.discord,
       applicationId: "90001",
       ownerUserId: "30002",
-      swarmGuildId: "10001",
+      managedGuildId: "10001",
       teamVisible: false,
       ingressChannelIds: ["20001"],
       voiceChannelIds: ["20004"],
@@ -400,7 +400,7 @@ it("the real CLI connects a server and role, toggles fleet and selects tracking 
   expect(connect.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
   expect(connect.snapshot.settings.userSessionEnabled).toBe(false);
   expect(connect.snapshot.settings.userSessionVoiceEnabled).toBe(false);
-  expect(connect.snapshot.settings.swarmGuildId).toBeUndefined();
+  expect(connect.snapshot.settings.managedGuildId).toBeUndefined();
   const choices = await f.cli("setup", "choices", "connect");
   expect(choices.pickers.map((part: { kind: string }) => part.kind)).toEqual(["server", "role"]);
   expect(choices.pickers[1].choices.map((choice: { choice: string }) => choice.choice)).toEqual([
@@ -414,7 +414,7 @@ it("the real CLI connects a server and role, toggles fleet and selects tracking 
   const invite = await f.cli("setup", "invite", "--role", "admin");
   expect(new URL(invite.url).searchParams.get("permissions")).toBe("8");
   expect((await f.settings.load()).discord.role).toBe("participant");
-  expect((await f.settings.load()).discord.swarmGuildId).toBeUndefined();
+  expect((await f.settings.load()).discord.managedGuildId).toBeUndefined();
   const hidden = await f.cli("setup", "fleet", "--enabled", "off");
   expect(hidden.snapshot.settings.serverId).toBe("10002");
   expect(hidden.snapshot.settings.teamVisible).toBe(false);
@@ -492,7 +492,7 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
       skill: "house-hunting",
     });
     expect(view.snapshot.settings.systemActorUserIds).toEqual(["30005"]);
-    expect(view.snapshot.settings.swarmGuildId).toBe("10002");
+    expect(view.snapshot.settings.managedGuildId).toBe("10002");
     f.disconnect();
     finished = false;
     running = submit(shell, "/discord").finally(() => {
@@ -504,7 +504,7 @@ it("real TUI overlays use the shared role, fleet and tracking writer and keep ra
     await running;
     expect((await f.settings.load()).discord.fleetEnabled).toBe(false);
     expect((await f.settings.load()).discord.serverId).toBe("10002");
-    expect((await f.settings.load()).discord.swarmGuildId).toBe("10002");
+    expect((await f.settings.load()).discord.managedGuildId).toBe("10002");
   } finally {
     for (let attempt = 0; !finished && attempt < 10; attempt++) {
       shell.setupFlow.handleSubmit("/cancel");
@@ -723,3 +723,17 @@ it("overlay readiness waits for real HTTP preparation, beyond the old helper dea
     await running;
   }
 });
+
+it.each(["--managed-guild-id", "--swarm-guild-id"])(
+  "the real CLI accepts %s while retaining the managed server",
+  async (flag) => {
+    const f = await fixture();
+    const value = (await f.settings.load()).discord.managedGuildId;
+    expect(value).toBe("10001");
+    const result = await f.cli("set", flag, value!);
+    expect(result.ok).toBe(true);
+    expect(result.discord.managedGuildId).toBe(value);
+    expect(result.discord).not.toHaveProperty("swarmGuildId");
+    expect((await f.settings.load()).discord.managedGuildId).toBe(value);
+  },
+);

@@ -1,4 +1,4 @@
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -31,6 +31,56 @@ async function tempStore(): Promise<SettingsStore> {
 }
 
 describe("settings store", () => {
+  it("migrates the managed-server name from a real legacy file without losing its value or environment precedence", async () => {
+    const store = await tempStore();
+    const legacy = { schemaVersion: 1, discord: { swarmGuildId: "123456789012345678" } };
+    await writeFile(store.path, JSON.stringify(legacy));
+    const loaded = await store.load();
+    expect(loaded.discord.managedGuildId).toBe(legacy.discord.swarmGuildId);
+    expect(loaded.discord).not.toHaveProperty("swarmGuildId");
+    expect(JSON.parse(await readFile(store.path, "utf8"))).toEqual(legacy);
+    expect(discordSettingsToEnvironment(loaded.discord).DISCORD_MANAGED_GUILD_ID).toBe(
+      legacy.discord.swarmGuildId,
+    );
+    const oldEnvironment = { DISCORD_SWARM_GUILD_ID: "234567890123456789" };
+    applyDiscordSettingsToEnvironment(loaded.discord, oldEnvironment);
+    expect(resolveDiscordSettings(loaded.discord, oldEnvironment).settings.managedGuildId).toBe(
+      "234567890123456789",
+    );
+    expect(
+      resolveDiscordSettings(loaded.discord, {
+        ...oldEnvironment,
+        DISCORD_MANAGED_GUILD_ID: "345678901234567890",
+      }).settings.managedGuildId,
+    ).toBe("345678901234567890");
+    await store.update((current) => current);
+    const persisted = JSON.parse(await readFile(store.path, "utf8"));
+    expect(persisted.discord.managedGuildId).toBe(legacy.discord.swarmGuildId);
+    expect(persisted.discord).not.toHaveProperty("swarmGuildId");
+    expect((await new SettingsStore(store.path).load()).discord.managedGuildId).toBe(
+      legacy.discord.swarmGuildId,
+    );
+  });
+
+  it("prefers the canonical managed-server file key and still rejects invalid legacy or canonical values", async () => {
+    const store = await tempStore();
+    await writeFile(
+      store.path,
+      JSON.stringify({
+        schemaVersion: 1,
+        discord: { swarmGuildId: "123456789012345678", managedGuildId: "234567890123456789" },
+      }),
+    );
+    expect((await store.load()).discord.managedGuildId).toBe("234567890123456789");
+    for (const discord of [
+      { swarmGuildId: "not-an-id" },
+      { swarmGuildId: "123456789012345678", managedGuildId: "not-an-id" },
+    ]) {
+      await writeFile(store.path, JSON.stringify({ schemaVersion: 1, discord }));
+      await expect(new SettingsStore(store.path).load()).rejects.toThrow();
+    }
+  });
+
   it("defaults existing fleet settings to peer messages on and persists the owner's off switch", async () => {
     const store = await tempStore();
     await writeFile(store.path, JSON.stringify({ schemaVersion: 1, fleet: { tools: "off" } }));

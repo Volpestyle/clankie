@@ -9,5 +9,5 @@
   },
   "repository": "https://github.com/Volpestyle/clankie",
   "license": "Apache-2.0",
-  "keywords": ["clankie", "swarm", "worker", "channel"]
+  "keywords": ["clankie", "fleet", "worker", "channel"]
 }

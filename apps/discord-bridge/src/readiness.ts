@@ -92,7 +92,7 @@ export async function inspectDiscordTextReadiness(
   }
   const applicationId = discordId(options.env.DISCORD_APPLICATION_ID);
   const guildId = discordId(options.env.DISCORD_GUILD_ID);
-  const swarmGuildId = discordId(discordManagedGuildId(options.env));
+  const managedGuildId = discordId(discordManagedGuildId(options.env));
   const ambientRoles = discordIdSet(options.env.DISCORD_AMBIENT_ROLE_IDS);
   const ambientUsers = discordIdSet(options.env.DISCORD_AMBIENT_USER_IDS);
   const ingressGuilds = discordIdSet(options.env.DISCORD_INGRESS_GUILD_IDS);
@@ -114,8 +114,8 @@ export async function inspectDiscordTextReadiness(
   );
   add(
     "managed server",
-    swarmGuildId !== undefined,
-    swarmGuildId === undefined ? "DISCORD_MANAGED_GUILD_ID is missing or invalid" : "configured",
+    managedGuildId !== undefined,
+    managedGuildId === undefined ? "DISCORD_MANAGED_GUILD_ID is missing or invalid" : "configured",
     "Set DISCORD_MANAGED_GUILD_ID to the one server Clankie controls; channels are made only there.",
   );
   // Either binding admits: `authorizeAmbientCommand` takes a named user or a
@@ -254,13 +254,13 @@ export async function inspectDiscordTextReadiness(
       );
     }
 
-    if (swarmGuildId !== undefined) {
+    if (managedGuildId !== undefined) {
       // Making a room needs two permissions the ordinary text lane never
       // exercises, so an install can be perfectly healthy and still fail the
       // first time a channel is projected. Checked here so that lands as a
       // readiness line rather than a failed room.
       try {
-        const missing = await missingSwarmPermissions(rest, swarmGuildId, applicationId);
+        const missing = await missingManagedPermissions(rest, managedGuildId, applicationId);
         add(
           "managed server permissions",
           missing.length === 0,
@@ -331,21 +331,21 @@ const ADMINISTRATOR = 1n << 3n;
  * enters the report. A bot application's user id is its application id, so the
  * member lookup needs no extra identity call.
  */
-async function missingSwarmPermissions(
+async function missingManagedPermissions(
   rest: DiscordRestReadPort,
-  swarmGuildId: string,
+  managedGuildId: string,
   applicationId: string,
 ): Promise<readonly string[]> {
-  const member = asRecord(await rest.get(`/guilds/${swarmGuildId}/members/${applicationId}`));
+  const member = asRecord(await rest.get(`/guilds/${managedGuildId}/members/${applicationId}`));
   const held = new Set(Array.isArray(member.roles) ? member.roles.map(String) : []);
-  const guild = asRecord(await rest.get(`/guilds/${swarmGuildId}`));
+  const guild = asRecord(await rest.get(`/guilds/${managedGuildId}`));
   const roles = Array.isArray(guild.roles) ? guild.roles : [];
   let granted = 0n;
   for (const entry of roles) {
     const role = asRecord(entry);
     const id = typeof role.id === "string" ? role.id : undefined;
     // The guild id is `@everyone`, which every member holds without listing it.
-    if (id === undefined || !(id === swarmGuildId || held.has(id))) continue;
+    if (id === undefined || !(id === managedGuildId || held.has(id))) continue;
     if (typeof role.permissions === "string") granted |= BigInt(role.permissions);
   }
   if ((granted & ADMINISTRATOR) !== 0n) return [];

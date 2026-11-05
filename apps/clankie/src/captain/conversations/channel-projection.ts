@@ -88,22 +88,22 @@ export async function resolveProjection(
   // Required before either path resolves, never merely compared against when
   // it happens to be set: an unset managed server is not "no opinion", it is no
   // server Clankie controls, and the fleet may not be put anywhere at all.
-  const swarmGuildId = ctx["projection"].currentGuildId
+  const managedGuildId = ctx["projection"].currentGuildId
     ? await ctx["projection"].currentGuildId()
-    : ctx["projection"].swarmGuildId?.();
-  if (swarmGuildId === undefined) {
-    throw new Error("Clankie has no swarm server set, so a room cannot go to Discord.");
+    : ctx["projection"].managedGuildId?.();
+  if (managedGuildId === undefined) {
+    throw new Error("Clankie has no managed server set, so a room cannot go to Discord.");
   }
   if (choice.kind === "webhook") {
     const credential = ctx["projection"].parseWebhookUrl(choice.webhookUrl);
     // Resolved before anything is saved: a webhook that cannot be reached is
     // a projection that would silently never post.
     const resolved = { ...(await ctx["projection"].resolve(credential)), ...credential };
-    // A pasted URL is otherwise the back door around the swarm fence: a
+    // A pasted URL is otherwise the back door around the managed-server fence: a
     // webhook from a guild Clankie merely inhabits would put his agents in a
     // server he does not control, without any grant being involved.
-    if (!(ctx["projection"].allowsGuild?.(resolved.guildId) ?? resolved.guildId === swarmGuildId)) {
-      throw new Error("That webhook is not in Clankie’s swarm server.");
+    if (!(ctx["projection"].allowsGuild?.(resolved.guildId) ?? resolved.guildId === managedGuildId)) {
+      throw new Error("That webhook is not in Clankie’s managed server.");
     }
     const resolvedRoom = (await ctx["projection"].rooms?.())?.find(
       (room) => room.channelId === resolved.channelId,
@@ -115,7 +115,7 @@ export async function resolveProjection(
     return resolved;
   }
   if (ctx["projection"].provision === undefined) {
-    throw new Error("Clankie cannot make Discord channels here; paste one from your swarm server instead");
+    throw new Error("Clankie cannot make Discord channels here; paste one from your managed server instead");
   }
   // Checked first for a named room: provisioning makes a webhook in Discord,
   // and a refusal afterwards would leave one behind that nothing posts to.
@@ -127,8 +127,8 @@ export async function resolveProjection(
   // Held to the same fence as a paste. The trusted module answers for the
   // managed server, but a room is only a room here if it landed in the guild this
   // side was told about — a disagreement is a refusal, not a projection.
-  if (provisioned.guildId !== swarmGuildId) {
-    throw new Error("That Discord room is not in Clankie’s swarm server.");
+  if (provisioned.guildId !== managedGuildId) {
+    throw new Error("That Discord room is not in Clankie’s managed server.");
   }
   if (choice.room?.kind === "forum" && provisioned.threadId === undefined) {
     throw new Error("Discord did not create a post in that forum.");
@@ -167,10 +167,11 @@ export function liveProjection(
   ctx: ConversationStore,
   meta: ConversationMeta,
 ): ConversationMeta["channelDiscord"] {
-  const swarmGuildId = ctx["projection"]?.swarmGuildId?.();
+  const managedGuildId = ctx["projection"]?.managedGuildId?.();
   const guildId = meta.channelDiscord?.guildId;
   return guildId &&
-    (ctx["projection"]?.allowsGuild?.(guildId) ?? (swarmGuildId !== undefined && guildId === swarmGuildId))
+    (ctx["projection"]?.allowsGuild?.(guildId) ??
+      (managedGuildId !== undefined && guildId === managedGuildId))
     ? meta.channelDiscord
     : undefined;
 }

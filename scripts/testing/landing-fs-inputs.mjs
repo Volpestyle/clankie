@@ -162,7 +162,7 @@ export const landingFsInputs = Object.fromEntries([
   // reachable from Vitest's parent-process module graph.
   [
     "apps/tui/test/worker-link.test.ts",
-    [...seatChannelInputs, ...seatHookInputs, ...workerBin("fleet-mcp", "swarm-mcp")],
+    [...seatChannelInputs, ...seatHookInputs, ...workerBin("fleet-mcp", "worker-mcp", "swarm-mcp")],
   ],
   ...[
     "worker-bridge-health.integration",

@@ -695,7 +695,7 @@ export async function runSeatCommand(args: readonly string[], options: SeatComma
   }
   const execFile = options.execFileImpl ?? defaultExecFile;
   const sleep = options.sleepImpl ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  // The service owns the lead actor. A portal never inherits a worker's Swarm
+  // The service owns the lead actor. A portal never inherits a worker's retired coordinator
   // session from the terminal it happened to launch in.
   const seatEnv = { ...env };
   delete seatEnv.CLANKIE_BRIDGE_NONCE;

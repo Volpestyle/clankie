@@ -39,6 +39,16 @@ and clears when answered or cancelled on the same presence read. Inspect
 `currentActivity` to distinguish a published fact from the pet's layout; API
 publication does not prove a bubble appeared on screen.
 
+## Discord managed server
+
+`clankie discord status` shows `managedGuildId`, the selected server where
+Clankie may make rooms. Use `clankie discord set --managed-guild-id ID` for
+that existing setting. Legacy `swarmGuildId` files migrate on load and save as
+`managedGuildId` on the next normal write; `--swarm-guild-id` remains an input
+alias. `DISCORD_MANAGED_GUILD_ID` is preferred over the supported legacy
+`DISCORD_SWARM_GUILD_ID`; an explicit environment value still overrides the
+stored choice. Keep the owner's existing server selection when migrating names.
+
 ## Voice provider readiness
 
 Read `clankie doctor --json` → `voice.providerReadiness` before a call, or

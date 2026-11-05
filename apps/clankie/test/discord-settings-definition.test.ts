@@ -325,17 +325,17 @@ it("the preferred managed-server environment name preserves stored and legacy wi
   const stored = (
     await settings.update((current) => ({
       ...current,
-      discord: { ...current.discord, swarmGuildId: "11111" },
+      discord: { ...current.discord, managedGuildId: "11111" },
     }))
   ).discord;
   expect(discordSettingsToEnvironment(stored).DISCORD_MANAGED_GUILD_ID).toBe("11111");
   const legacyEnv = { DISCORD_SWARM_GUILD_ID: "22222" };
   applyDiscordSettingsToEnvironment(stored, legacyEnv);
   expect(discordManagedGuildId(legacyEnv)).toBe("22222");
-  expect(resolveDiscordSettings(stored, legacyEnv).settings.swarmGuildId).toBe("22222");
+  expect(resolveDiscordSettings(stored, legacyEnv).settings.managedGuildId).toBe("22222");
   const both = { ...legacyEnv, DISCORD_MANAGED_GUILD_ID: "33333" };
   expect(discordManagedGuildId(both)).toBe("33333");
-  expect(resolveDiscordSettings(stored, both).settings.swarmGuildId).toBe("33333");
+  expect(resolveDiscordSettings(stored, both).settings.managedGuildId).toBe("33333");
   const empty = {};
   applyDiscordSettingsToEnvironment(stored, empty);
   expect(discordManagedGuildId(empty)).toBe("11111");
@@ -350,7 +350,7 @@ it("legacy managed-server overrides migrate without replacing command or presenc
   }).settings;
   expect(resolved.serverId).toBeUndefined();
   expect(resolved.guildId).toBe("10101");
-  expect(resolved.swarmGuildId).toBe("20202");
+  expect(resolved.managedGuildId).toBe("20202");
   expect(resolved.presenceGuildIds).toEqual(["30303"]);
   expect(resolved.guilds["20202"]).toMatchObject({ role: "admin", owners: "me", fleetEnabled: false });
 });
@@ -369,14 +369,14 @@ it("the independent visibility setting keeps the team's selected server across h
   const refreshed = await client.discordSettings();
   const hidden = await client.updateDiscordSettings({
     expectedRevision: refreshed.revision,
-    settings: { ...refreshed.settings, swarmGuildId: "12345", teamVisible: false },
+    settings: { ...refreshed.settings, managedGuildId: "12345", teamVisible: false },
   });
   const visible = await client.updateDiscordSettings({
     expectedRevision: hidden.revision,
     settings: { ...hidden.settings, teamVisible: true },
   });
-  expect(hidden.settings.swarmGuildId).toBe("12345");
-  expect(visible.settings.swarmGuildId).toBe("12345");
+  expect(hidden.settings.managedGuildId).toBe("12345");
+  expect(visible.settings.managedGuildId).toBe("12345");
   const fleet = visible.setup!.definition.sentences.find((sentence) => sentence.id === "fleet")!;
   expect(fleet.parts.filter((part) => part.kind === "picker").map((part) => part.fields)).toEqual([
     ["fleetEnabled"],
@@ -402,7 +402,7 @@ it("fresh body authority observes persisted role and fleet changes despite start
   const fresh = await readDiscordServerSettings(env);
   expect(fresh.role).toBe("participant");
   expect(fresh.fleetEnabled).toBe(false);
-  expect(fresh.swarmGuildId).toBeUndefined();
+  expect(fresh.managedGuildId).toBeUndefined();
   const explicit: NodeJS.ProcessEnv = { CLANKIE_SETTINGS_FILE: settings.path, DISCORD_ROLE: "admin" };
   applyDiscordSettingsToEnvironment(fresh, explicit);
   expect((await readDiscordServerSettings(explicit)).role).toBe("admin");
@@ -429,7 +429,7 @@ it("clearing the connected server in Advanced disconnects its projected body set
   expect(disconnected.settings.serverId).toBeUndefined();
   expect(disconnected.settings.fleetChannelId).toBeUndefined();
   expect(disconnected.settings.guildId).toBeUndefined();
-  expect(disconnected.settings.swarmGuildId).toBeUndefined();
+  expect(disconnected.settings.managedGuildId).toBeUndefined();
   expect(disconnected.settings.ingressGuildIds).toEqual([]);
   expect(disconnected.settings.voiceGuildIds).toEqual([]);
   expect(disconnected.settings.presenceGuildIds).toEqual([]);

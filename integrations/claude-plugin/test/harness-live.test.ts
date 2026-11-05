@@ -275,24 +275,28 @@ it("does not turn denied env, absent foreground, unsupported hosts, or snapshot 
   expect((await observer({ rows: cli, unavailable: true }).promise).state).toBe("unavailable");
   expect((await observer({ rows: cli, platform: "win32" }).promise).state).toBe("unsupported");
 });
-it("recognizes the actual installed Claude worker bridge and excludes unrelated swarm MCPs", async () => {
-  const report = await inspectLiveHarnessBridges({
-    socket,
-    platform: "darwin",
-    panes: [{ ...pane, harness: "claude" }],
-    run: async (command, args) =>
-      command === "/bin/ps"
-        ? args[0] !== "eww"
-          ? "20 10 /bin/claude\n30 20 node /home/.claude/plugins/cache/clankie/clankie-worker/0.6.1/bin/swarm-mcp.mjs\n40 20 node /dev/swarm-mcp/dist/server.mjs"
-          : env()
-        : JSON.stringify({
-            result: {
-              process_info: { pane_id: pane.paneId, shell_pid: 10, foreground_process_group_id: 20 },
-            },
-          }),
-  });
-  expect(report.panes[0]?.status).toBe("live-process");
-});
+it.each(["worker-mcp.mjs", "swarm-mcp.mjs"])(
+  "recognizes the installed worker bridge %s and excludes unrelated MCPs",
+  async (entry) => {
+    const report = await inspectLiveHarnessBridges({
+      socket,
+      platform: "darwin",
+      panes: [{ ...pane, harness: "claude" }],
+      run: async (command, args) =>
+        command === "/bin/ps"
+          ? args[0] !== "eww"
+            ? `20 10 /bin/claude\n30 20 node /home/.claude/plugins/cache/clankie/clankie-worker/0.6.1/bin/${entry}\n40 20 node /dev/swarm-mcp/dist/server.mjs`
+            : env()
+          : JSON.stringify({
+              result: {
+                process_info: { pane_id: pane.paneId, shell_pid: 10, foreground_process_group_id: 20 },
+              },
+            }),
+    });
+    expect(report.panes[0]?.status).toBe("live-process");
+    expect(report.panes[0]?.bridgePid).toBe(30);
+  },
+);
 
 it("uses the native member of a wrapper's foreground process group", async () => {
   const report = await inspectLiveHarnessBridges({

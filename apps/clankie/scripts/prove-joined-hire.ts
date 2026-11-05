@@ -305,7 +305,7 @@ try {
     await client.connect(
       new StdioClientTransport({
         command: process.execPath,
-        args: [join(installed, "bin/swarm-mcp.mjs")],
+        args: [join(installed, "bin/worker-mcp.mjs")],
         env: launched.env,
         cwd: workspace,
         stderr: "inherit",

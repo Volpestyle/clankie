@@ -28,7 +28,7 @@ const USERNAME_MAX = 80;
  * only a pasted webhook projects.
  */
 export function discordChannelProjection(
-  runtime: Pick<DiscordPresenceRuntimePort, "provisionChannel" | "listRooms" | "swarmGuildId"> | undefined,
+  runtime: Pick<DiscordPresenceRuntimePort, "provisionChannel" | "listRooms" | "managedGuildId"> | undefined,
 ): CreateChannelProjection {
   return (host) =>
     createChannelProjection({
@@ -58,7 +58,7 @@ export function discordChannelProjection(
         ? {}
         : { provision: (input) => runtime.provisionChannel!(input) }),
       ...(runtime?.listRooms === undefined ? {} : { rooms: () => runtime.listRooms!() }),
-      ...(runtime?.swarmGuildId === undefined ? {} : { swarmGuildId: () => runtime.swarmGuildId!() }),
+      ...(runtime?.managedGuildId === undefined ? {} : { managedGuildId: () => runtime.managedGuildId!() }),
     });
 }
 
@@ -70,7 +70,7 @@ export function createChannelProjection(
     /** Same runtime, listing the managed server's rooms so one can be picked. */
     readonly rooms?: ChannelProjection["rooms"];
     /** Which guild the managed server is, so a pasted webhook can be held to it. */
-    readonly swarmGuildId?: ChannelProjection["swarmGuildId"];
+    readonly managedGuildId?: ChannelProjection["managedGuildId"];
     /** Fresh owner settings gate existing credentials as well as provisioning. */
     readonly fleetSettings?: () => Promise<DiscordSettings>;
     readonly ownerAudience?: (guildId: string, channelId: string) => Promise<boolean>;
@@ -152,8 +152,8 @@ export function createChannelProjection(
             latestSettings?.guilds[guildId]?.role === "admin" &&
             latestSettings.guilds[guildId]?.fleetEnabled === true,
         }),
-    swarmGuildId: () =>
-      latestSettings === undefined ? options.swarmGuildId?.() : discordFleetGuild(latestSettings),
+    managedGuildId: () =>
+      latestSettings === undefined ? options.managedGuildId?.() : discordFleetGuild(latestSettings),
     ...(options.fleetSettings === undefined
       ? {}
       : {

@@ -528,7 +528,7 @@ export const localCodexServer: CodexServerLauncher = async (input) => {
   const directory = await mkdtemp(join(input.socketRoot ?? tmpdir(), "clankie-codex-"));
   const socketPath = join(directory, "rpc.sock");
   const catalogSignalPath = join(directory, "catalog-changed");
-  // The supervisor must not lend its own pane identity or Swarm enrollment to
+  // The supervisor must not lend its own pane identity or retired coordinator enrollment to
   // the child. Explicit worker launch settings (including CODEX_HOME) survive.
   const env =
     input.inheritEnvironment === false
