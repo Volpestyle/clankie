@@ -325,6 +325,7 @@ describe("the worker plugin on a linked machine (VUH-1527)", () => {
       result: {
         tools: [
           { name: "message_clankie" },
+          { name: "list_report_leads" },
           { name: "message_clankie_status" },
           { name: "clankie_tools" },
           { name: "clankie_call" },
@@ -786,6 +787,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       await bridge.init();
       expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
         "message_clankie",
+        "list_report_leads",
         "message_clankie_status",
         "clankie_tools",
         "clankie_call",
@@ -798,6 +800,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
       const before = service.seen.length;
       expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
         "message_clankie",
+        "list_report_leads",
         "message_clankie_status",
       ]);
       expect(
@@ -822,6 +825,7 @@ describe("the first native tool catalog while a pane settles (VUH-1558)", () => 
     for (const reply of replies)
       expect(reply.result.tools.map((tool) => tool.name)).toEqual([
         "message_clankie",
+        "list_report_leads",
         "message_clankie_status",
         "clankie_tools",
         "clankie_call",
@@ -1647,6 +1651,7 @@ it.each([
     await bridge.init();
     const names = [
       "message_clankie",
+      "list_report_leads",
       "message_clankie_status",
       "clankie_tools",
       "clankie_call",
@@ -1692,6 +1697,7 @@ it.each(["held", "refused"] as const)(
     service.failDiscovery(state === "refused");
     const names = [
       "message_clankie",
+      "list_report_leads",
       "message_clankie_status",
       "clankie_tools",
       "clankie_call",
@@ -1808,6 +1814,7 @@ it("shares the whole initialized handshake and bounds a hanging response body, i
   await expect.poll(() => service.health.at(-1)?.status).toBe("ready");
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
     "message_clankie",
+    "list_report_leads",
     "message_clankie_status",
     "clankie_tools",
     "clankie_call",
@@ -1822,6 +1829,7 @@ it("retains proven catalogs while discovery fails, and never replays an admitted
   await bridge.init();
   const names = [
     "message_clankie",
+    "list_report_leads",
     "message_clankie_status",
     "clankie_tools",
     "clankie_call",
@@ -1858,7 +1866,7 @@ it("retains proven catalogs while discovery fails, and never replays an admitted
   expect(service.initializes()).toBe(3);
   expect(service.calls.filter((name) => name === "mutate")).toHaveLength(1);
   service.disablePeers();
-  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names.slice(0, 4));
+  expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual(names.slice(0, 5));
 });
 
 it("advertises authenticated peer settings before native proof settles, while invocations still require fresh proof", async () => {
@@ -1867,6 +1875,7 @@ it("advertises authenticated peer settings before native proof settles, while in
   await bridge.init();
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
     "message_clankie",
+    "list_report_leads",
     "message_clankie_status",
     "clankie_tools",
     "clankie_call",
@@ -1880,6 +1889,7 @@ it("advertises authenticated peer settings before native proof settles, while in
   service.setPeerMessages("off");
   expect((await bridge.list()).result.tools.map((tool) => tool.name)).toEqual([
     "message_clankie",
+    "list_report_leads",
     "message_clankie_status",
     "clankie_tools",
     "clankie_call",

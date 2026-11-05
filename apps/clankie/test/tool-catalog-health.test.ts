@@ -361,7 +361,13 @@ it("records a desktop-app hire's catalog under its own proof and refuses a proof
     processes: [{ pid: 4242, startTime: "start" }],
     shell: { pid: 4242, startTime: "start" },
   });
-  const bridged = report(["message_clankie", "message_clankie_status", "list_fleet_seats", "message_peer"]);
+  const bridged = report([
+    "message_clankie",
+    "list_report_leads",
+    "message_clankie_status",
+    "list_fleet_seats",
+    "message_peer",
+  ]);
   const recorded = await health.recordNativeToolCatalog(
     desktop.paneId,
     bridged,

@@ -237,6 +237,7 @@ it("keeps the bridge's first catalog pending until the sole native thread binds,
       result: {
         tools: [
           { name: "message_clankie" },
+          { name: "list_report_leads" },
           { name: "message_clankie_status" },
           { name: "clankie_tools" },
           { name: "clankie_call" },

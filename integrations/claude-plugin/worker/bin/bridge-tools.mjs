@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SOURCES = [
-  ["seat-tools.mjs", (module) => [module.MESSAGE_TOOL, ...module.PEER_TOOLS]],
+  ["seat-tools.mjs", (module) => [module.MESSAGE_TOOL, module.REPORT_LEADS_TOOL, ...module.PEER_TOOLS]],
   ["message-status.mjs", (module) => [module.MESSAGE_CLANKIE_STATUS_TOOL]],
   ["review-tools.mjs", (module) => module.REVIEW_TOOLS],
   ["evidence-push.mjs", (module) => [module.EVIDENCE_PUSH_TOOL]],

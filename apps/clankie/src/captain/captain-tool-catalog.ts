@@ -84,6 +84,7 @@ export function createToolCatalogHealth(ctx: ToolCatalogHealthContext) {
         ? [
             "message_clankie",
             "message_clankie_status",
+            "list_report_leads",
             ...workerTools,
             ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
           ]
@@ -150,6 +151,7 @@ export function createToolCatalogHealth(ctx: ToolCatalogHealthContext) {
       const worker = [
         "message_clankie",
         "message_clankie_status",
+        "list_report_leads",
         ...((await options.projectHireTools?.(DEFAULT_PROJECT_ID)) ?? []),
         ...(currentSettings.fleet.peerMessages === "on" ? ["list_fleet_seats", "message_peer"] : []),
       ];
