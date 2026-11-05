@@ -254,15 +254,18 @@ commitment with `clankie hire-receipt settle ORIGINAL_UUID abandoned-unknown`
 (contract in `docs/cli.md`); it claims neither non-launch nor delivery, and a
 held project allocation is released separately.
 
-An ordinary remote project hire whose only attempted effect was an unanswered
+A remote project hire, including a fresh intent, whose only attempted effect was an unanswered
 workspace create can recover automatically before the next hire's checkout and
 allocation checks. The host must seal the original as not launched; the allocation
-must retain a unique causal link to that receipt, still belong to the resolved
+must retain a unique causal link to its own receipt (including the fresh intent
+UUID when present), still belong to the resolved
 project, and pass unchanged-allocation and complete before/after inventory checks.
 Settlement also retains its host authority through the final allocation write;
 if that authority cannot be verified, the allocation stays held.
-Legacy allocations without the link, live or possibly starting workers and fresh
-intents remain held. Keep the settled original; never replay it. New work uses its
+Legacy allocations without the link and live or possibly starting workers
+remain held. A fresh attempt needs its own seal; its predecessor's evidence
+cannot release it. Retrying the same intent stays held; a later request without
+that intent can recover it. Keep the settled original; never replay it. New work uses its
 own brief and the returned `freshIntent`. No real-PC acceptance is implied by a
 loopback fixture.
 

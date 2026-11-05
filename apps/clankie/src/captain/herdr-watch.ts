@@ -1188,7 +1188,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * A causal receipt link and the operator's double census protect the allocation.
    */
   public retireUnsentRemoteAt(
-    input: { fleet?: string | undefined; workingDirectory: string; harness?: string | undefined },
+    input: {
+      fleet?: string | undefined;
+      workingDirectory: string;
+      harness?: string | undefined;
+      freshIntent?: { readonly id: string; readonly afterReceiptId: string } | undefined;
+    },
     guard: () => Promise<void>,
     projectId?: string,
   ): Promise<void> {

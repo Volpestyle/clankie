@@ -206,7 +206,12 @@ export interface HerdrWatchContext {
   ): Promise<HerdrSeatSpawnResult>;
   retireGoneProjectHires(workingDirectory: string, guard: () => Promise<void>): Promise<void>;
   retireUnsentRemoteAt(
-    input: { fleet?: string | undefined; workingDirectory: string; harness?: string | undefined },
+    input: {
+      fleet?: string | undefined;
+      workingDirectory: string;
+      harness?: string | undefined;
+      freshIntent?: { readonly id: string; readonly afterReceiptId: string } | undefined;
+    },
     guard: () => Promise<void>,
     projectId?: string,
   ): Promise<void>;

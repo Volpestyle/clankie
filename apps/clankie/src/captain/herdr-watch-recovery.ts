@@ -426,11 +426,17 @@ export function createHerdrWatchRecovery(ctx: Context) {
    * A causal receipt link and the operator's double census protect the allocation.
    */
   async function retireUnsentRemoteAt(
-    input: { fleet?: string | undefined; workingDirectory: string; harness?: string | undefined },
+    input: {
+      fleet?: string | undefined;
+      workingDirectory: string;
+      harness?: string | undefined;
+      freshIntent?: { readonly id: string; readonly afterReceiptId: string } | undefined;
+    },
     guard: () => Promise<void>,
     projectId?: string,
   ): Promise<void> {
-    if (thisMachineReceiptFleet(input.fleet ?? "local") || ctx.closed) return;
+    // Retrying an existing intent never settles itself or authorizes new work.
+    if (input.freshIntent || thisMachineReceiptFleet(input.fleet ?? "local") || ctx.closed) return;
     try {
       const matches = (key: string) => {
         const [fleet, harness, cwd, session] = JSON.parse(key) as unknown[];
@@ -446,13 +452,25 @@ export function createHerdrWatchRecovery(ctx: Context) {
           ctx.hireReceipts
             .entries()
             .filter(([key]) => matches(key))
-            .map(([key]) => key),
+            .map(([key, receipt]) => receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key),
         ),
       ];
       for (const key of keys) await ctx.retireUnsentRemoteHires(key, guard);
       const candidates = ctx.projectHires.unresolvedAt(input);
       for (const candidate of candidates) {
         const receipt = candidate.nativeReceipt;
+        const { freshIntent, ...launch } = candidate.request;
+        if (freshIntent) {
+          const original = ctx.hireReceipts
+            .all()
+            .find(([key, record]) => key === receipt?.key && record.messageId === receipt.id)?.[1];
+          if (
+            original?.freshHire?.id !== freshIntent.id ||
+            original.freshHire.afterReceiptId !== freshIntent.afterReceiptId ||
+            !isDeepStrictEqual(original.freshHire.launch, { ...launch, projectId: candidate.projectId })
+          )
+            continue;
+        }
         if (
           projectId === undefined ||
           candidate.projectId !== projectId ||
