@@ -52,6 +52,7 @@ async function guideSignals(path: string, name: string): Promise<Signal[]> {
 
 async function repoSignals(path: string, name: string): Promise<Signal[]> {
   const signals = await guideSignals(path, name);
+  // allow-swallowed-rejection -- an unreadable convention is simply one signal fewer
   const convention = await readConvention(path).catch(() => undefined);
   if (convention?.backend === "github")
     signals.push({

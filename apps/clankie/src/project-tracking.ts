@@ -28,6 +28,18 @@ export function createProjectTrackingService(options: {
   readonly suggest?: (project: Project) => Promise<ProjectTrackingSuggestion | undefined>;
   readonly logger?: TrackingLogger;
 }) {
+  // A suggestion is a convenience: failing to read one never blocks a view or a sweep.
+  const suggestionFor = async (project: Project) => {
+    try {
+      return await options.suggest?.(project);
+    } catch (error) {
+      options.logger?.warn(
+        { event: "project_tracking.suggest_failed", projectId: project.id, error: String(error) },
+        "Could not read a project's tracking signals",
+      );
+      return undefined;
+    }
+  };
   const forEachRepo = async (
     project: Project,
     visit: (api: GithubApi, repo: string) => Promise<TrackingRepoStatus>,
@@ -52,7 +64,7 @@ export function createProjectTrackingService(options: {
       const project = current.projects.projects.find((saved) => saved.id === projectId);
       if (!project) return undefined;
       const tracker = project.tracking?.tracker;
-      const suggestion = await options.suggest?.(project).catch(() => undefined);
+      const suggestion = await suggestionFor(project);
       return {
         projectId,
         revision: projectsRevision(current.projects),
@@ -87,7 +99,7 @@ export function createProjectTrackingService(options: {
           proposes ? proposeTrackingRepo(api, repo, tracker) : inspectTrackingRepo(api, repo, tracker),
         );
         const unsettled = statuses.filter((status) => status.state !== "in_step");
-        const suggestion = await options.suggest?.(project).catch(() => undefined);
+        const suggestion = await suggestionFor(project);
         const fields = {
           event: "project_tracking.sweep",
           projectId: project.id,
@@ -145,6 +157,7 @@ export function createProjectTrackingRoutes(
     return view ? context.json(view) : context.json({ error: "unknown_project" }, 404);
   });
   app.post(PROJECT_TRACKING_APPLY_PATH, async (context) => {
+    // allow-swallowed-rejection -- an unreadable body is the malformed reply below
     const input = ApplyProjectTrackingSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
     const result = await service.apply(input.data.projectId, input.data.expectedRevision);
