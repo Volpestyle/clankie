@@ -74,6 +74,7 @@ export async function installedPiReceiptFixture(cleanup: (close: () => unknown |
     effort: "off",
   };
   const capability = await discoverPiNativeCapability(launch);
+  // allow-no-sandbox -- loads Pi's own installed package by path for scratch SettingsManager, not Playwright
   const sdk = await import(
     /* @vite-ignore */ pathToFileURL(join(dirname(dirname(dirname(capability.cli))), "dist/index.js")).href
   );
