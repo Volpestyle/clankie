@@ -100,6 +100,7 @@ export interface RegisterConversationRoutesContext {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
+  readonly authorizeOwner: (request: Request) => Promise<true | "authentication_required" | "forbidden">;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers?: ConnectorPromptAnswers;
   readonly clock: () => Date;
@@ -164,13 +165,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         context.header("cache-control", "no-store");
         // Owner operator or a paired Take Control device; ordinary fleet workers and support reads are excluded.
         const authorize = async () => {
-          const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-          if (operator && operator !== "unavailable") return true;
-          if (path === FLEET_REPORT_LEADS_PATH) return false;
-          const device = await ctx.authenticateDevice(context.req.raw);
-          if (device === "unavailable" || "denied" in device || !device.grants.terminalControl) return false;
-          const record = ctx.devices.get(device.deviceId);
-          return ownerDeviceRecord(record, ctx.devices);
+          if (path === FLEET_REPORT_LEADS_PATH) {
+            const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
+            return Boolean(operator && operator !== "unavailable");
+          }
+          return (await ctx.authorizeOwner(context.req.raw)) === true;
         };
         if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
         if (path === FLEET_REPORT_LEADS_PATH) {
@@ -493,6 +492,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
     principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
   const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
+    if ((await ctx.authorizeOwner(request)) !== true) return undefined;
     const deviceRequest = request;
     const device = await ctx.authenticateDevice(deviceRequest);
     if (device !== "unavailable" && !("denied" in device)) {
@@ -504,6 +504,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         return (
           record?.status === "active" &&
           record.grants.terminalControl &&
+          ownerPairedDeviceRecord(record, ctx.devices) &&
           now.getTime() < sessionExpiresAt &&
           !isDeviceRunExpired(record, now)
         );
@@ -518,7 +519,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
             fresh !== "unavailable" &&
             !("denied" in fresh) &&
             fresh.deviceId === device.deviceId &&
-            fresh.grants.terminalControl &&
+            (await ctx.authorizeOwner(deviceRequest)) === true &&
             eligible()
           );
         },
@@ -1672,13 +1673,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
    */
   ctx.app.on(["GET", "POST"], ROUTINES_PATH, async (context) => {
     context.header("cache-control", "no-store");
-    const operator = await authenticateOperator(context.req.raw, ctx.dependencies);
-    if (!operator || operator === "unavailable") {
-      const device = await ctx.authenticateDevice(context.req.raw);
-      if (device === "unavailable" || "denied" in device)
-        return context.json({ error: "authentication_required" }, 401);
-      if (!device.grants.terminalControl) return context.json({ error: "forbidden" }, 403);
-    }
+    const decision = await ctx.authorizeOwner(context.req.raw);
+    if (decision !== true) return context.json({ error: decision }, decision === "forbidden" ? 403 : 401);
     const parsed =
       context.req.method === "GET"
         ? RoutineCommandSchema.safeParse({ action: "list" })
@@ -1689,7 +1685,12 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         400,
       );
     try {
-      return context.json(await ctx.dependencies.captain.routineCommand(parsed.data));
+      return context.json(
+        await ctx.dependencies.captain.routineCommand(parsed.data, async () => {
+          if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+            throw new RoutineError("forbidden", "Owner authority changed");
+        }),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const code = error instanceof RoutineError ? error.code : "refused";
@@ -1729,8 +1730,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     return context.json({ schemaVersion: 1 as const, items });
   });
   /**
-   * Built-in tracker calls from an authenticated owner principal. A terminalControl
-   * device is always the owner's app. The operator bearer proves a local caller (the
+   * Built-in tracker calls from an authenticated owner principal. A paired device
+   * must pass the shared owner decision. The operator bearer proves a local caller (the
    * lead seat, a hire, or the owner's own terminal), not the human at the keyboard, so
    * `/v1/tracker/call` (every `clankie work` tracker verb) is Clankie writing for the
    * owner (LOCAL-VUH-1). `/v1/tracker/owner/call` (`clankie work owner`) is the owner

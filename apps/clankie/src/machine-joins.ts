@@ -235,8 +235,8 @@ export class MachineJoins {
   async legacyJoinsEnabled(): Promise<boolean> {
     return (await this.options.settings.load()).legacyMachineJoins;
   }
-  async setLegacyJoinsEnabled(enabled: boolean): Promise<void> {
-    await this.options.settings.update((current) => ({ ...current, legacyMachineJoins: enabled }));
+  async setLegacyJoinsEnabled(enabled: boolean, guard?: () => Promise<void>): Promise<void> {
+    await this.options.settings.update((current) => ({ ...current, legacyMachineJoins: enabled }), guard);
   }
   start(raw: unknown) {
     const input = MachineJoinStartSchema.parse(raw);

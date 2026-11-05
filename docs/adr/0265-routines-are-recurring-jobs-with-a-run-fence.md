@@ -52,7 +52,7 @@ policy, owned by the service in `<state>/routines/`.
   `catch_up`, `manual`), slot, status, start, finish, duration, a one-sentence
   detail, links. History reads newest first.
 - **Surfaces.** One API, `POST /v1/captain/routines` with a `RoutineCommand`
-  (operator auth, or a Take Control device through the relay, as the fleet
+  (operator auth, or an owner-paired Take Control device through the relay, as the fleet
   roster): `list`, `add`, `edit`, `pause`, `resume`, `run_now`,
   `remove`, `history`. `clankie routines` is a thin client of it, as are the
   TUI's `/routines`, the app's Settings > Routines and the desktop pet's menu

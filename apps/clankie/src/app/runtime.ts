@@ -108,7 +108,7 @@ import {
   WorkRequestError,
 } from "../work-items.ts";
 import { WorkerGrantRequestSchema } from "../worker-mcp.ts";
-import { registerConversationRoutes } from "./conversation-routes.ts";
+import { ownerPairedDeviceRecord, registerConversationRoutes } from "./conversation-routes.ts";
 import { PROFILE_HASH, discordPresenceBindingKey } from "./body-presence.ts";
 import { authenticateCaptain, authenticateOperator, captainTransportKind, readJson } from "./http-auth.ts";
 import { logger } from "./log.ts";
@@ -615,7 +615,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     }),
   );
-  /** Owner operator or a current Take Control device: model keys and account connections. */
+  /** Owner operator or an owner device with current Take Control authority. */
   const authorizeOwnerSecrets = async (
     request: Request,
   ): Promise<true | "authentication_required" | "forbidden"> => {
@@ -623,7 +623,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     if (operator && operator !== "unavailable") return true;
     const device = await authenticateDevice(request);
     if (device === "unavailable" || "denied" in device) return "authentication_required";
-    return device.grants.terminalControl ? true : "forbidden";
+    return device.grants.terminalControl && ownerPairedDeviceRecord(devices.get(device.deviceId), devices)
+      ? true
+      : "forbidden";
   };
   app.route(
     "/",
@@ -638,7 +640,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         const operator = await authenticateOperator(request, dependencies);
         if (operator && operator !== "unavailable") return `operator:${operator.operatorId}`;
         const device = await authenticateDevice(request);
-        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+        if (device === "unavailable" || "denied" in device || (await authorizeOwnerSecrets(request)) !== true)
           return undefined;
         return `device:${device.deviceId}`;
       },
@@ -668,19 +670,26 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         return !(await readCaptainReadiness()).ready;
       },
       signInAuthority: async (request) => {
+        if ((await authorizeOwnerSecrets(request)) !== true) return undefined;
         const operator = await authenticateOperator(request, dependencies);
         if (operator && operator !== "unavailable")
           return {
             principal: `operator:${operator.operatorId}`,
             commit: async (operation) => {
               const fresh = await authenticateOperator(request, dependencies);
-              if (!fresh || fresh === "unavailable" || fresh.operatorId !== operator.operatorId) return false;
+              if (
+                !fresh ||
+                fresh === "unavailable" ||
+                fresh.operatorId !== operator.operatorId ||
+                (await authorizeOwnerSecrets(request)) !== true
+              )
+                return false;
               await operation();
               return true;
             },
           };
         const device = await authenticateDevice(request);
-        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+        if (device === "unavailable" || "denied" in device || (await authorizeOwnerSecrets(request)) !== true)
           return undefined;
         return {
           principal: `device:${device.deviceId}`,
@@ -691,7 +700,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
                 fresh === "unavailable" ||
                 "denied" in fresh ||
                 fresh.deviceId !== device.deviceId ||
-                !fresh.grants.terminalControl
+                (await authorizeOwnerSecrets(request)) !== true
               )
                 return false;
               await operation();
@@ -784,12 +793,10 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     "/",
     createViewRoutes(
       async (request) => {
+        const allowed = await authorizeOwnerSecrets(request);
+        if (allowed !== true) return allowed;
         const operator = await authenticateOperator(request, dependencies);
-        if (operator && operator !== "unavailable") return "operator";
-        // The same owner authority as `authorizeOwnerSecrets`, naming which caller it is.
-        const device = await authenticateDevice(request);
-        if (device === "unavailable" || "denied" in device) return "authentication_required";
-        return device.grants.terminalControl ? "device" : "forbidden";
+        return operator && operator !== "unavailable" ? "operator" : "device";
       },
       dependencies.views,
       {
@@ -1679,8 +1686,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     const parsed = GameplaySettingsSchema.safeParse(await readJson(context.req.raw));
     if (!parsed.success) return context.json({ error: "invalid_game_configuration" }, 400);
     if (settingsSource.update === undefined) return context.json({ error: "settings_unavailable" }, 503);
-    const updated = await settingsSource.update((current) => ({ ...current, gameplay: parsed.data }));
-    return context.json({ games: updated.gameplay, restart: "clankie restart" });
+    try {
+      const updated = await settingsSource.update(
+        (current) => ({ ...current, gameplay: parsed.data }),
+        async () => {
+          if ((await authorizeOwnerSecrets(context.req.raw)) !== true) throw Error("owner_revoked");
+        },
+      );
+      return context.json({ games: updated.gameplay, restart: "clankie restart" });
+    } catch {
+      return context.json({ error: "game_configuration_conflict" }, 409);
+    }
   });
 
   app.post("/v1/embodiment/sessions/live/guide", async (context) => {
@@ -2579,6 +2595,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     );
   });
   const { runRevocationTimer } = registerPairingRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     get supportGrants() {
       return supportGrants;
     },
@@ -2627,6 +2644,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
   // After pairing: its middleware expires automation credentials before any route reads them.
   const closeMacAccountRoutes = registerMacAccountRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     app,
     dependencies,
     clock,
@@ -2650,6 +2668,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     detection,
   });
   const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     get app() {
       return app;
     },

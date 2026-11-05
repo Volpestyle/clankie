@@ -5689,7 +5689,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
 
     evaluatorStatus: () => evaluator.status(),
     evaluatorCommand: (command) => evaluator.command(command),
-    routineCommand: (command) => routines.command(command, { kind: "owner" }),
+    routineCommand: (command, authorized) => routines.command(command, { kind: "owner" }, authorized),
 
     observeConnectorLead: (input) => fleetLeadActivity.record(input),
     async fleetLeadTarget(seatId) {

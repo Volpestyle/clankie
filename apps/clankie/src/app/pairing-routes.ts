@@ -98,6 +98,7 @@ export interface RegisterPairingRoutesContext {
   readonly deviceDenialResponse: (context: Context, denial: DeviceAuthDenial) => Response;
   readonly deviceLocks: Map<string, Promise<unknown>>;
   readonly devices: DeviceRegistry;
+  readonly authorizeOwner: (request: Request) => Promise<true | "authentication_required" | "forbidden">;
   readonly completionTokens: Map<string, PendingCompletion>;
   readonly hostDisplayName: string;
 }
@@ -351,11 +352,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const device = await ctx.authenticateDevice(request);
     if (device === "unavailable") return { error: "device_authentication_unavailable", status: 503 } as const;
     if ("denied" in device) return { error: "operator_authentication_required", status: 401 } as const;
-    if (
-      !device.grants.terminalControl ||
-      !ownerPairedDeviceRecord(ctx.devices.get(device.deviceId), ctx.devices)
-    )
-      return { error: "forbidden", status: 403 } as const;
+    if ((await ctx.authorizeOwner(request)) !== true) return { error: "forbidden", status: 403 } as const;
     return { mintedBy: `device:${device.deviceId}`, device: true } as const;
   };
 
@@ -613,6 +610,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           401,
         );
       }
+      // Control-session renewal shares the owner-device decision used by owner routes.
+      if (record.grants.terminalControl && !ownerPairedDeviceRecord(record, ctx.devices))
+        return context.json({ error: "forbidden" }, 403);
       const claims = mintDeviceSessionClaims({
         deviceId: identity.deviceId,
         nowEpochSeconds: Math.floor(now.getTime() / 1000),
@@ -821,13 +821,7 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
     const device = operator ? undefined : await ctx.authenticateDevice(context.req.raw);
     if (!operator && (device === undefined || device === "unavailable" || "denied" in device))
       return context.json({ error: "authentication_required" }, 401);
-    if (
-      !operator &&
-      device &&
-      device !== "unavailable" &&
-      !("denied" in device) &&
-      !device.grants.terminalControl
-    )
+    if ((await ctx.authorizeOwner(context.req.raw)) !== true)
       return context.json({ error: "forbidden" }, 403);
     const revokedBy = operator ? operator.operatorId : (device as TrustedDeviceIdentity).deviceId;
     const deviceId = context.req.param("id");
@@ -839,8 +833,9 @@ export function registerPairingRoutes(ctx: RegisterPairingRoutesContext) {
           return context.json({ error: "device_authentication_unavailable" }, 503);
         if ("denied" in current || current.deviceId !== revokedBy)
           return context.json({ error: "authentication_required" }, 401);
-        if (!current.grants.terminalControl) return context.json({ error: "forbidden" }, 403);
       }
+      if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+        return context.json({ error: "forbidden" }, 403);
       const now = ctx.clock();
       const record = ctx.devices.get(deviceId);
       if (record === undefined || isDevicePendingExpired(record, now))

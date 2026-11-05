@@ -7,7 +7,7 @@ Each harness runs its own official login; credentials stay in that harness's
 own store. This is separate from [model keys](model-keys.md), which configure
 Clankie's own model.
 
-Every route requires the local operator bearer or a paired device whose grant
+Every route requires the local operator bearer or a paired owner device whose grant
 includes `terminalControl` (Take Control); support access cannot call them.
 Public gateway calls use the encrypted device envelope. Schemas and paths live
 in `@clankie/protocol/harness-logins`.

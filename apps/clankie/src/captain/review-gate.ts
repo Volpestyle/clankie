@@ -35,7 +35,8 @@ export type ReviewRefusal = {
     | "not_reviewer"
     | "already_decided"
     | "superseded"
-    | "store_unavailable";
+    | "store_unavailable"
+    | "authority_changed";
   readonly detail: string;
 };
 
@@ -500,6 +501,7 @@ export class ReviewGate {
   waive(
     input: ReviewWaiverInput,
     waiver: Omit<ReviewWaiver, "at" | "reason">,
+    authorized?: () => Promise<void>,
   ): Promise<ReviewCandidate | ReviewRefusal> {
     return this.serial(async () => {
       if (this.unreadable)
@@ -524,6 +526,11 @@ export class ReviewGate {
           error: "no_reviewer",
           detail: `Project ${projectId} names no reviewer; nothing needs waiving.`,
         };
+      try {
+        await authorized?.();
+      } catch {
+        return { error: "authority_changed", detail: "Review waiver authority changed; nothing was waived." };
+      }
       const recorded: ReviewWaiver = { ...waiver, reason: input.reason, at: new Date().toISOString() };
       const existing = this.list(projectId).find(
         (candidate) => candidate.patchId === patchId && candidate.status !== "superseded",

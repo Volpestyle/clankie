@@ -14,15 +14,16 @@ connect` says so and changes nothing.
 
 `clankie remote-access status` shows `account.state` (`signed_in`, `signed_out`,
 `never_set_up`). The Mac app signs in through `/v1/mac-account`, `/start` and
-`/complete`; they admit this Mac's loopback only, and `complete` restarts the
-service when he is idle. A phone or the gateway cannot reach them.
+`/complete`; they admit this Mac's loopback only, with the operator credential
+or an owner-paired Take Control device. The shared owner decision is rechecked
+before account writes; `complete` restarts the service when he is idle. A phone or the gateway cannot reach them.
 
 ## Model keys and connected accounts
 
 Provider-key management uses the owner model-key API
 (`docs/model-keys.md` under the service root): GET `/v1/model-keys` lists the
 same providers/models as `/model`; POST `/set`, `/validate`, `/select`, `/remove`
-under that path manage broker API keys and the captain selection. The device
+under that path manage broker API keys and the captain selection. The owner device and its pairing ancestry must belong to the owner; it
 must accept **Take Control** (`terminalControl`) at pairing. Supervise cannot
 manage keys; the local operator bearer can. Public gateway calls must use the
 encrypted envelope. Keys are write-only: never ask for one in chat or put one in
