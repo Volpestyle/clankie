@@ -171,10 +171,13 @@ class FleetLink {
       let stderr = "";
       let failure: string | undefined;
       let port: number | undefined;
+      const assertCurrent = () => {
+        if (this.closed || this.child !== child) throw new Error("Original fleet link is no longer live");
+      };
       const publish = (allocatedPort: number) => {
         if (this.closed || this.child !== child || port !== undefined) return;
         port = allocatedPort;
-        void this.socket()
+        void this.socket(assertCurrent)
           .then((socket) => {
             if (this.closed || this.child !== child) return;
             const discovery = { fleet: this.fleet.id, socket, url: `http://127.0.0.1:${String(port)}` };
@@ -183,7 +186,7 @@ class FleetLink {
               : { ...discovery, schemaVersion: 1, token: this.token };
             return this.options.publish(async () => {
               if (this.closed || this.child !== child) return;
-              await this.options.shell(writeLinkFileCommand(this.fleet, file));
+              await this.options.shell(writeLinkFileCommand(this.fleet, file), undefined, assertCurrent);
             });
           })
           .then(() => {
@@ -268,10 +271,12 @@ class FleetLink {
   }
 
   /** The fleet's Herdr socket on that machine: how its panes say which session they are in. */
-  private async socket(): Promise<string> {
+  private async socket(beforeDispatch: () => void): Promise<string> {
     const listed = JSON.parse(
       await this.options.shell(
         remoteProgramCommand(this.fleet.ssh.shell, "herdr", ["session", "list", "--json"]),
+        undefined,
+        beforeDispatch,
       ),
     ) as { sessions?: { name?: unknown; socket_path?: unknown }[] };
     const socket = listed.sessions?.find((session) => session.name === this.fleet.session)?.socket_path;
