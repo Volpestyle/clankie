@@ -11944,6 +11944,48 @@ and never the pilot's. The VUH-1987 rehearsal on a scratch copy of the real
 Clankie Work store shows both effects
 ([record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-25-vuh-1987-switch-back/README.md)).
 
+### Project repos and tracker
+
+`clankie project tracking PROJECT` reads a project's repos and tracker and each
+repo's state. Before anything is saved it opens with what the local repos suggest,
+and asks about what they don't settle. The private board is always asked.
+
+```sh
+clankie project tracking PROJECT
+clankie project tracking PROJECT --provider github --public-board owner/public \
+  --private-board owner/private --repo owner/one --repo owner/two
+clankie project tracking PROJECT --accept-suggestion --private-board BOARD
+clankie project tracking PROJECT apply
+clankie project tracking PROJECT clear
+```
+
+Unnamed fields keep their saved value, and `--repo` replaces the whole list. Saving
+proposes straight away unless you add `--no-apply`. `clear` stops managing the blocks
+and leaves them in the repos.
+
+Clankie fills a block between `<!-- clankie:tracking -->` and
+`<!-- /clankie:tracking -->` from a template, and never touches text outside the
+markers. Each repo gets one small pull request from `clankie/tracking-block`, which
+Clankie never merges. An hourly sweep repeats this for drift and only reads when the
+project's `push` preference is `owner`. The block lands in public repos too, so name
+only boards you are happy to show. A changed tracker moves no issues; the result
+offers that as separate work. See
+[ADR 0362](adr/0362-a-project-owns-its-repos-and-tracker.md).
+
+| State         | Meaning                                                                       |
+| ------------- | ----------------------------------------------------------------------------- |
+| `in_step`     | The default branch matches; `confirmedPull` is the merged proposal read back. |
+| `drifted`     | The block is missing or differs, with no matching proposal open.              |
+| `proposed`    | This exact block is in an open pull request.                                  |
+| `declined`    | You closed this exact proposal. The sweep leaves it; `apply` reopens it.      |
+| `refused`     | Clankie won't write here until you act; `reason` says why.                    |
+| `unavailable` | The forge could not be reached; the next pass retries.                        |
+
+`refused` reasons: `malformed_markers`, `unclosed_code_fence`, `duplicate_blocks`,
+`unsupported_guide`, `guide_too_large`, `guide_not_utf8`, `repository_archived`,
+`repository_moved` and `proposal_branch_edited`. The last means someone else's commit
+is on the proposal branch: merge or delete it.
+
 ### Work tracker settings
 
 `clankie fleet tracker` reads the default for new projects. `clankie project
