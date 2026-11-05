@@ -451,7 +451,7 @@ it.each([1, 2, 3])(
 
 // The terminal fixture implements the real JSONL boundary and executes a real
 // diagnostic subprocess. Its observations are labelled fixtures, not native TCC proof.
-async function permissionTerminal(native = false, desktop = false) {
+async function permissionTerminal(native = false, desktop = false, desktopAddress = "t2k") {
   const root = await mkdtemp("/tmp/clankie-permission-test-");
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const helper = native
@@ -523,7 +523,7 @@ await writeFile(output,JSON.stringify({nonce:${kind === "nonce" ? "'wrong'" : "n
             id: request.id,
             result:
               request.method === "terminal.run"
-                ? { address: "t909" }
+                ? { address: desktopAddress }
                 : request.method === "layout.apply"
                   ? { layout: { root: { type: "pane", pane_id: "wfixture:pcheck" } } }
                   : { closed: true },
@@ -753,17 +753,24 @@ it("revocation during request preparation prevents even the first diagnostic lau
   expect(terminal.calls).toEqual([]);
 });
 
-it("desktop-host API checks use generation-checked terminal.run and clean up only the new diagnostic", async () => {
-  const terminal = await permissionTerminal(false, true);
-  const f = await fixture(false, terminal.check);
-  expect(await f.cli("permissions", "--request")).toMatchObject({
-    state: "observed",
-    observation: { actor: { name: "Fixture terminal" } },
-  });
-  expect(terminal.calls.map((call) => call.method)).toEqual(["terminal.run", "terminal.kill", "terminal.rm"]);
-  for (const call of terminal.calls.filter((call) => call.method !== "terminal.run"))
-    expect(call.params.terminal).toBe("t909");
-});
+it.each(["t1", "t909", "t2k", "t6kf3jk5"])(
+  "desktop-host API accepts native address %s and cleans up only that diagnostic",
+  async (address) => {
+    const terminal = await permissionTerminal(false, true, address);
+    const f = await fixture(false, terminal.check);
+    expect(await f.cli("permissions", "--request")).toMatchObject({
+      state: "observed",
+      observation: { actor: { name: "Fixture terminal" } },
+    });
+    expect(terminal.calls.map((call) => call.method)).toEqual([
+      "terminal.run",
+      "terminal.kill",
+      "terminal.rm",
+    ]);
+    for (const call of terminal.calls.filter((call) => call.method !== "terminal.run"))
+      expect(call.params.terminal).toBe(address);
+  },
+);
 
 it.each(["terminal.run", "terminal.kill", "terminal.rm"])(
   "desktop-host revocation during %s prevents observation publication",
@@ -818,3 +825,30 @@ it("concurrent API requests cannot launch twice while asynchronous host selectio
   expect(await request).toMatchObject({ state: "observed" });
   expect(terminal.calls.filter((c) => c.method === "layout.apply")).toHaveLength(1);
 });
+
+it.each([
+  "",
+  "t0",
+  "t01",
+  "t2a",
+  "t2l",
+  "t2K",
+  "other/t2k",
+  "t2k/other",
+  "t2k\n",
+  "t2k\u2028",
+  "t9zzzzzz",
+  "t10000000",
+])(
+  "desktop-host API refuses non-native address %j without reading or cleaning up an unrelated terminal",
+  async (address) => {
+    const terminal = await permissionTerminal(false, true, address);
+    const f = await fixture(false, terminal.check);
+    expect(await f.cli("permissions", "--request")).toEqual({
+      state: "unavailable",
+      reason: "launch_unconfirmed",
+    });
+    expect((await f.state()).permissions).toEqual({ state: "unavailable", reason: "not_checked" });
+    expect(terminal.calls.map((call) => call.method)).toEqual(["terminal.run"]);
+  },
+);

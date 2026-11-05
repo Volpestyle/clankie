@@ -22,6 +22,24 @@ const Created = z.object({
   }),
 });
 
+// herdr-core terminals.rs: address/parse_id use a leading digit 1–9,
+// then this 30-symbol alphabet, with a nonzero u32 counter. Local IDs only.
+const DesktopTerminalAddress = z.string().refine((address) => {
+  if (!/^t[1-9][0-9bcdfghjkmnpqrstvwxyz]{0,6}$/u.test(address)) return false;
+  let rest = Number(address[1]) - 1;
+  let before = 0;
+  let size = 9;
+  for (const symbol of address.slice(2)) {
+    const digit = "0123456789bcdfghjkmnpqrstvwxyz".indexOf(symbol);
+    // Also refuses a final line separator (JavaScript's $ can match before it).
+    if (digit < 0) return false;
+    rest = rest * 30 + digit;
+    before += size;
+    size *= 30;
+  }
+  return before + rest + 1 <= 0xffff_ffff;
+});
+
 /** One fixed diagnostic in a new owned terminal. No existing terminal receives input. */
 export function createDesktopPermissionCheck(options: {
   binding: () =>
@@ -89,7 +107,7 @@ export function createDesktopPermissionCheck(options: {
             return unavailable("launch_unconfirmed");
           }
           if (desktop) {
-            const created = z.object({ address: z.string().regex(/^t[0-9]+$/u) }).safeParse(reply);
+            const created = z.object({ address: DesktopTerminalAddress }).safeParse(reply);
             if (!created.success) return unavailable("launch_unconfirmed");
             pane = created.data.address;
           } else {
