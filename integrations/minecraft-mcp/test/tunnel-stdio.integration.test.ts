@@ -39,7 +39,46 @@ test("real MCP process exposes noninteractive claim status and idle polling with
 
 // A real delayed Cargo build and HTTP exchange exercise request completion and
 // the retained preparation job, without replacing process/filesystem/HTTP APIs.
-test("claim preparation survives returned requests and reuses one real delayed Cargo build", async () => {
+test("claim preparation survives returned requests and reuses one real delayed Cargo build", async (context) => {
+  const started = performance.now();
+  const stages: Array<{
+    name: string;
+    startedAt: string;
+    startMs: number;
+    endMs?: number;
+    outcome: "running" | "completed" | "failed";
+  }> = [];
+  const measure = async <T>(name: string, operation: () => Promise<T>): Promise<T> => {
+    const entry: (typeof stages)[number] = {
+      name,
+      startedAt: new Date().toISOString(),
+      startMs: performance.now() - started,
+      outcome: "running",
+    };
+    stages.push(entry);
+    try {
+      const result = await operation();
+      entry.outcome = "completed";
+      return result;
+    } catch (error) {
+      entry.outcome = "failed";
+      throw error;
+    } finally {
+      entry.endMs = performance.now() - started;
+    }
+  };
+  context.onTestFailed(() => {
+    const elapsed = performance.now() - started;
+    console.error(
+      "Minecraft claim failure stages:",
+      JSON.stringify(
+        stages.map(({ endMs, ...entry }) => ({
+          ...entry,
+          durationMs: (endMs ?? elapsed) - entry.startMs,
+        })),
+      ),
+    );
+  });
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
   const { createServer } = await import("node:http");
@@ -51,6 +90,7 @@ test("claim preparation survives returned requests and reuses one real delayed C
   const secret = "abcdef0123456789".repeat(4);
   let setups = 0;
   let exchanges = 0;
+  let claimPolls = 0;
   const provider = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -95,14 +135,16 @@ test("claim preparation survives returned requests and reuses one real delayed C
       install: () => {
         installation = (async () => {
           installs++;
-          await run("cargo", ["build", "--release", "--offline"], {
-            cwd: dataDir,
-            env: {
-              ...process.env,
-              // Vitest isolates HOME; use the installed toolchain with a fixture-owned Cargo cache.
-              RUSTUP_HOME: join((await import("node:os")).userInfo().homedir, ".rustup"),
-              CARGO_HOME: join(dataDir, "cargo-home"),
-            },
+          await measure("Cargo build", async () => {
+            await run("cargo", ["build", "--release", "--offline"], {
+              cwd: dataDir,
+              env: {
+                ...process.env,
+                // Vitest isolates HOME; use the installed toolchain with a fixture-owned Cargo cache.
+                RUSTUP_HOME: join((await import("node:os")).userInfo().homedir, ".rustup"),
+                CARGO_HOME: join(dataDir, "cargo-home"),
+              },
+            });
           });
           const binary = join(dataDir, "target/release/claim-preparation-fixture");
           const hash = createHash("sha256")
@@ -114,37 +156,50 @@ test("claim preparation survives returned requests and reuses one real delayed C
         return installation;
       },
       api: async (path, input) => {
-        const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
-          method: "POST",
-          body: JSON.stringify(input),
-          headers: { "content-type": "application/json" },
+        const stage = path === "/claim/setup" ? `claim API poll ${++claimPolls}` : "claim API exchange";
+        return measure(stage, async () => {
+          const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
+            method: "POST",
+            body: JSON.stringify(input),
+            headers: { "content-type": "application/json" },
+          });
+          const result = (await response.json()) as { data: unknown };
+          return result.data;
         });
-        const result = (await response.json()) as { data: unknown };
-        return result.data;
       },
     });
     closeTunnel = () => tunnel.close();
-    const before = performance.now();
-    expect(await tunnel.prepareClaim()).toEqual({ phase: "preparing", claimed: false });
-    expect(performance.now() - before).toBeLessThan(500);
-    expect(await tunnel.prepareClaim()).toEqual({ phase: "preparing", claimed: false });
-    expect(await tunnel.completeClaim()).toEqual({ phase: "preparing", claimed: false });
-    expect(tunnel.claimStatus().phase).toBe("preparing");
-    expect(installs).toBe(1);
-    // The caller has completed while the same real Cargo build continues. Its
-    // completion is the fixture boundary; the publication deadline starts there,
-    // so compiler startup or host contention cannot consume the claim's budget.
-    expect(installation).toBeDefined();
-    await installation;
-    await expect.poll(() => tunnel.claimStatus().phase, { timeout: 10_000 }).toBe("pending");
+    await measure("claim preparation", async () => {
+      const before = performance.now();
+      expect(await tunnel.prepareClaim()).toEqual({ phase: "preparing", claimed: false });
+      expect(performance.now() - before).toBeLessThan(500);
+      expect(await tunnel.prepareClaim()).toEqual({ phase: "preparing", claimed: false });
+      expect(await tunnel.completeClaim()).toEqual({ phase: "preparing", claimed: false });
+      expect(tunnel.claimStatus().phase).toBe("preparing");
+      expect(installs).toBe(1);
+      // The caller has completed while the same real Cargo build continues. Its
+      // completion is the fixture boundary; the publication deadline starts there,
+      // so compiler startup or host contention cannot consume the claim's budget.
+      expect(installation).toBeDefined();
+      await measure("wait for Cargo installation", async () => {
+        await installation;
+      });
+      await measure("poll pending publication", async () => {
+        await expect.poll(() => tunnel.claimStatus().phase, { timeout: 10_000 }).toBe("pending");
+      });
+    });
     const ready = tunnel.claimStatus();
     expect(ready.claimUrl).toMatch(/^https:\/\/playit.gg\/claim\/[a-f0-9]{10}$/);
     expect(await tunnel.prepareClaim()).toEqual(ready);
     expect(installs).toBe(1);
     // Pending publishes the URL before the first real setup request reaches the provider.
-    await expect.poll(() => setups, { timeout: 5000 }).toBe(1);
+    await measure("poll first provider request", async () => {
+      await expect.poll(() => setups, { timeout: 5000 }).toBe(1);
+    });
     expect(setups).toBe(1);
-    await expect.poll(() => tunnel.claimStatus().phase, { timeout: 5000 }).toBe("claimed");
+    await measure("poll claimed completion", async () => {
+      await expect.poll(() => tunnel.claimStatus().phase, { timeout: 5000 }).toBe("claimed");
+    });
     expect(await tunnel.completeClaim()).toEqual({ phase: "claimed", claimed: true });
     expect(await readFile(join(dataDir, "broker-secret"), "utf8")).toBe(secret);
     expect(await tunnel.prepareClaim()).toEqual({ phase: "claimed", claimed: true });
@@ -152,11 +207,19 @@ test("claim preparation survives returned requests and reuses one real delayed C
     expect(exchanges).toBe(1);
     expect(JSON.stringify([ready, tunnel.claimStatus()])).not.toContain(secret);
   } finally {
-    await closeTunnel?.();
-    await new Promise<void>((resolve, reject) =>
-      provider.close((error) => (error ? reject(error) : resolve())),
-    );
-    await rm(dataDir, { recursive: true, force: true });
+    await measure("cleanup", async () => {
+      await measure("cleanup tunnel", async () => {
+        await closeTunnel?.();
+      });
+      await measure("cleanup provider", async () => {
+        await new Promise<void>((resolve, reject) =>
+          provider.close((error) => (error ? reject(error) : resolve())),
+        );
+      });
+      await measure("cleanup files", async () => {
+        await rm(dataDir, { recursive: true, force: true });
+      });
+    });
   }
 });
 

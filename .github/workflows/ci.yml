@@ -212,6 +212,10 @@ jobs:
         with:
           node-version: 26.7.0
           cache: pnpm
+      # The reached tests include a real Cargo build; use landing's toolchain.
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy, rustfmt
       - run: sudo apt-get install -y --no-install-recommends ffmpeg zsh
       - run: pnpm install --frozen-lockfile
       - run: pnpm herdr:build
