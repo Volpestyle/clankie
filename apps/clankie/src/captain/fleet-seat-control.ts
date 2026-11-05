@@ -616,6 +616,14 @@ export function createFleetSeatControl(
           : { outcome: "unconfirmed", detail: String(error) };
       }
     }
+    // A refused Pi attachment is final: direct prompting must not bypass its native proof.
+    if (isMessageableSeat(current) && (current.agent === "pi" || current.session?.source === "herdr:pi")) {
+      return {
+        outcome: "undelivered",
+        deliveryStage: "unavailable",
+        detail: "Native Pi attachment could not be proved; no terminal input was sent.",
+      };
+    }
     // A Codex queue that proved it can't take the message and sent nothing, such as a plain
     // TUI with no shared app server, is no lane, so direct prompting may still type it (ADR 0334).
     let unreachableQueue: FleetSeatDelivery | undefined;
