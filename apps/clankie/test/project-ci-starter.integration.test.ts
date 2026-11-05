@@ -43,11 +43,49 @@ function run(
     child.stderr.on("data", (value) => {
       stderr += value;
     });
+    let inputError: NodeJS.ErrnoException | undefined;
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      inputError = error;
+    });
     child.on("error", reject);
-    child.on("close", (code) => done({ code, stdout, stderr }));
-    child.stdin.end(input);
+    child.on("close", (code) => {
+      // A command may reject its input and exit first. Keep its real failure,
+      // but never report success when required input was not delivered.
+      if (inputError && (inputError.code !== "EPIPE" || (code === 0 && input.length > 0))) reject(inputError);
+      else done({ code, stdout, stderr });
+    });
+    if (input.length > 0) child.stdin.end(input);
+    else child.stdin.end();
   });
 }
+// Larger than the native pipe buffer: the write must still be pending when the
+// child closes fd 0. This forces the broken-pipe path without timing or retries.
+const closedStdinInput = "x".repeat(16 * 1024 * 1024);
+const closedStdinChild = (code: number) => [
+  "-e",
+  `require("node:fs").closeSync(0); process.stdout.write("closed stdin\\n"); process.stderr.write("child diagnostic\\n"); process.exitCode = ${code};`,
+];
+
+it("closed stdin preserves the real child's nonzero status and diagnostics", async () => {
+  expect(await run(process.execPath, closedStdinChild(37), repo, closedStdinInput)).toEqual({
+    code: 37,
+    stdout: "closed stdin\n",
+    stderr: "child diagnostic\n",
+  });
+});
+
+it("closed stdin cannot turn undelivered input into a successful child result", async () => {
+  await expect(run(process.execPath, closedStdinChild(0), repo, closedStdinInput)).rejects.toMatchObject({
+    code: "EPIPE",
+  });
+});
+
+it("a child that cannot start still reports its real spawn failure", async () => {
+  await expect(run(join(await scratch(), "missing-executable"), [], repo, "input")).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
 const request = {
   schemaVersion: 1,
   profile: "pnpm-vitest-4",
