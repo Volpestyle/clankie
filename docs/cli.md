@@ -425,6 +425,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
                            Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
   maximum-trust-mode [status|on|off]
                            Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you (JSON)
+  fleet digest [--json]  Read an aggregate daily fleet digest, owner attention first
   fleet leads [--json]  Read active Clankie and connected app leads
   fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
