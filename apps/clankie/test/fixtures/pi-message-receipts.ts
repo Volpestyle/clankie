@@ -32,6 +32,7 @@ export async function piFixture(enabled?: () => Promise<boolean>) {
   let beforeSendPreparation: (() => Promise<void>) | undefined;
   let preparingSend = false;
   let beforeNativeClaim: (() => Promise<void>) | undefined;
+  let beforeNativeClaimReply: (() => Promise<void>) | undefined;
   const root = {
     paneId: "w1:p1",
     terminalId: "terminal",
@@ -125,10 +126,32 @@ export async function piFixture(enabled?: () => Promise<boolean>) {
     effort: "high",
   };
   let sendCommands = 0;
+  const positiveReplies: string[] = [];
   const connect = (prepared: Pick<import("@clankie/agent-hosts").PreparedSeatLaunch, "env">) => {
     const connection = connectPiWorker(
       { port: Number(prepared.env?.CLANKIE_PI_WORKER_PORT), token: prepared.env!.CLANKIE_PI_WORKER_TOKEN! },
       (controller) => {
+        const bridge = controller as {
+          authorize(action: string): Promise<unknown>;
+          claim(input: unknown): Promise<unknown>;
+        };
+        const authorize = bridge.authorize.bind(bridge);
+        bridge.authorize = async (action: string) => {
+          const result = await authorize(action);
+          if (action === "send") positiveReplies.push("authorize");
+          return result;
+        };
+        const claim = bridge.claim.bind(bridge);
+        bridge.claim = async (input: unknown) => {
+          if (beforeNativeClaimReply) {
+            const hook = beforeNativeClaimReply;
+            beforeNativeClaimReply = undefined;
+            await hook();
+          }
+          const result = await claim(input);
+          positiveReplies.push("claim");
+          return result;
+        };
         const runtime = createPiWorkerRuntime(pi, controller);
         const send = runtime.send.bind(runtime);
         runtime.send = (...args) => {
@@ -161,6 +184,10 @@ export async function piFixture(enabled?: () => Promise<boolean>) {
   };
   return {
     sendCommands: () => sendCommands,
+    positiveReplies: () => [...positiveReplies],
+    beforeNativeClaimReply: (hook: () => Promise<void>) => {
+      beforeNativeClaimReply = hook;
+    },
     beforeNativeClaim: (hook: () => Promise<void>) => {
       beforeNativeClaim = hook;
     },

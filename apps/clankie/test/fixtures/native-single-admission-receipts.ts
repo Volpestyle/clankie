@@ -250,13 +250,15 @@ export async function claudeReceiptFixture() {
   const polling = (async () => {
     while (!stopped) {
       const events = await outbox.poll(1000);
-      for (const event of events)
+      for (const event of events) {
+        admitted++;
         entries.push({
           type: "message",
           id: event.id,
           role: "operator",
           text: `<channel source="clankie-worker">\n${event.content}\n</channel>`,
         });
+      }
     }
   })();
   cleanup.push(async () => {
@@ -281,7 +283,6 @@ export async function claudeReceiptFixture() {
     mailbox: {
       bound: () => outbox.bound(),
       deliver: (_seat, text) => {
-        admitted++;
         const delivery = outbox.deliver({
           kind: "message",
           conversationId: "receipt-conversation",

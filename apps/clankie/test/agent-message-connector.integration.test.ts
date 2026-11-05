@@ -749,7 +749,7 @@ it("refuses unsupported queued receipt modes before creating a native delivery",
   expect(f.sends()).toBe(0);
 });
 
-it.each(["beforeSendPreparation", "beforeNativeClaim"] as const)(
+it.each(["beforeSendPreparation", "beforeNativeClaim", "beforeNativeClaimReply", "stable"] as const)(
   "refuses a revoked app through the production Pi adapter at %s",
   async (boundary) => {
     const p = await piFixture();
@@ -759,11 +759,13 @@ it.each(["beforeSendPreparation", "beforeNativeClaim"] as const)(
     p.finish();
     const before = p.sendMessage.mock.calls.length;
     const commands = p.sendCommands();
+    const replies = p.positiveReplies().length;
     const f = await fixture({ control: started.control, file: p.file }),
       client = await f.client();
-    p[boundary](async () => {
-      expect((await f.revoke()).status).toBe(200);
-    });
+    if (boundary !== "stable")
+      p[boundary](async () => {
+        expect((await f.revoke()).status).toBe(200);
+      });
     const result = await client.callTool({
       name: "message_agent",
       arguments: {
@@ -772,9 +774,21 @@ it.each(["beforeSendPreparation", "beforeNativeClaim"] as const)(
         receipt: true,
       },
     });
-    expect(p.sendMessage.mock.calls.length - before).toBe(0);
+    if (boundary === "stable") {
+      expect(p.sendMessage.mock.calls.length - before).toBe(1);
+      expect(decoded(result).status).toBe("delivered");
+    } else {
+      expect(p.sendMessage.mock.calls.length - before).toBe(0);
+      expect(result.isError || JSON.stringify(result).includes("offline")).toBe(true);
+    }
     expect(p.sendCommands() - commands).toBe(boundary === "beforeSendPreparation" ? 0 : 1);
-    expect(result.isError || JSON.stringify(result).includes("offline")).toBe(true);
+    expect(p.positiveReplies().slice(replies)).toEqual(
+      boundary === "stable"
+        ? ["authorize", "claim"]
+        : boundary === "beforeNativeClaimReply"
+          ? ["authorize"]
+          : [],
+    );
   },
 );
 
