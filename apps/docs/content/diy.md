@@ -225,21 +225,11 @@ that runs them. [Herdr](https://herdr.dev) holds their real terminals, and
 Clankie messages them through each harness's own channel, never by typing into
 the pane.
 
-A **machine** is where agents run; a **device** is a paired phone or desktop.
-`/machines` or `clankie machines` lists them, and
-`clankie machines add pc --ssh my-pc` adds another computer over SSH. Owners
-choose cumulative portal, workers, shell or screen with
-`clankie machines access pc workers` or Settings → Machines. Existing local
-installs retain screen; existing linked fleets retain worker access, and new remote machines start at portal. Access refusals and the owner fix appear in `clankie doctor`. These are
-authority preferences. An installed Mac can additionally use
-`clankie machines sandbox prepare LEVEL --workspace DIR`: a private home and
-an owner relaunch activate an inherited OS boundary. It needs owner credential,
-harness and stopped-state provisioning; live hire/refusal/restoration proof is
-held. `clankie machines --json` distinguishes verified `os-sandbox` from a
-preference. See the
-[machine reference](/cli/#runtime-setup) and the
+Workers can run here or on another computer you own. [Add a machine](/add-a-machine/)
+covers joining, access levels, Windows setup and the older SSH route. The
 [adapter guide](https://github.com/Volpestyle/clankie/blob/main/packages/agent-hosts/README.md)
-for each harness's support and limits.
+lists each harness's support and limits. For an installed Mac's optional OS
+boundary, see [local sandbox preparation](/cli/#a-lower-local-mac-with-an-os-boundary).
 
 ### Bring your own lead
 

@@ -65,16 +65,10 @@ remains available separately.
 
 ### Windows
 
-The installer doesn't run on Windows yet. A Windows PC joins a Clankie running
-on your Mac or Linux machine as a fleet machine: the service reaches it over SSH
-and leads hire agents into its Herdr sessions.
-
-```sh
-clankie machines add pc --ssh my-pc --shell powershell
-```
-
-See [machines](/cli/#machines-list-discover-json) for discovery and the access
-each machine gets.
+The installer doesn't run on Windows yet. A Windows PC can join a Clankie
+running on your Mac or Linux machine and host workers there. Follow
+[Add a machine](/add-a-machine/#windows) for the CLI prerequisites, outbound
+join and owner approval; it needs no inbound port or SSH alias.
 
 <a id="set-him-up"></a>
 

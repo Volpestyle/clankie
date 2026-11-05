@@ -31,6 +31,12 @@ prices, release channels, or full command catalogs into those guides.
 | `/get-started/`   | `content/get-started.md`: installation, setup and pairing                                                                                               |
 | `/using-clankie/` | `content/using-clankie.md`: everyday use, memory, making things, and the app                                                                            |
 | `/diy/`           | `content/diy.md`: leads, models, skills, agents, integrations, and extension points                                                                     |
+| `/pokemon-on-stream/` | `content/pokemon-on-stream.md`: An AI that plays Pokémon while you watch and talk, and what the game and viewer need. |
+| `/discord-ai-bot/` | `content/discord-ai-bot.md`: Run your own Discord bot, configure voice and consent, and choose who can ask for work. |
+| `/self-hosted-ai-assistant/` | `content/self-hosted-ai-assistant.md`: Install the free service on your own Mac, choose models and pair your devices. |
+| `/claude-code-and-codex/` | `content/claude-code-and-codex.md`: Prepare native coding workers, brief a lead and follow the work. |
+| `/add-a-machine/` | `content/add-a-machine.md`: Join another computer, approve its folders and access, and check or remove the connection. |
+| `/changelog/` | `content/changelog.md`: Published service releases, with summaries, release notes and downloads. |
 | `/reference/`     | `content/reference.md`: links by task into the canonical library                                                                                        |
 | `/how-it-works/`  | `content/how-it-works.md`, a product-depth digest of [`docs/architecture.md`](../../docs/architecture.md)                                               |
 | `/console/`       | `content/console.md` plus the slash-command literals in `apps/tui/src` and the Workspaces and Operator behavior sections of the TUI README              |
@@ -69,3 +75,7 @@ rather than copying them. [ADR 0155](../../docs/adr/0155-public-docs-are-a-produ
 records the product boundary and deployment ownership, and
 [ADR 0156](../../docs/adr/0156-the-docs-site-renders-the-canonical-references.md)
 the identity and the rendered references.
+
+When publishing a service release, add one entry to `content/changelog.md`
+using its published release date and release notes. Unpublished tags are not
+releases. Keep historical summaries distinct from current setup instructions.
