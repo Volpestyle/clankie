@@ -5,6 +5,7 @@ import { OperatorSeatMigrationSchema } from "./operator-seat-migration.ts";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
   OperatorConversationIdSchema,
+  OperatorConversationScopeSchema,
   OperatorOwnerTurnOriginSchema,
   OPERATOR_CONVERSATION_CODE_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
@@ -235,7 +236,10 @@ export const FleetSeatMessageDeliverySchema = z
     binding: z.string().regex(/^[a-f0-9]{64}$/u),
   })
   .strict();
-export type FleetSeatMessageDelivery = z.infer<typeof FleetSeatMessageDeliverySchema>;
+export type FleetSeatMessageDelivery = z.infer<typeof FleetSeatMessageDeliverySchema> & {
+  /** Host validated report target; absent on legacy/default delivery. */
+  readonly target?: string;
+};
 export const FleetSeatMessageReceiptSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -261,10 +265,61 @@ export const FleetSeatMessageStatusSchema = z
   })
   .strict();
 export type FleetSeatMessageStatus = z.infer<typeof FleetSeatMessageStatusSchema>;
+/** Opaque IDs from the exact hire record, never a pane title or a role claim. */
+export const WorkerReportTargetIdSchema = z.string().min(1).max(512);
+export const WorkerReportLeadSchema = z
+  .object({
+    id: WorkerReportTargetIdSchema,
+    conversationId: OperatorConversationIdSchema,
+    scope: OperatorConversationScopeSchema.optional(),
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    projectIds: z.array(z.string().min(1).max(256)).max(128).optional(),
+    deviceId: z.string().min(1).max(256).optional(),
+    ref: z
+      .string()
+      .regex(/^[A-Za-z0-9._:-]{1,128}$/u)
+      .optional(),
+  })
+  .strict();
+export type WorkerReportLead = z.infer<typeof WorkerReportLeadSchema>;
+export const FLEET_REPORT_LEADS_PATH = "/v1/fleet/report-leads";
+export const ManageWorkerReportLeadsSchema = z
+  .object({
+    paneId: z.string().min(1).max(512),
+    change: z.discriminatedUnion("op", [
+      z.object({ op: z.literal("list") }).strict(),
+      z
+        .object({
+          op: z.literal("grant"),
+          conversationId: OperatorConversationIdSchema,
+          deviceId: z.string().min(1).max(256).optional(),
+          ref: z
+            .string()
+            .regex(/^[A-Za-z0-9._:-]{1,128}$/u)
+            .optional(),
+        })
+        .strict(),
+      z.object({ op: z.literal("revoke"), id: WorkerReportTargetIdSchema }).strict(),
+    ]),
+  })
+  .strict()
+  .superRefine((input, ctx) => {
+    if (input.change.op === "grant" && input.change.ref !== undefined && input.change.deviceId === undefined)
+      ctx.addIssue({
+        code: "custom",
+        path: ["change", "ref"],
+        message: "An app report ref requires deviceId",
+      });
+  });
+export type ManageWorkerReportLeads = z.infer<typeof ManageWorkerReportLeadsSchema>;
+export const WorkerReportLeadsSchema = z
+  .object({ schemaVersion: z.literal(1), leads: z.array(WorkerReportLeadSchema).max(34) })
+  .strict();
 export const FleetSeatMessageSchema = z
   .object({
     schemaVersion: z.literal(1),
     text: z.string().trim().min(1).max(OPERATOR_CONVERSATION_TEXT_MAX),
+    target: WorkerReportTargetIdSchema.optional(),
     /** Optional on decode for legacy clients; current HTTP writes require it. */
     delivery: FleetSeatMessageDeliverySchema.optional(),
     /**

@@ -72,7 +72,7 @@ export const InboundReportDeliverySchema = z
   })
   .strict();
 
-/** Captured by the host at admission; a worker cannot choose its recipient. */
+/** Captured by the host after report destination admission. */
 export const InboundReportRecipientSchema = z.union([
   NativeSeatRecipientSchema,
   z.object({ kind: z.literal("conversation"), owner: ConversationOwnerSchema }).strict(),
@@ -85,6 +85,7 @@ export const InboundAcceptanceSchema = z
     fingerprint: z.string(),
     paneId: z.string(),
     seatId: z.string().optional(),
+    target: z.string().min(1).max(512).optional(),
     connectorHire: z
       .object({ deviceId: z.string().min(1), ref: z.string().min(1).optional() })
       .strict()

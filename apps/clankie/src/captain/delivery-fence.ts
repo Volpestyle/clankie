@@ -719,3 +719,14 @@ export function readsBackAs(
     (sent.scrubbedFingerprint !== undefined && fingerprint === sent.scrubbedFingerprint)
   );
 }
+
+/** Default fingerprints remain compatible; explicit report destinations are original identity. */
+export function workerReportFingerprint(text: string, target?: string): string {
+  if (target === undefined) return deliveryFingerprint(text);
+  // 0xff cannot occur in UTF-8 legacy text. A worker cannot alias an explicit
+  // destination by putting its serialized frame in an ordinary report body.
+  return createHash("sha256")
+    .update(new Uint8Array([0xff]))
+    .update(JSON.stringify(["worker-report-target", target, text.replace(/\r\n?/gu, "\n").trim()]))
+    .digest("hex");
+}

@@ -171,7 +171,12 @@ inspected output). Name any test that must exist; otherwise workers add none
 Ask for a final report you can act on without the transcript: outcome, evidence
 links and any open decision, in a few lines.
 
-Workers report with `message_clankie`. Never deliver work by typing into a
+Workers report with `message_clankie`. Its optional `target` must be an ID from
+`list_report_leads` on the native fleet bridge: an exact hire's recorded lead or an owner-added
+report destination. The owner manages additions with `clankie fleet report-leads
+PANE grant CONVERSATION [APP_DEVICE [REF]]` and removes them with `revoke TARGET`.
+Receiving a report grants no adoption or control of that worker; its report
+remains agent output. A worker cannot add itself or anyone else as a lead. Never deliver work by typing into a
 terminal, and never ask the owner to paste a message into a worker's pane: an
 undelivered or uncertain send is followed up from its receipt through Clankie
 ([ADR 0207](../../../docs/adr/0207-work-records-and-native-agent-delivery.md), [ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)).

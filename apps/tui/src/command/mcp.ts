@@ -1,3 +1,5 @@
+import { WorkerReportLeadsSchema } from "@clankie/protocol";
+import { REPORT_LEADS_TOOL } from "../../../../integrations/claude-plugin/worker/bin/seat-tools.mjs";
 import { readableMcpResult } from "@clankie/protocol/mcp-result";
 import { seatIdentity } from "./seat-identity.ts";
 import { homedir } from "node:os";
@@ -1110,10 +1112,17 @@ export async function connectLaneUpstream(input: {
 const MESSAGE_CLANKIE_TOOL = {
   name: "message_clankie",
   description:
-    'Send Clankie, the agent leading this machine\'s fleet, a message from this agent: a question, a blocker, or news he should hear now. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message. To ask your lead to choose, add one JSON block to the text: {"ask": {"question": "...", "options": [{"value": "a", "label": "..."}, {"value": "b", "label": "..."}], "freeText": false, "confirms": "push"}} with 2 to 5 options, freeText true to allow an answer in their own words, and confirms (push, merge, restart, rotate, delete or release) only when it confirms a risky action. Your lead answers it as a card, and you hear the chosen value tied to the ask.',
+    'Send attributed worker output to your current lead or an exact permitted target from list_report_leads: a question, a blocker, or news to share. Say with kind whether it is done, blocked or an update. He answers in this session if he chooses to. Stored means retained by his conversation, not read or completed. After uncertainty, another call only reconciles the original ID; it never resends or substitutes a new message. To ask your current lead to choose, omit target and add one JSON block to the text: {"ask": {"question": "...", "options": [{"value": "a", "label": "..."}, {"value": "b", "label": "..."}], "freeText": false, "confirms": "push"}} with 2 to 5 options, freeText true to allow an answer in their own words, and confirms (push, merge, restart, rotate, delete or release) only when it confirms a risky action. Your lead answers it as a card, and you hear the chosen value tied to the ask.',
   inputSchema: {
     type: "object" as const,
     properties: {
+      target: {
+        type: "string",
+        minLength: 1,
+        maxLength: 512,
+        description:
+          "An exact ID from list_report_leads. Omit for your current lead. Refusal never falls back; this grants no adoption or authority.",
+      },
       text: { type: "string", description: "What to tell him." },
       urgent: {
         type: "boolean",
@@ -1140,12 +1149,13 @@ const MESSAGE_CLANKIE_TOOL = {
 export function createFleetSeatBridge(
   send?: (
     text: string,
-    options?: { urgent?: boolean; kind?: "done" | "blocked" | "update" },
+    options?: { urgent?: boolean; kind?: "done" | "blocked" | "update"; target?: string },
   ) => Promise<
     boolean | { received: boolean; deliveryStage: "stored" | "unavailable" | "rejected" | "uncertain" }
   >,
   durable = false,
   status?: (deliveryId: unknown) => Promise<unknown>,
+  leads?: () => Promise<unknown>,
 ): Server<Request, ChannelNotification, Result> {
   const server = new Server<Request, ChannelNotification, Result>(
     { name: FLEET_SEAT_MCP_SERVER, version: "0.3.0" },
@@ -1158,11 +1168,25 @@ export function createFleetSeatBridge(
     },
   );
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: send === undefined ? [] : [MESSAGE_CLANKIE_TOOL, ...(status ? [MESSAGE_CLANKIE_STATUS_TOOL] : [])],
+    tools:
+      send === undefined
+        ? []
+        : [
+            MESSAGE_CLANKIE_TOOL,
+            ...(leads ? [REPORT_LEADS_TOOL] : []),
+            ...(status ? [MESSAGE_CLANKIE_STATUS_TOOL] : []),
+          ],
   }));
   let uncertain = false;
   if (send !== undefined)
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      if (request.params.name === REPORT_LEADS_TOOL.name && leads) {
+        try {
+          return readableMcpResult({ content: [{ type: "text", text: JSON.stringify(await leads()) }] });
+        } catch {
+          return { content: [{ type: "text", text: "Report destinations are unavailable." }], isError: true };
+        }
+      }
       if (request.params.name === MESSAGE_CLANKIE_STATUS_TOOL.name && status) {
         try {
           const receipt = await status(request.params.arguments?.deliveryId);
@@ -1177,10 +1201,18 @@ export function createFleetSeatBridge(
       if (request.params.name !== MESSAGE_CLANKIE_TOOL.name)
         return { content: [{ type: "text", text: `Unknown tool ${request.params.name}` }], isError: true };
       const args = request.params.arguments as
-        | { text?: unknown; urgent?: unknown; kind?: unknown }
+        | { text?: unknown; urgent?: unknown; kind?: unknown; target?: unknown }
         | undefined;
       const text = String(args?.text ?? "").trim();
       if (text === "") return { content: [{ type: "text", text: "Say what to tell him." }], isError: true };
+      if (
+        args?.target !== undefined &&
+        (typeof args.target !== "string" || !args.target || args.target.length > 512)
+      )
+        return {
+          content: [{ type: "text", text: "Choose a target ID from list_report_leads; nothing was sent." }],
+          isError: true,
+        };
       if (uncertain && !durable)
         return readableMcpResult({
           content: [
@@ -1197,6 +1229,7 @@ export function createFleetSeatBridge(
         });
       const sent = await send(text.slice(0, OPERATOR_CONVERSATION_TEXT_MAX), {
         urgent: args?.urgent === true,
+        ...(typeof args?.target === "string" ? { target: args.target } : {}),
         ...(args?.kind === "done" || args?.kind === "blocked" || args?.kind === "update"
           ? { kind: args.kind }
           : {}),
@@ -1338,6 +1371,13 @@ async function runFleetSeatMcp(options: McpCommandOptions): Promise<number> {
     paneId.length === 0 ? undefined : sendInbound,
     true,
     paneId.length === 0 ? undefined : (id) => readMessageStatus(inboundRequest, id),
+    paneId.length === 0
+      ? undefined
+      : async () => {
+          const response = await inboundRequest("/leads");
+          if (!response.ok) throw new Error("Report destinations are unavailable");
+          return WorkerReportLeadsSchema.parse(await response.json());
+        },
   );
   const transport = options.transport ?? new HarnessStdioTransport();
   const closing = new AbortController();

@@ -443,7 +443,10 @@ export function createOperatorService(
         const items = await Promise.all(
           page.items.map(async (item) => ({
             ...item,
-            ...(await notify(ctx.herdrWatches.notifyLead(item.seatId, item.paneId))),
+            // An explicit report destination does not inherit the hiring app's wake metadata.
+            ...(ctx.conversations.inboundAcceptance(item.deliveryId)?.target === undefined
+              ? await notify(ctx.herdrWatches.notifyLead(item.seatId, item.paneId))
+              : {}),
           })),
         );
         return { op: request.op, schemaVersion: 1, page: { ...page, items } };

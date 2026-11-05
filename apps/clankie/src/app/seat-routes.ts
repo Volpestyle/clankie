@@ -1,3 +1,4 @@
+import { workerReportDevice, type DeviceRegistry } from "../devices.ts";
 import { DEFAULT_PROJECT_ID } from "@clankie/protocol/projects";
 import {
   FLEET_SEAT_TOOL_CATALOG_PATH,
@@ -100,6 +101,8 @@ const CaptainLanePromptQuerySchema = z
   })
   .strict();
 export interface RegisterSeatRoutesContext {
+  readonly devices?: Readonly<DeviceRegistry>;
+  readonly now?: () => Date;
   readonly dependencies: ClankieAppDependencies;
   readonly app: Hono;
   readonly authenticateLane: (
@@ -108,6 +111,8 @@ export interface RegisterSeatRoutesContext {
 }
 
 export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
+  const reportDeviceAvailable = (id: string) =>
+    workerReportDevice(ctx.devices?.get(id), ctx.now?.() ?? new Date());
   ctx.app.post(OPERATOR_SEAT_MIGRATIONS_PATH, bodyLimit({ maxSize: 8 * 1024 }), async (context) => {
     const auth = await ctx.authenticateLane(context);
     if ("denial" in auth) return auth.denial;
@@ -765,6 +770,15 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
       ? context.json({ schemaVersion: 1, binding })
       : context.json({ error: "unknown_native_session", deliveryStage: "unavailable" }, 404);
   });
+  ctx.app.get(`${FLEET_SEAT_MESSAGES_PATH}/leads`, async (context) => {
+    context.header("cache-control", "no-store");
+    const pane = await fleetSeatPane(context);
+    if ("denial" in pane) return pane.denial;
+    return context.json({
+      schemaVersion: 1,
+      leads: await ctx.dependencies.captain.workerReportLeads(pane.paneId, reportDeviceAvailable),
+    });
+  });
   ctx.app.get(`${FLEET_SEAT_MESSAGES_PATH}/:id/status`, async (context) => {
     context.header("cache-control", "no-store");
     const pane = await fleetSeatPane(context);
@@ -804,6 +818,7 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const request = {
       deadlineAt: Date.now() + INBOUND_REQUEST_DEADLINE_MS,
       signal: context.req.raw.signal,
+      reportDeviceAvailable,
     };
     // Include body/authentication waits in the original budget, retaining the
     // transport signal even when the body limiter reconstructs a chunked request.
@@ -817,7 +832,10 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
     const received = await ctx.dependencies.captain.receiveFleetSeatMessage(
       pane.paneId,
       parsed.data.text,
-      parsed.data.delivery,
+      {
+        ...parsed.data.delivery,
+        ...(parsed.data.target === undefined ? {} : { target: parsed.data.target }),
+      },
       request,
       parsed.data.urgent === true || parsed.data.kind !== undefined
         ? {

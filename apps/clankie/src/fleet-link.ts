@@ -38,6 +38,7 @@ const LINK_RECEIPT =
   /^\/v1\/fleet\/seats\/[^/]+\/(?:messages|peer-messages|review-candidates)\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu;
 const LINK_MESSAGE_STATUS =
   /^\/v1\/fleet\/seats\/[^/]+\/messages\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\/status$/iu;
+const LINK_REPORT_LEADS = /^\/v1\/fleet\/seats\/[^/]+\/messages\/leads$/u;
 const LINK_EVENT_ACK = /^\/v1\/fleet\/seats\/[^/]+\/events\/[^/]+\/ack$/u;
 /** An evidence receipt is its idempotency key, not a UUID (VUH-2923). */
 const LINK_EVIDENCE_RECEIPT = /^\/v1\/fleet\/seats\/[^/]+\/evidence-uploads\/[A-Za-z0-9_-]{16,128}$/u;
@@ -50,7 +51,10 @@ export function fleetLinkFetch<Rest extends unknown[]>(
     return LINK_ROUTE.test(path) ||
       LEAD_ROUTE.test(path) ||
       (request.method === "GET" &&
-        (LINK_RECEIPT.test(path) || LINK_MESSAGE_STATUS.test(path) || LINK_EVIDENCE_RECEIPT.test(path))) ||
+        (LINK_RECEIPT.test(path) ||
+          LINK_REPORT_LEADS.test(path) ||
+          LINK_MESSAGE_STATUS.test(path) ||
+          LINK_EVIDENCE_RECEIPT.test(path))) ||
       (request.method === "POST" && LINK_EVENT_ACK.test(path)) ||
       (request.method === "PUT" && LINK_EVIDENCE_BLOB.test(path))
       ? fetch(request, ...rest)

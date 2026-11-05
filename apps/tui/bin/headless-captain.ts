@@ -519,6 +519,15 @@ export async function runHeadlessCaptainCommand(
         );
         return 0;
       }
+      if (rest[0] === "report-leads") {
+        outputJson(
+          stdout,
+          await (
+            await import("../src/command/fleet-report-leads.ts")
+          ).runFleetReportLeadsCommand(rest.slice(1), options),
+        );
+        return 0;
+      }
       if (rest[0] === "leads") {
         const snapshot = await (
           await import("../src/command/fleet-leads.ts")

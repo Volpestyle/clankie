@@ -179,7 +179,7 @@ import {
   type ConversationTurnContext,
   type OwnerAttachmentHost,
 } from "./conversations.ts";
-import { deliveryFingerprint } from "./delivery-fence.ts";
+import { deliveryFingerprint, workerReportFingerprint } from "./delivery-fence.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
 import type { NormalizedDiscordTurn, RoomTurnsHost } from "./room-turns.ts";
@@ -6598,6 +6598,95 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       return inboundReceipts.status(paneId, binding, deliveryId);
     },
 
+    async manageWorkerReportLeads(input, authorize) {
+      if (!(await authorize())) throw new Error("Owner authorization is required for report grants");
+      const original = await herdrRunner.get(input.paneId);
+      if (!original || inboundBinding(original) === undefined)
+        throw new Error("Report grants require a native occupant");
+      herdrWatches.nativeOwner(original);
+      const change = input.change;
+      if (
+        change.op === "grant" &&
+        (!["global", "workspace"].includes(
+          conversations.conversation(change.conversationId)?.scope.kind ?? "",
+        ) ||
+          !(await validateConversationOwner({ conversationId: change.conversationId })))
+      )
+        throw new Error("Report destination conversation is unavailable");
+      const current = await herdrRunner.get(input.paneId);
+      if (!current || inboundBinding(current) !== inboundBinding(original) || !(await authorize()))
+        throw new Error("Report grant authority changed");
+      // The caller's owner authorization, native occupant and journal are checked before the write.
+      if (change.op === "grant")
+        herdrWatches.grantReportLead(current, {
+          id: `grant:${randomUUID()}`,
+          owner: { conversationId: change.conversationId },
+          ...(change.deviceId === undefined
+            ? {}
+            : { connector: { deviceId: change.deviceId, ...(change.ref ? { ref: change.ref } : {}) } }),
+        });
+      if (change.op === "revoke") herdrWatches.revokeReportLead(current, change.id);
+      return herdrWatches.reportLeads(current).map((lead) => ({
+        id: lead.id,
+        conversationId: lead.owner.conversationId,
+        ...(conversations.conversation(lead.owner.conversationId)
+          ? {
+              scope: conversations.conversation(lead.owner.conversationId)!.scope,
+              title: conversations.conversation(lead.owner.conversationId)!.title,
+            }
+          : {}),
+        ...lead.connector,
+      }));
+    },
+
+    async workerReportLeads(paneId, reportDeviceAvailable) {
+      // allow-swallowed-rejection -- Missing native identity returns no report destinations.
+      const agent = await herdrRunner.get(paneId).catch(() => undefined);
+      if (!agent || inboundBinding(agent) === undefined) return [];
+      let leads: ReturnType<typeof herdrWatches.reportLeads>;
+      try {
+        leads = herdrWatches.reportLeads(agent);
+      } catch {
+        return [];
+      }
+      const projectSettings = await settings();
+      const result: import("@clankie/protocol").WorkerReportLead[] = [];
+      for (const destination of leads) {
+        if (
+          destination.connector &&
+          (!reportDeviceAvailable?.(destination.connector.deviceId) ||
+            !lead.holds(conversations.conversation(destination.owner.conversationId)?.scope))
+        )
+          continue;
+        if (await validateConversationOwner(destination.owner))
+          result.push({
+            id: destination.id,
+            conversationId: destination.owner.conversationId,
+            ...(conversations.conversation(destination.owner.conversationId)
+              ? {
+                  scope: conversations.conversation(destination.owner.conversationId)!.scope,
+                  title: conversations.conversation(destination.owner.conversationId)!.title,
+                }
+              : {}),
+            projectIds: routedProjects(
+              projectSettings.projects.projects,
+              projectSettings.linearWebhook.projectChats,
+              destination.owner.conversationId,
+            ).map((project) => project.id),
+            ...destination.connector,
+          });
+      }
+      // allow-swallowed-rejection -- A failed fresh identity check returns an empty destination list.
+      const current = await herdrRunner.get(paneId).catch(() => undefined);
+      if (!current || inboundBinding(current) !== inboundBinding(agent)) return [];
+      try {
+        if (JSON.stringify(herdrWatches.reportLeads(current)) !== JSON.stringify(leads)) return [];
+      } catch {
+        return [];
+      }
+      return result;
+    },
+
     async receiveFleetSeatMessage(paneId, text, delivery, request, options) {
       if (!delivery) return false;
       return inboundReceipts.trackAttempt(
@@ -6623,10 +6712,10 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               deliveryStage: "uncertain",
               deliveryId: delivery.id,
               binding: delivery.binding,
-              fingerprint: deliveryFingerprint(text),
+              fingerprint: workerReportFingerprint(text, delivery.target),
             };
           // A huddle answer is recorded for the compiled board, not relayed one by one.
-          {
+          if (delivery.target === undefined) {
             const recorded = huddleService.receive(
               [agent.terminalId, ...(fleet === undefined ? [] : [`${fleet}/${agent.terminalId}`])],
               text,
@@ -6638,13 +6727,13 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
                 deliveryStage: "stored",
                 deliveryId: delivery.id,
                 binding: delivery.binding,
-                fingerprint: deliveryFingerprint(text),
+                fingerprint: workerReportFingerprint(text, delivery.target),
                 detail: `Recorded for huddle ${recorded.id}; carry on with your work.`,
               };
             }
           }
           // #425: the pull requests a done report names join its persona's work history.
-          if (options?.kind === "done" && agent.session !== undefined) {
+          if (delivery.target === undefined && options?.kind === "done" && agent.session !== undefined) {
             const occupant = occupantIdForHerdrSession(agent.session);
             const persona = liveSeats.find((seat) => seat.occupantId === occupant)?.personaId;
             if (persona !== undefined) workHistory.noteDone(persona, text);
@@ -6658,10 +6747,100 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
               `Answer with message_seat to that seat if you choose to.${reportKindLine(options?.kind)}`,
             "",
             text,
-            ...(ask === undefined ? [] : [workerAskLines(delivery.id, ask)]),
+            ...(ask === undefined || delivery.target !== undefined ? [] : [workerAskLines(delivery.id, ask)]),
           ].join("\n");
-          const previous = inboundReceipts.reconcile(agent.paneId, delivery, deliveryFingerprint(text));
+          const previous = inboundReceipts.reconcile(
+            agent.paneId,
+            delivery,
+            workerReportFingerprint(text, delivery.target),
+          );
           if (previous.received || previous.definitive) return previous;
+          if (delivery.target !== undefined) {
+            // The request selects a host-owned grant; text, titles and persona never grant access.
+            let destination: ReturnType<typeof herdrWatches.reportLeads>[number] | undefined;
+            try {
+              destination = herdrWatches.reportLeads(agent).find((entry) => entry.id === delivery.target);
+            } catch {
+              return inboundReceipts.refuse(agent.paneId, delivery, text);
+            }
+            if (
+              !destination ||
+              (destination.connector &&
+                (!request?.reportDeviceAvailable?.(destination.connector.deviceId) ||
+                  !lead.holds(conversations.conversation(destination.owner.conversationId)?.scope))) ||
+              !(await validateConversationOwner(destination.owner))
+            )
+              return inboundReceipts.refuse(
+                agent.paneId,
+                delivery,
+                text,
+                "That report destination is not available to this native hire. No message was sent.",
+              );
+            const originalGrant = JSON.stringify(destination);
+            const freshCensus = await census();
+            // Parallel census reads may have captured an earlier row. Pin the native
+            // occupant again after all discovery awaits, then persist synchronously.
+            // allow-swallowed-rejection -- Losing the native occupant refuses the report before acceptance.
+            const current = await herdrRunner.get(paneId).catch(() => undefined);
+            if (
+              !current ||
+              inboundBinding(current) !== delivery.binding ||
+              !conversations.conversation(destination.owner.conversationId) ||
+              (destination.connector &&
+                (!request?.reportDeviceAvailable?.(destination.connector.deviceId) ||
+                  !lead.holds(conversations.conversation(destination.owner.conversationId)?.scope)))
+            )
+              return inboundReceipts.refuse(agent.paneId, delivery, text);
+            const reporter = freshCensus.seats.find((seat) => seat.paneId === agent.paneId);
+            if (
+              !reporter ||
+              inboundBinding(observedAgent(reporter)) !== delivery.binding ||
+              JSON.stringify(
+                herdrWatches.reportLeads(current).find((entry) => entry.id === delivery.target),
+              ) !== originalGrant
+            )
+              return inboundReceipts.refuse(agent.paneId, delivery, text);
+            const target = destination.owner;
+            let runner: ConversationRunner | undefined;
+            if (target.discord !== undefined) {
+              runner = async (_id, prompt) => {
+                if (
+                  !(await rooms?.runDiscordWatchTurn(target, prompt, undefined, "machine", true, "message"))
+                )
+                  throw new Error("Worker report room authority is unavailable");
+              };
+            } else if (headSeat !== undefined || seatOutboxes.has(target.conversationId)) {
+              runner = conversationReportRunner(target, delivery.id);
+            }
+            // No await between the final grant proof and persistence. This does not adopt the sender.
+            const accepted = inboundReceipts.accept(
+              agent.paneId,
+              delivery,
+              text,
+              message,
+              target.conversationId,
+              runner,
+              undefined,
+              { kind: "conversation", owner: target },
+              options?.urgent === true || options?.kind === "blocked",
+              agent.terminalId,
+              destination.connector === undefined
+                ? undefined
+                : {
+                    deviceId: destination.connector.deviceId,
+                    ...(destination.connector.ref === undefined ? {} : { ref: destination.connector.ref }),
+                  },
+              options?.kind,
+            );
+            if (accepted.received) {
+              try {
+                paneTidy.keepReport(agent, text);
+              } catch {
+                /* Durable acceptance remains authoritative. */
+              }
+            }
+            return accepted;
+          }
           try {
             herdrWatches.nativeOwner(agent);
           } catch {

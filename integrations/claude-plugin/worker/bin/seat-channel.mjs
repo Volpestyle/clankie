@@ -17,7 +17,7 @@ import {
 } from "./admission.mjs";
 import { createPeerSender, readPeerCatalog } from "./peer-receipt.mjs";
 import { createReviewTools, REVIEW_TOOLS } from "./review-tools.mjs";
-import { MESSAGE_TOOL, PEER_TOOLS } from "./seat-tools.mjs";
+import { MESSAGE_TOOL, PEER_TOOLS, REPORT_LEADS_TOOL } from "./seat-tools.mjs";
 import { callEvidencePush, EVIDENCE_PUSH_TOOL, linkEvidenceClient } from "./evidence-push.mjs";
 import { createCatalogWatcher, signalCodexCatalog } from "./catalog-watch.mjs";
 // The clankie-worker channel on a linked machine (VUH-1527): the same seat
@@ -713,6 +713,7 @@ export function runSeatChannel({
     link
       ? [
           MESSAGE_TOOL,
+          REPORT_LEADS_TOOL,
           MESSAGE_CLANKIE_STATUS_TOOL,
           ...(verifiedTools ?? []),
           ...(verifiedPeers ? PEER_TOOLS : []),
@@ -1225,7 +1226,7 @@ export function runSeatChannel({
     })();
     return refreshReconciliation;
   }
-  async function messageClankie(text, urgent, kind) {
+  async function messageClankie(text, urgent, kind, target) {
     if (!paneId) return { isError: true, text: "This session is not in a Herdr pane Clankie can answer." };
     const body = String(text ?? "").trim();
     if (!body) return { isError: true, text: "Say what to tell him." };
@@ -1239,6 +1240,7 @@ export function runSeatChannel({
         (await sendInbound(body.slice(0, TEXT_MAX), {
           urgent: urgent === true,
           ...(REPORT_KINDS.has(kind) ? { kind } : {}),
+          ...(target === undefined ? {} : { target }),
         }));
       retainedInbound = undefined;
     } catch {
@@ -1412,11 +1414,30 @@ export function runSeatChannel({
           return send({ id, result: { isError: true, content: [{ type: "text", text: String(error) }] } });
         }
       }
+      if (params?.name === REPORT_LEADS_TOOL.name) {
+        try {
+          const response = await inboundRequest("/leads");
+          const value = response.ok ? await response.json() : { error: "report_leads_unavailable" };
+          return send({
+            id,
+            result: { content: [{ type: "text", text: JSON.stringify(value) }], isError: !response.ok },
+          });
+        } catch {
+          return send({
+            id,
+            result: {
+              content: [{ type: "text", text: "Report destinations are unavailable." }],
+              isError: true,
+            },
+          });
+        }
+      }
       if (params?.name === MESSAGE_TOOL.name) {
         const result = await messageClankie(
           params?.arguments?.text,
           params?.arguments?.urgent,
           params?.arguments?.kind,
+          params?.arguments?.target,
         );
         return send({
           id,

@@ -1465,7 +1465,12 @@ export class WorkerMcp {
   async expectedBridgeToolNames(): Promise<readonly string[]> {
     const forwarded = new Set(FLEET_TOOLS.map((tool) => tool.name));
     return [
-      ...new Set(["message_clankie", "message_clankie_status", ...(await this.expectedFleetToolNames())]),
+      ...new Set([
+        "message_clankie",
+        "message_clankie_status",
+        "list_report_leads",
+        ...(await this.expectedFleetToolNames()),
+      ]),
     ]
       .filter((name) => !forwarded.has(name))
       .sort();

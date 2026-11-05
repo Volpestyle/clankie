@@ -71,7 +71,17 @@ completion, and unknown status does not prove nothing was sent. Report receipts
 reach you as `worker-report-receipt` events with your next real event; they are
 not new assignments ([ADR 0211](../../../docs/adr/0211-a-delivery-says-how-far-it-got.md)). Details: [receipts](reference/receipts.md).
 
-Your `message_clankie` goes to the conversation that hired you. A `message_seat`
+Without a target, `message_clankie` keeps your existing lead route. To send a
+report from the native fleet bridge to another permitted lead, call `list_report_leads` and pass its exact
+`id` as `message_clankie.target`. Only destinations in your native hire record
+or added by the owner are listed, with their conversation, project, workspace
+and machine context when known. A refused explicit target never falls back to
+your hiring chat. Reports grant no adoption, control or lead role. The original
+receipt binds text and target; reconciliation cannot change either. Ask your
+lead to arrange an owner-added destination when one is missing. Joined-machine
+workers keep their separate hiring-chat report API ([#876](https://github.com/Volpestyle/clankie/issues/876)).
+
+Your ordinary report goes to the conversation that hired you. A `message_seat`
 from another conversation reaches you, but you keep your lead; only a hire whose
 lead conversation is gone, or a hand-started seat, is adopted by the conversation
 that messages it. Reports fall back to `global-default` only when the lead

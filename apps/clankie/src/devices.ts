@@ -208,3 +208,15 @@ export function groupDeviceListItems(items: DeviceListItem[]): DeviceListItem[] 
 export function isDeviceRunExpired(record: DeviceRecord, now: Date): boolean {
   return record.run !== undefined && Date.parse(record.run.expiresAt) <= now.getTime();
 }
+
+/** Existing connected-lead report readers; a report destination never raises their ceiling. */
+export function workerReportDevice(record: DeviceRecord | undefined, now: Date): boolean {
+  return (
+    record !== undefined &&
+    record.status === "active" &&
+    record.scope === "connector" &&
+    record.supportGrantId === undefined &&
+    record.grants.steer &&
+    !isDeviceRunExpired(record, now)
+  );
+}

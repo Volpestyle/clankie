@@ -6,13 +6,15 @@ import type {
   WorkerReportRouting,
 } from "@clankie/protocol";
 import { randomUUID } from "node:crypto";
-import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
+import { DeliveryFence, workerReportFingerprint } from "./delivery-fence.ts";
 import type { ConversationRunner, ConversationStore, InboundReportRecipient } from "./conversations.ts";
 
 export const INBOUND_REQUEST_DEADLINE_MS = 20_000;
 export interface InboundSeatRequest {
   readonly signal?: AbortSignal;
   readonly deadlineAt?: number;
+  /** Host registry observation, never a request-body claim. */
+  readonly reportDeviceAvailable?: (deviceId: string) => boolean;
 }
 interface InboundAttempt {
   readonly paneId: string;
@@ -113,7 +115,7 @@ export class InboundSeatReceipts {
     run: () => Promise<FleetSeatMessageReceipt>,
     request?: InboundSeatRequest,
   ): Promise<FleetSeatMessageReceipt> {
-    const fingerprint = deliveryFingerprint(text);
+    const fingerprint = workerReportFingerprint(text, delivery.target);
     const previous = this.reconcile(paneId, delivery, fingerprint);
     if (previous.received || previous.definitive) return previous;
     if (this.active.has(delivery.id)) return this.lookup(paneId, delivery, fingerprint);
@@ -201,7 +203,7 @@ export class InboundSeatReceipts {
         accepted.paneId !== paneId ||
         accepted.binding !== delivery.binding ||
         accepted.fingerprint !== fingerprint ||
-        deliveryFingerprint(accepted.text) !== fingerprint
+        workerReportFingerprint(accepted.text, accepted.target) !== fingerprint
       )
         return receipt;
       if (
@@ -304,14 +306,19 @@ export class InboundSeatReceipts {
   }
 
   /** A known refusal before any original attempt may carry its honest stage. */
-  public refuse(paneId: string, delivery: FleetSeatMessageDelivery, text: string): FleetSeatMessageReceipt {
+  public refuse(
+    paneId: string,
+    delivery: FleetSeatMessageDelivery,
+    text: string,
+    detail?: string,
+  ): FleetSeatMessageReceipt {
     const receipt: FleetSeatMessageReceipt = {
       schemaVersion: 1,
       received: false,
       deliveryStage: "uncertain",
       deliveryId: delivery.id,
       binding: delivery.binding,
-      fingerprint: deliveryFingerprint(text),
+      fingerprint: workerReportFingerprint(text, delivery.target),
     };
     try {
       if (
@@ -329,7 +336,12 @@ export class InboundSeatReceipts {
         })
       )
         return receipt;
-      return { ...receipt, deliveryStage: "unavailable", definitive: "not_sent" };
+      return {
+        ...receipt,
+        deliveryStage: "unavailable",
+        definitive: "not_sent",
+        ...(detail === undefined ? {} : { detail }),
+      };
     } catch {
       return receipt;
     }
@@ -356,7 +368,7 @@ export class InboundSeatReceipts {
     /** The sender's own done/blocked/update label (#317); not part of the fingerprint. */
     kind?: WorkerReportKind,
   ): FleetSeatMessageReceipt {
-    const fingerprint = deliveryFingerprint(text);
+    const fingerprint = workerReportFingerprint(text, delivery.target);
     const previous = this.reconcile(paneId, delivery, fingerprint);
     if (previous.received || previous.definitive) return previous;
     const attempt = this.active.get(delivery.id);
@@ -415,6 +427,7 @@ export class InboundSeatReceipts {
           ...(senderSeatId === undefined ? {} : { seatId: senderSeatId }),
           ...(connectorHire === undefined ? {} : { connectorHire }),
           text,
+          ...(delivery.target === undefined ? {} : { target: delivery.target }),
           ...(workerReportRouting === undefined ? {} : { workerReportRouting }),
           ...(recipient === undefined ? {} : { recipient }),
           ...(urgent ? { urgent: true as const } : {}),
