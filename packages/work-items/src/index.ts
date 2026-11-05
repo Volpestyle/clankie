@@ -16,6 +16,8 @@ export * from "./outcomes.ts";
 export { createFilesBackend, PRIVATE_WORK_GITIGNORE } from "./backends/files.ts";
 export * from "./files-export.ts";
 export * from "./drops.ts";
+export * from "./tracking-guide.ts";
+export * from "./tracking-proposals.ts";
 export {
   createGithubBackend,
   ghCliApi,

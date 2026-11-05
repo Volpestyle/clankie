@@ -282,6 +282,8 @@ import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
+import { createProjectTrackingService, startProjectTrackingSweep } from "./project-tracking.ts";
+import { suggestProjectTracking } from "./project-tracking-inference.ts";
 import { HarnessInstalls } from "./harness-installs.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
 import {
@@ -1065,6 +1067,12 @@ const remoteProjectBatchObserver = remoteProjectObserver.batch;
 const remoteCanonical = createRemoteWorkspaceCanonical(remoteProofOptions);
 const remoteGitWorktree = createRemoteGitWorktreeObserver(remoteProofOptions);
 const remoteWorktreeRoot = createRemoteWorktreeRootObserver(remoteProofOptions);
+const projectTracking = createProjectTrackingService({
+  settings: settingsStore,
+  forge: () => workItems.githubForge(),
+  suggest: suggestProjectTracking,
+  logger,
+});
 const projectWorktreeRoot: ObserveProjectWorktreeRoot = (input) =>
   input.machineId === "local" ? observeLocalProjectWorktreeRoot(input) : remoteWorktreeRoot(input);
 const projectGitWorktree: ObserveProjectGitWorktree = (root, cwd) =>
@@ -2467,6 +2475,7 @@ const clankie = await createClankieApp({
     }),
   fleetProjectMembership,
   projectWorktreeRoot,
+  projectTracking,
   ...(runtimeUpdater === undefined ? {} : { runtimeUpdater }),
   scheduledReleaseCutover: async (guard) => {
     await guard();
@@ -2809,6 +2818,13 @@ const ownerCheckoutSync = startOwnerCheckoutSync({
   report: ownerCheckoutSyncReport(logger),
 });
 
+const projectTrackingSweep = startProjectTrackingSweep(projectTracking, (error) =>
+  logger.warn(
+    { event: "project_tracking.sweep_failed", error: String(error) },
+    "Project tracking sweep failed",
+  ),
+);
+
 const listenHost = "127.0.0.1";
 const webSocketServer = new WebSocketServer({
   noServer: true,
@@ -2948,6 +2964,7 @@ function requestShutdown(signal: "SIGINT" | "SIGTERM"): void {
   updateBatching?.close();
   clearInterval(serviceLogRotation);
   void ownerCheckoutSync.close();
+  projectTrackingSweep.stop();
   harnessLogins.close();
   harnessInstalls.close();
   fleetLinks.close();

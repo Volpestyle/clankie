@@ -63,6 +63,7 @@ const HEADLESS_COMMAND_HELP = [
       "  project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings",
       "  project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding",
       "  project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides",
+      "  project tracking PROJECT [apply|clear|--provider github|linear --public-board BOARD --private-board BOARD --repo OWNER/NAME... --accept-suggestion --no-apply]  Read or set a project's repos and tracker, and propose each repo's tracking block as a pull request (JSON)",
       "  project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)",
       "  project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root",
       "  project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment",

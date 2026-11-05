@@ -102,6 +102,7 @@ import { createModelKeyRoutes } from "../model-key-routes.ts";
 import { createHarnessLoginRoutes } from "../harness-login-routes.ts";
 import { PairingOfferStore, replayReviewOffers } from "../pairing.ts";
 import { createProjectRoutes } from "../project-routes.ts";
+import { createProjectTrackingRoutes } from "../project-tracking.ts";
 import { createReviewRoutes } from "../review-routes.ts";
 import { createPushDispatcher, type PushDispatcher } from "../push.ts";
 import { createRuntimeUpdateRoutes } from "../runtime-update-routes.ts";
@@ -846,6 +847,8 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     }),
   );
   app.route("/", createReviewRoutes(dependencies.captain.reviews, authorizeOwnerSecrets));
+  if (dependencies.projectTracking)
+    app.route("/", createProjectTrackingRoutes(authorizeOwnerSecrets, dependencies.projectTracking));
   app.route(
     "/",
     createProjectRoutes(authorizeOwnerSecrets, settingsSource, {
