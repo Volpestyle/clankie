@@ -6,6 +6,8 @@ import type { SeatEvent } from "@clankie/agent-hosts";
 export interface NativeMessageObservation {
   readonly messageId: string;
   readonly read: (signal: AbortSignal) => Promise<SeatEvent>;
+  /** Last awaited recipient read, followed by a synchronous original-recipient/control check. */
+  readonly publicationFence: (signal: AbortSignal) => Promise<() => boolean>;
 }
 
 /** Host-only capture for the original native send. It is never decoded from request JSON. */

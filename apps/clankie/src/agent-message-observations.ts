@@ -44,7 +44,10 @@ export class AgentMessageObservations {
           if (!current()) return;
           const event = await input.native.read(abort.signal);
           await input.authorize();
-          if (!current()) return;
+          const recipientCurrent = await input.native.publicationFence(abort.signal);
+          // One final synchronous gate covers sender, recipient and the accepted control.
+          // Nothing may await between this predicate and the metadata store write below.
+          if (!current() || !recipientCurrent()) return;
           if (event.type === "turn_started" || event.type === "turn_completed") {
             if (event.messageId !== input.native.messageId) return;
             this.receipts.observe(input.receiptId, input.binding, event);

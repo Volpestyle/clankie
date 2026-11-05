@@ -598,6 +598,9 @@ export function createFleetSeatControl(
           if (options?.nativeObservation && current) {
             const key = JSON.stringify([current.paneId, current.terminalId, current.agent, current.session]);
             const original = current;
+            const originalRef = control.ref;
+            const refKey = JSON.stringify(originalRef);
+            const originalSettlement = control.settled;
             const guard = async (signal: AbortSignal) => {
               signal.throwIfAborted();
               const live = await runner.resolveTerminal(original.terminalId ?? original.paneId);
@@ -610,6 +613,15 @@ export function createFleetSeatControl(
             try {
               options.nativeObservation({
                 messageId: delivery.messageId,
+                publicationFence: async (signal) => {
+                  // This is deliberately the final awaited read. No sender authorization,
+                  // native status request or other asynchronous work follows its result.
+                  const live = await runner.resolveTerminal(original.terminalId ?? original.paneId, { fresh: true });
+                  return () => !signal.aborted &&
+                    JSON.stringify(live && [live.paneId, live.terminalId, live.agent, live.session]) === key &&
+                    control.ref === originalRef && JSON.stringify(control.ref) === refKey &&
+                    control.settled === originalSettlement;
+                },
                 read: async (signal) => {
                   await guard(signal);
                   const event = await control.settled(signal, delivery.messageId, armedAt);
