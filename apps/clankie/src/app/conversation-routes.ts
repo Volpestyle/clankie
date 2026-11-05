@@ -175,6 +175,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (!(await authorize())) return context.json({ error: "forbidden" }, 403);
         if (path === FLEET_REPORT_LEADS_PATH) {
           const parsed = ManageWorkerReportLeadsSchema.safeParse(
+            // allow-swallowed-rejection -- Malformed JSON fails the strict schema before any grant write.
             await context.req.json().catch(() => undefined),
           );
           if (!parsed.success) return context.json({ error: "invalid_request" }, 400);

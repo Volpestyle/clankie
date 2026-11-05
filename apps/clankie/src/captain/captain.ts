@@ -6640,6 +6640,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     },
 
     async workerReportLeads(paneId, reportDeviceAvailable) {
+      // allow-swallowed-rejection -- Missing native identity returns no report destinations.
       const agent = await herdrRunner.get(paneId).catch(() => undefined);
       if (!agent || inboundBinding(agent) === undefined) return [];
       let leads: ReturnType<typeof herdrWatches.reportLeads>;
@@ -6675,6 +6676,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             ...destination.connector,
           });
       }
+      // allow-swallowed-rejection -- A failed fresh identity check returns an empty destination list.
       const current = await herdrRunner.get(paneId).catch(() => undefined);
       if (!current || inboundBinding(current) !== inboundBinding(agent)) return [];
       try {
@@ -6778,6 +6780,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             const freshCensus = await census();
             // Parallel census reads may have captured an earlier row. Pin the native
             // occupant again after all discovery awaits, then persist synchronously.
+            // allow-swallowed-rejection -- Losing the native occupant refuses the report before acceptance.
             const current = await herdrRunner.get(paneId).catch(() => undefined);
             if (
               !current ||
