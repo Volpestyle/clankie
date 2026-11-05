@@ -760,11 +760,12 @@ it.each(["beforeSendPreparation", "beforeNativeClaim", "beforeNativeClaimReply",
     const before = p.sendMessage.mock.calls.length;
     const commands = p.sendCommands();
     const replies = p.positiveReplies().length;
+    let revoked = false;
     const f = await fixture({ control: started.control, file: p.file }),
       client = await f.client();
     if (boundary !== "stable")
       p[boundary](async () => {
-        expect((await f.revoke()).status).toBe(200);
+        revoked = (await f.revoke()).status === 200;
       });
     const result = await client.callTool({
       name: "message_agent",
@@ -774,6 +775,7 @@ it.each(["beforeSendPreparation", "beforeNativeClaim", "beforeNativeClaimReply",
         receipt: true,
       },
     });
+    expect(revoked).toBe(boundary !== "stable");
     if (boundary === "stable") {
       expect(p.sendMessage.mock.calls.length - before).toBe(1);
       expect(decoded(result).status).toBe("delivered");
@@ -874,13 +876,15 @@ it.each([1, 2] as const)(
       const native = await openCodeReceiptFixture(version);
       const f = await fixture({ control: native.control }),
         client = await f.client();
+      let revoked = false;
       native.pauseAt(phase, async () => {
-        expect((await f.revoke()).status).toBe(200);
+        revoked = (await f.revoke()).status === 200;
       });
       const result = await client.callTool({
         name: "message_agent",
         arguments: { agent: "herdr:" + f.seat.seatId, message: "Native OpenCode admission", receipt: true },
       });
+      expect(revoked).toBe(phase !== "stable");
       expect(native.admitted()).toBe(phase === "stable" ? 1 : 0);
       expect(native.positiveReplies()).toEqual(
         phase === "stable" ? ["authorize", "claim"] : phase.startsWith("claim") ? ["authorize"] : [],
@@ -900,9 +904,10 @@ it.each([
     const native = await makeNative(),
       f = await fixture({ control: native.control }),
       client = await f.client();
+    let revoked = false;
     if (revoke)
       native.beforeMutation(async () => {
-        expect((await f.revoke()).status).toBe(200);
+        revoked = (await f.revoke()).status === 200;
       });
     const result = await client.callTool({
       name: "message_agent",
@@ -912,6 +917,7 @@ it.each([
         receipt: true,
       },
     });
+    expect(revoked).toBe(revoke);
     expect(native.admitted()).toBe(revoke ? 0 : 1);
     if (!revoke) expect(result.isError).not.toBe(true);
   }
@@ -927,9 +933,10 @@ it.each([
     const native = await externalCodexReceiptFixture(mode, remote),
       f = await fixture({ control: native.control }),
       client = await f.client();
+    let revoked = false;
     if (revoke)
       native.beforeMutation(async () => {
-        expect((await f.revoke()).status).toBe(200);
+        revoked = (await f.revoke()).status === 200;
       });
     const result = await client.callTool({
       name: "message_agent",
@@ -939,6 +946,7 @@ it.each([
         receipt: true,
       },
     });
+    expect(revoked).toBe(revoke);
     expect(native.admitted()).toBe(revoke ? 0 : 1);
     if (!revoke) expect(result.isError).not.toBe(true);
   }
