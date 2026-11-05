@@ -12,7 +12,7 @@ import {
 } from "@clankie/settings";
 
 const MACHINES_USAGE =
-  "Usage: clankie machines [list|discover] [--json]\n       clankie machines legacy-joins [on|off]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines sandbox status|remove\n       clankie machines sandbox prepare portal|workers|shell --workspace DIR [--workspace DIR] [--home DIR]\n       clankie machines remove NAME\n       clankie machines shell-audit\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
+  "Usage: clankie machines [list|discover] [--desktop] [--json]\n       clankie machines legacy-joins [on|off]\n       clankie machines add NAME --ssh HOST [--shell posix|powershell]\n       clankie machines access NAME portal|workers|shell|screen\n       clankie machines sandbox status|remove\n       clankie machines sandbox prepare portal|workers|shell --workspace DIR [--workspace DIR] [--home DIR]\n       clankie machines remove NAME\n       clankie machines shell-audit\n       clankie machines sessions NAME [--connect SESSION --id CONNECTION] [--json]";
 export const MACHINE_RESTART_HINT =
   "Named machine connections apply immediately. Default workspace changes require clankie restart captain.";
 export async function runMachinesCommand(
@@ -25,7 +25,8 @@ export async function runMachinesCommand(
     repoRoot?: string;
   } = {},
 ): Promise<unknown> {
-  const values = args.filter((arg) => arg !== "--json");
+  const desktop = args.includes("--desktop");
+  const values = args.filter((arg) => arg !== "--json" && arg !== "--desktop");
   const [verb = "list", name, ...rest] = values;
   if (verb === "sandbox") {
     const env = options.env ?? process.env;
@@ -113,6 +114,10 @@ export async function runMachinesCommand(
   ) {
     if (rest.length) return runRuntimeCommand(["connect-machine", rest[3]!, name, rest[1]!], options);
   } else if (!(verb === "list" && values.length <= 1)) throw new Error(MACHINES_USAGE);
+  if (desktop) {
+    if (method !== "GET" || path !== "/v1/machines") throw Error(MACHINES_USAGE);
+    path += "?includeDesktopAccess=true";
+  }
   const credential = await resolveOperatorCredential({
     env: options.env ?? process.env,
     ...(options.operatorCredentialStore ? { store: options.operatorCredentialStore } : {}),

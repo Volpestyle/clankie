@@ -1,3 +1,4 @@
+import type { DesktopAccess } from "./desktop-access.ts";
 import { execFile } from "node:child_process";
 import { appendFile, chmod, glob, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -161,6 +162,19 @@ export class Machines {
   setJoinedProvider(provider: NonNullable<Machines["joined"]>) {
     this.joined = provider;
     this.invalidate();
+  }
+  private desktop?: DesktopAccess;
+  setDesktopAccess(desktop: DesktopAccess): void {
+    this.desktop = desktop;
+  }
+  desktopAccessLevel(current: import("@clankie/settings").ClankieSettings, id: string) {
+    return machineAccessLevel(current, id, this.joined);
+  }
+  async hasDesktopMachine(id: string): Promise<boolean> {
+    const current = await this.options.settings.load();
+    return (
+      id === "local" || this.joined?.has(id) === true || current.machines.some((entry) => entry.id === id)
+    );
   }
   private active = 0;
   private readonly waiting: Array<() => void> = [];
@@ -395,11 +409,20 @@ export class Machines {
     return { refusals: await readMachineAccessRefusals(this.options.settings, this.joined) };
   }
 
-  async list(refresh = false): Promise<MachineInventory> {
-    if (!refresh && this.cached && this.cached.expires > Date.now()) return this.cached.inventory;
-    const inventory = this.discover();
-    this.cached = { expires: Date.now() + 15_000, inventory };
-    return inventory;
+  async list(refresh = false, includeDesktopAccess = false): Promise<MachineInventory> {
+    if (refresh || !this.cached || this.cached.expires <= Date.now()) {
+      this.cached = { expires: Date.now() + 15_000, inventory: this.discover() };
+    }
+    const inventory = await this.cached.inventory;
+    if (!this.desktop || !includeDesktopAccess) return inventory;
+    const current = await this.options.settings.load();
+    return {
+      ...inventory,
+      machines: inventory.machines.map((machine) => ({
+        ...machine,
+        desktopAccess: this.desktop!.snapshot(current, machine.id),
+      })),
+    };
   }
 
   private async discover(): Promise<MachineInventory> {
@@ -409,6 +432,7 @@ export class Machines {
     const configured: Machine[] = [
       {
         id: "local",
+        platform: process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "win32" : "linux",
         transport: "local",
         configured: true,
         state: "discovering",

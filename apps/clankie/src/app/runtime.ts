@@ -1,4 +1,7 @@
 import { workerReportDevice } from "../devices.ts";
+import { DesktopAccess } from "../desktop-access.ts";
+import { createDesktopAccessRoutes } from "../desktop-access-routes.ts";
+import { machineAccessLevel } from "../machine-access.ts";
 import { createPiSettingsRoutes } from "../pi-settings-routes.ts";
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
@@ -615,6 +618,17 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       },
     }),
   );
+  const desktopMachines = dependencies.runtimes?.machines;
+  const desktopAccess = new DesktopAccess(
+    settingsSource,
+    (current, id) => desktopMachines?.desktopAccessLevel(current, id) ?? machineAccessLevel(current, id),
+    () => clock().getTime(),
+  );
+  desktopMachines?.setDesktopAccess(desktopAccess);
+  const desktopOperator = async (request: Request): Promise<true | "authentication_required"> => {
+    const identity = await authenticateOperator(request, dependencies);
+    return identity && identity !== "unavailable" ? true : "authentication_required";
+  };
   /** Owner operator or an owner device with current Take Control authority. */
   const authorizeOwnerSecrets = async (
     request: Request,
@@ -627,6 +641,16 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       ? true
       : "forbidden";
   };
+  app.route(
+    "/",
+    createDesktopAccessRoutes({
+      desktop: desktopAccess,
+      read: authorizeOwnerSecrets,
+      write: authorizeOwnerSecrets,
+      publish: desktopOperator,
+      known: (id) => desktopMachines?.hasDesktopMachine(id) ?? Promise.resolve(id === "local"),
+    }),
+  );
   app.route(
     "/",
     createFleetProjectMembershipRoutes(dependencies.fleetProjectMembership, authorizeOwnerSecrets),
@@ -1039,7 +1063,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       return context.json({ error: "operator_authentication_unavailable" }, 503);
     if (!operator) return context.json({ error: "operator_authentication_required" }, 401);
     if (!dependencies.runtimes) return context.json({ error: "machines_unavailable" }, 503);
-    return context.json(await dependencies.runtimes.machines.list(context.req.query("discover") === "true"));
+    return context.json(
+      await dependencies.runtimes.machines.list(
+        context.req.query("discover") === "true",
+        context.req.query("includeDesktopAccess") === "true",
+      ),
+    );
   });
   app.post("/v1/machines", bodyLimit({ maxSize: 16 * 1024 }), async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);

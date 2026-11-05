@@ -80,6 +80,8 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["computer"],
     lines: [
+      "  computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json  Read or change the owner’s desktop choice",
+      "  computer permissions [--machine ID] [--refresh] --json  Read permission status; refresh only in the acting terminal on its Mac",
       "  computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)",
     ],
   },
@@ -572,7 +574,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["machines"],
     lines: [
-      "  machines [list|discover] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | shell-audit | sessions NAME",
+      "  machines [list|discover] [--desktop] [--json] | add NAME --ssh HOST | access NAME portal|workers|shell|screen | sandbox prepare LEVEL --workspace DIR [--home DIR] | sandbox status|remove | remove NAME | shell-audit | sessions NAME",
       "                           Machines where agents run; connections apply live",
     ],
   },

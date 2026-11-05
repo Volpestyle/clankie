@@ -30,6 +30,24 @@ harness, the brief, human checks and the report
 ([ADR 0199](../../../docs/adr/0199-hard-computer-work-goes-to-a-computer-use-harness.md)). The rest of this skill is for
 driving the desktop yourself.
 
+## Read the owner's desktop choice first
+
+Run `clankie computer mode --json` (or `--machine ID`, `--lead NAME` for that
+owner-set policy). Default `none` means only the agent's private browser. The
+owner chooses opt-ins; a worker never changes the mode to make its task work.
+A configured mode is not a ready desktop: machine ceilings, consent and actual
+capabilities still apply. The mode API does not provision or route a VM.
+
+`clankie computer permissions --json` reports a named actor/context, or
+unavailable. Do not substitute the service's or Clankie app's own TCC status.
+When the owner asks for a refresh, run `computer permissions --refresh --json`
+in the terminal app that will act, against its local service; this is a
+non-prompting preflight only. A report expires after a minute and grants no
+access. Do not infer denied/not-asked from unavailable, or grants for other apps
+from one terminal's report. Missing permission goes to the lead; never request it
+or open Settings as a side effect of reading. Details and implementation limits:
+[desktop choice and permissions](../../../docs/desktop-control.md#desktop-choice-and-permission-status).
+
 ## Stay off the owner's screen
 
 The screen belongs to the person using it, so screen work runs in the

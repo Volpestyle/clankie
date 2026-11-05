@@ -218,3 +218,15 @@ secret from Clankie's vault; the two vaults stay separate.
 - What this ADR does not do: no hosted desktop (ADR 0300), no shared desktop
   between owners, no automatic account creation (ADR 0127 still holds), and no
   driving the owner's foreground windows in any mode.
+
+## Implementation boundary (core #300)
+
+The typed owner choice, per-lead override, revision-fenced write, machine
+inventory projection and actor-context permission report are implemented through
+[`desktop-access.ts`](../../packages/protocol/src/desktop-access.ts) and the
+[CLI/API guide](../desktop-control.md#desktop-choice-and-permission-status).
+Reads never run a service-context TCC check. The owner explicitly refreshes a
+named actor report from the acting terminal; unavailable status stays unknown.
+Neither a report nor a choice raises a machine ceiling. This does not claim the
+proposed hire routing, guest manager or credential vault is built. Those remain
+separate work; no VM is created or started by saving a choice.

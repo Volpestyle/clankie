@@ -142,6 +142,18 @@ profile. Live mode status explicitly covers this machine only. Neither this
 switch nor the autonomy dial raises machine access ceilings or workspace grants.
 See [Maximum trust mode](cli.md#maximum-trust-mode).
 
+Desktop access ([ADR 0342](adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md),
+Common): `computer.machines[ID].desktopMode` defaults to `none` (private browser
+only), with owner-set `leadModes`. `GET`/`POST /v1/operator/computer` is the
+revision-fenced API, forwarded by the relay and doorway. CLI:
+`computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] --json`.
+App/pet controls are pending; no TUI control added. `computer permissions --json`
+reads named, expiring actor observations; the owner refreshes explicitly in the
+acting Mac terminal with `--refresh`. The service's TCC state is never a
+substitute. Selection cannot raise the machine's independent access ceiling.
+Desktop routing and VM management remain separate unimplemented ADR work, not
+side effects of this setting. [API and observation limits](desktop-control.md#desktop-choice-and-permission-status).
+
 ### 5. Projects
 
 | Setting                                                                                   | API                                                       | CLI                                                       | TUI                   | App                                                                | Dash | Tier     |

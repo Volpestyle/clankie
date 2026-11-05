@@ -3,6 +3,11 @@ import {
   ProjectCiStarterRequestSchema,
   ProjectCiStarterOfferSchema,
 } from "../../../packages/protocol/src/project-ci-starter.ts";
+import {
+  DESKTOP_ACCESS_PATH,
+  DesktopAccessSnapshotSchema,
+  UpdateDesktopModeSchema,
+} from "../../../packages/protocol/src/desktop-access.ts";
 import { FLEET_LEADS_PATH, FleetLeadsSnapshotSchema } from "../../../packages/protocol/src/fleet-leads.ts";
 import {
   CAPTAIN_SEAT_PATH,
@@ -263,6 +268,8 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: LINEAR_WAKE_PATH },
   { method: "GET", path: EVIDENCE_STORAGE_SETTINGS_PATH },
   { method: "POST", path: EVIDENCE_STORAGE_SETTINGS_PATH },
+  { method: "GET", path: DESKTOP_ACCESS_PATH },
+  { method: "POST", path: DESKTOP_ACCESS_PATH },
   { method: "GET", path: HOST_SETTINGS_PATH },
   { method: "GET", path: HTTP_SETTINGS_PATH },
   { method: "POST", path: HTTP_SETTINGS_PATH },
@@ -299,6 +306,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     methods: ["GET", "POST"],
     update: UpdateEvidenceStorageSchema,
     snapshot: EvidenceStorageSnapshotSchema,
+  },
+  [DESKTOP_ACCESS_PATH]: {
+    methods: ["GET", "POST"],
+    update: UpdateDesktopModeSchema,
+    snapshot: DesktopAccessSnapshotSchema,
   },
   [HOST_SETTINGS_PATH]: {
     methods: ["GET", "POST"],
