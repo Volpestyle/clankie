@@ -46,9 +46,11 @@ it("waits for a seat's status on Herdr's socket without a subprocess", { timeout
     expect((await runner.wait(herdr.pane, signal)).status).toBe("idle");
 
     await report("working");
-    const closing = runner.waitForChange!(herdr.pane, "working", signal);
+    // Herdr can refuse the wait before the close CLI returns. Attach the
+    // expected rejection now so that refusal never becomes unhandled.
+    const closing = expect(runner.waitForChange!(herdr.pane, "working", signal)).rejects.toThrow();
     await herdr.cli("pane", "close", herdr.pane);
-    await expect(closing).rejects.toThrow();
+    await closing;
     expect(spawned).toEqual([]);
   } finally {
     await herdr.close();
