@@ -33,7 +33,7 @@ it.skipIf(!executable || process.platform !== "darwin").each(["worker", "pane"] 
         `import {createInterface} from 'node:readline';
 createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.id===undefined)return;
 const result=q.method==='initialize'?{protocolVersion:q.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'isolated-holder-proof',version:'1'}}:q.method==='tools/list'?{tools:[]}:{};
-process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');});`,
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+String.fromCharCode(10));});`,
       );
       await writeFile(join(bin, "clankie"), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(mcp)}\n`, {
         mode: 0o700,
