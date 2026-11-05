@@ -236,7 +236,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     // Another lead may answer (VUH-1763); the seat's own lead stays its lead.
     let owner: ConversationOwner | undefined;
     try {
-      owner = ctx.nativeOwner(agent);
+      owner = structuredClone(ctx.nativeOwner(agent));
     } catch {
       /* A replaced occupant fails the dispatch guard below; nothing is sent. */
     }
@@ -273,37 +273,46 @@ export function createHerdrWatchQuestions(ctx: Context) {
     } catch (error) {
       return { outcome: "undelivered", detail: String(error) };
     }
+    const recipientKey = (value: HerdrAgentSnapshot) =>
+      JSON.stringify([value.paneId, value.terminalId, value.agent, nativeSessionId(value)]);
+    const originalRecipient = recipientKey(agent);
+    let recipient: HerdrAgentSnapshot | undefined;
+    const refreshRecipient = async () => {
+      recipient = await ctx.runner.resolveTerminal(seatId, { fresh: true });
+    };
     let machineFence: import("../machine-access.ts").MachineAccessFence | void;
     const assertAnswerCurrent = () => {
       if (!authority.current()) throw new Error("Question authority changed");
       machineFence?.assertCurrent();
       ownerQuestion?.assertCurrent();
+      if (
+        !recipient?.session ||
+        recipientKey(recipient) !== originalRecipient ||
+        owner === undefined ||
+        !isDeepStrictEqual(ctx.nativeOwner(recipient), owner)
+      )
+        throw new Error("The seat's lead or native occupant changed; no answer was sent.");
     };
     const guard = Object.assign(
       async () => {
         await assertConversationAuthority(authority);
+        await refreshRecipient();
         await permissionAuthority();
+        await refreshRecipient();
         if (ownerQuestion && ownerPrincipal && expectedSessionId !== undefined && !authority.owner.discord)
           machineFence = await ownerQuestion.access(splitFleetQualified(agent.paneId)?.fleet);
         else machineFence = await ctx.requireWorkerAccess?.(splitFleetQualified(agent.paneId)?.fleet);
-        const current = await ctx.runner.resolveTerminal(seatId);
-        if (
-          !current?.session ||
-          current.paneId !== agent.paneId ||
-          current.agent !== agent.agent ||
-          nativeSessionId(current) !== nativeSessionId(agent) ||
-          owner === undefined ||
-          !isDeepStrictEqual(ctx.nativeOwner(current), owner)
-        )
-          throw new Error("The seat's lead or native occupant changed; no answer was sent.");
+        await refreshRecipient();
         await assertConversationAuthority(authority);
-        if (
-          pending &&
-          expectedSessionId === undefined &&
-          (pending.permission?.transport === "channel" ||
-            (await ctx.questionGate?.(current, pending)) === "owner")
-        )
-          throw new Error("This native question is reserved for the owner");
+        await refreshRecipient();
+        if (pending && expectedSessionId === undefined) {
+          const gate = await ctx.questionGate?.(recipient ?? agent, pending);
+          await refreshRecipient();
+          if (pending.permission?.transport === "channel" || gate === "owner")
+            throw new Error("This native question is reserved for the owner");
+        }
+        // Every asynchronous authorization read precedes the final recipient
+        // observation. Native controllers repeat this synchronous fence at write.
         assertAnswerCurrent();
       },
       { assertCurrent: assertAnswerCurrent },

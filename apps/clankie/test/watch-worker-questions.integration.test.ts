@@ -111,17 +111,29 @@ async function fixture(watch = true) {
     },
   );
   cleanup.push(() => captain.close());
+  let afterAuth: (() => Promise<void>) | undefined;
   const credentials = new FileCredentialStore(join(root, "credentials.json"));
   const credential = await ensureOperatorCredential({ env: {}, store: credentials });
   const app = await createClankieApp({
     captain,
     settings,
     authenticateCaptain: async () => undefined,
-    authenticateOperator: createCredentialBackedOperatorAuthenticator({
-      env: {},
-      store: credentials,
-      identity: { operatorId: "owner", steerSourceLane: "tui" },
-    }),
+    authenticateOperator: (() => {
+      const authenticate = createCredentialBackedOperatorAuthenticator({
+        env: {},
+        store: credentials,
+        identity: { operatorId: "owner", steerSourceLane: "tui" },
+      });
+      if (!authenticate.readFence) throw new Error("Missing real owner credential fence");
+      return Object.assign(
+        async (request: Request) => {
+          const identity = await authenticate(request);
+          await afterAuth?.();
+          return identity;
+        },
+        { readFence: authenticate.readFence },
+      );
+    })(),
     localFleet: {
       identity: (request) =>
         request.headers.get("x-clankie-pane") === pane
@@ -247,6 +259,12 @@ async function fixture(watch = true) {
     return { code, result: JSON.parse(output) };
   };
   return {
+    afterAuth: (observe: () => Promise<void>) => {
+      afterAuth = observe;
+    },
+    replaceRecipient: () => {
+      row.agent_session = { ...native, value: randomUUID() };
+    },
     command,
     stopWorker: async () => {
       if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -499,3 +517,30 @@ it("disconnecting the held native hook retires its owner card without an answer 
   expect(record.question.status).toBe("cancelled");
   expect(record.workerDelivery).toBeUndefined();
 });
+
+// Reads 6–8 are the native answer path's three owner-authority awaits, after
+// the API/store admission reads. Retain the real authenticator and its fence.
+it.each([6, 7, 8])(
+  "recipient replacement at owner authorization read %s refuses and keeps the card open",
+  async (read) => {
+    const f = await fixture();
+    const ask = await f.ask();
+    let reads = 0,
+      replaced = false;
+    f.afterAuth(async () => {
+      if (++reads === read) {
+        f.replaceRecipient();
+        replaced = true;
+      }
+    });
+    const result = await f.call(f.answerRequest(ask));
+    expect(replaced).toBe(true);
+    expect(result).toMatchObject({ status: 200, body: { result: { status: "refused" } } });
+    expect(f.stdout()).toBe("");
+    const record = (await f.meta()).questions.records.find(
+      (record: { question: { requestId: string } }) => record.question.requestId === ask.question!.requestId,
+    );
+    expect(record.question.status).toBe("pending");
+    expect(record.workerDelivery).toBeUndefined();
+  },
+);

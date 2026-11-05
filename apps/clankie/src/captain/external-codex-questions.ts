@@ -171,8 +171,8 @@ export function externalCodexQuestions(
               (status.type === "idle" && active.length !== 0)
             )
               throw new Error("Original native turn identity is unavailable; nothing was sent");
-            await guard?.();
             await assertCurrent();
+            await guard?.();
             guard?.assertCurrent?.();
             const text = codexAsyncQuestionAnswer(question, answer);
             const receipt = fence.begin(key, {
