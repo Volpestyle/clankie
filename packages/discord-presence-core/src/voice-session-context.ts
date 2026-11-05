@@ -603,7 +603,7 @@ export interface PendingVoiceResponse {
   playbackOutcome?: PlaybackJob["outcome"];
 }
 
-export interface VoiceInputTiming {
+interface VoiceInputTiming {
   lastAudioAtMs?: number;
   captureEndedAtMs?: number;
   transcriptFinalAtMs?: number;

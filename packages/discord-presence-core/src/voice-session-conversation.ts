@@ -122,6 +122,7 @@ export function createVoiceConversation(ctx: VoiceConversationContext) {
         }
         if (ctx.floor.state === "dormant") armHold();
       })
+      // allow-swallowed-rejection -- The existing detached membership queue drops refused opportunities and stays usable; never replay speech.
       .catch(() => undefined);
   }
 
@@ -336,6 +337,7 @@ export function createVoiceConversation(ctx: VoiceConversationContext) {
           });
         }
       })
+      // allow-swallowed-rejection -- The existing detached turn queue recovers from provider or lease refusal; never replay a spoken opportunity.
       .catch(() => undefined);
   }
 
@@ -740,6 +742,7 @@ export function createVoiceConversation(ctx: VoiceConversationContext) {
           );
         }
       })
+      // allow-swallowed-rejection -- A best-effort briefing refusal leaves it unsent; keep the queue usable without replaying private context.
       .catch(() => undefined);
   }
 

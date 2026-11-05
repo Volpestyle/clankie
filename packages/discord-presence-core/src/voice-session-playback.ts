@@ -107,6 +107,7 @@ export function createVoicePlayback(ctx: VoicePlaybackContext) {
         failureReason: undefined,
       };
       ctx.openPlayback = job;
+      // allow-swallowed-rejection -- The existing playback tail recovers for later responses without retrying rejected audio.
       ctx.playbackChain = ctx.playbackChain.then(() => playJob(job)).catch(() => undefined);
     }
     const job = ctx.openPlayback;
