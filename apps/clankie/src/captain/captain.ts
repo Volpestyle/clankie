@@ -1,4 +1,6 @@
 import { leadChangeSources } from "./lead-change-sources.ts";
+import { createMissingWorktreeClose, positivelyMissing } from "./missing-worktree-close.ts";
+import { MainCheckpointRefused } from "@clankie/work-items";
 import { FleetLeadActivity, type LeadHire } from "./fleet-lead-activity.ts";
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
@@ -612,11 +614,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             fleet.id,
             createRemoteHerdrRunner(
               fleet,
-              async (args, signal, timeout) => {
+              async (args, signal, timeout, beforeDispatch) => {
                 const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
                 if (!active || (fleetRevisions.get(fleet.id) ?? 0) !== revision)
                   throw new Error(`Machine connection ${fleet.id} changed or disconnected`);
-                return deps.fleets!.run(active)(args, signal, timeout);
+                beforeDispatch?.();
+                return deps.fleets!.run(active)(args, signal, timeout, beforeDispatch);
               },
               options.remoteOpenCode === undefined
                 ? {}
@@ -643,11 +646,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             entry.id,
             createHerdrWatchRunner(
               undefined,
-              async (args, signal, timeout) => {
+              async (args, signal, timeout, beforeDispatch) => {
                 await refreshFleets();
                 if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
                   throw new Error(`Machine connection ${entry.id} changed or disconnected`);
-                return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry);
+                beforeDispatch?.();
+                return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry, beforeDispatch);
               },
               undefined,
               { localCodexRecovery: false },
@@ -2844,7 +2848,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           },
     );
   };
-  const { hireSeat, hireWorktreeBase } = createHiring({
+  const { hireSeat, hireWorktreeBase, closeWorktreeRelocation } = createHiring({
     options,
     deps,
     settings,
@@ -2888,7 +2892,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       liveSeats = seats;
     },
   });
-
   // The worktree the host recorded for a local hire, owned by its tidy provenance.
   const recordedWorktree = (agent: HerdrAgentSnapshot) => {
     const owner = herdrWatches.tidyProvenance(agent);
@@ -2896,6 +2899,22 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       ? seatEfficiency.readCommitBaseline(occupantIdForHerdrSession(agent.session), owner)
       : undefined;
   };
+  const observeMissingWorktree = deps.workItems?.landedBranch
+    ? createMissingWorktreeClose({
+        settings: settingsStore,
+        claim: (agent) => herdrWatches.missingWorktreeClaim(agent),
+        relocation: closeWorktreeRelocation,
+        provider: (repository, launch) => deps.workItems!.landedBranch!(repository, launch),
+        history: join(options.stateDir, "landed-close-proofs.jsonl"),
+      })
+    : undefined;
+
+  // Existing recorded baselines keep their original checkpoint path. This recovery only
+  // supplies the evidence missing from an unconfirmed launch.
+  const missingWorktreeClose = observeMissingWorktree
+    ? (agent: HerdrAgentSnapshot, path: string) =>
+        recordedWorktree(agent) ? Promise.resolve(undefined) : observeMissingWorktree(agent, path)
+    : undefined;
   const paneTidy: PaneTidy = new PaneTidy(join(options.stateDir, "pane-tidy.json"), {
     runner: herdrRunner,
     runtimeRoot: options.repoRoot,
@@ -2953,6 +2972,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
           }),
       );
     },
+    ...(missingWorktreeClose === undefined ? {} : { landedMissingWorktree: missingWorktreeClose }),
     mainCheckpoint: async (agent) => {
       const qualified = splitFleetQualified(agent.paneId);
       await refreshFleets();
@@ -2976,6 +2996,19 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         return { reason: "main_unknown", failingJobs: [], detail: "Worker directory unavailable" };
       const baseline = fleet ? undefined : recordedWorktree(agent);
       for (const path of paths) {
+        if (missingWorktreeClose && positivelyMissing(path)) {
+          try {
+            if (await missingWorktreeClose(agent, path)) continue;
+          } catch (error) {
+            return error instanceof MainCheckpointRefused
+              ? error.hold
+              : {
+                  reason: "main_unknown",
+                  failingJobs: [],
+                  detail: "Missing worktree close proof unavailable",
+                };
+          }
+        }
         const startHead =
           baseline &&
           projectPathContains(baseline.worktreeRoot, path, process.platform === "win32" ? "windows" : "posix")

@@ -1,3 +1,7 @@
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { githubConnectionFenced } from "../src/accounts.ts";
+import { fenceFleetSeatAdapter } from "../src/captain/fleet-seat-boundary.ts";
+import type { SeatControl, SeatExitGuard } from "@clankie/agent-hosts";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +34,7 @@ async function fixture(path?: string, onRetire?: () => void | Promise<void>) {
   const check = vi.fn(async () => true);
   const guard = vi.fn(async () => {});
   controller.bind(check, guard);
-  return { controller, check, guard, receiptsPath };
+  return { controller, check, guard, receiptsPath, directory };
 }
 
 async function native(controller: OpenCodeController, token = controller.token) {
@@ -267,3 +271,83 @@ test("pending-admission close and cleanup rejection retire owned resources witho
   await expect(controller.close()).rejects.toThrow("fixture cleanup failure");
   expect(onRetire).toHaveBeenCalledOnce();
 });
+
+test.each(["stable", "request", "authorization", "wrapped"])(
+  "native exit checks the retained broker witness at %s dispatch",
+  async (phase) => {
+    const f = await fixture();
+    const credentials = new FileCredentialStore(join(f.directory, "github.json"));
+    const writer = new FileCredentialStore(join(f.directory, "github.json"));
+    await credentials.set("github", { type: "api", key: "account-a" });
+    const fence = await githubConnectionFenced(credentials);
+    const n = await native(f.controller);
+    f.controller.select(sessionId);
+    let exits = 0,
+      requests = 0;
+    n.handle(async (method) => {
+      if (method !== "exit") throw new Error("Unexpected fixture method");
+      requests++;
+      await n.callback("authorize", { action: "exit" });
+      exits++;
+      return true;
+    });
+    let prepared = false,
+      changed = false;
+    f.guard.mockImplementation(async () => {
+      if (
+        !changed &&
+        (phase === "request" || ((phase === "authorization" || phase === "wrapped") && prepared))
+      ) {
+        changed = true;
+        await writer.set("github", { type: "api", key: "account-b" });
+      }
+    });
+    const guard: SeatExitGuard = Object.assign(
+      async () => {
+        prepared = true;
+      },
+      {
+        assertCurrent: fence.assertCurrent,
+      },
+    );
+    const exit = async (beforeExit?: SeatExitGuard) => {
+      await f.controller.request(
+        "exit",
+        undefined,
+        1000,
+        Object.assign(
+          async () => {
+            await beforeExit?.();
+            beforeExit?.assertCurrent?.();
+            return true;
+          },
+          { assertCurrent: () => beforeExit?.assertCurrent?.() },
+        ),
+      );
+    };
+    const control: SeatControl = {
+      ref: { harness: "opencode", paneId: "fixture", sessionId },
+      exit,
+      send: async () => ({ outcome: "offline", detail: "No message fixture" }),
+      status: async () => "idle",
+      interrupt: async () => false,
+      settled: async () => ({ type: "released", at: "now" }),
+      close: async () => {},
+    };
+    const adapter = fenceFleetSeatAdapter(
+      {
+        harness: "opencode",
+        attach: async () => control,
+        start: async () => {
+          throw new Error("No native launch fixture");
+        },
+      },
+      async () => true,
+    );
+    const action = phase === "wrapped" ? (await adapter.attach(control.ref))!.exit!(guard) : exit(guard);
+    if (phase === "stable") await expect(action).resolves.toBeUndefined();
+    else await expect(action).rejects.toThrow();
+    expect(exits).toBe(phase === "stable" ? 1 : 0);
+    expect(requests).toBe(phase === "request" ? 0 : 1);
+  },
+);

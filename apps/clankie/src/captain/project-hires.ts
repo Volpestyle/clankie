@@ -49,6 +49,11 @@ const AllocationSchema = z
     id: z.string(),
     key: z.string(),
     projectId: z.string(),
+    /** Service-captured before dispatch; never accepted from the worker request. */
+    repository: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/u)
+      .optional(),
     role: z.string().optional(),
     policy: z.string(),
     request: SpawnOperatorSeatSchema,
@@ -248,6 +253,7 @@ export class ProjectHires {
     projectId: string,
     input: SpawnOperatorSeat,
     defaults: HireProfile = {},
+    controller?: { readonly repository?: string | undefined },
   ): Allocation & { reused: boolean } {
     // Policy changes must not produce a different retry key and a second native job.
     const key = JSON.stringify([input.fleet ?? "default", input.workingDirectory]);
@@ -279,6 +285,7 @@ export class ProjectHires {
         id: randomUUID(),
         key,
         projectId,
+        ...(controller?.repository === undefined ? {} : { repository: controller.repository }),
         ...(request.role === undefined ? {} : { role: request.role }),
         request,
         policy: launchPolicy(settings, projectId, request.role),
@@ -774,6 +781,56 @@ export class ProjectHires {
       ...(entry.role === undefined ? {} : { role: entry.role }),
     };
   }
+  /** Close evidence only: never confirms or adopts an uncertain launch. */
+  public missingWorktreeClaim(fleet: string, pane: string, seat: string, occupantId: string) {
+    const candidates = () =>
+      this.read().allocations.filter(
+        (a) => !a.gone && (a.request.fleet ?? "default") === fleet && a.pane === pane,
+      );
+    const all = candidates(),
+      entry = all[0];
+    if (
+      all.length !== 1 ||
+      !entry?.started ||
+      !entry.repository ||
+      entry.operatorRelease ||
+      !entry.proof ||
+      entry.seat !== seat ||
+      entry.occupantId !== occupantId ||
+      entry.proof.nativeOccupantId !== occupantId ||
+      entry.proof.fleet !== fleet ||
+      entry.proof.pane !== pane ||
+      !Number.isFinite(entry.beganAt) ||
+      !entry.request.workingDirectory ||
+      entry.request.fleet !== undefined
+    )
+      return undefined;
+    const exclusive = () =>
+      this.read().allocations.filter(
+        (a) =>
+          !a.gone &&
+          a.started &&
+          a.request.fleet === undefined &&
+          a.request.workingDirectory === entry.request.workingDirectory,
+      ).length === 1;
+    if (!exclusive()) return undefined;
+    const saved = structuredClone(entry);
+    return {
+      allocation: entry.id,
+      repository: entry.repository,
+      occupantId,
+      projectId: entry.projectId,
+      workingDirectory: entry.request.workingDirectory,
+      harness: entry.request.harness,
+      hiredAt: new Date(entry.beganAt!).toISOString(),
+      validate: () => {
+        const current = candidates();
+        if (current.length !== 1 || !exclusive() || !isDeepStrictEqual(current[0], saved))
+          throw new Error("Original close allocation changed");
+      },
+    };
+  }
+
   /**
    * Capture a confirmed original hire for its later exit bookkeeping. This is
    * not live membership: complete inventory may mark the hire gone before its

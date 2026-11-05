@@ -443,11 +443,13 @@ export function createHerdrCoreRunner(options: HerdrCoreRunnerOptions): HerdrWat
       await seats.keys(address, keys);
     },
     closePane: async (address, guard) => {
+      if ((await own(address)) === undefined) return;
       await guard?.();
+      guard?.assertCurrent?.();
       pending.delete(address);
       reported.delete(address);
-      if ((await own(address)) === undefined) return;
-      await seats.kill(address);
+      if (guard?.assertCurrent) await seats.kill(address, guard.assertCurrent);
+      else await seats.kill(address);
       // The core keeps an ended terminal in the window until it is removed (#584). The program
       // has ended, so the close stands even if removal fails; auto-tidy's removeFinished retries.
       await seats.remove(address).catch((error: unknown) => {

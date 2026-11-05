@@ -9158,6 +9158,12 @@ run URL and failing jobs when available. File and link a red-run bug before
 retrying. This applies to automatic tidy, connector `close_agent`, and lead Done
 after landing too; built-in lead Done needs an immutable commit or merged PR
 link on the issue. An unlanded-work reason cannot waive checkpoint proof.
+A missing local checkout without a recorded baseline can use the original native
+allocation’s repository captured before dispatch and controller relocation, plus an exact canonical merged GitHub branch
+proof ([ADR 0280](adr/0280-automatic-tidy-requires-positive-work-proof.md#missing-worktree-provider-proof-885)).
+Legacy allocations without that repository record, or connections without a
+synchronous broker witness, stay unknown. Other work stays held; this does not
+confirm a hire or repair native admission.
 Repos with none of those jobs in their 20 recent main push runs have no checkpoint
 to wait for. Workers with no commits beyond their recorded hire/worktree base or
 Git fork point have no merge to account for. Connection-scoped results and bug

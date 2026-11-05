@@ -1,4 +1,5 @@
 import { leadChangePulls } from "./lead-change-pulls.ts";
+import { observeLandedBranch } from "./landed-branch.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
@@ -2013,6 +2014,30 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       });
     },
     mergedPull,
+    landedBranch: async (
+      repository: string,
+      launch: { branchRef: string; startHead: string; hiredAt: string },
+    ) => {
+      if (!options.githubConnectionFence)
+        throw new MainCheckpointRefused(
+          checkpointUnknown("GitHub connection cannot be fenced for close proof"),
+        );
+      // The broker captures its durable revision before reading the credential.
+      const fence = await options.githubConnectionFence();
+      if (!fence.connection)
+        throw new MainCheckpointRefused(checkpointUnknown("GitHub connection unavailable for close proof"));
+      const access = checkpointAccess(fence.connection.token);
+      const observation = await observeLandedBranch(access.api, repository, launch, access.cache);
+      const assertCurrent = () => {
+        fence.assertCurrent();
+      };
+      const revalidate = async () => {
+        assertCurrent();
+        await observation.revalidate();
+        assertCurrent();
+      };
+      return { proof: observation.proof, revalidate, assertCurrent };
+    },
     checkIssueCheckpoint,
     handleOwnerWrite,
     /**

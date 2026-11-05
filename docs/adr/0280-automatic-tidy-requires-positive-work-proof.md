@@ -128,3 +128,27 @@ This record retains the roughly 670 worktrees, false live-pane claims and 104 Gi
 ## Revisit when
 
 Revisit when new process/cwd behavior or actual cleanup evidence exposes false busy/free results; rerun real ownership and worktree-use proofs, never replacing positive proof with age or disk pressure.
+
+## Missing-worktree provider proof (#885)
+
+A deleted checkout without a commit baseline may use a separate landed-work
+proof. The controller's original allocation and relocation must bind the exact
+native occupant, project, source repository and allocated branch. The repository
+must have been captured in the controller allocation before native dispatch;
+legacy allocations without it remain unknown and are never backfilled from
+current Git configuration. GitHub must prove that the live branch tip is the exact head of a PR merged into main after
+the hire, descended from its recorded start, with the merge still on main. Any
+surviving local branch must agree. Existing main checkpoints still apply.
+
+The broker must provide a durable connection witness, captured before its
+credential read and checked synchronously after final authority preparation.
+A connection without that witness cannot authorize recovery. The complete
+synchronous assertion follows the guard through every close backend, including
+terminal lookup, socket handshake, named binding and fleet transport preparation.
+Each transport checks it immediately before dispatch, with no intervening await.
+
+The proof covers only that missing checkout. Dirty, unlanded, ambiguous and
+unavailable work evidence elsewhere still refuses. Branch, account, project
+and allocation bindings are revalidated at the close guard and evidence is
+retained. This neither confirms a failed hire nor grants close authority;
+worker text and leave-unlanded reasons cannot create this proof.

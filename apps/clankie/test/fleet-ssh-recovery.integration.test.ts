@@ -1,3 +1,5 @@
+import { execFile, type ExecFileException } from "node:child_process";
+import { FileCredentialStore } from "@clankie/credential-broker";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -371,3 +373,39 @@ it("releases a real remote-queue fence after pre-channel transport failure and p
   });
   expect((await f.programs()).map((program) => program.args)).toEqual([["deliberate-follow-up"]]);
 });
+
+it.each([false, true])(
+  "checks the close witness again before an SSH recovery retry (changed=%s)",
+  async (changed) => {
+    const f = await fixture();
+    await createFleetShellRun(fleet, { controlDirectory: f.controlDirectory })(
+      remoteProgramCommand("powershell", "fixtureprobe", ["environment"]),
+    );
+    await f.install(f.newBin);
+    await f.login(`${f.newBin}${delimiter}${f.oldBin}`);
+    const reader = new FileCredentialStore(join(f.root, "github.json"));
+    const writer = new FileCredentialStore(join(f.root, "github.json"));
+    await writer.set("github", { type: "api", key: "account-a" });
+    const fence = reader.readFence("github");
+    const wrapped = ((
+      file: string,
+      args: readonly string[],
+      options: object,
+      callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
+    ) =>
+      execFile(file, [...args], options, (error, stdout, stderr) => {
+        void (async () => {
+          // The owned SSH fixture proves the first command was not dispatched. Change
+          // the real broker while that result is pending, before transport recovery.
+          if (changed && error?.code === 127) await writer.set("github", { type: "api", key: "account-b" });
+          callback(error, String(stdout), String(stderr));
+        })().catch((failure) => callback(failure as ExecFileException, "", ""));
+      })) as typeof execFile;
+    const run = createHerdrFleetRun(fleet, { controlDirectory: f.controlDirectory, execFile: wrapped });
+    const action = run(["pane", "close", "fixture-pane"], undefined, undefined, fence.assertCurrent);
+    if (changed) await expect(action).rejects.toThrow();
+    else await expect(action).resolves.toContain('"accepted":true');
+    expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(changed ? 2 : 3);
+    expect((await f.programs()).filter((call) => call.args.includes("close"))).toHaveLength(changed ? 0 : 1);
+  },
+);
