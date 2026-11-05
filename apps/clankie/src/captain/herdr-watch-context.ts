@@ -100,6 +100,11 @@ export interface HerdrWatchContext {
     start?: boolean,
     messageId?: string,
   ): HerdrWatchRecord | undefined;
+  readonly returnQuestionToLead:
+    | ((seatId: string, sessionId: string, requestId: string | number) => void)
+    | undefined;
+  watching: (() => Promise<boolean>) | undefined;
+  questionRoutingFence: (() => Promise<{ watching: boolean; assertCurrent(): void }>) | undefined;
   permissionLeadAllowed: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   questionGate:
     | ((agent: HerdrAgentSnapshot, question: SeatQuestion) => Promise<"allow" | "lead" | "owner">)

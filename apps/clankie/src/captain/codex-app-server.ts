@@ -312,7 +312,7 @@ export class CodexAppServerClient {
   async answerQuestion(
     threadId: string,
     answer: SeatQuestionAnswer,
-    beforeDispatch?: () => Promise<void>,
+    beforeDispatch?: (() => Promise<void>) & { readonly assertCurrent?: () => void },
     asyncDispatch?: (question: SeatQuestion) => Promise<CodexAsyncAnswerReceipt>,
   ): Promise<
     | { outcome: "resolved" }
@@ -341,6 +341,7 @@ export class CodexAppServerClient {
       };
     try {
       await beforeDispatch?.();
+      beforeDispatch?.assertCurrent?.();
     } catch (error) {
       return { outcome: "refused", detail: String(error) };
     }
@@ -463,7 +464,7 @@ export interface CodexAppServerSeat {
   pendingQuestion?(requestId: string | number): SeatQuestion | undefined;
   answerQuestion?(
     answer: SeatQuestionAnswer,
-    beforeDispatch?: () => Promise<void>,
+    beforeDispatch?: (() => Promise<void>) & { readonly assertCurrent?: () => void },
   ): Promise<SeatQuestionResult>;
   interrupt(): Promise<boolean>;
   stopTask?(beforeDispatch: () => Promise<void>): Promise<StopNativeTaskResult>;
@@ -1401,27 +1402,39 @@ export async function startCodexAppServerSeat(options: {
         const result = await client!.answerQuestion(
           threadId!,
           answer,
-          async () => {
-            await checkPolicy();
-            await guard?.();
-          },
+          Object.assign(
+            async () => {
+              await checkPolicy();
+              await guard?.();
+            },
+            { assertCurrent: () => guard?.assertCurrent?.() },
+          ),
           async (question) => {
             const text = codexAsyncQuestionAnswer(question, answer);
             const clientUserMessageId = randomUUID();
             const sent = await sendNative(
               text,
-              async () => {
-                await guard?.();
-                const current = client!.pendingQuestion(threadId!, answer.requestId);
-                if (
-                  !current ||
-                  !isDeepStrictEqual(
-                    current.questions.map((question) => question.id),
-                    question.questions.map((question) => question.id),
+              Object.assign(
+                async () => {
+                  await guard?.();
+                  const current = client!.pendingQuestion(threadId!, answer.requestId);
+                  if (
+                    !current ||
+                    !isDeepStrictEqual(
+                      current.questions.map((question) => question.id),
+                      question.questions.map((question) => question.id),
+                    )
                   )
-                )
-                  throw new Error("native_async_question_already_answered: no replacement input was sent");
-              },
+                    throw new Error("native_async_question_already_answered: no replacement input was sent");
+                  guard?.assertCurrent?.();
+                },
+                {
+                  current: () => {
+                    guard?.assertCurrent?.();
+                    return true;
+                  },
+                },
+              ),
               { requestId: answer.requestId, clientUserMessageId },
             );
             return { text, clientUserMessageId, turnId: sent.turnId };

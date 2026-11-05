@@ -26,6 +26,9 @@ import {
 } from "@clankie/settings";
 import { ProjectIdSchema, type ProjectsSettings } from "@clankie/protocol/projects";
 
+/** A proven pre-dispatch refusal is retryable; transport uncertainty never is. */
+export class WorkerAnswerRefused extends Error {}
+
 export const SAFE_DECISION_DEFAULT =
   "Leave the requested change pending and continue other authorized work; do not cross any owner gate.";
 
@@ -176,6 +179,7 @@ const RecordSchema = z
       .optional(),
     workspace: BindingSchema.optional(),
     persistenceUncertain: z.boolean().optional(),
+    watchRouting: z.enum(["owner", "lead"]).optional(),
     workerDelivery: z
       .object({
         state: z.enum(["attempting", "delivered", "uncertain"]),
@@ -227,7 +231,11 @@ const RecordSchema = z
       ctx.addIssue({ code: "custom", message: "Owner workspace question lost authority binding" });
     if (
       q.status === "submitted" &&
-      (!q.answer || !q.continuation || !q.resolvedAt || !r.responder || !r.message)
+      (!q.answer ||
+        (!q.continuation && !(q.workerQuestion && r.workerDelivery)) ||
+        !q.resolvedAt ||
+        !r.responder ||
+        !r.message)
     )
       ctx.addIssue({ code: "custom", message: "Incomplete submitted receipt" });
     if (q.status === "cancelled" && !q.resolvedAt)

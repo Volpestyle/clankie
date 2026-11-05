@@ -36,7 +36,7 @@ import {
   ownerCredentialRecoveryExtension,
   type OwnerCredentialRecovery,
 } from "./owner-credential-recovery.ts";
-import { escalateWorkerQuestion } from "./worker-question-escalation.ts";
+import { connectWorkerQuestions } from "./worker-question-routing.ts";
 import { ClaudeHookQuestions } from "./claude-hook-questions.ts";
 import { checkoutGit, hireWorktreeStart, projectPathContains } from "@clankie/settings";
 import { captainFleetSettingsExtension } from "./fleet-settings.ts";
@@ -2594,6 +2594,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (selected !== null && typeof selected === "object" && "mode" in selected && selected.mode === "owner")
     );
   };
+  connectWorkerQuestions({ conversations, herdrWatches, settingsStore, shutdown });
   herdrWatches.permissionLeadAllowed = async (owner) => {
     const conversation = conversations.conversation(owner.conversationId);
     return (
@@ -2613,63 +2614,6 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     if (splitFleetQualified(agent.paneId) || !agent.workingDirectory) return "owner";
     const policy = await localFleetGates(agent.workingDirectory);
     return policy[question.gate ?? "everydayWork"];
-  };
-  herdrWatches.escalateQuestion = async (owner, agent, question, guard) => {
-    await escalateWorkerQuestion(conversations, owner.conversationId, agent.terminalId, question, {
-      current: () => !shutdown.signal.aborted,
-      authorize: async () => {
-        await guard();
-        return true;
-      },
-    });
-    await guard();
-  };
-  conversations.prepareWorkerQuestion = async (seatId, requestId) => {
-    const observed = await herdrWatches.observedSeatQuestion(seatId, requestId);
-    if (observed.question.questions.some((question) => question.isSecret))
-      throw new Error("worker_secret_question_requires_native_owner_input");
-    return {
-      seatId,
-      requestId: observed.question.requestId,
-      sessionId: observed.sessionId,
-      questions: observed.question.questions.map((question) => ({
-        ...question,
-        ...(question.options === null ? { options: undefined } : { options: [...question.options] }),
-      })),
-    };
-  };
-  conversations.reconcileWorkerQuestion = async (question) => {
-    const worker = question.workerQuestion;
-    const status = worker
-      ? await herdrWatches.workerQuestionStatus(worker.seatId, worker.requestId, worker.sessionId)
-      : "unknown";
-    return status === "unknown" ? "uncertain" : status;
-  };
-  conversations.deliverWorkerAnswer = async (question, answer, authority) => {
-    const worker = question.workerQuestion;
-    if (!worker || answer.kind !== "worker") throw new Error("worker_answer_invalid");
-    const delivery = await herdrWatches.answerSeatQuestion(
-      worker.seatId,
-      { requestId: worker.requestId, answers: answer.answers },
-      {
-        owner: { conversationId: question.conversationId },
-        current: () =>
-          authority.current() &&
-          !shutdown.signal.aborted &&
-          conversations.conversation(question.conversationId) !== undefined,
-        authorize: async () =>
-          authority.current() &&
-          (await authority.authorize()) &&
-          !shutdown.signal.aborted &&
-          conversations.conversation(question.conversationId) !== undefined,
-      },
-      worker.sessionId,
-      authority.principal,
-    );
-    if (delivery.outcome !== "delivered")
-      throw new Error(
-        `worker_answer_${delivery.outcome}: ${delivery.detail ?? "No confirmed native answer"}`,
-      );
   };
 
   /**
@@ -6572,7 +6516,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         : false;
     },
 
-    async recordSeatHook(paneId, hook, proof, signal) {
+    async recordSeatHook(paneId, hook, proof, signal, questionProgress) {
       if (splitFleetQualified(paneId) === undefined && deps.herdrAvailable?.() === false) return false;
       // Only the Claude session herdr says sits in that pane may report for it.
       const agent = await herdrRunner.get(paneId).catch(() => undefined);
@@ -6590,15 +6534,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         hook.event === "PermissionRequest" ||
         (hook.event === "PreToolUse" && hook.toolName === "AskUserQuestion")
       ) {
-        const hookOutput = await hookQuestions.open(
-          ref,
-          hook,
-          (question) => herdrWatches.forwardNativeQuestion(ref, question),
-          signal,
-          splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
-          personas.boundPersona(liveSeats, agent.terminalId, occupantIdForHerdrSession(session))?.name,
-        );
-        return { recorded: true as const, hookOutput: { ...hookOutput } };
+        let requestId: string | number | undefined;
+        try {
+          const hookOutput = await hookQuestions.open(
+            ref,
+            hook,
+            (question) => {
+              requestId = question.requestId;
+              return herdrWatches.forwardNativeQuestion(ref, question, questionProgress);
+            },
+            signal,
+            splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
+            personas.boundPersona(liveSeats, agent.terminalId, occupantIdForHerdrSession(session))?.name,
+          );
+          return { recorded: true as const, hookOutput: { ...hookOutput } };
+        } finally {
+          if (requestId !== undefined) herdrWatches.forgetNativeQuestion(ref, requestId);
+        }
       }
       if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit"].includes(hook.event))
         hookQuestions.cancel(ref, "Native question is no longer pending");

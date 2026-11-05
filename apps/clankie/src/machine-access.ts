@@ -76,6 +76,34 @@ export async function requireRuntimeMachineAccess(
   return { assertCurrent: () => policy.assertCurrent() };
 }
 
+/** Owner feed answers retain the configured ceiling; only Watch's temporary ceiling is excepted.
+ * The caller must retain the exact open-question and authenticated-owner witness through the write.
+ */
+export async function requireOwnerQuestionMachineAccess(
+  settings: SettingsStore,
+  fleet: string | undefined,
+  question: { assertCurrent(): void },
+  joined?: JoinedMachineRegistry,
+): Promise<MachineAccessFence> {
+  question.assertCurrent();
+  const policy = await settings.loadFenced();
+  const local = fleet === undefined || fleet === "default" || fleet === HERDR_CORE_FLEET;
+  const connection = local
+    ? undefined
+    : policy.settings.execution.connections.find((entry) => entry.id === fleet);
+  if (!local && (!connection || (connection.ssh && !connection.machine)))
+    throw new Error("Unknown question runtime machine");
+  const machine = connection?.machine ?? "local";
+  const level = machineAccessLevel(policy.settings, machine, joined);
+  if (!machineAccessAllows(level, "workers")) await refuseMachineAccess(settings, machine, level, "workers");
+  const assertCurrent = () => {
+    policy.assertCurrent();
+    question.assertCurrent();
+  };
+  assertCurrent();
+  return { assertCurrent };
+}
+
 /**
  * Watch holds every machine at Portal (ADR 0308). It leaves no refusal
  * observation: the owner chose Watch, and the fix is the dial, not the machine.

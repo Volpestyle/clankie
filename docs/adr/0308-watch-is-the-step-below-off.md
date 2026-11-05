@@ -104,3 +104,24 @@ changes nothing.
   A voice handoff to the captain is a turn, so Watch refuses it.
 - A future write path must check Watch too. Most will inherit it through
   machine access or the captain's model runtime.
+
+## Amendment — owner feed questions (James, 2026-11-02; #269)
+
+Watch still refuses every lead-seat turn and autonomous write. Open native
+worker questions, including one the built-in model was answering when Watch
+started, move to the owner's existing feed once. The worker receives a routing
+notice on its held native hook, without terminal input or another model turn.
+
+The authenticated owner may answer the asking worker's own still-open question
+record from that feed while Watch stays on. This is the narrow exception to the
+question-answer and connected-app refusals above. The configured machine ceiling
+remains; Portal without Watch still refuses worker access. Owner authentication,
+record visibility and native first-answer state are checked synchronously at the
+native write. Revocation or a record returned to the lead refuses. Nothing is
+queued into a lead seat as an answer continuation. An uncertain native answer
+stays consumed rather than authorizing a retry.
+
+On leaving Watch, still-open questions return to the current leading conversation
+where the current gate allows it. Only Watch-created owner asks are withdrawn;
+owner-reserved asks stay with the owner. Re-entering Watch reuses the same ask
+and native request ID. Native secret-input restrictions remain unchanged.

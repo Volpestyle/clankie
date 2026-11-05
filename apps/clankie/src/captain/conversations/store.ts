@@ -427,6 +427,8 @@ export class ConversationStore {
   /** Native seat binding is owned by captain; no native question continuation. */
   public questionEligible: (id: string) => boolean = () => true;
   public readonly workerAnswerInFlight = new Set<string>();
+  public reconcileWatchQuestions: (() => Promise<void>) | undefined;
+  public watching: (() => Promise<boolean>) | undefined;
   public reconcileWorkerQuestion:
     | ((question: ConversationQuestion) => Promise<"pending" | "resolved" | "uncertain">)
     | undefined;
@@ -443,6 +445,7 @@ export class ConversationStore {
         question: ConversationQuestion,
         answer: ConversationQuestionAnswer,
         authority: QuestionAuthority,
+        assertOpen: () => void,
       ) => Promise<void>)
     | undefined;
   /**
@@ -911,6 +914,7 @@ export class ConversationStore {
       }
       case "input_list": {
         await authorizeQuestion(authority);
+        await this.reconcileWatchQuestions?.();
         expireDecisionQuestions(this, request.conversationId);
         for (const meta of this.metas.values()) {
           if (request.conversationId && request.conversationId !== meta.conversationId) continue;
@@ -944,7 +948,10 @@ export class ConversationStore {
             this.validQuestionState(meta);
             return (meta.questions?.records ?? [])
               .toReversed()
-              .filter((record) => record.question.status === (request.status ?? "pending"))
+              .filter(
+                (record) =>
+                  record.watchRouting !== "lead" && record.question.status === (request.status ?? "pending"),
+              )
               .map((record) => this.questionResult(meta, record, "ready"));
           });
         questions.sort(
@@ -3937,12 +3944,33 @@ export class ConversationStore {
       if (
         meta.questions?.records.some(
           (record) =>
-            record.question.status === "pending" && record.question.workerQuestion?.seatId === seatId,
+            record.watchRouting !== "lead" &&
+            record.question.status === "pending" &&
+            record.question.workerQuestion?.seatId === seatId,
         )
       )
         return true;
     }
     return false;
+  }
+
+  public returnWatchQuestionToLead(seatId: string, sessionId: string, requestId: string | number): void {
+    for (const meta of this.metas.values()) {
+      this.validQuestionState(meta);
+      for (const record of meta.questions?.records ?? []) {
+        const worker = record.question.workerQuestion;
+        if (
+          record.watchRouting === "owner" &&
+          record.question.status === "pending" &&
+          worker?.seatId === seatId &&
+          worker.sessionId === sessionId &&
+          worker.requestId === requestId
+        ) {
+          record.watchRouting = "lead";
+          this.saveQuestionMeta(meta);
+        }
+      }
+    }
   }
 
   /** Internal receipt read for durable host-raised asks, not a mailbox authorization bypass. */
@@ -3963,6 +3991,7 @@ export class ConversationStore {
     admission: {
       readonly current: () => boolean;
       readonly authorize?: () => Promise<boolean>;
+      readonly workerQuestionWatch?: boolean;
       readonly publicationId?: string;
       /** Reuse only this publication's own ask, never another publication's equal one. */
       readonly exactPublication?: boolean;
@@ -3983,6 +4012,7 @@ export class ConversationStore {
         runId: admission.publicationId ?? `ask-${randomUUID()}`,
         signal: new AbortController().signal,
         questionCurrent: admission.current,
+        ...(admission.workerQuestionWatch ? { workerQuestionWatch: true } : {}),
         acceptedAt: new Date().toISOString(),
         draft: () => {},
       },
@@ -4036,7 +4066,7 @@ export class ConversationStore {
   public pendingLeadQuestions(): ConversationQuestionResult[] {
     return [...this.metas.values()].flatMap((meta) =>
       (meta.questions?.records ?? [])
-        .filter(({ question }) => question.status === "pending")
+        .filter(({ question, watchRouting }) => watchRouting !== "lead" && question.status === "pending")
         .map((record) => this.questionResult(meta, record, "ready")),
     );
   }

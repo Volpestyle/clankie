@@ -328,6 +328,7 @@ export interface ConversationTurnContext {
   readonly ownerAuthority?: QuestionAuthority;
   /** The owner sent this turn without question authority, such as his Supervise phone (ADR 0350). */
   readonly leadOwner?: LeadOwnerProof;
+  readonly workerQuestionWatch?: boolean;
   readonly questionCurrent?: () => boolean;
   readonly questionBinding?: { readonly incarnationId: string; readonly workspace?: QuestionWorkspace };
   readonly inputAnswer?: { readonly requestId: string; readonly answer: ConversationQuestionAnswer };

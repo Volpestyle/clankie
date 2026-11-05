@@ -33,7 +33,11 @@ async function until(check: () => boolean, ms = 3000): Promise<void> {
   }
 }
 
-async function fixture(results: ("accepted" | "deferred")[], kind: "ask" | "permission" = "ask") {
+async function fixture(
+  results: ("accepted" | "deferred")[],
+  kind: "ask" | "permission" = "ask",
+  watching = false,
+) {
   const root = mkdtempSync(join(tmpdir(), "open-question-reminders-"));
   const ref: SeatRef = { harness: "claude", paneId: "worker-pane", sessionId: randomUUID() };
   const agent: HerdrAgentSnapshot = {
@@ -82,6 +86,7 @@ async function fixture(results: ("accepted" | "deferred")[], kind: "ask" | "perm
   let leadMayAnswer = true;
   const escalations: string[] = [];
   let failEscalations = 0;
+  store.watching = async () => watching;
   store.permissionLeadAllowed = async () => leadMayAnswer;
   store.questionGate = async () => "allow";
   store.escalateQuestion = async (_owner, _agent, question) => {
@@ -224,4 +229,12 @@ it("tries the owner again when sending them the question fails", async () => {
   await new Promise((resolve) => setTimeout(resolve, 400));
   expect(f.escalations).toHaveLength(1);
   expect(f.wakes.filter((wake) => wake.text.startsWith("Still open"))).toEqual([]);
+});
+
+it("on Watch an everyday native question creates an owner ask without a lead wake", async () => {
+  const f = await fixture([], "ask", true);
+  await until(() => f.escalations.length === 1);
+  expect(f.escalations).toEqual([String(f.question.requestId)]);
+  expect(f.wakes).toEqual([]);
+  expect(f.registry.pending(f.ref, f.question.requestId)?.requestId).toBe(f.question.requestId);
 });

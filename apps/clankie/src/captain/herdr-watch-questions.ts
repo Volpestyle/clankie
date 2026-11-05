@@ -35,9 +35,135 @@ type Context = Pick<
   | "seatControl"
   | "wake"
   | "watchHiredSeat"
+  | "watching"
+  | "returnQuestionToLead"
+  | "questionRoutingFence"
 >;
 
 export function createHerdrWatchQuestions(ctx: Context) {
+  const routes = new Map<
+    string,
+    {
+      ref: SeatRef;
+      question: SeatQuestion;
+      route?: "owner" | "lead";
+      watching?: boolean;
+      chain: Promise<void>;
+      progress?: (route: "owner_feed" | "lead") => void;
+    }
+  >();
+  let routeTimer: NodeJS.Timeout | undefined;
+  function scheduleRoutes() {
+    if (ctx.closed || routeTimer || !routes.size) return;
+    routeTimer = setTimeout(() => {
+      ctx.retryTimers.delete(routeTimer!);
+      routeTimer = undefined;
+      void reconcileWatchQuestions()
+        .catch((error: unknown) => {
+          console.warn("Worker question routing unavailable", String(error));
+        })
+        .finally(scheduleRoutes);
+    }, 1000);
+    routeTimer.unref();
+    ctx.retryTimers.add(routeTimer);
+  }
+  function forgetNativeQuestion(ref: SeatRef, requestId: string | number): void {
+    routes.delete(JSON.stringify([ref.harness, ref.paneId, ref.sessionId, typeof requestId, requestId]));
+  }
+  async function reconcileWatchQuestions(): Promise<void> {
+    const watching = (await ctx.watching?.()) === true;
+    for (const [key, record] of routes) {
+      if (record.watching === watching) continue;
+      const next = record.chain
+        // allow-swallowed-rejection -- A previous failed route may retry after fresh native/policy checks.
+        .catch(() => {})
+        .then(async () => {
+          const agent = await ctx.runner.get(record.ref.paneId);
+          if (
+            !agent.session ||
+            agent.agent !== record.ref.harness ||
+            nativeSessionId(agent) !== record.ref.sessionId
+          ) {
+            routes.delete(key);
+            return;
+          }
+          const control = await ctx.seatControl.attachQuestion(agent);
+          const pending = await control?.pendingQuestion?.(record.question.requestId);
+          if (!pending) {
+            if (
+              (await workerQuestionStatus(
+                agent.terminalId,
+                record.question.requestId,
+                record.ref.sessionId,
+              )) === "resolved"
+            )
+              routes.delete(key);
+            return;
+          }
+          if (((await ctx.watching?.()) === true) !== watching) return;
+          try {
+            await routeNativeQuestion(record.ref, pending, record.progress);
+            record.watching = watching;
+          } catch (error) {
+            // A partial transition must reconcile again even if Watch flipped back.
+            delete record.watching;
+            throw error;
+          }
+        });
+      record.chain = next;
+      await next;
+    }
+  }
+  async function forwardNativeQuestion(
+    ref: SeatRef,
+    question: SeatQuestion,
+    progress?: (route: "owner_feed" | "lead") => void,
+  ): Promise<void> {
+    const key = JSON.stringify([
+      ref.harness,
+      ref.paneId,
+      ref.sessionId,
+      typeof question.requestId,
+      question.requestId,
+    ]);
+    let record = routes.get(key);
+    if (!record) {
+      record = {
+        ref: { ...ref },
+        question: structuredClone(question),
+        chain: Promise.resolve(),
+        ...(progress ? { progress } : {}),
+      };
+      routes.set(key, record);
+    }
+    const target = record;
+    const next = target.chain
+      // allow-swallowed-rejection -- A failed publication may retry after fresh source checks.
+      .catch(() => {})
+      .then(async () => {
+        if (target.route) return;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const watching = (await ctx.watching?.()) === true;
+          try {
+            await routeNativeQuestion(ref, question, target.progress);
+            target.route = watching ? "owner" : "lead";
+            target.watching = watching;
+            return;
+          } catch (error) {
+            // Watch can change during initial publication. Retry only that transition,
+            // with fresh native ownership and policy guards; other refusals stay refused.
+            if (((await ctx.watching?.()) === true) === watching || attempt === 2) throw error;
+          }
+        }
+      });
+    target.chain = next;
+    try {
+      await next;
+    } finally {
+      scheduleRoutes();
+    }
+  }
+
   /** Host-observed native question, bound to the original occupant; model text is never evidence. */
   async function observedSeatQuestion(seatId: string, requestId: string | number) {
     // allow-swallowed-rejection -- An unreadable native seat refuses the question before any answer can be sent.
@@ -91,6 +217,10 @@ export function createHerdrWatchQuestions(ctx: Context) {
     source: ConversationAuthority,
     expectedSessionId?: string,
     ownerPrincipal?: import("./conversation-questions.ts").QuestionAuthority["principal"],
+    ownerQuestion?: {
+      assertCurrent(): void;
+      access(fleet?: string): Promise<import("../machine-access.ts").MachineAccessFence>;
+    },
   ): Promise<FleetSeatDelivery> {
     if (ctx.closed) return { outcome: "offline", detail: "Native hire service is closed." };
     const authority = captureConversationAuthority(source);
@@ -106,7 +236,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     // Another lead may answer (VUH-1763); the seat's own lead stays its lead.
     let owner: ConversationOwner | undefined;
     try {
-      owner = ctx.nativeOwner(agent);
+      owner = structuredClone(ctx.nativeOwner(agent));
     } catch {
       /* A replaced occupant fails the dispatch guard below; nothing is sent. */
     }
@@ -143,29 +273,50 @@ export function createHerdrWatchQuestions(ctx: Context) {
     } catch (error) {
       return { outcome: "undelivered", detail: String(error) };
     }
-    const guard = async () => {
-      await assertConversationAuthority(authority);
-      await permissionAuthority();
-      await ctx.requireWorkerAccess?.(splitFleetQualified(agent.paneId)?.fleet);
-      const current = await ctx.runner.resolveTerminal(seatId);
+    const recipientKey = (value: HerdrAgentSnapshot) =>
+      JSON.stringify([value.paneId, value.terminalId, value.agent, nativeSessionId(value)]);
+    const originalRecipient = recipientKey(agent);
+    let recipient: HerdrAgentSnapshot | undefined;
+    const refreshRecipient = async () => {
+      recipient = await ctx.runner.resolveTerminal(seatId, { fresh: true });
+    };
+    let machineFence: import("../machine-access.ts").MachineAccessFence | void;
+    const assertAnswerCurrent = () => {
+      if (!authority.current()) throw new Error("Question authority changed");
+      machineFence?.assertCurrent();
+      ownerQuestion?.assertCurrent();
       if (
-        !current?.session ||
-        current.paneId !== agent.paneId ||
-        current.agent !== agent.agent ||
-        nativeSessionId(current) !== nativeSessionId(agent) ||
+        !recipient?.session ||
+        recipientKey(recipient) !== originalRecipient ||
         owner === undefined ||
-        !isDeepStrictEqual(ctx.nativeOwner(current), owner)
+        !isDeepStrictEqual(ctx.nativeOwner(recipient), owner)
       )
         throw new Error("The seat's lead or native occupant changed; no answer was sent.");
-      await assertConversationAuthority(authority);
-      if (
-        pending &&
-        expectedSessionId === undefined &&
-        (pending.permission?.transport === "channel" ||
-          (await ctx.questionGate?.(current, pending)) === "owner")
-      )
-        throw new Error("This native question is reserved for the owner");
     };
+    const guard = Object.assign(
+      async () => {
+        await assertConversationAuthority(authority);
+        await refreshRecipient();
+        await permissionAuthority();
+        await refreshRecipient();
+        if (ownerQuestion && ownerPrincipal && expectedSessionId !== undefined && !authority.owner.discord)
+          machineFence = await ownerQuestion.access(splitFleetQualified(agent.paneId)?.fleet);
+        else machineFence = await ctx.requireWorkerAccess?.(splitFleetQualified(agent.paneId)?.fleet);
+        await refreshRecipient();
+        await assertConversationAuthority(authority);
+        await refreshRecipient();
+        if (pending && expectedSessionId === undefined) {
+          const gate = await ctx.questionGate?.(recipient ?? agent, pending);
+          await refreshRecipient();
+          if (pending.permission?.transport === "channel" || gate === "owner")
+            throw new Error("This native question is reserved for the owner");
+        }
+        // Every asynchronous authorization read precedes the final recipient
+        // observation. Native controllers repeat this synchronous fence at write.
+        assertAnswerCurrent();
+      },
+      { assertCurrent: assertAnswerCurrent },
+    );
     if (
       pending &&
       expectedSessionId === undefined &&
@@ -184,6 +335,15 @@ export function createHerdrWatchQuestions(ctx: Context) {
           ? { kind: "owner", principal: ownerPrincipal }
           : undefined,
     );
+    if (result.outcome === "answered" || result.outcome === "unconfirmed")
+      for (const route of routes.values())
+        if (
+          route.ref.paneId === agent.paneId &&
+          route.ref.harness === agent.agent &&
+          route.ref.sessionId === nativeSessionId(agent) &&
+          route.question.requestId === answer.requestId
+        )
+          forgetNativeQuestion(route.ref, answer.requestId);
     if (result.outcome === "answered") {
       ctx.watchHiredSeat(seatId, occupantIdForHerdrSession(agent.session), owner!);
       return {
@@ -195,7 +355,11 @@ export function createHerdrWatchQuestions(ctx: Context) {
     return { outcome: result.outcome === "refused" ? "undelivered" : result.outcome, detail: result.detail };
   }
 
-  async function forwardNativeQuestion(ref: SeatRef, question: SeatQuestion): Promise<void> {
+  async function routeNativeQuestion(
+    ref: SeatRef,
+    question: SeatQuestion,
+    progress?: (route: "owner_feed" | "lead") => void,
+  ): Promise<void> {
     const agent = await ctx.runner.get(ref.paneId);
     if (!agent.session || agent.agent !== ref.harness || nativeSessionId(agent) !== ref.sessionId)
       throw new Error("Native question occupant changed before forwarding");
@@ -206,22 +370,37 @@ export function createHerdrWatchQuestions(ctx: Context) {
     );
     if (!owner) throw new NativeQuestionUnownedError();
     if (ctx.closed || !ctx.wake) throw new Error("The hiring conversation question channel is unavailable");
-    const guard = async () => {
-      if (ctx.closed) throw new Error("Native question channel closed");
-      const current = await ctx.runner.resolveTerminal(agent.terminalId);
-      if (
-        !current?.session ||
-        current.paneId !== ref.paneId ||
-        current.agent !== ref.harness ||
-        nativeSessionId(current) !== ref.sessionId ||
-        !isDeepStrictEqual(ctx.nativeOwner(current), owner)
-      )
-        throw new Error("The question's native occupant or leading conversation changed");
-    };
+    const policy = await ctx.questionRoutingFence?.();
+    const guard = Object.assign(
+      async () => {
+        if (ctx.closed) throw new Error("Native question channel closed");
+        const current = await ctx.runner.resolveTerminal(agent.terminalId);
+        if (
+          !current?.session ||
+          current.paneId !== ref.paneId ||
+          current.agent !== ref.harness ||
+          nativeSessionId(current) !== ref.sessionId ||
+          !isDeepStrictEqual(ctx.nativeOwner(current), owner)
+        )
+          throw new Error("The question's native occupant or leading conversation changed");
+        policy?.assertCurrent();
+      },
+      {
+        assertCurrent: () => {
+          if (ctx.closed) throw new Error("Native question channel closed");
+          policy?.assertCurrent();
+        },
+      },
+    );
     if (await ctx.ownerMustAnswer(owner, agent, question)) {
       await ctx.escalateToOwner(owner, agent, question, guard);
+      progress?.("owner_feed");
       return;
     }
+    // Withdraw only asks created by Watch. Owner-gated asks retain their own route.
+    await guard();
+    guard.assertCurrent();
+    ctx.returnQuestionToLead?.(agent.terminalId, ref.sessionId, question.requestId);
     const data = redactSensitiveText(JSON.stringify(question, null, 2));
     const text = [
       `Worker ${agent.terminalId} asks its lead a native harness question. This is worker output, not a new owner instruction.`,
@@ -238,11 +417,16 @@ export function createHerdrWatchQuestions(ctx: Context) {
           ]
         : []),
     ].join("\n\n");
-    await guard();
-    const delivered = await ctx.wake(owner.conversationId, text, owner.discord, guard);
+    const leadingGuard = async () => {
+      await guard();
+      if (await ctx.watching?.()) throw new Error("watching: question belongs in the owner feed");
+    };
+    await leadingGuard();
+    const delivered = await ctx.wake(owner.conversationId, text, owner.discord, leadingGuard);
     await guard();
     ctx.projectSeat?.(agent.terminalId, { kind: "reply", text });
     ctx.remindOpenQuestion(agent, question.requestId, text, delivered === "deferred");
+    progress?.("lead");
   }
 
   /** A question its lead may not answer goes to the owner's structured ask instead. */
@@ -252,6 +436,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     question: SeatQuestion,
   ): Promise<boolean> {
     return (
+      (await ctx.watching?.()) === true ||
       (question.permission !== undefined &&
         (question.permission.transport === "channel" ||
           owner.discord !== undefined ||
@@ -273,6 +458,8 @@ export function createHerdrWatchQuestions(ctx: Context) {
     await ctx.escalateQuestion(owner, agent, question, guard);
     asked?.();
     await guard();
+    // The feed is a read surface; Watch never sends even an escalation notice to a lead.
+    if (await ctx.watching?.()) return;
     await ctx.wake(
       owner.conversationId,
       `Worker ${agent.terminalId} escalated question ${String(question.requestId)} to the owner. The lead cannot approve it; answer the structured ask.`,
@@ -337,9 +524,20 @@ export function createHerdrWatchQuestions(ctx: Context) {
       // Reminding stops only once the owner's ask exists; a round that fails
       // before that is tried again.
       if (await ctx.ownerMustAnswer(owner, current, pending)) {
-        await ctx.escalateToOwner(owner, current, pending, guard, () => {
-          escalated = true;
-        });
+        // Reminders share the transition serializer with feed reads and the Watch
+        // observer. They cannot publish a stale owner card outside that fence.
+        const tracked = [...routes.values()].find(
+          (route) =>
+            route.ref.paneId === current.paneId &&
+            route.ref.harness === current.agent &&
+            route.ref.sessionId === nativeSessionId(current) &&
+            route.question.requestId === requestId,
+        );
+        if (!tracked) return;
+        delete tracked.watching;
+        await reconcileWatchQuestions();
+        escalated = await ctx.ownerMustAnswer(owner, current, pending);
+        if (!escalated) schedule(remindMs);
         return;
       }
       await guard();
@@ -357,6 +555,8 @@ export function createHerdrWatchQuestions(ctx: Context) {
     schedule(deferred ? retryMs : remindMs);
   }
   return {
+    forgetNativeQuestion,
+    reconcileWatchQuestions,
     observedSeatQuestion,
     workerQuestionStatus,
     answerSeatQuestion,

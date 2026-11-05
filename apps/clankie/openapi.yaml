@@ -6587,6 +6587,17 @@ paths:
         Its bounded children list carries exact local agent IDs, native state and
         original state-change time. Claude root turns remain unsupported by this
         activity projection; a root turn's generated agent ID is not a root proof.
+        Question hooks may opt into `Accept: application/x-ndjson`. The held
+        response then emits `question_route` records with `route: owner_feed|lead`
+        and one terminal `result` record containing the ordinary JSON result.
+        A stream `error` or missing terminal result is unavailable, never permission
+        to replay an uncertain answer. Without this Accept header the response is
+        ordinary JSON. While Watch is on, native worker questions go to the owner
+        feed; no routing notice or answer continuation reaches a lead seat. An
+        authenticated owner may answer only the asking worker's still-open ask
+        through `input_answer`, retaining native IDs, machine ceilings and final
+        synchronous owner/record checks. The worker hook prints route notices to
+        stderr and writes only the final native hook JSON to stdout.
       security: [{ operatorBearer: [] }, { captainBearer: [] }]
       parameters:
         - in: path

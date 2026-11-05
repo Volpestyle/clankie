@@ -608,6 +608,7 @@ export interface CaptainPort {
     hook: FleetSeatHook,
     proof?: ProjectProcessProof,
     signal?: AbortSignal,
+    questionProgress?: (route: "owner_feed" | "lead") => void,
   ): Promise<
     | boolean
     | { readonly recorded: true; readonly additionalContext: string; readonly messageIds: readonly string[] }

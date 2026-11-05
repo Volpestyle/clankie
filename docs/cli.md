@@ -5893,11 +5893,22 @@ wake.
 `watch` is the step below Off
 ([ADR 0308](adr/0308-watch-is-the-step-below-off.md)). Clankie reads the fleet,
 sessions and transcripts and changes nothing: no model turn reaches a provider,
-every machine acts at Portal (no hire, delivery, question answer, restart or
-close), no wake or health alert reaches a seat, connected apps cannot answer
-prompts, Auto rounds and auto-tidy stop, and no tracker write by Clankie, a lead
+every machine acts at Portal (no hire, ordinary delivery, restart or
+close), no wake or health alert reaches a lead seat, Auto rounds and auto-tidy
+stop, and no tracker write by Clankie, a lead
 or a worker goes through him. Stop, every read, settings and the owner's own
-tracker writes still work. The command reports `level: "watch"`. The API is
+tracker writes still work. Open native worker questions go once to the owner's
+feed (`clankie conversations questions`, API `input_list`), including a question Clankie was
+already answering when Watch began. The authenticated owner can use
+`clankie conversations answer` / `input_answer` while Watch stays on: only that worker's
+still-open native question is answered, through its original harness channel.
+The configured machine ceiling still applies. No answer continuation enters the
+lead's seat. A question returned to the lead when Watch ends refuses its stale
+owner card; entering Watch again reuses its original ask. Owner-reserved
+questions keep their owner route. The held Claude hook reports where the question
+went without another prompt; its stdout receipt proves the pipe write, not model
+awareness. Uncertain delivery is consumed and must not be replayed.
+The command reports `level: "watch"`. The API is
 `changes.watch` (`true` turns it on and writes Off's leaves; `false` leaves it);
 any `changes.autonomyLevel` leaves Watch too, so a client that predates Watch,
 which reads Off, moves up with its next choice. Snapshots carry `watch` only

@@ -37,6 +37,7 @@ import {
 import type { HttpBindings } from "@hono/node-server";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { stream } from "hono/streaming";
 import { z } from "zod";
 import type { PeerSeatAuthority } from "../captain/peer-seat-messages.ts";
 import { CAPTAIN_PROMPT_SECTIONS, type CaptainPromptSection } from "../captain/port.ts";
@@ -960,12 +961,46 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         (parsed.data.event === "PreToolUse" && parsed.data.toolName !== "AskUserQuestion"))
     )
       return context.json({ schemaVersion: 1, recorded: true, rootLeaseAbsent: !!rootLeaseAbsent });
-    const recorded = await ctx.dependencies.captain.recordSeatHook(
-      pane.paneId,
-      parsed.data,
-      proof,
-      context.req.raw.signal,
-    );
+    const record = (signal: AbortSignal, progress?: (route: "owner_feed" | "lead") => void) =>
+      ctx.dependencies.captain.recordSeatHook(pane.paneId, parsed.data, proof, signal, progress);
+    if (
+      context.req.header("accept") === "application/x-ndjson" &&
+      !parsed.data.deliveredQuestionId &&
+      (parsed.data.event === "PermissionRequest" ||
+        (parsed.data.event === "PreToolUse" && parsed.data.toolName === "AskUserQuestion"))
+    ) {
+      context.header("Content-Type", "application/x-ndjson");
+      return stream(context, async (output) => {
+        const stopped = new AbortController();
+        output.onAbort(() => stopped.abort());
+        const signal = AbortSignal.any([context.req.raw.signal, stopped.signal]);
+        let writes = Promise.resolve();
+        const send = (value: unknown) => {
+          writes = writes
+            .then(async () => {
+              await output.write(JSON.stringify(value) + "\n");
+            })
+            .catch(() => {
+              // allow-swallowed-rejection -- A broken response pipe cancels this exact native hook; it cannot publish or replay an answer.
+              stopped.abort();
+            });
+        };
+        try {
+          const result = await record(signal, (route) => send({ type: "question_route", route }));
+          send({
+            type: "result",
+            result:
+              result && typeof result === "object"
+                ? { schemaVersion: 1, ...result }
+                : { schemaVersion: 1, recorded: result },
+          });
+        } catch {
+          send({ type: "error", error: "native_question_unavailable" });
+        }
+        await writes;
+      });
+    }
+    const recorded = await record(context.req.raw.signal);
     return recorded
       ? context.json({
           schemaVersion: 1 as const,

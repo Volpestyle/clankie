@@ -289,7 +289,7 @@ export interface SeatControl {
   /** Answer one pending native request through its native control, without terminal fallback. */
   answerQuestion?(
     answer: SeatQuestionAnswer,
-    beforeDispatch?: () => Promise<void>,
+    beforeDispatch?: (() => Promise<void>) & { readonly assertCurrent?: () => void },
     decider?: SeatQuestionDecider,
   ): Promise<SeatQuestionResult>;
   /**

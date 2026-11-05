@@ -211,6 +211,11 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   /** Host policy resolution and escalation reuse the owner's ask store. */
+  public returnQuestionToLead:
+    | ((seatId: string, sessionId: string, requestId: string | number) => void)
+    | undefined;
+  public watching: (() => Promise<boolean>) | undefined;
+  public questionRoutingFence: (() => Promise<{ watching: boolean; assertCurrent(): void }>) | undefined;
   public permissionLeadAllowed: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   public questionGate:
     | ((agent: HerdrAgentSnapshot, question: SeatQuestion) => Promise<"allow" | "lead" | "owner">)
@@ -597,12 +602,35 @@ export class HerdrWatchStore implements HerdrWatchPort {
     source: ConversationAuthority,
     expectedSessionId?: string,
     ownerPrincipal?: import("./conversation-questions.ts").QuestionAuthority["principal"],
+    ownerQuestion?: {
+      assertCurrent(): void;
+      access(fleet?: string): Promise<import("../machine-access.ts").MachineAccessFence>;
+    },
   ): Promise<FleetSeatDelivery> {
-    return this.questions.answerSeatQuestion(seatId, answer, source, expectedSessionId, ownerPrincipal);
+    return this.questions.answerSeatQuestion(
+      seatId,
+      answer,
+      source,
+      expectedSessionId,
+      ownerPrincipal,
+      ownerQuestion,
+    );
   }
 
-  public forwardNativeQuestion(ref: SeatRef, question: SeatQuestion): Promise<void> {
-    return this.questions.forwardNativeQuestion(ref, question);
+  public forgetNativeQuestion(ref: SeatRef, requestId: string | number): void {
+    this.questions.forgetNativeQuestion(ref, requestId);
+  }
+
+  public reconcileWatchQuestions(): Promise<void> {
+    return this.questions.reconcileWatchQuestions();
+  }
+
+  public forwardNativeQuestion(
+    ref: SeatRef,
+    question: SeatQuestion,
+    progress?: (route: "owner_feed" | "lead") => void,
+  ): Promise<void> {
+    return this.questions.forwardNativeQuestion(ref, question, progress);
   }
 
   /** A question its lead may not answer goes to the owner's structured ask instead. */
@@ -1669,6 +1697,15 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return store.requireWorkerAccess;
       },
       watchHiredSeat: (...args) => store.watchHiredSeat(...args),
+      get questionRoutingFence() {
+        return store.questionRoutingFence;
+      },
+      get returnQuestionToLead() {
+        return store.returnQuestionToLead;
+      },
+      get watching() {
+        return store.watching;
+      },
       get permissionLeadAllowed() {
         return store.permissionLeadAllowed;
       },
