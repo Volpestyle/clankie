@@ -1,3 +1,4 @@
+import type { AgentMessageDispatch } from "../../agent-message-dispatch.ts";
 import type { InboundReportReference } from "./inbound-report-store.ts";
 import type { ConversationQuestionAnswer } from "@clankie/protocol";
 import {
@@ -40,6 +41,7 @@ export type ConversationServiceRequest = Exclude<
   | { op: "fleet_room" }
   | { op: "app_notes" }
   | { op: "lead_changes" }
+  | { op: "agent_message_status" }
   | { op: "prompt_answer" }
   | { op: "key_press" }
   | { op: "lead_wake" }
@@ -104,6 +106,7 @@ export type ConversationServiceResult = Exclude<
   | { op: "fleet_room" }
   | { op: "app_notes" }
   | { op: "lead_changes" }
+  | { op: "agent_message_status" }
   | { op: "prompt_answer" }
   | { op: "key_press" }
   | { op: "lead_wake" }
@@ -392,6 +395,7 @@ export type SeatSender = (
   context: {
     readonly conversationId: string;
     readonly source: string;
+    readonly agentMessage?: AgentMessageDispatch;
     readonly delivery?: "steer" | "queue";
   },
 ) => Promise<boolean | FleetSeatDelivery>;

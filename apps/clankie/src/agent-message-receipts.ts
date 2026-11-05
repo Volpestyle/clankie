@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import type { SeatEvent } from "@clankie/agent-hosts";
 import { z } from "zod";
@@ -9,34 +10,15 @@ const Digest = z.string().regex(/^[a-f0-9]{64}$/u);
 const Binding = z.strictObject({ machineId: Identity, seatId: Identity, instanceId: Identity });
 export type AgentMessageBinding = z.infer<typeof Binding>;
 
-const Stage = z.enum(["queued", "delivered", "read", "acted_on", "answered"]);
-const Progress = z.strictObject({
-  stage: Stage,
-  observedAt: z.number().finite().nonnegative(),
-  /** Native timestamp, when the adapter actually supplies one. */
-  occurredAt: z.string().datetime({ offset: true }).optional(),
-  evidence: z.enum([
-    "native_queue",
-    "native_handoff",
-    "native_turn_started",
-    "native_turn_completed",
-    "native_answer",
-  ]),
-});
-export const AgentMessageReceiptSchema = z.strictObject({
-  receiptId: z.string().uuid(),
-  agent: Identity,
-  revision: z.number().int().positive(),
-  createdAt: z.number().finite().nonnegative(),
-  updatedAt: z.number().finite().nonnegative(),
-  delivery: z.enum(["pending", "queued", "delivered", "uncertain", "refused", "unavailable"]),
-  /** Only facts observed for this exact input; missing stages remain unknown. */
-  progress: z.array(Progress).max(5),
-});
-export type AgentMessageReceipt = z.infer<typeof AgentMessageReceiptSchema>;
-export type AgentMessageReceiptLookup =
-  | { outcome: "found"; receipt: AgentMessageReceipt }
-  | { outcome: "unknown" | "expired" | "unavailable" };
+import {
+  AgentMessageReceiptSchema,
+  type AgentMessageReceipt,
+  type AgentMessageReceiptLookup,
+  type AgentMessageStageSchema,
+  type AgentMessageProgressSchema,
+  SubmitOperatorConversationTurnResultSchema,
+  type SubmitOperatorConversationTurnResult,
+} from "@clankie/protocol";
 
 const RecordSchema = z
   .strictObject({
@@ -46,10 +28,12 @@ const RecordSchema = z
     senderDeviceId: Identity,
     requestKey: Identity,
     fingerprint: Digest,
+    commandFingerprint: Digest,
     binding: Binding,
     /** Filled once by the native controller; an operator runId is not a messageId. */
     messageId: Identity.optional(),
     result: AgentMessageReceiptSchema.optional(),
+    sendResult: SubmitOperatorConversationTurnResultSchema.optional(),
   })
   .refine((record) => record.result === undefined || record.result.receiptId === record.id);
 type ReceiptRecord = z.infer<typeof RecordSchema>;
@@ -61,13 +45,18 @@ const digest = (value: string) => createHash("sha256").update(value).digest("hex
 export class AgentMessageReceipts {
   private readonly store: DurableReceiptStore<ReceiptRecord>;
   private readonly now: () => number;
+  private readonly nativeEvidencePath: string | undefined;
 
-  public constructor(path: string, now: () => number = Date.now) {
+  public constructor(path: string, now: () => number = Date.now, nativeEvidencePath?: string) {
+    this.nativeEvidencePath = nativeEvidencePath;
     this.now = now;
     this.store = new DurableReceiptStore({
       path,
       sharded: true,
       schema: RecordSchema,
+      trimSettled: (record) => {
+        delete record.sendResult;
+      },
       unreadableMessage: "Agent message receipts are unreadable; no message was dispatched",
     });
   }
@@ -79,6 +68,7 @@ export class AgentMessageReceipts {
     agent: string;
     binding: AgentMessageBinding;
     message: string;
+    targetKey?: string;
     attachments?: readonly { filename: string; mediaType: string; sha256: string }[];
   }): { outcome: "new" | "existing"; receiptId: string } | { outcome: "conflict" } {
     const senderDeviceId = Identity.parse(input.senderDeviceId);
@@ -91,6 +81,9 @@ export class AgentMessageReceipts {
       sha256: Digest.parse(sha256),
     }));
     const fingerprint = digest(JSON.stringify({ agent, binding, message: input.message, attachments }));
+    const commandFingerprint = digest(
+      JSON.stringify({ targetKey: input.targetKey ?? agent, message: input.message, attachments }),
+    );
     const records = this.store.load();
     const original = [...records.values()].find(
       (record) => record.senderDeviceId === senderDeviceId && record.requestKey === requestKey,
@@ -107,6 +100,7 @@ export class AgentMessageReceipts {
       senderDeviceId,
       requestKey,
       fingerprint,
+      commandFingerprint,
       binding,
       state: "uncertain",
       result: {
@@ -121,6 +115,25 @@ export class AgentMessageReceipts {
     });
     this.store.save();
     return { outcome: "new", receiptId: id };
+  }
+
+  /** Reconcile the immutable original command before doing any new recipient discovery. */
+  public recover(input: {
+    senderDeviceId: string;
+    requestKey: string;
+    targetKey: string;
+    message: string;
+  }): { outcome: "absent" | "conflict" } | { outcome: "existing"; receiptId: string } {
+    const record = [...this.store.load().values()].find(
+      (entry) => entry.senderDeviceId === input.senderDeviceId && entry.requestKey === input.requestKey,
+    );
+    if (!record) return { outcome: "absent" };
+    const fingerprint = digest(
+      JSON.stringify({ targetKey: input.targetKey, message: input.message, attachments: [] }),
+    );
+    return record.commandFingerprint === fingerprint
+      ? { outcome: "existing", receiptId: record.id }
+      : { outcome: "conflict" };
   }
 
   /** Bind only the original occupant's actual native input, never its service run ID. */
@@ -191,13 +204,90 @@ export class AgentMessageReceipts {
     if (record === undefined || record.senderDeviceId !== senderDeviceId) return { outcome: "unknown" };
     return record.result === undefined
       ? { outcome: "expired" }
-      : { outcome: "found", receipt: record.result };
+      : { outcome: "found", receipt: this.projectNative(record) };
+  }
+
+  /** Only the host's separately authenticated owner inspection path may call this. */
+  public inspectAsOwner(id: string): AgentMessageReceiptLookup {
+    const record = this.store.read(id);
+    return !record
+      ? { outcome: "unknown" }
+      : record.result === undefined
+        ? { outcome: "expired" }
+        : { outcome: "found", receipt: this.projectNative(record) };
+  }
+
+  /** Pure projection of the native watcher's durable exact-input completion; no session I/O or writes. */
+  private projectNative(record: ReceiptRecord): AgentMessageReceipt {
+    const result = structuredClone(record.result!);
+    if (!this.nativeEvidencePath || !record.messageId) return result;
+    try {
+      const journal = z
+        .object({
+          schemaVersion: z.literal(1),
+          harvestedTurns: z.array(
+            z.object({
+              terminalId: z.string(),
+              occupantId: z.string(),
+              messageId: z.string(),
+              completion: z
+                .object({
+                  type: z.literal("turn_completed"),
+                  at: z.string().datetime({ offset: true }),
+                  messageId: z.string().optional(),
+                  ok: z.boolean(),
+                  text: z.string().optional(),
+                })
+                .optional(),
+            }),
+          ),
+        })
+        .parse(JSON.parse(readFileSync(this.nativeEvidencePath, "utf8")));
+      const proof = journal.harvestedTurns.find(
+        (entry) =>
+          entry.terminalId === record.binding.seatId &&
+          entry.occupantId === record.binding.instanceId &&
+          entry.messageId === record.messageId &&
+          entry.completion?.messageId === record.messageId,
+      )?.completion;
+      if (!proof?.ok || Date.parse(proof.at) < record.createdAt) return result;
+      result.updatedAt = Math.max(result.updatedAt, Date.parse(proof.at));
+      const stages = proof.text?.trim() ? (["acted_on", "answered"] as const) : (["acted_on"] as const);
+      for (const stage of stages) {
+        if (result.progress.some((entry) => entry.stage === stage)) continue;
+        result.progress.push({
+          stage,
+          occurredAt: proof.at,
+          evidence: stage === "answered" ? "native_answer" : "native_turn_completed",
+        });
+        result.revision += 1;
+      }
+    } catch {
+      /* Missing or unverified native evidence never advances the original receipt. */
+    }
+    return result;
+  }
+
+  public sendResult(id: string, senderDeviceId: string): SubmitOperatorConversationTurnResult | undefined {
+    const record = this.store.read(id);
+    return record?.senderDeviceId === senderDeviceId ? record.sendResult : undefined;
+  }
+
+  public settleSend(
+    id: string,
+    binding: AgentMessageBinding,
+    result: SubmitOperatorConversationTurnResult,
+  ): void {
+    const record = this.store.load().get(id);
+    if (!record || !sameBinding(record.binding, binding) || record.sendResult !== undefined) return;
+    record.sendResult = SubmitOperatorConversationTurnResultSchema.parse(result);
+    this.store.save();
   }
 
   private progress(
     record: ReceiptRecord,
-    stage: z.infer<typeof Stage>,
-    evidence: z.infer<typeof Progress>["evidence"],
+    stage: z.infer<typeof AgentMessageStageSchema>,
+    evidence: z.infer<typeof AgentMessageProgressSchema>["evidence"],
     occurredAt?: string,
   ): void {
     if (record.result === undefined || record.result.progress.some((entry) => entry.stage === stage)) return;

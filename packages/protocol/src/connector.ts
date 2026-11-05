@@ -503,6 +503,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "get":
     case "send":
     case "send_receipt":
+    case "agent_message_status":
       return true;
     // Images to an agent upload into its own persona thread (ADR 0315); the relay checks the thread.
     case "upload_begin":

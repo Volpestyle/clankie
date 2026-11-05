@@ -1,3 +1,4 @@
+import type { AgentMessageDispatch } from "../../agent-message-dispatch.ts";
 import {
   InboundReportStore,
   InboundReportStorageError,
@@ -881,6 +882,7 @@ export class ConversationStore {
     readSignal?: AbortSignal,
     /** Host-verified sender of a `send` that carries no question authority (ADR 0350). */
     leadOwner?: LeadOwnerProof,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<ConversationServiceResult> {
     switch (request.op) {
       case "project_proposal_get":
@@ -1076,7 +1078,7 @@ export class ConversationStore {
         return {
           op: "send",
           schemaVersion: 1,
-          result: await this.send(request.turn, authority, leadOwner, request.appDeviceId),
+          result: await this.send(request.turn, authority, leadOwner, request.appDeviceId, agentMessage),
         };
       case "upload_begin":
         return {
@@ -2707,6 +2709,7 @@ export class ConversationStore {
     leadOwner?: LeadOwnerProof,
     /** The connector device the relay stamped; delivery decides whether it leads the seat (#442). */
     connectorDevice?: string,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const meta = this.metas.get(turn.conversationId);
     if (meta === undefined) {
@@ -2736,6 +2739,8 @@ export class ConversationStore {
         { seatId: meta.nativeSource.paneId },
         attachments,
         authority,
+        undefined,
+        agentMessage,
       );
     }
     if (meta.scope.kind === "seat") {
@@ -2747,6 +2752,7 @@ export class ConversationStore {
         attachments,
         authority,
         connectorDevice,
+        agentMessage,
       );
     }
     if (meta.scope.kind === "persona") {
@@ -2760,6 +2766,7 @@ export class ConversationStore {
         attachments,
         authority,
         connectorDevice,
+        agentMessage,
       );
     }
     if (authority !== undefined) {
@@ -2974,10 +2981,20 @@ export class ConversationStore {
     attachments?: readonly StoredOwnerAttachment[],
     authority?: QuestionAuthority,
     connectorDevice?: string,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const previous = this.seatSends.get(meta.conversationId) ?? Promise.resolve();
     const pending = previous.then(() =>
-      this.deliverSeatTurn(meta, seatId, offlineIdentity, turn, attachments, authority, connectorDevice),
+      this.deliverSeatTurn(
+        meta,
+        seatId,
+        offlineIdentity,
+        turn,
+        attachments,
+        authority,
+        connectorDevice,
+        agentMessage,
+      ),
     );
     const settled = pending.then(
       () => undefined,
@@ -2998,6 +3015,7 @@ export class ConversationStore {
     attachments?: readonly StoredOwnerAttachment[],
     authority?: QuestionAuthority,
     connectorDevice?: string,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<SubmitOperatorConversationTurnResult> {
     const safeCursor = this.lastCursor(meta);
     if (turn.expectedRevision !== meta.revision) {
@@ -3054,6 +3072,7 @@ export class ConversationStore {
           handedOff = true;
         },
         connectorDevice,
+        agentMessage,
       );
     } catch (error) {
       if (!handedOff) throw error;
@@ -3088,6 +3107,7 @@ export class ConversationStore {
     safeCursor: string,
     handOff: () => void,
     connectorDevice?: string,
+    agentMessage?: AgentMessageDispatch,
   ): Promise<SubmitOperatorConversationTurnResult> {
     if (turn.delivery === "queue" && this.nativeMessageHost && seatId !== undefined) {
       const authorize = this.nativeMessageAuthority(meta, seatId, authority);
@@ -3157,6 +3177,7 @@ export class ConversationStore {
         : await this.sendToSeat?.(seatId, message, {
             conversationId: meta.conversationId,
             source: "operator",
+            ...(agentMessage === undefined ? {} : { agentMessage }),
             ...(connectorDevice === undefined ? {} : { connectorDevice }),
             ...(turn.freeAgent === undefined ? {} : { freeAgent: turn.freeAgent }),
             ...(turn.workHandoff === undefined ? {} : { workHandoff: turn.workHandoff }),

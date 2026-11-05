@@ -1,3 +1,4 @@
+import { AgentMessageRefusalCodeSchema } from "../../../packages/protocol/src/agent-message-receipts.ts";
 import { LeadChangesRefusalCodeSchema } from "../../../packages/protocol/src/lead-changes.ts";
 import { HOSTED_OPERATOR_PATH } from "../../../packages/protocol/src/hosted-operator.ts";
 import {
@@ -38,6 +39,25 @@ export function createCaptainConversationDispatch(
       signal: dispatchSignal(signal, request.op),
     });
     if (!response.ok) {
+      if (
+        (request.op === "agent_message_status" ||
+          (request.op === "send" && request.receiptRequestId !== undefined)) &&
+        (response.status === 400 ||
+          response.status === 403 ||
+          response.status === 409 ||
+          response.status === 503)
+      ) {
+        const body: unknown = await response
+          .clone()
+          .json()
+          // allow-swallowed-rejection -- malformed refusal JSON falls through to the existing upstream error.
+          .catch(() => undefined);
+        const code = AgentMessageRefusalCodeSchema.safeParse(
+          typeof body === "object" && body !== null && "error" in body ? body.error : undefined,
+        );
+        if (code.success) throw new AgentMessageUpstreamRefusal(response.status, code.data);
+      }
+
       if (
         request.op === "lead_changes" &&
         (response.status === 400 || response.status === 403 || response.status === 503)
@@ -258,6 +278,17 @@ export class LeadChangesUpstreamRefusal extends Error {
   readonly status: 400 | 403 | 503;
   readonly code: string;
   constructor(status: 400 | 403 | 503, code: string) {
+    super(code);
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** Closed receipt refusal contract; other upstream response/error shapes are unchanged. */
+export class AgentMessageUpstreamRefusal extends Error {
+  readonly status: 400 | 403 | 409 | 503;
+  readonly code: string;
+  constructor(status: 400 | 403 | 409 | 503, code: string) {
     super(code);
     this.status = status;
     this.code = code;

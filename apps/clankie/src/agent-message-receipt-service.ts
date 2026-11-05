@@ -1,13 +1,12 @@
-import { z } from "zod";
-import { AgentMessageReceipts, type AgentMessageReceiptLookup } from "./agent-message-receipts.ts";
-
-export const AgentMessageReceiptRequestSchema = z.strictObject({ receiptId: z.string().uuid() });
+import { AgentMessageReceiptReadSchema, type AgentMessageReceiptLookup } from "@clankie/protocol";
+import { AgentMessageReceipts } from "./agent-message-receipts.ts";
 
 /** Supplied by the authenticated host boundary, not fields from an app's request. */
 export interface AgentMessageReceiptAuthority {
   readonly deviceId: string;
   /** Current registration/authorization version, changed by revocation or downgrade. */
   readonly authorizationRevision: string;
+  readonly ownerInspection?: true;
 }
 
 /** Read-only: no session inspection, native wake, delivery acknowledgment or replay. */
@@ -16,14 +15,15 @@ export async function lookupAgentMessageReceipt(
   request: unknown,
   authorize: () => Promise<AgentMessageReceiptAuthority | undefined>,
 ): Promise<AgentMessageReceiptLookup> {
-  const { receiptId } = AgentMessageReceiptRequestSchema.parse(request);
+  const { receiptId } = AgentMessageReceiptReadSchema.parse(request);
   const admitted = await authorize();
   if (admitted === undefined) return { outcome: "unknown" };
   // Capture values, not a mutable registration object that the second read may update.
-  const { deviceId, authorizationRevision } = admitted;
+  const { deviceId, authorizationRevision, ownerInspection } = admitted;
   let result: AgentMessageReceiptLookup;
   try {
-    result = receipts.lookup(receiptId, deviceId);
+    result =
+      ownerInspection === true ? receipts.inspectAsOwner(receiptId) : receipts.lookup(receiptId, deviceId);
   } catch {
     // A broken journal never authorizes a resend or exposes a different sender's record.
     result = { outcome: "unavailable" };
@@ -32,7 +32,8 @@ export async function lookupAgentMessageReceipt(
   if (
     current === undefined ||
     current.deviceId !== deviceId ||
-    current.authorizationRevision !== authorizationRevision
+    current.authorizationRevision !== authorizationRevision ||
+    current.ownerInspection !== ownerInspection
   )
     return { outcome: "unknown" };
   return result;

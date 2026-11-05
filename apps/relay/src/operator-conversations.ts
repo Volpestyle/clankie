@@ -1,3 +1,4 @@
+import { AgentMessageUpstreamRefusal } from "./conversation-upstream.ts";
 import { LeadChangesUpstreamRefusal } from "./conversation-upstream.ts";
 import {
   PROJECT_CI_STARTER_PATH,
@@ -822,9 +823,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
         serviceRequest.op === "worker_reports" ||
-        serviceRequest.op === "lead_changes") &&
+        serviceRequest.op === "lead_changes" ||
+        serviceRequest.op === "agent_message_status") &&
       (serviceRequest.appDeviceId !== undefined ||
-        (serviceRequest.op === "lead_changes" && serviceRequest.appSessionExpiresAt !== undefined))
+        ((serviceRequest.op === "lead_changes" ||
+          serviceRequest.op === "agent_message_status" ||
+          serviceRequest.op === "send") &&
+          serviceRequest.appSessionExpiresAt !== undefined))
     ) {
       writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
       return true;
@@ -970,11 +975,17 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
         serviceRequest.op === "worker_reports" ||
-        serviceRequest.op === "lead_changes") &&
+        serviceRequest.op === "lead_changes" ||
+        serviceRequest.op === "agent_message_status") &&
       currentAuthorization.device.scope === "connector"
     )
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
-    if (serviceRequest.op === "lead_changes" && currentAuthorization.device.scope === "connector")
+    if (
+      (serviceRequest.op === "lead_changes" ||
+        serviceRequest.op === "agent_message_status" ||
+        (serviceRequest.op === "send" && serviceRequest.receiptRequestId !== undefined)) &&
+      currentAuthorization.device.scope === "connector"
+    )
       serviceRequest = {
         ...serviceRequest,
         appSessionExpiresAt: currentAuthorization.device.sessionExpiresAt,
@@ -1209,6 +1220,14 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch (error) {
       if (abort.signal.aborted) return true;
+      if (
+        (serviceRequest.op === "agent_message_status" ||
+          (serviceRequest.op === "send" && serviceRequest.receiptRequestId !== undefined)) &&
+        error instanceof AgentMessageUpstreamRefusal
+      ) {
+        writeJson(response, error.status, { error: error.code });
+        return true;
+      }
       if (serviceRequest.op === "lead_changes" && error instanceof LeadChangesUpstreamRefusal) {
         writeJson(response, error.status, { error: error.code });
         return true;
@@ -1921,6 +1940,7 @@ const CONNECTOR_OPS = new Set([
   "lead",
   "worker_reports",
   "lead_changes",
+  "agent_message_status",
   "acknowledge_worker_reports",
   // Reading the owner's projects and their issues. An app writes only its own
   // issue_write, through the posting setting; the owner's work writes stay off.

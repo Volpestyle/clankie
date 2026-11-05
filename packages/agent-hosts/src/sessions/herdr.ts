@@ -37,6 +37,7 @@ export interface HerdrSessionSourceOptions {
   readonly localMachine?: string;
   /** Preserve internal attribution for receipt-aware callers; legacy send results stay unchanged. */
   readonly includeSendIdentity?: boolean;
+  readonly receiptRequestId?: string;
 }
 
 /** One line for a lead choosing who takes related work (#425): newest three, compactly. */
@@ -241,6 +242,7 @@ export function createHerdrSessionSource(
         const sent = await port.dispatch({
           op: "send",
           schemaVersion: 1,
+          ...(options.receiptRequestId === undefined ? {} : { receiptRequestId: options.receiptRequestId }),
           turn: {
             schemaVersion: 1,
             conversationId: created.conversation.conversationId,
@@ -253,7 +255,16 @@ export function createHerdrSessionSource(
         });
         if (sent.op !== "send") throw new Error("The send answered with something else.");
         const result = sent.result;
+        const receipt = sent.receiptId === undefined ? {} : { receiptId: sent.receiptId };
         if (result.status === "revision_conflict") {
+          if (sent.receiptId !== undefined)
+            return {
+              id,
+              ...receipt,
+              status: "not_delivered",
+              detail:
+                "The thread changed before dispatch. Nothing was sent; inspect the receipt before a new request.",
+            };
           revision = result.currentRevision;
           continue;
         }
@@ -282,6 +293,7 @@ export function createHerdrSessionSource(
           return {
             id,
             ...identity,
+            ...receipt,
             status: "delivered",
             detail: `${name} has the message in its session. Read the agent to see it respond.`,
           };
@@ -289,6 +301,7 @@ export function createHerdrSessionSource(
           return {
             id,
             ...identity,
+            ...receipt,
             status: "queued",
             detail:
               result.seatDelivery.detail ??
@@ -298,22 +311,25 @@ export function createHerdrSessionSource(
           return {
             id,
             ...identity,
+            ...receipt,
             status: "delivered",
             detail: `Sent to ${name}. Read the agent to see it respond.`,
           };
         if (result.status === "seat_offline")
           return {
             id,
+            ...receipt,
             status: "offline",
             detail: `${name} isn't running in a pane right now. Nothing was sent.`,
           };
         if (result.status === "seat_undelivered")
-          return { id, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
+          return { id, ...receipt, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
         if (result.status === "seat_delivery_unconfirmed")
-          return { id, ...identity, status: "unconfirmed", detail: result.detail };
+          return { id, ...identity, ...receipt, status: "unconfirmed", detail: result.detail };
         return {
           id,
           ...identity,
+          ...receipt,
           status: "unconfirmed",
           detail: `The message may have reached ${name} but wasn't confirmed. Read the agent before sending it again.`,
         };

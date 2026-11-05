@@ -1,3 +1,4 @@
+import { AgentMessageReceipts } from "./agent-message-receipts.ts";
 import { createDesktopPermissionCheck } from "./desktop-permission-check.ts";
 import { operatorCredentialReadFence } from "@clankie/credential-broker";
 import { LeadChanges } from "./lead-changes.ts";
@@ -2553,6 +2554,11 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   leadChanges: new LeadChanges(join(stateRoot, "lead-changes")),
+  agentMessageReceipts: new AgentMessageReceipts(
+    join(stateRoot, "agent-message-receipts.json"),
+    Date.now,
+    join(stateRoot, "herdr-watches.json"),
+  ),
   leadChangesAuthorityFence: (_request, kind) =>
     kind === "operator"
       ? operatorCredentialReadFence({

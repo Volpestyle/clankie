@@ -69,6 +69,7 @@ export interface SessionSendResult {
   readonly detail: string;
   /** Opt-in adapter attribution, not a claim that the model read or acted on the input. */
   readonly identity?: SessionSendIdentity;
+  readonly receiptId?: string;
 }
 
 /** An image sent with a message, as the agent's own workspace file (ADR 0315). */

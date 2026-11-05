@@ -1,3 +1,6 @@
+import { AgentMessageRefusalCodeSchema } from "@clankie/protocol";
+import { lookupAgentMessageReceipt } from "../agent-message-receipt-service.ts";
+import { sendAgentMessageWithReceipt } from "../agent-message-send.ts";
 import { collectLeadChanges } from "../lead-change-read.ts";
 import { LeadChangesRefusal } from "../lead-changes.ts";
 import { withPresenceCursor } from "../captain/presence.ts";
@@ -660,6 +663,107 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const owner = await questionOwnerAuthority(context.req.raw);
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
+    if (
+      parsed.success &&
+      (parsed.data.op === "agent_message_status" ||
+        (parsed.data.op === "send" && parsed.data.receiptRequestId !== undefined))
+    ) {
+      const request = parsed.data;
+      if (request.op === "send") delete request.turn.herdrPaneId;
+      const deviceId = request.appDeviceId;
+      const deadline = Date.parse(request.appSessionExpiresAt ?? "");
+      const kind = deviceId === undefined ? owner?.principal.kind : "relay";
+      if (!kind || (request.op === "send" && deviceId === undefined))
+        return context.json({ error: "agent_message_forbidden" }, 403);
+      const receipts = ctx.dependencies.agentMessageReceipts;
+      if (!receipts || !ctx.dependencies.leadChangesAuthorityFence)
+        return context.json({ error: "agent_message_unavailable" }, 503);
+      let fence: { assertCurrent(): void };
+      try {
+        fence = ctx.dependencies.leadChangesAuthorityFence(context.req.raw, kind);
+      } catch {
+        return context.json({ error: "agent_message_unavailable" }, 503);
+      }
+      const discovery = ctx.detection.multiplexer("herdr");
+      const stamp = () => {
+        if (deviceId === undefined) return undefined;
+        const record = ctx.devices.get(deviceId);
+        if (!record) return undefined;
+        const { lastSeenAt: _seen, push: _push, ...authority } = record;
+        return JSON.stringify(authority);
+      };
+      const originalRecord = stamp();
+      const current = () => {
+        try {
+          fence.assertCurrent();
+        } catch {
+          return false;
+        }
+        if (context.req.raw.signal.aborted) return false;
+        if (deviceId === undefined) return owner?.current() === true;
+        return (
+          workerReportDevice(ctx.devices.get(deviceId), ctx.clock()) &&
+          ctx.clock().getTime() < deadline &&
+          stamp() === originalRecord &&
+          ctx.detection.served(deviceId) &&
+          discovery &&
+          ctx.detection.multiplexer("herdr") === discovery
+        );
+      };
+      const authorize = async () => {
+        if (!current()) return undefined;
+        if (deviceId === undefined) {
+          if (!owner || !(await owner.authorize()) || !current()) return undefined;
+          return {
+            deviceId: owner.principal.id,
+            authorizationRevision: owner.principal.kind + ":" + owner.principal.id,
+            ownerInspection: true as const,
+          };
+        }
+        const relay = await authenticateCaptain(context.req.raw, ctx.dependencies);
+        if (!relay || relay === "unavailable" || relay.steerSourceLane !== "api" || !current())
+          return undefined;
+        return { deviceId, authorizationRevision: originalRecord! };
+      };
+      try {
+        if (!(await authorize())) return context.json({ error: "agent_message_forbidden" }, 403);
+        const result =
+          request.op === "agent_message_status"
+            ? {
+                op: "agent_message_status" as const,
+                schemaVersion: 1 as const,
+                result: await lookupAgentMessageReceipt(
+                  receipts,
+                  { receiptId: request.receiptId },
+                  authorize,
+                ),
+              }
+            : await sendAgentMessageWithReceipt({
+                request,
+                captain: ctx.dependencies.captain,
+                receipts,
+                authorize,
+                current,
+              });
+        if (!current()) return context.json({ error: "agent_message_forbidden" }, 403);
+        return context.json(result);
+      } catch (error) {
+        const known = AgentMessageRefusalCodeSchema.safeParse(
+          error instanceof Error ? error.message : undefined,
+        );
+        const code = known.success ? known.data : "agent_message_unavailable";
+        return context.json(
+          { error: code },
+          code === "agent_message_forbidden"
+            ? 403
+            : code === "agent_message_request_conflict"
+              ? 409
+              : code === "agent_message_mode_unsupported"
+                ? 400
+                : 503,
+        );
+      }
+    }
     if (parsed.success && parsed.data.op === "lead_changes") {
       const request = parsed.data;
       const deviceId = request.appDeviceId;
