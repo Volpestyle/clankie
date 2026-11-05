@@ -8,6 +8,7 @@ import { z } from "zod";
 import { DesktopPermissionCheckSchema, type DesktopPermissionCheck } from "@clankie/protocol/desktop-access";
 import type { HerdrBinding } from "@clankie/protocol";
 import { herdrCoreCall } from "./captain/herdr-core.ts";
+import { logger } from "./app/log.ts";
 import { nativeRequest } from "./herdr-native-request.ts";
 
 const Created = z.object({
@@ -129,14 +130,23 @@ export function createDesktopPermissionCheck(options: {
           }
           return unavailable("timed_out");
         } finally {
+          const cleanupUnavailable = () =>
+            logger.warn(
+              { event: "desktop_permission_check.cleanup_unavailable", host: desktop ? "desktop" : "herdr" },
+              "Permission diagnostic cleanup unavailable",
+            );
           // Only the exact newly created pane is ever closed. Never retry an uncertain creation.
           if (pane) {
             if (desktop) {
-              await herdrCoreCall(binding.socketPath, "terminal.kill", { terminal: pane }).catch(() => {});
-              await herdrCoreCall(binding.socketPath, "terminal.rm", { terminal: pane }).catch(() => {});
+              await herdrCoreCall(binding.socketPath, "terminal.kill", { terminal: pane }).catch(
+                cleanupUnavailable,
+              );
+              await herdrCoreCall(binding.socketPath, "terminal.rm", { terminal: pane }).catch(
+                cleanupUnavailable,
+              );
             } else
               await nativeRequest(binding, "pane.close", { pane_id: pane }, { timeoutMs: 2000 }).catch(
-                () => {},
+                cleanupUnavailable,
               );
           }
           if (directory) await rm(directory, { recursive: true, force: true });
