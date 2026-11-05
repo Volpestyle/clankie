@@ -48,6 +48,9 @@ export const ProjectTrackingSchema = z
   .superRefine((tracking, ctx) => {
     if (new Set(tracking.repos.map((repo) => repo.toLowerCase())).size !== tracking.repos.length)
       ctx.addIssue({ code: "custom", message: "Repos must be unique" });
+    const board = (value: string) => value.toLowerCase().replace(/\/overview\/?$|\/$/u, "");
+    if (board(tracking.tracker.publicBoard) === board(tracking.tracker.privateBoard))
+      ctx.addIssue({ code: "custom", message: "Public and private work need separate boards" });
   });
 export type ProjectTracking = z.infer<typeof ProjectTrackingSchema>;
 

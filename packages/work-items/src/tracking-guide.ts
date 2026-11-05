@@ -6,12 +6,14 @@ export const TRACKING_CLOSE = "<!-- /clankie:tracking -->";
 
 const PROVIDER_NAMES = { github: "GitHub issues", linear: "Linear" } as const;
 
+export type TrackingAudience = "public" | "private";
+
 /**
- * The whole block as a pure function of the choice: no clock, no model, no repo facts.
- * It names only the tracker the owner chose, because the same text lands in public and
- * private repos alike, and listing the project's other repos would publish private names.
+ * The whole block as a pure function of the choice and who can read the repo: no clock, no
+ * model. A public block names only the public destination, because anything in it is published,
+ * and no block lists the project's other repos for the same reason.
  */
-export function renderTrackingBlock(tracker: TrackerChoice): string {
+export function renderTrackingBlock(tracker: TrackerChoice, audience: TrackingAudience): string {
   return [
     TRACKING_OPEN,
     "## Work tracking",
@@ -21,7 +23,9 @@ export function renderTrackingBlock(tracker: TrackerChoice): string {
     "",
     `- Tracker: ${PROVIDER_NAMES[tracker.provider]}`,
     `- Public work: ${tracker.publicBoard}`,
-    `- Private work: ${tracker.privateBoard}`,
+    audience === "private"
+      ? `- Private work: ${tracker.privateBoard}`
+      : "- Private work: not named in this repo; never file it here.",
     TRACKING_CLOSE,
   ].join("\n");
 }

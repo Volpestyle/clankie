@@ -11967,9 +11967,9 @@ Clankie fills a block between `<!-- clankie:tracking -->` and
 `<!-- /clankie:tracking -->` from a template, and never touches text outside the
 markers. Each repo gets one small pull request from `clankie/tracking-block`, which
 Clankie never merges. An hourly sweep repeats this for drift and only reads when the
-project's `push` preference is `owner`. The block lands in public repos too, so name
-only boards you are happy to show. A changed tracker moves no issues; the result
-offers that as separate work. See
+project's `push` preference is `owner`. Only a repo GitHub confirms as private gets
+the private board; every other repo's block names just the public board. A changed
+tracker moves no issues; the result offers that as separate work. See
 [ADR 0362](adr/0362-a-project-owns-its-repos-and-tracker.md).
 
 | State         | Meaning                                                                       |
@@ -11983,7 +11983,9 @@ offers that as separate work. See
 
 `refused` reasons: `malformed_markers`, `unclosed_code_fence`, `duplicate_blocks`,
 `unsupported_guide`, `guide_too_large`, `guide_not_utf8`, `repository_archived`,
-`repository_moved` and `proposal_branch_edited`. The last means someone else's commit
+`repository_moved`, `public_board_not_public` and `proposal_branch_edited`.
+`public_board_not_public` means the public board is a GitHub repo that GitHub won't
+show as public: pick a public one. `proposal_branch_edited` means someone else's commit
 is on the proposal branch: merge or delete it.
 
 ### Work tracker settings

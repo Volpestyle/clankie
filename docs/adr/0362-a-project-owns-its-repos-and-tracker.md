@@ -45,9 +45,13 @@ flowchart LR
   the project's `push` preference is `owner`.
 - **Refusal over guessing.** Malformed markers, two blocks, an unclosed code fence, a
   guide that links elsewhere or is not UTF-8 are reported, and nothing is written.
-- **The block is public.** It lands in public and private repos alike, so it names
-  only the tracker and boards the owner chose. It never lists the project's other
-  repos, and a proposal in one repo names no other.
+- **A public repo names only the public destination.** Each pass asks the forge
+  whether the repo is private. Only a repo it confirms as private gets the private
+  board. A public repo, an `internal` one, and one whose visibility it won't confirm
+  all get the public block, which says private work is not named there. A GitHub
+  public board the forge won't show as public is refused rather than published, and
+  the two boards must differ. No block lists the project's other repos, and a proposal
+  in one repo names no other.
 - **Issues stay put.** A changed tracker never moves or closes an issue. The change
   offers that to the owner, and approved work is hired out separately.
 - **Suggested, then confirmed.** `clankie project tracking PROJECT` opens with what
@@ -62,6 +66,10 @@ flowchart LR
 - A repo's `.clankie/tracking.json` stays the per-repo answer `clankie work` reads
   (ADR 0191). The block tells agents reading the guide; this setting does not write
   that file.
+- Only a public board that is a GitHub repo can be checked. A Linear board or a GitHub
+  Project is the owner's word, because no forge read says who can see it.
+- A repo made public keeps its git history: the next pass drops the private board from
+  the block and any open proposal, but cannot remove what was already committed.
 - Only GitHub repos can be proposed to today, through the connected account or the
   owner's `gh` login. Linear is a tracker choice, not a place the block lands.
 - The branch check and its forced update are two calls, because GitHub has no

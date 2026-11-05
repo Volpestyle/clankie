@@ -1,4 +1,8 @@
-import type { TrackerChoice, TrackingRepoStatus } from "@clankie/protocol/project-tracking";
+import {
+  TrackingRepoSchema,
+  type TrackerChoice,
+  type TrackingRepoStatus,
+} from "@clankie/protocol/project-tracking";
 import type { GithubApi } from "./backends/github.ts";
 import {
   chooseTrackingGuide,
@@ -8,6 +12,7 @@ import {
   trackingBlockHash,
   writeTrackingBlock,
   type GuideFile,
+  type TrackingAudience,
 } from "./tracking-guide.ts";
 
 /** The one branch Clankie proposes from in each repo, so a repo never holds two proposals. */
@@ -111,6 +116,30 @@ type Reading =
 
 const pullRef = (pull: Pull) => ({ number: pull.number, url: pull.html_url });
 
+/** Private only on the forge's own word. An `internal` repo, or a missing answer, reads as public. */
+const trackingAudience = (repository: {
+  readonly private?: unknown;
+  readonly visibility?: unknown;
+}): TrackingAudience =>
+  repository.private === true && (repository.visibility ?? "private") === "private" ? "private" : "public";
+
+/** The repo a GitHub board points at. A project board or a plain name has none to ask about. */
+function boardRepo(board: string): string | undefined {
+  const slug = /^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+)(?:\/issues)?\/?$/u.exec(board)?.[1];
+  return TrackingRepoSchema.safeParse(slug).success ? slug : undefined;
+}
+
+/** A public block publishes this board, so a repo the forge won't show as public stops it. */
+async function publicBoardConfirmed(api: GithubApi, tracker: TrackerChoice): Promise<boolean> {
+  const slug = tracker.provider === "github" ? boardRepo(tracker.publicBoard) : undefined;
+  if (slug === undefined) return true;
+  const board = (await api.request("GET", `repos/${slug}`).catch((error: unknown) => {
+    if (notFound(error)) return undefined;
+    throw error;
+  })) as { readonly private?: unknown } | undefined;
+  return board?.private === false;
+}
+
 async function readRepo(api: GithubApi, slug: string, tracker: TrackerChoice): Promise<Reading> {
   const refused = (reason: string, guide?: string): Reading => ({
     status: { repo: slug, state: "refused", reason, ...(guide === undefined ? {} : { guide }) },
@@ -119,10 +148,15 @@ async function readRepo(api: GithubApi, slug: string, tracker: TrackerChoice): P
     readonly default_branch: string;
     readonly full_name: string;
     readonly archived?: boolean;
+    readonly private?: unknown;
+    readonly visibility?: unknown;
   };
   if (repository.full_name.toLowerCase() !== slug.toLowerCase())
     return refused(`repository_moved: now ${repository.full_name}`);
   if (repository.archived) return refused("repository_archived");
+  const audience = trackingAudience(repository);
+  if (audience === "public" && !(await publicBoardConfirmed(api, tracker)))
+    return refused("public_board_not_public");
   const defaultBranch = repository.default_branch;
   const ref = (await api.request("GET", `repos/${slug}/git/ref/heads/${refPath(defaultBranch)}`)) as {
     readonly object: { readonly sha: string };
@@ -138,7 +172,7 @@ async function readRepo(api: GithubApi, slug: string, tracker: TrackerChoice): P
   if (choice.kind === "refused") return refused(choice.reason);
   const file = choice.file;
   const text = read.guides[file] ?? "";
-  const block = renderTrackingBlock(tracker);
+  const block = renderTrackingBlock(tracker, audience);
   const hash = trackingBlockHash(block);
   const content = writeTrackingBlock(text, block);
   if (typeof content !== "string") return refused(content.refused, file);

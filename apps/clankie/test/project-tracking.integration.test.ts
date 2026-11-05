@@ -53,6 +53,7 @@ async function fixture(push: "lead" | "owner" = "lead") {
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const forge = await startLoopbackForge();
   cleanups.push(() => forge.stop());
+  await forge.addRepo(GITHUB.publicBoard, { "README.md": { content: "Where public work goes.\n" } });
   const credentials = new FileCredentialStore(join(directory, "credentials.json"));
   const token = mintOperatorToken();
   await credentials.set(OPERATOR_CREDENTIAL_PROVIDER_ID, { type: "api", key: token });
@@ -111,7 +112,7 @@ it("takes a setting from the CLI through proposal, merge, read-back, drift and a
   await forge.addRepo("fixture/bare", { "README.md": { content: "No guide here.\n" } });
   await forge.addRepo("fixture/broken", { "CLAUDE.md": { content: `${TRACKING_OPEN}\nnever closed\n` } });
   const repos = ["linked", "included", "both", "block", "bare", "broken"].map((name) => `fixture/${name}`);
-  const block = renderTrackingBlock(GITHUB);
+  const block = renderTrackingBlock(GITHUB, "public");
 
   const first = await cli(
     "--provider",
@@ -200,7 +201,9 @@ it("takes a setting from the CLI through proposal, merge, read-back, drift and a
   expect(moved.tracking?.repos).toEqual(repos);
   expect(repos.map((repo) => forge.pulls(repo).length)).toEqual(openBefore);
   expect(await forge.read("fixture/block", TRACKING_BRANCH, "CLAUDE.md")).toBe(
-    WITH_BLOCK(renderTrackingBlock({ provider: "linear", publicBoard: "VUH", privateBoard: "VUH-PRIVATE" })),
+    WITH_BLOCK(
+      renderTrackingBlock({ provider: "linear", publicBoard: "VUH", privateBoard: "VUH-PRIVATE" }, "public"),
+    ),
   );
   expect(byRepo(moved.repos!, "fixture/bare")).toMatchObject({
     state: "refused",
@@ -210,6 +213,65 @@ it("takes a setting from the CLI through proposal, merge, read-back, drift and a
 
   // The whole run never reached for an issue or a merge.
   expect(forge.requests.filter((request) => /issues|merge/u.test(request.path))).toEqual([]);
+}, 120_000);
+
+it("names the private board only in a repo the forge confirms is private", async () => {
+  const { forge, service, cli } = await fixture();
+  const secret = "https://linear.app/fixture/project/secret-board";
+  const tracker = { ...GITHUB, privateBoard: secret };
+  await forge.addRepo("fixture/open", { "CLAUDE.md": { content: GUIDE } }, "public");
+  await forge.addRepo("fixture/closed", { "CLAUDE.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/unknown", { "CLAUDE.md": { content: GUIDE } }, "unknown");
+  await forge.addRepo("fixture/internal", { "CLAUDE.md": { content: GUIDE } }, "internal");
+  const proposed = async (repo: string) => ({
+    guide: await forge.read(repo, TRACKING_BRANCH, "CLAUDE.md"),
+    body: forge.pulls(repo)[0]!.body,
+  });
+
+  const saved = await cli(
+    "--provider",
+    "github",
+    "--public-board",
+    tracker.publicBoard,
+    "--private-board",
+    secret,
+    ...["open", "closed", "unknown", "internal"].flatMap((name) => ["--repo", `fixture/${name}`]),
+  );
+  expect(saved.repos.map((repo) => repo.state)).toEqual(Array(4).fill("proposed"));
+
+  for (const repo of ["fixture/open", "fixture/unknown", "fixture/internal"]) {
+    const { guide, body } = await proposed(repo);
+    expect(guide).toBe(`${GUIDE}\n${renderTrackingBlock(tracker, "public")}\n`);
+    expect(guide).toContain(`Public work: ${tracker.publicBoard}`);
+    expect(`${guide}${body}`).not.toContain("secret-board");
+  }
+  const closed = await proposed("fixture/closed");
+  expect(closed.guide).toBe(`${GUIDE}\n${renderTrackingBlock(tracker, "private")}\n`);
+  expect(closed.guide).toContain(`Private work: ${secret}`);
+
+  // Each pass asks the forge again: a repo made public loses the name from its open proposal.
+  forge.setVisibility("fixture/closed", "public");
+  await service.sweep();
+  const flipped = await proposed("fixture/closed");
+  expect(`${flipped.guide}${flipped.body}`).not.toContain("secret-board");
+
+  // A public board the forge won't confirm as public is refused rather than published.
+  for (const [board, seen] of [
+    ["fixture/hidden", "private"],
+    ["https://github.com/fixture/hidden-issues/issues", "unknown"],
+    ["fixture/missing", undefined],
+  ] as const) {
+    const slug = board.replace("https://github.com/", "").replace("/issues", "");
+    if (seen) await forge.addRepo(slug, { "README.md": { content: "Board.\n" } }, seen);
+    await forge.addRepo(`fixture/${seen ?? "none"}-repo`, { "CLAUDE.md": { content: GUIDE } });
+    const mark = forge.requests.length;
+    const refused = await cli("--public-board", board, "--repo", `fixture/${seen ?? "none"}-repo`);
+    expect(refused.repos[0]).toMatchObject({ state: "refused", reason: "public_board_not_public" });
+    expect(forge.writesSince(mark)).toEqual([]);
+  }
+
+  // One board for both would put the private board in every public block.
+  await expect(cli("--public-board", secret.toUpperCase())).rejects.toThrow("separate boards");
 }, 120_000);
 
 it("keeps the setting and every pass behind owner authority", async () => {

@@ -27,6 +27,15 @@ interface FixturePull {
   base: { ref: string };
 }
 
+/** `unknown` answers with neither field, as a token too narrow to see them would. */
+export type FixtureVisibility = "public" | "private" | "internal" | "unknown";
+const VISIBILITY_FIELDS = {
+  public: { private: false, visibility: "public" },
+  private: { private: true, visibility: "private" },
+  internal: { private: true, visibility: "internal" },
+  unknown: {},
+} as const;
+
 export interface FixtureFile {
   readonly content: string;
   /** Git mode; `120000` makes `content` a symlink target. */
@@ -41,6 +50,7 @@ export interface FixtureFile {
 export async function startLoopbackForge() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "loopback-forge-")));
   const pulls = new Map<string, FixturePull[]>();
+  const visibility = new Map<string, FixtureVisibility>();
   const requests: { readonly method: string; readonly path: string }[] = [];
   const bare = (slug: string) => join(root, `${slug}.git`);
   const git = async (slug: string, ...args: string[]) =>
@@ -76,7 +86,15 @@ export async function startLoopbackForge() {
     const rest = parts[2] ?? "";
     if (!pulls.has(slug)) return { status: 404, value: { message: "Not Found" } };
     const route = `${method} ${rest}`;
-    if (route === "GET ") return { status: 200, value: { full_name: slug, default_branch: "main" } };
+    if (route === "GET ")
+      return {
+        status: 200,
+        value: {
+          full_name: slug,
+          default_branch: "main",
+          ...VISIBILITY_FIELDS[visibility.get(slug) ?? "public"],
+        },
+      };
     let match: RegExpExecArray | null;
     if (method === "GET" && (match = /^git\/ref\/heads\/(.+)$/u.exec(rest))) {
       const sha = await refOf(slug, match[1]!).catch(() => undefined);
@@ -203,12 +221,15 @@ export async function startLoopbackForge() {
     /** Every request since `mark` that was not a read. */
     writesSince: (mark: number) => requests.slice(mark).filter((request) => request.method !== "GET"),
     pulls: (slug: string) => pulls.get(slug) ?? [],
-    async addRepo(slug: string, files: Record<string, FixtureFile>) {
+    async addRepo(slug: string, files: Record<string, FixtureFile>, seen: FixtureVisibility = "public") {
+      visibility.set(slug, seen);
       await mkdir(join(root, slug.split("/")[0]!), { recursive: true });
       await run("git", ["init", "--bare", "--quiet", "--initial-branch=main", bare(slug)]);
       pulls.set(slug, []);
       await git(slug, "update-ref", "refs/heads/main", await commitFiles(slug, undefined, files));
     },
+    /** The owner flipping a repo's visibility on the forge. */
+    setVisibility: (slug: string, seen: FixtureVisibility) => visibility.set(slug, seen),
     /** Someone pushing to the default branch, or to a proposal branch. */
     async push(slug: string, branch: string, files: Record<string, FixtureFile>) {
       await git(
