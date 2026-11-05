@@ -1,3 +1,4 @@
+import { createDesktopPermissionCheck } from "./desktop-permission-check.ts";
 import { joinedFleetResources } from "./joined-fleet-resources.ts";
 import { createMachineFleetResources } from "./machine-fleet-resources.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
@@ -2675,6 +2676,22 @@ const clankie = await createClankieApp({
   extensions: withOutsideStates(extensions, outsideExtensions),
   ...(activityLaunches === undefined ? {} : { activityLaunches }),
   herdrBinding: herdr.binding,
+  desktopPermissionCheck: createDesktopPermissionCheck({
+    binding: async () => {
+      if ((await settingsStore.load()).fleet.seatHost === "desktop")
+        return {
+          kind: "desktop",
+          binding: {
+            runtime: "external",
+            session: HERDR_CORE_FLEET,
+            socketPath: herdrCoreSocketPath(process.env),
+          },
+        };
+      const binding = herdr.binding();
+      return binding ? { kind: "herdr", binding } : undefined;
+    },
+    helper: join(repoRoot, "apps/tui/native/desktop-permission-probe.mjs"),
+  }),
   runtimes,
   memory,
   settings: settingsStore,

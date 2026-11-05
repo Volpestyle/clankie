@@ -48,6 +48,13 @@ from one terminal's report. Missing permission goes to the lead; never request i
 or open Settings as a side effect of reading. Details and implementation limits:
 [desktop choice and permissions](../../../docs/desktop-control.md#desktop-choice-and-permission-status).
 
+`clankie computer permissions --request --json` asks the configured local
+terminal for a fresh, non-prompting check through the owner API. It starts only
+a fixed background diagnostic, never inputs to an existing pane.
+Missing context or a timeout is typed unavailable; it does not reuse an old
+report as fresh. `--refresh` retains the explicit check in this local terminal.
+Neither command grants permission or changes a desktop choice.
+
 ## Stay off the owner's screen
 
 The screen belongs to the person using it, so screen work runs in the

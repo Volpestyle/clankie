@@ -1932,3 +1932,33 @@ describe("public gateway reach", () => {
     },
   );
 });
+
+it("carries fresh permission requests with the original owner bearer and validates the response without captain dispatch", async () => {
+  const path = "/v1/operator/computer/permissions/refresh";
+  const result = { state: "unavailable", reason: "terminal_context_unavailable" };
+  const dispatch = vi.fn();
+  const roomRequest = vi.fn(async () => Response.json(result));
+  const relay = await startRelay({
+    dispatch,
+    roomRequest,
+    authorizeDevice: {
+      authorize: async () => ({
+        authorized: true,
+        device: {
+          ...activeDevice,
+          ownerDevice: true,
+          grants: { ...activeDevice.grants, terminalControl: true },
+        },
+      }),
+    },
+  });
+  const response = await post(relay.url, path, { schemaVersion: 1 });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(result);
+  expect(roomRequest).toHaveBeenCalledWith(path, "POST", TOKEN, JSON.stringify({ schemaVersion: 1 }));
+  expect(dispatch).not.toHaveBeenCalled();
+  expect((await post(relay.url, path, { schemaVersion: 1, observation: {} })).status).toBe(400);
+  expect((await post(relay.url, path + "?machine=local", { schemaVersion: 1 })).status).toBe(400);
+  roomRequest.mockImplementation(async () => Response.json({ state: "unavailable", reason: "unknown" }));
+  expect((await post(relay.url, path, { schemaVersion: 1 })).status).toBe(502);
+});

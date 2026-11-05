@@ -523,10 +523,30 @@ this public landing. Decision: [ADR 0255](adr/0255-a-lent-screen-keeps-consent-a
 
 ## Fresh terminal checks
 
-The owner can request a fresh non-prompting permission observation through the
-computer API. The service uses its configured local terminal runtime to start
-one fixed diagnostic in a new, unfocused tab; it never types into an existing
+The owner can request a fresh non-prompting permission observation with
+`POST /v1/operator/computer/permissions/refresh` and `{schemaVersion: 1}`
+(CLI: `clankie computer permissions --request --json`). It returns `state:
+observed` with the original actor/time, or `state: unavailable` with a bounded
+reason. It never returns an old cached report as a fresh result. GET and
+`computer permissions --json` continue to read only the last report.
+
+The computer API uses the same owner-device chain decision as desktop choices.
+Workers, joined hosts, supervisors and non-owner devices cannot request checks.
+The service uses its configured local terminal runtime to start
+one fixed diagnostic terminal; it never types into an existing
 worker or owner shell. The diagnostic identifies its actual application through
 process ancestry and refuses when that context cannot be established. Requests
 are bounded, do not retry an uncertain launch, and never grant permission or
 change a desktop choice. Unavailable context remains unavailable.
+
+The target follows the existing hire host choice: `fleet.seatHost: desktop`
+uses herdr-core's generation-checked `terminal.run`, without window-adoption
+labels or parent notifications; `auto`/`herdr` use the
+configured Herdr binding's new-tab request. No fallback launches a check in a
+different host when the chosen host is unavailable. Other harnesses may act
+from a different context: a report covers only the application it names.
+
+The Herdr new-tab request has `focus: false`; desktop diagnostics have no
+window-adoption labels. Neither path sends a focus or bring-forward command.
+GUI focus preservation on the installed terminal has not been observed in this
+source proof; no owner window was driven to obtain it.

@@ -147,7 +147,7 @@ Common): `computer.machines[ID].desktopMode` defaults to `none` (private browser
 only), with owner-set `leadModes`. `GET`/`POST /v1/operator/computer` is the
 revision-fenced API, forwarded by the relay and doorway. CLI:
 `computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] --json`.
-App/pet controls are pending; no TUI control added. `computer permissions --json`
+App/pet controls consume the same API; no TUI control added. `computer permissions --json`
 reads named, expiring actor observations; the owner refreshes explicitly in the
 acting Mac terminal with `--refresh`. The service's TCC state is never a
 substitute. Selection cannot raise the machine's independent access ceiling.
@@ -307,3 +307,8 @@ concern:
 Within each group, app and pet expose the Common rows. Advanced settings,
 including play and raw Discord fields, stay in the CLI. Dashboard settings are
 limited to billing and account. Existing TUI controls remain supported.
+
+Fresh desktop permission checks: owner-only `POST /v1/operator/computer/permissions/refresh`
+with `{schemaVersion: 1}`, CLI `computer permissions --request --json`. The
+configured local terminal runs a fixed non-prompting diagnostic; missing context
+stays unavailable. It never changes the saved mode or permission grants.

@@ -263,6 +263,27 @@ paths:
                               at: { type: string, format: date-time }
         "403": { description: Owner fleet read required }
         "503": { description: Lead observations unavailable }
+  /v1/operator/computer/permissions/refresh:
+    post:
+      tags: [Operator]
+      summary: Ask the acting terminal for a fresh permission check
+      description: Owner operator or current owner-provenance device with Take Control only. Runs one fixed non-prompting diagnostic in the configured local terminal runtime, without a focus/bring-forward command or input to an existing pane. Rechecks owner authority before dispatch and publication. Never changes OS grants, machine ceilings or desktop choices; never substitutes a cached report for a fresh check.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schemaVersion]
+              properties:
+                schemaVersion: { const: 1 }
+      responses:
+        "200":
+          description: DesktopPermissionCheckSchema from @clankie/protocol/desktop-access. State observed includes the named actor, original observedAt and preflight results. State unavailable names unsupported, terminal_unavailable, terminal_context_unavailable, terminal_changed, check_in_progress, timed_out, invalid_observation or launch_unconfirmed. No report is published on unavailable.
+        "400": { description: Malformed body or query }
+        "401": { description: Authentication required }
+        "403": { description: Owner authority missing or revoked }
   /v1/operator/http-settings:
     get:
       tags: [Operator]
