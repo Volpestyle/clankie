@@ -393,7 +393,12 @@ function herdrError(stdout: string): HerdrFleetError | undefined {
  * steps a native channel needs on that machine, such as starting a dedicated
  * Codex app-server (VUH-1527).
  */
-export type FleetShellRun = (remoteCommand: string, timeoutMs?: number) => Promise<string>;
+export type FleetShellRun = (
+  remoteCommand: string,
+  timeoutMs?: number,
+  /** Synchronous original-caller authority, checked immediately before each SSH spawn. */
+  beforeDispatch?: () => void,
+) => Promise<string>;
 
 interface FleetCommandOptions {
   readonly controlDirectory: string;
@@ -524,12 +529,14 @@ async function runFleetCommand(
 }
 
 export function createFleetShellRun(fleet: HerdrFleet, options: FleetCommandOptions): FleetShellRun {
-  return async (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
+  return async (remoteCommand, timeoutMs = REMOTE_HERDR_TIMEOUT_MS, beforeDispatch) => {
     const { error, stdout, stderr, definitive } = await runFleetCommand(
       fleet,
       options,
       remoteCommand,
       timeoutMs,
+      undefined,
+      beforeDispatch,
     );
     if (error === null) return stdout;
     throw new HerdrFleetError(

@@ -1,4 +1,5 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
+import { once } from "node:events";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -326,6 +327,134 @@ it("streams a 32 KB finite POSIX command without expanding the SSH control reque
   expect((await f.programs()).at(-1)?.args).toEqual([text]);
   expect((await f.ssh()).at(-1)?.command).toBe("sh -s");
 });
+
+it("does not discover a closed link from buffered SSH output", async () => {
+  const f = await fixture();
+  let child: ChildProcess | undefined;
+  let receivedNotice = () => {};
+  const notice = new Promise<void>((resolve) => {
+    receivedNotice = resolve;
+  });
+  const buffered: unknown[][] = [];
+  let release = () => {};
+  const pending: Promise<string>[] = [];
+  const shell = createFleetShellRun(fleet, { controlDirectory: f.controlDirectory });
+  const links = new FleetLinks({
+    spawn: ((...args: Parameters<typeof spawn>) => {
+      child = spawn(...args);
+      const output = child.stderr!;
+      const emit = output.emit.bind(output);
+      let holding = true;
+      output.emit = ((event: string | symbol, ...values: unknown[]) => {
+        if (event === "data" && holding) {
+          buffered.push(values);
+          receivedNotice();
+          return true;
+        }
+        return emit(event, ...values);
+      }) as typeof output.emit;
+      release = () => {
+        holding = false;
+        for (const values of buffered) emit("data", ...values);
+      };
+      return child;
+    }) as typeof spawn,
+    shell:
+      () =>
+      (...args) => {
+        const command = shell(...args);
+        pending.push(command);
+        return command;
+      },
+  });
+  linksToClose.push(links);
+  links.start([fleet], 4567);
+  const forward = child!;
+  // Keep the real fixture SSH process's allocation notice buffered until the
+  // link is closed, then deliver it as an already-queued native stream event.
+  await notice;
+  const closed = once(forward, "close");
+  links.close();
+  // The following fixture has its own PATH and journal. A stale discovery
+  // must not run in that later environment or displace its POSIX command.
+  const next = await fixture();
+  const posixFleet: HerdrFleet = { ...fleet, ssh: { ...fleet.ssh, shell: "posix" } };
+  const nextShell = createFleetShellRun(posixFleet, { controlDirectory: next.controlDirectory });
+  const text = "x".repeat(32_768);
+  expect(await nextShell(remoteProgramCommand("posix", "fixtureprobe", [text]))).toContain('"accepted":true');
+  release();
+  await closed;
+  await Promise.allSettled(pending);
+  expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(0);
+  expect((await next.programs()).at(-1)?.args).toEqual([text]);
+  expect((await next.ssh()).at(-1)?.command).toBe("sh -s");
+  expect((await next.ssh()).filter((call) => call.kind === "command")).toHaveLength(1);
+  expect(links.status(fleet.id)).toBeUndefined();
+});
+
+it.each(["removed", "replaced", "stable"] as const)(
+  "keeps every discovery retry bound to the original link (%s)",
+  async (change) => {
+    const f = await fixture();
+    await f.login(f.oldBin, "missing-clixml");
+    const oldDirectory = join(f.controlDirectory, "original");
+    const originalControlPaths = new Set<string>();
+    const commands: Promise<string>[] = [];
+    let changed = false;
+    let links: FleetLinks;
+    const dispatch = ((
+      file: string,
+      args: readonly string[],
+      options: object,
+      callback: (error: ExecFileException | null, stdout: string, stderr: string) => void,
+    ) => {
+      const control = args.find((arg) => arg.startsWith("ControlPath="));
+      if (!control) throw new Error("Expected original SSH control path");
+      originalControlPaths.add(control.slice("ControlPath=".length));
+      return execFile(file, [...args], options, (error, stdout, stderr) => {
+        // Hold only delivery of the real first launch-failure result. The
+        // original link disappears while that result is pending, before retry.
+        if (!changed && change !== "stable" && error?.code === 127) {
+          changed = true;
+          links.start(change === "removed" ? [] : [{ ...fleet, session: "replacement" }], 4567);
+        }
+        callback(error, String(stdout), String(stderr));
+      });
+    }) as typeof execFile;
+    let settled = () => {};
+    const first = new Promise<void>((resolve) => {
+      settled = resolve;
+    });
+    links = new FleetLinks({
+      shell: (selected) => {
+        const original = selected === fleet;
+        const shell = createFleetShellRun(selected, {
+          controlDirectory: original ? oldDirectory : join(f.controlDirectory, "replacement"),
+          ...(original ? { execFile: dispatch } : {}),
+        });
+        return (...args) => {
+          const command = shell(...args);
+          if (original) {
+            commands.push(command);
+            void command.then(settled, settled);
+          }
+          return command;
+        };
+      },
+    });
+    linksToClose.push(links);
+    links.start([fleet], 4567);
+    await first;
+    await Promise.allSettled(commands);
+    expect(changed).toBe(change !== "stable");
+    const originalCalls = (await f.ssh()).filter(
+      (call) => call.kind === "command" && originalControlPaths.has(call.controlPath!),
+    );
+    expect(originalCalls).toHaveLength(change === "stable" ? 2 : 1);
+    expect(await f.programs()).toHaveLength(0);
+    if (change === "removed") expect(links.status(fleet.id)).toBeUndefined();
+  },
+);
 
 it("does not treat an application's mux-looking stderr as proof it was never dispatched", async () => {
   const f = await fixture();
