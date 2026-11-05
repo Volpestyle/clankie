@@ -1,3 +1,8 @@
+import { createServer as createNetServer } from "node:net";
+import { createHerdrCoreRunner } from "../src/captain/herdr-core-runner.ts";
+import { createHerdrCoreSeats, SEAT_LABEL } from "../src/captain/herdr-core-seats.ts";
+import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
+import { routeHerdrFleets } from "../src/captain/herdr-fleet-runner.ts";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { githubConnection, githubConnectionFenced } from "../src/accounts.ts";
 import { createServer, type Server } from "node:http";
@@ -20,7 +25,7 @@ import {
   createOperatorService,
   type CreateOperatorServiceContext,
 } from "../src/captain/captain-operator-service.ts";
-import type { HerdrAgentSnapshot } from "../src/captain/herdr-watch.ts";
+import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -42,7 +47,11 @@ async function listen(server: Server) {
 
 /** Real controller stores, Git DAG, HTTP provider/close boundaries, and production close adapter.
  * Only provider responses and the native close effect are disposable fixtures. */
-async function fixture(enableRecovery = true, fenced = true) {
+async function fixture(
+  enableRecovery = true,
+  fenced = true,
+  backend: "effect" | "desktop" | "herdr" | "fleet" = "effect",
+) {
   const git = await checkpointFixture();
   cleanups.push(git.close);
   git.mode("green");
@@ -228,6 +237,64 @@ async function fixture(enableRecovery = true, fenced = true) {
     },
   } as never);
   let exits = 0;
+  let observationHook = async () => {};
+  let handshakeHook = async () => {};
+  let bindingHook = async () => {};
+  let transportHook = async () => {};
+  const nativeMethods: string[] = [];
+  const socketPath = join(root, "owned-herdr.sock");
+  let backendRunner: HerdrWatchRunner | undefined;
+  if (backend === "desktop") {
+    const native = createNetServer((socket) => {
+      let buffered = "";
+      socket.on("data", (chunk) => {
+        buffered += chunk.toString();
+        let end: number;
+        while ((end = buffered.indexOf("\n")) >= 0) {
+          const request = JSON.parse(buffered.slice(0, end));
+          buffered = buffered.slice(end + 1);
+          void (async () => {
+            let result: unknown = {};
+            if (request.method === "hello") {
+              if (nativeMethods.includes("terminal.get") && !nativeMethods.includes("terminal.kill"))
+                await handshakeHook();
+              result = { methods: ["terminal.get", "terminal.kill", "terminal.rm"] };
+            } else {
+              nativeMethods.push(request.method);
+              if (request.method === "terminal.get") {
+                await observationHook();
+                result = { address: "t885", state: "live", labels: { [SEAT_LABEL]: "fixture" } };
+              } else if (request.method === "terminal.kill") exits++;
+            }
+            socket.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\n");
+          })().catch((error) => socket.destroy(error));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => native.listen(socketPath, resolve));
+    cleanups.push(() => new Promise<void>((resolve) => native.close(() => resolve())));
+    backendRunner = createHerdrCoreRunner({ seats: createHerdrCoreSeats({ socketPath }) });
+  } else if (backend !== "effect") {
+    const local = createHerdrWatchRunner(
+      undefined,
+      async (args, _signal, _timeout, assertCurrent) => {
+        await transportHook();
+        assertCurrent?.();
+        nativeMethods.push(args.slice(0, 2).join("."));
+        exits++;
+        return "{}";
+      },
+      undefined,
+      {
+        localReadBinding: async () => {
+          await bindingHook();
+          return { socketPath, session: "fixture" };
+        },
+      },
+    );
+    backendRunner =
+      backend === "fleet" ? routeHerdrFleets(local, async () => new Map([["herdr-core", local]])) : local;
+  }
   const serve = createOperatorService({
     shutdown: new AbortController(),
     personas: { ready: async () => {} },
@@ -260,6 +327,10 @@ async function fixture(enableRecovery = true, fenced = true) {
         try {
           await guard();
           await nativeHook();
+          if (backendRunner) {
+            await backendRunner.closePane!(agent.paneId, guard);
+            return true;
+          }
           await guard();
         } catch {
           return false;
@@ -314,6 +385,19 @@ async function fixture(enableRecovery = true, fenced = true) {
     { surfaceClientId: "885-proof" },
   );
   return {
+    nativeMethods,
+    onObservation: (hook: typeof observationHook) => {
+      observationHook = hook;
+    },
+    onHandshake: (hook: typeof handshakeHook) => {
+      handshakeHook = hook;
+    },
+    onBinding: (hook: typeof bindingHook) => {
+      bindingHook = hook;
+    },
+    onTransport: (hook: typeof transportHook) => {
+      transportHook = hook;
+    },
     forgeRepo: async () => {
       forged = true;
       repo.id = 2;
@@ -620,4 +704,49 @@ it("refuses recovery without a synchronous broker witness", async () => {
   expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
   expect(f.exits()).toBe(0);
   expect(f.calls).toEqual([]);
+});
+
+it.each(["observation", "handshake"])(
+  "desktop close refuses a broker change during native %s",
+  async (phase) => {
+    const f = await fixture(true, true, "desktop");
+    const change = async () => {
+      await f.token();
+      f.account();
+    };
+    if (phase === "observation") f.onObservation(change);
+    else f.onHandshake(change);
+    expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+    expect(f.exits()).toBe(0);
+    expect(f.nativeMethods).toEqual(["terminal.get"]);
+  },
+);
+it("desktop close with a stable broker reaches the owned socket once", async () => {
+  const f = await fixture(true, true, "desktop");
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "closed" });
+  expect(f.exits()).toBe(1);
+  expect(f.nativeMethods).toEqual(["terminal.get", "terminal.kill", "terminal.rm"]);
+});
+it.each(["herdr", "fleet"] as const)(
+  "%s close rechecks the broker after binding and transport preparation",
+  async (backend) => {
+    for (const phase of ["binding", "transport"] as const) {
+      const f = await fixture(true, true, backend);
+      const change = async () => {
+        await f.token();
+        f.account();
+      };
+      if (phase === "binding") f.onBinding(change);
+      else f.onTransport(change);
+      expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+      expect(f.exits()).toBe(0);
+      expect(f.nativeMethods).toEqual([]);
+    }
+  },
+);
+it.each(["herdr", "fleet"] as const)("%s close with a stable broker dispatches once", async (backend) => {
+  const f = await fixture(true, true, backend);
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "closed" });
+  expect(f.exits()).toBe(1);
+  expect(f.nativeMethods).toEqual(["pane.close"]);
 });

@@ -57,7 +57,9 @@ this proof. Verified evidence is retained in private close history and
 `captain/landed-close-proofs.jsonl`; it never confirms a failed hire or repairs
 native admission. Legacy allocations without a recorded repository stay unknown;
 current Git configuration cannot fill that gap. A broker connection without a
-synchronous publication witness also holds close-out.
+synchronous publication witness also holds close-out. The close transports
+recheck that witness after their own lookups and handshakes, immediately before
+sending the close.
 
 For a GitHub job with its own landed commits, close-out also needs main's post-merge checkpoint:
 `landing`, `checkpoint` and `mac` must all complete green, or a repository

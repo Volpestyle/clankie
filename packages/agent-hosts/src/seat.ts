@@ -243,6 +243,13 @@ export type SeatEvent =
   | { readonly type: "released"; readonly at: string }
   | { readonly type: "exited"; readonly at: string; readonly code: number | null };
 
+/**
+ * Close preparation may await. Every backend must recheck the retained synchronous
+ * witness after its own lookup/handshake, immediately before writing the close,
+ * with no await between the assertion and the write. Wrappers preserve it.
+ */
+export type SeatExitGuard = (() => Promise<void>) & { readonly assertCurrent?: () => void };
+
 /** Control of one live seat. */
 export interface SeatControl {
   readonly ref: SeatRef;
@@ -305,7 +312,7 @@ export interface SeatControl {
   stopTask?(beforeDispatch: () => Promise<void>): Promise<StopNativeTaskResult>;
   /** Request this original native TUI's own exit. The caller confirms pane
    * disappearance; a disconnected reply can follow a successful exit. */
-  exit?(beforeExit?: () => Promise<void>): Promise<void>;
+  exit?(beforeExit?: SeatExitGuard): Promise<void>;
   /** End programmatic control gracefully. Closing the pane stays the caller's job. */
   close(): Promise<void>;
 }

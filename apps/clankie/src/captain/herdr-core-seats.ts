@@ -92,7 +92,7 @@ export interface HerdrCoreSeats {
   /** The finished terminals the core still keeps, which a plain list leaves out. */
   finished(): Promise<readonly HerdrCoreTerminal[]>;
   /** Ends a terminal Clankie started; one that is already gone is not an error. */
-  kill(address: string): Promise<void>;
+  kill(address: string, beforeDispatch?: () => void): Promise<void>;
   /**
    * Takes a finished terminal out of the core, so the window no longer shows it; one that is
    * gone is not an error. False when it is still live and so stays (#584).
@@ -119,7 +119,8 @@ export interface HerdrCoreSeatsOptions {
 
 export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): HerdrCoreSeats {
   const socket = () => options.socketPath ?? herdrCoreSocketPath(options.env ?? process.env);
-  const call = (method: string, params: Record<string, unknown>) => herdrCoreCall(socket(), method, params);
+  const call = (method: string, params: Record<string, unknown>, beforeDispatch?: () => void) =>
+    herdrCoreCall(socket(), method, params, beforeDispatch);
   return {
     async available() {
       try {
@@ -206,9 +207,9 @@ export function createHerdrCoreSeats(options: HerdrCoreSeatsOptions = {}): Herdr
       await call("terminal.keys", { terminal: address, keys: [...keys] });
     },
 
-    async kill(address) {
+    async kill(address, beforeDispatch) {
       try {
-        await call("terminal.kill", { terminal: address });
+        await call("terminal.kill", { terminal: address }, beforeDispatch);
       } catch (error) {
         // Gone, or already ended: either way it no longer runs.
         if (error instanceof HerdrCoreError && (error.kind === "not_found" || error.kind === "finished"))

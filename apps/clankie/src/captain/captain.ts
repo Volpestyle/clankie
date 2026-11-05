@@ -614,11 +614,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             fleet.id,
             createRemoteHerdrRunner(
               fleet,
-              async (args, signal, timeout) => {
+              async (args, signal, timeout, beforeDispatch) => {
                 const active = (await refreshFleets()).find((entry) => entry.id === fleet.id);
                 if (!active || (fleetRevisions.get(fleet.id) ?? 0) !== revision)
                   throw new Error(`Machine connection ${fleet.id} changed or disconnected`);
-                return deps.fleets!.run(active)(args, signal, timeout);
+                beforeDispatch?.();
+                return deps.fleets!.run(active)(args, signal, timeout, beforeDispatch);
               },
               options.remoteOpenCode === undefined
                 ? {}
@@ -645,11 +646,12 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
             entry.id,
             createHerdrWatchRunner(
               undefined,
-              async (args, signal, timeout) => {
+              async (args, signal, timeout, beforeDispatch) => {
                 await refreshFleets();
                 if ((fleetRevisions.get(entry.id) ?? 0) !== revision)
                   throw new Error(`Machine connection ${entry.id} changed or disconnected`);
-                return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry);
+                beforeDispatch?.();
+                return deps.runtimes!.runNamed!(entry.id, args, signal, timeout, entry, beforeDispatch);
               },
               undefined,
               { localCodexRecovery: false },

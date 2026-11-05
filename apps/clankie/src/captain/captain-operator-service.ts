@@ -1,4 +1,5 @@
 import { recommendHire } from "./hire-recommendation.ts";
+import type { SeatExitGuard } from "@clankie/agent-hosts";
 import { MainCheckpointRefused } from "@clankie/work-items";
 import { ConnectorStarts } from "./connector-starts.ts";
 import { WatchingError } from "../watch.ts";
@@ -1485,7 +1486,26 @@ export function createOperatorService(
           })
         : { path: "", reason: "agent_unresolved" };
       let checkpointAtExit: Awaited<ReturnType<NonNullable<typeof tidy>["mainCheckpointHold"]>>;
-      const closed = await ctx.herdrWatches.closeSeat(request.seatId, async () => {
+      let assertMissingAtExit: (() => void) | undefined;
+      const assertAtExit = () => {
+        try {
+          if (authority && !authority.current()) throw new Error("Close authority changed");
+          if (missingGuard && !assertMissingAtExit) throw new Error("Close proof not prepared");
+          assertMissingAtExit?.();
+        } catch (error) {
+          checkpointAtExit =
+            error instanceof MainCheckpointRefused
+              ? error.hold
+              : {
+                  reason: "main_unknown",
+                  failingJobs: [],
+                  detail: "Close authority or landed proof changed",
+                };
+          throw error;
+        }
+      };
+      const closeGuard: SeatExitGuard = async () => {
+        assertMissingAtExit = undefined;
         await refuseWhileWatching();
         if (request.unlandedReason === undefined && (await tidy?.seatWorktreeHold(request.seatId))?.length)
           throw new Error("unlanded_work");
@@ -1504,10 +1524,10 @@ export function createOperatorService(
         )
           throw new Error("busy");
         try {
-          const assertMissing = await missingGuard?.();
+          assertMissingAtExit = await missingGuard?.();
           await refuseWhileWatching();
           if (missingGuard && authority) await authorizeQuestion(authority);
-          assertMissing?.();
+          assertAtExit();
         } catch (error) {
           if (error instanceof MainCheckpointRefused) checkpointAtExit = error.hold;
           else if (missingGuard)
@@ -1518,7 +1538,9 @@ export function createOperatorService(
             };
           throw error;
         }
-      });
+      };
+      Object.assign(closeGuard, { assertCurrent: assertAtExit });
+      const closed = await ctx.herdrWatches.closeSeat(request.seatId, closeGuard);
       const worktree =
         closed && closeWorktree && tidy
           ? await tidy.pruneClosedWorktree(

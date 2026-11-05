@@ -395,12 +395,14 @@ export class ExecutionConnections {
     signal?: AbortSignal,
     timeoutMs = 15_000,
     expected?: Readonly<{ session: string; socketPath?: string | undefined }>,
+    beforeDispatch?: () => void,
   ): Promise<string> {
     const binding = await this.configuredBinding(id);
     if (!binding) throw new Error(`Machine connection ${id} is disconnected`);
     if (expected && (binding.session !== expected.session || binding.socketPath !== expected.socketPath))
       throw new Error(`Machine connection ${id} changed or disconnected`);
     const env = pinHerdrEnvironment({ ...(this.options.env ?? process.env) }, binding.socketPath);
+    beforeDispatch?.();
     const result = this.options.run
       ? await this.options.run("herdr", args, env)
       : await exec("herdr", [...args], {

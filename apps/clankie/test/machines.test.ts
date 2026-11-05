@@ -1,3 +1,4 @@
+import { FileCredentialStore } from "@clankie/credential-broker";
 import { createAgentSessions } from "../src/agent-sessions.ts";
 import { createAgentSessionRoutes } from "../src/agent-session-routes.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -431,3 +432,58 @@ test("discovery finds Herdr machines on the tailnet and trusts Tailscale's keys 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test.each([false, true])(
+  "named close checks the broker after its binding read (change=%s)",
+  async (changed) => {
+    const dir = await mkdtemp("/tmp/clankie-named-close-fence-");
+    try {
+      const settings = new SettingsStore(join(dir, "settings.json"));
+      await settings.update((current) => ({
+        ...current,
+        execution: {
+          ...current.execution,
+          connections: [
+            {
+              id: "work",
+              kind: "herdr",
+              session: "work",
+              socketPath: join(dir, "fixture.sock"),
+              enabled: true,
+              capabilities: [],
+            },
+          ],
+        },
+      }));
+      const reader = new FileCredentialStore(join(dir, "github.json"));
+      const writer = new FileCredentialStore(join(dir, "github.json"));
+      await writer.set("github", { type: "api", key: "account-a" });
+      const fence = reader.readFence("github");
+      const run = vi.fn(async () => ({ stdout: "{}" }));
+      const runtimes = new ExecutionConnections({
+        settings,
+        run,
+        primary: { binding: () => undefined, status: () => "disabled" },
+      });
+      const original = runtimes.configuredBinding.bind(runtimes);
+      vi.spyOn(runtimes, "configuredBinding").mockImplementation(async (id) => {
+        const binding = await original(id);
+        if (changed) await writer.set("github", { type: "api", key: "account-b" });
+        return binding;
+      });
+      const action = runtimes.runNamed(
+        "work",
+        ["pane", "close", "p1"],
+        undefined,
+        undefined,
+        undefined,
+        fence.assertCurrent,
+      );
+      if (changed) await expect(action).rejects.toThrow();
+      else await expect(action).resolves.toBe("{}");
+      expect(run).toHaveBeenCalledTimes(changed ? 0 : 1);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);

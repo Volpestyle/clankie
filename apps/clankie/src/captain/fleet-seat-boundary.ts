@@ -1,4 +1,4 @@
-import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
+import type { HarnessSeatAdapter, SeatControl, SeatExitGuard } from "@clankie/agent-hosts";
 
 /** A removed connection releases authority, without stopping its native worker. */
 export function fenceFleetSeatAdapter(
@@ -61,11 +61,16 @@ export function fenceFleetSeatAdapter(
       : {
           exit: async (beforeExit) => {
             await admit();
-            await control.exit!(async () => {
-              await admit();
-              await beforeExit?.();
-              await admit();
-            });
+            const guard: SeatExitGuard = Object.assign(
+              async () => {
+                await admit();
+                await beforeExit?.();
+                await admit();
+                beforeExit?.assertCurrent?.();
+              },
+              { assertCurrent: () => beforeExit?.assertCurrent?.() },
+            );
+            await control.exit!(guard);
           },
         }),
     settled: async (signal, messageId, armedAt) => {

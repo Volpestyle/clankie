@@ -1,3 +1,4 @@
+import type { SeatExitGuard } from "@clankie/agent-hosts";
 import { MissingWorktreeProofSchema, positivelyMissing } from "./missing-worktree-close.ts";
 import { MainCheckpointRefused } from "@clankie/work-items";
 import type { MissingWorktreeProof, MissingWorktreeObservation } from "./missing-worktree-close.ts";
@@ -251,7 +252,7 @@ export class PaneTidy {
       options?: import("./worktree-decisions.ts").WorktreeHoldOptions,
     ): Promise<WorktreeReconciliation[]>;
     ownerValid(owner: ConversationOwner): Promise<boolean>;
-    close(seatId: string, guard: () => Promise<void>, nativeOnly?: boolean): Promise<boolean>;
+    close(seatId: string, guard: SeatExitGuard, nativeOnly?: boolean): Promise<boolean>;
     untrack(seatId: string): void;
     hire: HireSeat;
     resolve?(ref: string): Promise<SavedAgentSession>;
@@ -1000,7 +1001,16 @@ export class PaneTidy {
         .readPane?.(agent.paneId, "recent-unwrapped", "text")
         .catch(() => undefined);
       if (raw === undefined) return fail("herdr_unavailable");
-      const guard = async () => {
+      let assertMissingAtExit: (() => void) | undefined;
+      const assertAtExit = () => {
+        if (!authority.current()) return fail("authority_unavailable");
+        if (missingGuard && !assertMissingAtExit) return fail("authority_unavailable");
+        if (input.automatic && (this.keptPane(agent) || this.keepVersion(agent) !== keepVersion))
+          return refuse("pane_kept");
+        assertMissingAtExit?.();
+      };
+      const guard: SeatExitGuard = async () => {
+        assertMissingAtExit = undefined;
         await this.authority(authority);
         await retirementGuard?.().catch((error: unknown) => fail("provenance_unknown", errorText(error)));
         const latest = await this.fresh(agent.paneId);
@@ -1050,12 +1060,13 @@ export class PaneTidy {
           const checkpoint = await this.mainCheckpointHold(latest);
           if (checkpoint) throw new Failure({ outcome: "refused", ...checkpoint });
         }
-        const assertMissing = await missingGuard?.();
+        assertMissingAtExit = await missingGuard?.();
         await this.authority(authority);
-        assertMissing?.();
+        assertAtExit();
         if (input.automatic && (this.keptPane(latest) || this.keepVersion(latest) !== keepVersion))
           return refuse("pane_kept");
       };
+      Object.assign(guard, { assertCurrent: assertAtExit });
       await guard();
       // Captured before the close releases the attempt's allocation.
       const attempt = input.nativeOnly ? undefined : this.ports.attemptRecord?.(agent);

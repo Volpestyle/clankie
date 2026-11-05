@@ -591,10 +591,19 @@ export function createOpenCodeSeatAdapter(deps: OpenCodeSeatDeps): HarnessSeatAd
                 },
                 async exit(beforeExit) {
                   await verify(selectedRef);
-                  await native.request("exit", undefined, 5000, async () => {
-                    await beforeExit?.();
-                    return true;
-                  });
+                  await native.request(
+                    "exit",
+                    undefined,
+                    5000,
+                    Object.assign(
+                      async () => {
+                        await beforeExit?.();
+                        beforeExit?.assertCurrent?.();
+                        return true;
+                      },
+                      { assertCurrent: () => beforeExit?.assertCurrent?.() },
+                    ),
+                  );
                 },
                 close: dispose,
               };

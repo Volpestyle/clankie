@@ -362,15 +362,24 @@ export class HerdrCoreError extends Error {
 }
 
 /** One call on the core's socket, for the seat host that starts hires there (ADR 0319). */
-export const herdrCoreCall = (socketPath: string, method: string, params: Record<string, unknown>) =>
-  call(socketPath, method, params);
+export const herdrCoreCall = (
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown>,
+  beforeDispatch?: () => void,
+) => call(socketPath, method, params, beforeDispatch);
 
 /** Core calls still waiting on an answer, by method, so a timeout can say what else was queued on the core. */
 const inFlight = new Map<number, string>();
 let nextCallId = 0;
 
 /** One call on a fresh connection: `hello` to check the generation and the method, then the call. */
-async function call(socketPath: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+async function call(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown>,
+  beforeDispatch?: () => void,
+): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const callId = nextCallId++;
@@ -468,7 +477,12 @@ async function call(socketPath: string, method: string, params: Record<string, u
             clearTimeout(timer);
             timer = setTimeout(timedOut, budget - (Date.now() - started));
           }
-          connection.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method, params })}\n`);
+          try {
+            beforeDispatch?.();
+            connection.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method, params })}\n`);
+          } catch (error) {
+            return finish(error instanceof Error ? error : new Error("Native dispatch refused"));
+          }
         } else if (message.id === 2) return finish(undefined, message.result ?? {});
       }
     });

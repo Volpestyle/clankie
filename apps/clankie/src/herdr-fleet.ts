@@ -469,6 +469,7 @@ async function runFleetCommand(
   command: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  beforeDispatch?: () => void,
 ) {
   mkdirSync(options.controlDirectory, { recursive: true, mode: 0o700 });
   const deadline = Date.now() + timeoutMs;
@@ -482,6 +483,7 @@ async function runFleetCommand(
       stdout: string;
       stderr: string;
     }>((resolve) => {
+      beforeDispatch?.();
       const child = (options.execFile ?? execFile)(
         "ssh",
         args,
@@ -542,12 +544,13 @@ export type HerdrFleetRun = (
   args: readonly string[],
   signal?: AbortSignal,
   timeoutMs?: number,
+  beforeDispatch?: () => void,
 ) => Promise<string>;
 
 const REMOTE_HERDR_TIMEOUT_MS = 20_000;
 
 export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOptions): HerdrFleetRun {
-  return async (args, signal, timeoutMs = REMOTE_HERDR_TIMEOUT_MS) => {
+  return async (args, signal, timeoutMs = REMOTE_HERDR_TIMEOUT_MS, beforeDispatch) => {
     const command = remoteHerdrCommand(fleet, args);
     // Census reads can use the same authenticated resident Windows relay as
     // process proofs. Writes and cancellable waits retain their original path.
@@ -569,6 +572,7 @@ export function createHerdrFleetRun(fleet: HerdrFleet, options: FleetCommandOpti
       command,
       timeoutMs,
       signal,
+      beforeDispatch,
     );
     const reported = herdrError(stdout);
     if (reported !== undefined) throw reported;

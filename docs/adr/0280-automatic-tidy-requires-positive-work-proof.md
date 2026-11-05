@@ -142,7 +142,10 @@ surviving local branch must agree. Existing main checkpoints still apply.
 
 The broker must provide a durable connection witness, captured before its
 credential read and checked synchronously after final authority preparation.
-A connection without that witness cannot authorize recovery.
+A connection without that witness cannot authorize recovery. The complete
+synchronous assertion follows the guard through every close backend, including
+terminal lookup, socket handshake, named binding and fleet transport preparation.
+Each transport checks it immediately before dispatch, with no intervening await.
 
 The proof covers only that missing checkout. Dirty, unlanded, ambiguous and
 unavailable work evidence elsewhere still refuses. Branch, account, project

@@ -1,3 +1,4 @@
+import type { SeatExitGuard } from "@clankie/agent-hosts";
 import { readGithubOriginSlug } from "./seat-telemetry.ts";
 import { pointedBrief } from "./brief-file.ts";
 import {
@@ -355,7 +356,7 @@ export interface HerdrWatchRunner {
     beforeDispatch?: () => Promise<boolean>,
   ): Promise<boolean | FleetSeatDelivery>;
   codexSettled?: typeof codexProxySettled;
-  closePane?(target: string, guard?: () => Promise<void>): Promise<void>;
+  closePane?(target: string, guard?: SeatExitGuard): Promise<void>;
   /** Change the manual label of an owned newly allocated pane, never its OSC title. */
   renamePane?(target: string, label: string): Promise<void>;
   /**
@@ -661,8 +662,10 @@ function execHerdr(
   args: readonly string[],
   signal?: AbortSignal,
   timeoutMs = HERDR_COMMAND_TIMEOUT_MS,
+  beforeDispatch?: () => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    beforeDispatch?.();
     execFile(
       "herdr",
       [...args],
@@ -754,7 +757,12 @@ function runExecFile(
 export function createHerdrWatchRunner(
   available?: () => boolean,
   /** Where each Herdr call runs; a remote fleet passes its ssh transport (ADR 0184). */
-  exec: (args: readonly string[], signal?: AbortSignal, timeoutMs?: number) => Promise<string> = execHerdr,
+  exec: (
+    args: readonly string[],
+    signal?: AbortSignal,
+    timeoutMs?: number,
+    beforeDispatch?: () => void,
+  ) => Promise<string> = execHerdr,
   createCommandTab?: (input: OpenCodeCommandTab) => Promise<string>,
   observation: {
     readonly localCodexRecovery?: false;
@@ -773,6 +781,7 @@ export function createHerdrWatchRunner(
     args: readonly string[],
     signal?: AbortSignal,
     timeoutMs?: number,
+    beforeDispatch?: () => void,
   ): Promise<string> => {
     if (available?.() === false) throw new Error("Herdr execution is unavailable");
     if (observation.localReadBinding) {
@@ -784,7 +793,8 @@ export function createHerdrWatchRunner(
       });
       if (read !== undefined) return read;
     }
-    return exec(args, signal, timeoutMs);
+    beforeDispatch?.();
+    return beforeDispatch ? exec(args, signal, timeoutMs, beforeDispatch) : exec(args, signal, timeoutMs);
   };
   /**
    * `herdr agent wait` (no `until` keeps its idle/done/blocked default). On the
@@ -943,7 +953,7 @@ export function createHerdrWatchRunner(
     codexSettled: codexProxySettled,
     closePane: async (target, guard) => {
       await guard?.();
-      await runHerdr(["pane", "close", target]);
+      await runHerdr(["pane", "close", target], undefined, undefined, guard?.assertCurrent);
     },
     runInPane: (paneId, argv) =>
       runHerdr(["pane", "run", paneId, argv.map(shellWord).join(" ")]).then(() => undefined),
@@ -6800,7 +6810,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
     }
   }
 
-  public async closeSeat(seatId: string, guard?: () => Promise<void>, nativeOnly = false): Promise<boolean> {
+  public async closeSeat(seatId: string, guard?: SeatExitGuard, nativeOnly = false): Promise<boolean> {
     if (this.closed || this.runner.closePane === undefined) return false;
     try {
       const current = await this.runner.resolveTerminal(seatId);

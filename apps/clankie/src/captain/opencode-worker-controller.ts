@@ -46,7 +46,7 @@ export interface OpenCodeController {
       | "exit",
     input?: unknown,
     timeoutMs?: number,
-    beforeDispatch?: () => Promise<boolean>,
+    beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void },
   ): Promise<unknown>;
   select(sessionId: string): void;
   pending(): { readonly messageId: string } | undefined;
@@ -87,8 +87,12 @@ export async function createOpenCodeController(input: {
   let candidate = false;
   let lastAcknowledgment: string | undefined;
   let activeSend: { messageId: string; text: string; delivery?: "steer" | "queue" | undefined } | undefined;
-  let activeExit: { beforeDispatch?: () => Promise<boolean> } | undefined;
-  let activeRefresh: { beforeDispatch?: () => Promise<boolean> } | undefined;
+  let activeExit:
+    | { beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void } }
+    | undefined;
+  let activeRefresh:
+    | { beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void } }
+    | undefined;
   const pending = new Map<
     string,
     { resolve(value: unknown): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }
@@ -205,6 +209,8 @@ export async function createOpenCodeController(input: {
         // check/result and fresh controller process/admission fence must pass.
       } else throw unavailable();
       await current();
+      if (frame.method === "authorize" && (frame.input as { action?: unknown })?.action === "exit")
+        activeExit?.beforeDispatch?.assertCurrent?.();
       original?.send(JSON.stringify({ id: frame.id, result: true }));
     } catch {
       if (original?.readyState === WebSocket.OPEN)
@@ -328,6 +334,7 @@ export async function createOpenCodeController(input: {
       const id = randomUUID();
       try {
         const result = await new Promise((resolve, reject) => {
+          if (method === "exit") beforeDispatch?.assertCurrent?.();
           const timer = setTimeout(
             () => {
               pending.delete(id);
