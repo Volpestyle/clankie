@@ -183,6 +183,8 @@ export type FleetHealthAlertDelivery =
  * and authenticates; the captain owns sessions, tools, and persona.
  */
 export interface CaptainPort {
+  /** Pure connector feed projections; caller/device filtering is applied before payloads leave the stores. */
+  leadChangeSources?(deviceId?: string): Promise<readonly import("../lead-changes.ts").LeadChangeSnapshot[]>;
   /** Retain the full request so a durable turn can resume it (ADR 0284); grants no authority. */
   retainsDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   /** A durable turn (or a follow-up it joined) was journaled, settled or not, so it answers from its journal (ADR 0284). */

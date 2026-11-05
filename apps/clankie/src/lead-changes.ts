@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -26,6 +26,8 @@ const StateSchema = z
     items: z.record(z.string(), LeadChangeRecordSchema),
     history: z.array(LeadChangeEntrySchema).max(HISTORY_MAX),
     sources: z.array(LeadChangeAvailabilitySchema).max(6),
+    sourceTimes: z.record(z.string(), z.string()),
+    sourceMarks: z.record(z.string(), z.number()),
   })
   .strict();
 const PositionSchema = z
@@ -41,10 +43,15 @@ export interface LeadChangeSnapshot {
   readonly source: LeadChangeSource;
   readonly records: readonly LeadChangeRecord[];
   readonly unavailable?: string;
+  readonly retainedSince?: string;
+  readonly floor?: number;
+  readonly position?: number;
 }
 export class LeadChangesRefusal extends Error {
-  constructor(public readonly code: "invalid_cursor" | "not_authorized" | "state_unavailable") {
+  public readonly code: "invalid_cursor" | "not_authorized" | "state_unavailable";
+  constructor(code: "invalid_cursor" | "not_authorized" | "state_unavailable") {
     super(code);
+    this.code = code;
   }
 }
 export function leadChangeRecord(
@@ -67,7 +74,10 @@ const missingFile = (error: unknown) => error instanceof Error && "code" in erro
 /** Observation checkpoints only: source records, reports and owner decisions are never mutated. */
 export class LeadChanges {
   private queue: Promise<void> = Promise.resolve();
-  constructor(private readonly directory: string) {}
+  private readonly directory: string;
+  constructor(directory: string) {
+    this.directory = directory;
+  }
 
   async read(input: {
     /** Supplied by authenticated server context, never decoded from client arguments. */
@@ -107,6 +117,8 @@ export class LeadChanges {
         items: {},
         history: [],
         sources: [],
+        sourceTimes: {},
+        sourceMarks: {},
       };
     }
     const position = input.request.since === undefined ? undefined : this.decode(input.request.since, state);
@@ -118,27 +130,51 @@ export class LeadChanges {
     const snapshots = await input.snapshot();
     if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
     const sources: State["sources"] = [];
+    const currentViews = new Map(state.history.map((entry) => [keyOf(entry), entry]));
     const append = (record: LeadChangeRecord, removed?: true) => {
-      state.history.push({ ...record, sequence: ++state.head, ...(removed ? { removed } : {}) });
+      const entry = { ...record, sequence: ++state.head, ...(removed ? { removed } : {}) };
+      state.history.push(entry);
+      currentViews.set(keyOf(entry), entry);
     };
     for (const source of LeadChangeSourceSchema.options) {
       const snapshot = snapshots.find((value) => value.source === source);
       const unavailable = snapshot?.unavailable ?? (snapshot ? undefined : "source_unavailable");
       const records = snapshot?.records ?? [];
+      if (
+        position &&
+        snapshot &&
+        !snapshot.unavailable &&
+        ((snapshot.retainedSince !== undefined &&
+          state.sourceTimes[source] !== undefined &&
+          state.sourceTimes[source]! < snapshot.retainedSince) ||
+          (snapshot.floor !== undefined &&
+            (state.sourceMarks[source] ?? 0) > 0 &&
+            state.sourceMarks[source]! < snapshot.floor))
+      )
+        return { outcome: "reset_required", reason: "retained_history_gap" };
+      state.sourceTimes[source] ??= anchoredAt;
       const currentKeys = Object.keys(state.items).filter((key) => state.items[key]!.item.kind === source);
       const otherCount = Object.keys(state.items).length - currentKeys.length;
-      const reason = unavailable ?? (otherCount + records.length > ITEMS_MAX ? "source_limit" : undefined);
-      const previous = state.sources.find((value) => value.source === source);
+      const size = unavailable
+        ? Object.keys(state.items).length + records.filter((record) => !state.items[keyOf(record)]).length
+        : otherCount + records.length;
+      const limited = size > ITEMS_MAX;
+      const reason = limited ? "source_limit" : unavailable;
       if (reason !== undefined) {
         sources.push({ source, status: "unavailable", reason: reason.slice(0, 256) });
-        if (previous?.status !== "unavailable")
-          for (const key of currentKeys) {
+        const incoming = new Set(limited ? [] : records.map(keyOf));
+        for (const key of currentKeys)
+          if (!incoming.has(key) && currentViews.get(key)?.state !== "unknown") {
             const record = state.items[key]!;
             append(leadChangeRecord(record.id, record.item, "unknown", anchoredAt));
           }
-        continue;
+      } else {
+        sources.push({ source, status: "ready" });
+        state.sourceTimes[source] = anchoredAt;
+        if (snapshot?.position !== undefined)
+          state.sourceMarks[source] = Math.max(state.sourceMarks[source] ?? 0, snapshot.position);
       }
-      sources.push({ source, status: "ready" });
+      if (limited) continue;
       const found = new Set<string>();
       for (const raw of records) {
         const record = LeadChangeRecordSchema.parse(raw);
@@ -146,13 +182,16 @@ export class LeadChanges {
         const key = keyOf(record);
         if (found.has(key)) throw new LeadChangesRefusal("state_unavailable");
         found.add(key);
-        if (state.items[key]?.revision !== record.revision || previous?.status === "unavailable") {
+        if (
+          state.items[key]?.revision !== record.revision ||
+          currentViews.get(key)?.revision !== record.revision
+        ) {
           state.items[key] = record;
           append(record);
         }
       }
       for (const key of currentKeys)
-        if (!found.has(key)) {
+        if (reason === undefined && !found.has(key)) {
           const record = state.items[key]!;
           append(leadChangeRecord(record.id, record.item, "superseded", anchoredAt), true);
           delete state.items[key];
@@ -165,8 +204,10 @@ export class LeadChanges {
       // A bootstrap is a frozen sequence range, not a moving first page.
       from = state.head;
       for (const record of Object.values(state.items)) {
-        const ready = sources.find((value) => value.source === record.item.kind)?.status === "ready";
-        append(ready ? record : leadChangeRecord(record.id, record.item, "unknown", anchoredAt));
+        const current = currentViews.get(keyOf(record));
+        append(
+          current ? { ...record, revision: current.revision, state: current.state, at: current.at } : record,
+        );
       }
       bootstrapTo = state.head;
     }
@@ -199,9 +240,14 @@ export class LeadChanges {
     if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const temporary = path + "." + randomUUID() + ".tmp";
-    await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
-    if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
-    await rename(temporary, path);
+    try {
+      await writeFile(temporary, JSON.stringify(state), { mode: 0o600 });
+      if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
+      await rename(temporary, path);
+      if (!(await input.authorize())) throw new LeadChangesRefusal("not_authorized");
+    } finally {
+      await rm(temporary, { force: true });
+    }
     return { outcome: "ready", bootstrap: bootstrapTo !== undefined, entries, next, more, sources };
   }
 

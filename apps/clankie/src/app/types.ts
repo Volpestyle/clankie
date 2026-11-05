@@ -165,6 +165,8 @@ export interface ClankieAppDependencies {
   seatCallReceiptPath?: string;
   /** Durable quick check key receipts, so an old key never asks the owner twice. */
   feedCheckReceiptPath?: string;
+  /** Durable, caller-scoped connected lead observation checkpoints. */
+  leadChanges?: import("../lead-changes.ts").LeadChanges;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
   /** Sends a job to a connected lead's stored wake webhook (ADR 0336). */

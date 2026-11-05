@@ -4939,7 +4939,7 @@ paths:
       description: |
         One route, discriminated `op`: `list`, `roster`, `get`, `create`,
         `fork`, `close`, `send`, `cancel`, `pending_messages`, `stop_task`, `replay`, `subagent_replay`, `tail`, `autonomy`,
-        `terminal_tail`, `readopt_seat`, `worker_reports`, and
+        `terminal_tail`, `readopt_seat`, `lead_changes`, `worker_reports`, and
         `acknowledge_worker_reports`. `worker_reports` optionally selects 1–100 exact
         UUID `deliveryIds` within the requested conversation, with the existing
         full-page byte budget and offered-only acknowledgment. Without that
@@ -4953,6 +4953,18 @@ paths:
         Roster/fleet report summaries
         survive disappeared panes, and delivery receipts never establish reading.
         The TUI and relay both speak this.
+        `lead_changes` is a read-only, caller-scoped observation feed: optional
+        opaque `since` and `limit` (1–100, default 50), with a 64 KiB page budget.
+        It returns `ready` with entries, next, more, bootstrap and per-source
+        availability, or `reset_required` for a retained history gap. Entries
+        coalesce current report, inbox, native pane, GitHub PR, permitted owner
+        ask reference and board note facts. Reading never offers/acknowledges a
+        report or answers an ask. Connected apps require current served-device
+        authority and apps lead mode; report selection remains device-scoped.
+        Private owner question bodies are withheld. Signed cursors persist on
+        the Mac and are bound to caller and current visibility scope. Invalid
+        cursors or revoked authority return 403; unavailable local state returns
+        503. An unavailable source is explicit and never asserts completion.
         Built-in tracker sync uses additive op `tracker_sync`: bootstrap, batch,
         subscribe, list_issue_views, list_issue_view_issues and keyed atomic
         transaction commands. Saved-view reads name an exact storeId and project

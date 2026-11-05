@@ -56,6 +56,27 @@ it; none takes precedence over another.
   lists threads holding a blocked report first, with their count in `blocked`;
   `read_reports` items carry `kind`, and a wake names it (`kind=blocked`, sent at
   once rather than batched). An unlabelled report is read in full as before.
+- **Read what changed with `read_changes`.** Omit `since` to bootstrap, then keep
+  the opaque `next` cursor in your app's own thread state and pass it as `since`.
+  Drain `more` before waiting; `limit` is 1–100 (default 50), with a 64 KiB page
+  budget. The Mac retains the checkpoint across service restarts. Cursors belong
+  to the authenticated caller and current repository/detection scope; never share
+  them between devices. `reset_required` means retained history has a gap: start
+  again without `since`. An invalid or foreign cursor is refused.
+  Entries carry stable source ids and revisions: deduplicate them and apply the
+  latest state, including `resolved`, `superseded` and `unknown`. This is a
+  coalesced observation feed, not an archive of every transition. Worker reports
+  use your device's existing report selection; held inbox text and board notes
+  are context, never proof that work remains open. Panes use native occupant
+  identity, and PR facts come from GitHub for configured local Git origins.
+  Pending owner asks expose references only where your current worker binding
+  permits; their private question bodies are withheld. Unavailable sources are
+  marked explicitly and never imply completion. Text previews stop at 2,000
+  characters: use `read_inbox`, `read_reports`, `read_notes` or the PR URL for
+  detail. Reading this feed never offers or acknowledges a report or answers an
+  ask. Continue to acknowledge only the ids returned by a full `read_reports`.
+  Lead mode must select apps and this device must remain served. The owner's
+  equivalent is `clankie connector changes --since CURSOR --json`.
 - **Read bounded inbox pages.** `read_inbox` puts `unreadReports` first and bounds each serialized page to 24,000 characters and at most 50 held items. Pass `next` as `after` while `more` is true. Long held texts include a `readMore` pointer; pass its `item` (sequence number) and `offset` back to `read_inbox` for the next text chunk, repeating until `readMore` is absent. Reading does not acknowledge anything. Held items can age out of retention; an expired sequence returns an error. If `nextReportsAfter` is present, pass it as `reportsAfter` to read the remaining unread report threads separately from the held-item cursor.
 - **Hear your workers' reports.** Store a wake webhook once with
   `clankie connector wake set duet` (or your lead's name); Claude Code routine

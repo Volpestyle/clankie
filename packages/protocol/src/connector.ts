@@ -518,6 +518,7 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "lead":
       return request.command.action !== "set";
     // A lead thread's reports, only while the apps lead; the relay checks both.
+    case "lead_changes":
     case "worker_reports":
     case "acknowledge_worker_reports":
       return true;

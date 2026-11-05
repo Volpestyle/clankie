@@ -1,3 +1,4 @@
+import { leadChangePulls } from "./lead-change-pulls.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
 import { projectWorkRepoId } from "./project-work-items.ts";
@@ -1887,8 +1888,78 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  const leadRepoSnapshot = async () => {
+    const projects = await options.projects?.();
+    const registry = await known();
+    const roots = new Map(registry.map((entry) => [entry.path, { id: entry.id, path: entry.path }]));
+    for (const project of projects?.projects ?? [])
+      for (const workspace of project.workspaces) {
+        if (workspace.machineId === "local" || workspace.machineId === options.localMachineId)
+          roots.set(workspace.path, { id: project.id, path: workspace.path });
+      }
+    const repos: { id: string; slug: string }[] = [];
+    const origins: [string, string][] = [];
+    for (const entry of [...roots.values()].sort((a, b) => a.path.localeCompare(b.path))) {
+      let remote: string;
+      try {
+        remote = (await run("git", ["remote", "get-url", "origin"], entry.path)).trim();
+      } catch (error) {
+        if (/not a git repository|No such remote/iu.test(String(error))) continue;
+        throw error;
+      }
+      origins.push([entry.id, remote]);
+      const slug =
+        /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
+          remote,
+        )?.[1];
+      if (slug && !repos.some((repo) => repo.slug.toLowerCase() === slug.toLowerCase()))
+        repos.push({ id: entry.id, slug });
+    }
+    const connection = await githubSnapshot();
+    return {
+      repos,
+      stamp: deliveryFingerprint(
+        JSON.stringify({
+          projects,
+          registry,
+          origins,
+          account: connection ? githubBindingOf(connection) : "local-gh",
+        }),
+      ),
+      connection,
+    };
+  };
   return {
     mainCheckpoint: checkpointForCheckout,
+    async leadChangeScope(): Promise<string> {
+      return (await leadRepoSnapshot()).stamp;
+    },
+    async leadChangePulls(signal?: AbortSignal) {
+      const snapshot = await leadRepoSnapshot();
+      if (snapshot.repos.length === 0) return { source: "pull_request" as const, records: [] };
+      if (!snapshot.connection)
+        return { source: "pull_request" as const, records: [], unavailable: "github_not_connected" };
+      const budget = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]);
+      const api = githubRestApi({
+        token: snapshot.connection.token,
+        ...(options.githubApiBase ? { baseUrl: options.githubApiBase } : {}),
+        fetch: (url, init) =>
+          (options.fetch ?? fetch)(url, {
+            ...init,
+            signal: AbortSignal.any([budget, ...(init?.signal ? [init.signal] : [])]),
+          }),
+      });
+      return leadChangePulls({
+        repos: snapshot.repos,
+        ...(options.clock ? { now: options.clock } : {}),
+        get: (path) => api.request("GET", path),
+        validate: async () => {
+          budget.throwIfAborted();
+          if ((await leadRepoSnapshot()).stamp !== snapshot.stamp)
+            throw new Error("Project repository scope changed");
+        },
+      });
+    },
     mergedPull,
     checkIssueCheckpoint,
     handleOwnerWrite,

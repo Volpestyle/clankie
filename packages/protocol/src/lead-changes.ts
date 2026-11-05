@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AppNoteSchema } from "./fleet-room.ts";
 
 export const LEAD_CHANGES_PAGE_MAX = 100;
 export const LEAD_CHANGES_PAGE_BYTES = 64 * 1024;
@@ -69,7 +70,8 @@ export const LeadChangeItemSchema = z.discriminatedUnion("kind", [
       sequence: z.number().int().positive(),
       author: text,
       text,
-      wakeState: text,
+      to: AppNoteSchema.shape.to,
+      wakes: AppNoteSchema.shape.wakes,
     })
     .strict(),
 ]);
@@ -118,3 +120,12 @@ export const LeadChangesResultSchema = z.discriminatedUnion("outcome", [
   z.object({ outcome: z.literal("reset_required"), reason: z.literal("retained_history_gap") }).strict(),
 ]);
 export type LeadChangesResult = z.infer<typeof LeadChangesResultSchema>;
+
+/** Safe refusal codes; the relay never forwards arbitrary upstream error bodies. */
+export const LeadChangesRefusalCodeSchema = z.enum([
+  "invalid_cursor",
+  "not_authorized",
+  "lead_changes_forbidden",
+  "state_unavailable",
+  "lead_changes_unavailable",
+]);

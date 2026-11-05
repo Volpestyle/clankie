@@ -1638,6 +1638,7 @@ export function createOperatorService(
       request.op === "lead_chats" ||
       request.op === "fleet_room" ||
       request.op === "app_notes" ||
+      request.op === "lead_changes" ||
       request.op === "prompt_answer" ||
       request.op === "key_press" ||
       request.op === "lead_wake" ||

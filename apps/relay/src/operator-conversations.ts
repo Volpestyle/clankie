@@ -1,3 +1,4 @@
+import { LeadChangesUpstreamRefusal } from "./conversation-upstream.ts";
 import {
   PROJECT_CI_STARTER_PATH,
   ProjectCiStarterRequestSchema,
@@ -820,7 +821,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       (serviceRequest.op === "send" ||
         serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
-        serviceRequest.op === "worker_reports") &&
+        serviceRequest.op === "worker_reports" ||
+        serviceRequest.op === "lead_changes") &&
       serviceRequest.appDeviceId !== undefined
     ) {
       writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
@@ -923,6 +925,7 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
               serviceRequest.op === "close_seat" ||
               serviceRequest.op === "readopt_seat" ||
               serviceRequest.op === "worker_reports" ||
+              serviceRequest.op === "lead_changes" ||
               serviceRequest.op === "acknowledge_worker_reports" ||
               serviceRequest.op === "lead" ||
               serviceRequest.op === "spawn_seat" ||
@@ -965,7 +968,8 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       (serviceRequest.op === "send" ||
         serviceRequest.op === "close_seat" ||
         serviceRequest.op === "start_agent" ||
-        serviceRequest.op === "worker_reports") &&
+        serviceRequest.op === "worker_reports" ||
+        serviceRequest.op === "lead_changes") &&
       currentAuthorization.device.scope === "connector"
     )
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
@@ -1155,7 +1159,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
                   abort.signal,
                   currentAuthorization.device.scope === "connector" ? undefined : { deviceToken: token },
                 )
-              : serviceRequest.op === "presence" || serviceRequest.op === "worker_reports"
+              : serviceRequest.op === "presence" ||
+                  serviceRequest.op === "worker_reports" ||
+                  serviceRequest.op === "lead_changes"
                 ? options.dispatch(serviceRequest, abort.signal)
                 : options.dispatch(serviceRequest);
       const result =
@@ -1197,6 +1203,10 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       logger.info(logFields(authorization, serviceRequest, 200, publicResult), "conversation relay request");
     } catch (error) {
       if (abort.signal.aborted) return true;
+      if (serviceRequest.op === "lead_changes" && error instanceof LeadChangesUpstreamRefusal) {
+        writeJson(response, error.status, { error: error.code });
+        return true;
+      }
       if (error instanceof ConversationServiceRestarting) {
         // A restart, not a failure: the device retries it (VUH-2663).
         writeJson(response, 503, {
@@ -1904,6 +1914,7 @@ const CONNECTOR_OPS = new Set([
   "key_press",
   "lead",
   "worker_reports",
+  "lead_changes",
   "acknowledge_worker_reports",
   // Reading the owner's projects and their issues. An app writes only its own
   // issue_write, through the posting setting; the owner's work writes stay off.

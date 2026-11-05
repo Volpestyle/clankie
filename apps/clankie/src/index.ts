@@ -1,4 +1,5 @@
 import { createDesktopPermissionCheck } from "./desktop-permission-check.ts";
+import { LeadChanges } from "./lead-changes.ts";
 import { joinedFleetResources } from "./joined-fleet-resources.ts";
 import { createMachineFleetResources } from "./machine-fleet-resources.ts";
 import { DiscordStreamWatchProjection } from "./stream-watch-observation.ts";
@@ -2549,6 +2550,7 @@ const clankie = await createClankieApp({
   },
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
+  leadChanges: new LeadChanges(join(stateRoot, "lead-changes")),
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
   leadWakes,

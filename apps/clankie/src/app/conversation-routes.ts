@@ -1,3 +1,5 @@
+import { collectLeadChanges } from "../lead-change-read.ts";
+import { LeadChangesRefusal } from "../lead-changes.ts";
 import { withPresenceCursor } from "../captain/presence.ts";
 import {
   FLEET_REPORT_LEADS_PATH,
@@ -100,6 +102,7 @@ export interface RegisterConversationRoutesContext {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly devices: DeviceRegistry;
+  readonly detection: import("./connector-detection.ts").ConnectorDetection;
   readonly authorizeOwner: (request: Request) => Promise<true | "authentication_required" | "forbidden">;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   readonly promptAnswers?: ConnectorPromptAnswers;
@@ -657,6 +660,69 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     const owner = await questionOwnerAuthority(context.req.raw);
     const body = await readJson(context.req.raw);
     const parsed = OperatorConversationServiceRequestSchema.safeParse(body);
+    if (parsed.success && parsed.data.op === "lead_changes") {
+      const request = parsed.data;
+      const deviceId = request.appDeviceId;
+      const authorized = async () => {
+        if (context.req.raw.signal.aborted) return false;
+        if (deviceId === undefined)
+          return Boolean(owner && owner.current() && (await owner.authorize()) && owner.current());
+        const relay = await authenticateCaptain(context.req.raw, ctx.dependencies);
+        if (!relay || relay === "unavailable" || relay.steerSourceLane !== "api") return false;
+        const lead = await ctx.dependencies.captain.serveOperatorConversation({
+          op: "lead",
+          schemaVersion: 1,
+          command: { action: "status" },
+        });
+        const record = ctx.devices.get(deviceId);
+        return (
+          lead.op === "lead" &&
+          lead.result.status.lead === "apps" &&
+          record?.status === "active" &&
+          record.scope === "connector" &&
+          ctx.detection.served(deviceId)
+        );
+      };
+      if (!(await authorized())) return context.json({ error: "lead_changes_forbidden" }, 403);
+      const changes = ctx.dependencies.leadChanges;
+      if (!changes) return context.json({ error: "lead_changes_unavailable" }, 503);
+      try {
+        const visibility = async () =>
+          JSON.stringify({
+            work: await ctx.dependencies.workItems?.leadChangeScope(),
+            herdr: ctx.detection.multiplexer("herdr"),
+          });
+        const scope = await visibility();
+        const result = await changes.read({
+          scope:
+            (deviceId === undefined
+              ? "owner:" + owner!.principal.kind + ":" + owner!.principal.id
+              : "connector:" + deviceId) +
+            ":" +
+            scope,
+          request: {
+            ...(request.since === undefined ? {} : { since: request.since }),
+            ...(request.limit === undefined ? {} : { limit: request.limit }),
+          },
+          authorize: async () =>
+            (await authorized()) && (await visibility()) === scope && (await authorized()),
+          snapshot: () =>
+            collectLeadChanges({
+              captain: ctx.dependencies.captain,
+              signal: context.req.raw.signal,
+              ...(ctx.dependencies.workItems ? { work: ctx.dependencies.workItems } : {}),
+              ...(deviceId === undefined ? {} : { deviceId }),
+              herdr: deviceId === undefined || ctx.detection.multiplexer("herdr"),
+            }),
+        });
+        return context.json({ op: "lead_changes", schemaVersion: 1, result });
+      } catch (error) {
+        if (error instanceof LeadChangesRefusal)
+          return context.json({ error: error.code }, error.code === "state_unavailable" ? 503 : 403);
+        return context.json({ error: "lead_changes_unavailable" }, 503);
+      }
+    }
+
     // Narrow work refusals are typed receipts, so a device can render the reason
     // without confusing known non-dispatch with transport uncertainty.
     if (typeof body === "object" && body !== null && (body as { op?: unknown }).op === "feed_check") {

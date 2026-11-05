@@ -2700,6 +2700,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     detection,
   });
   const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
+    detection,
     authorizeOwner: authorizeOwnerSecrets,
     get app() {
       return app;

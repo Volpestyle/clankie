@@ -1,3 +1,4 @@
+import { leadChangeSources } from "./lead-change-sources.ts";
 import { FleetLeadActivity, type LeadHire } from "./fleet-lead-activity.ts";
 import { discordGuildSettings } from "@clankie/protocol";
 import { listedOnLane } from "./mcp-tool-surface.ts";
@@ -5429,6 +5430,33 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     prepareFreeAgentIntent,
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
+    leadChangeSources: (deviceId) =>
+      leadChangeSources({
+        conversations,
+        lead,
+        ...(deviceId === undefined ? {} : { deviceId }),
+        ...(deviceId === undefined
+          ? {}
+          : {
+              visibleQuestion: async (question: import("@clankie/protocol").ConversationQuestion) => {
+                const worker = question.workerQuestion;
+                if (!worker) return false;
+                const native = await herdrRunner.resolveTerminal(worker.seatId);
+                return (
+                  native?.session?.value === worker.sessionId &&
+                  herdrWatches.connectorLeads(
+                    worker.seatId,
+                    occupantIdForHerdrSession(native.session),
+                    deviceId,
+                  )
+                );
+              },
+            }),
+        notes: async (input) => {
+          const result = fleetRoom.readAppNotes(input);
+          return noteWakes?.decorateResult(result) ?? result;
+        },
+      }),
     appNotes: async (command) => {
       if (command.action === "read") {
         const result = fleetRoom.readAppNotes(command);

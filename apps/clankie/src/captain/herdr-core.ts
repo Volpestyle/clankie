@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { leadChangeRecord, type LeadChangeSnapshot } from "../lead-changes.ts";
 import { execFile } from "node:child_process";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
@@ -478,4 +480,44 @@ function unavailableDetail(error: unknown): string {
   if ((error as NodeJS.ErrnoException).code === "ENOENT" && !(error instanceof HerdrCoreError))
     return "The Herdr desktop app's command line (herdr-app) isn't installed here.";
   return message.slice(0, 1024);
+}
+
+/** Structured terminal facts only; no transcript or screen read, steering or native launch. */
+export async function readDesktopLeadChanges(options: HerdrCoreOptions = {}): Promise<LeadChangeSnapshot> {
+  try {
+    const listed = (await call(
+      options.socketPath ?? herdrCoreSocketPath(options.env ?? process.env),
+      "terminal.list",
+      { all: true },
+    )) as { terminals?: unknown };
+    if (!Array.isArray(listed.terminals)) throw new Error("Malformed terminal list");
+    const records = listed.terminals.flatMap((terminal: HcTerminal) => {
+      const live = liveAgentOccupant(terminal);
+      const finished = finishedHire(terminal);
+      if ((!live || clankieSeat(terminal)) && !finished) return [];
+      const agent = toAgent(terminal);
+      const occupantId = createHash("sha256")
+        .update(live?.key ?? JSON.stringify([terminal.address, terminal.created_ms, finished!.session]))
+        .digest("hex");
+      return [
+        leadChangeRecord(
+          "herdr-core:" + agent.terminal + ":" + occupantId,
+          {
+            kind: "pane",
+            agentId: "herdr-core:" + agent.terminal,
+            occupantId,
+            status: finished ? "finished" : (agent.status ?? "unknown"),
+            harness: finished?.agent ?? agent.harness ?? "unknown",
+            machine: agent.machine ?? "local",
+            title: agent.title ?? "",
+          },
+          finished ? "resolved" : "active",
+          new Date().toISOString(),
+        ),
+      ];
+    });
+    return { source: "pane", records };
+  } catch {
+    return { source: "pane", records: [], unavailable: "desktop_unavailable" };
+  }
 }

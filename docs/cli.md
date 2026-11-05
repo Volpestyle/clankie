@@ -327,6 +327,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   connector lead [clankie|apps] [--json]   Who leads Clankie's lead threads: Clankie, or the connected apps
   connector wake [list | set LEAD | clear LEAD | send LEAD TEXT] [--json]
                            A connected lead's wake webhook (address and key on stdin), and a job for it
+  connector changes [--since CURSOR] [--limit N] [--json]  What changed for a lead since its last read
   connector notes [SINCE] [--json]   The apps' note board, with each addressed lead and how it was woken
   support [list | create read-state|shell --hours 1..72 --ref REFERENCE]
   support revoke ID | offer ID   Owner-issued support access (JSON)
@@ -2432,6 +2433,36 @@ also carry `status.clankie`: `{ "state": "on" | "off" | "cant_start", "reason"?:
 "no_model" | "no_credential" | "unavailable", "message"? }`, where `cant_start`
 and the reason come only from Clankie's own model readiness (`clankie doctor`'s
 `captain`).
+
+`clankie connector changes [--since CURSOR] [--limit 1..100] --json` reads a
+bounded "what changed" feed. Omit the cursor for a bootstrap, retain `next` in
+your caller's state, and pass it as `--since` on the next call. Drain `more`
+before waiting. A page contains at most 100 entries (default 50) and 64 KiB.
+The service persists the checkpoint privately on the Mac across restarts;
+cursors are authenticated and bound to the caller and current repository and
+Herdr detection scope. They do not grant access. `reset_required` requires a
+fresh bootstrap because retained source or observation history has a gap.
+Invalid, foreign and changed-scope cursors are refused.
+
+The connector's `read_changes` MCP tool uses the same operation, `lead_changes`
+on `/operator/v1/dispatch`. Connected apps must be active, served and selected
+as lead. Reports keep the same device filter as `read_reports`; pending owner
+asks expose only references permitted by the current worker binding, without
+private question bodies. The authenticated owner CLI has its existing broader
+operator view. Held inbox items, board notes, native idle/finished panes and
+GitHub PRs for configured local Git origins share the feed. PR reads require a
+connected GitHub account and are read-only. No repository or account is changed.
+
+Entries have stable source ids, revisions and current states. Deduplicate by
+source/id/revision and apply `resolved`, `superseded` or `unknown` observations;
+`removed` means the source no longer retains the item, not that work finished.
+This coalesces observations rather than archiving every transition. Closed PRs
+are queried for seven days; falling behind that window requires a reset.
+Unavailable sources are explicit, and previously observed items become unknown
+rather than falsely complete. Text previews are capped at 2,000 characters;
+use the existing inbox, report and note reads, or the PR URL, for details.
+Feed reads never offer or acknowledge reports or answer owner asks. An owner
+ask disappearing supersedes the reference without claiming which answer won.
 
 `clankie connector wake set LEAD` stores a connected lead's wake webhook
 ([ADR 0336](adr/0336-a-connected-app-wakes-a-lead-at-its-webhook.md)): the
