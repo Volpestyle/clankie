@@ -2,7 +2,7 @@ import { additionalPaneInputLine } from "./pane-input-composers.ts";
 
 /** Cell styling is required: identical placeholder words can be an owner's draft. */
 export type PaneDraftState = "empty" | "draft" | "unknown";
-export type PaneInputCell = { text: string; faint: boolean; italic: boolean; foreground?: string };
+export type PaneInputCell = { text: string; faint: boolean; italic: boolean; foreground: string | undefined };
 type Cell = PaneInputCell;
 
 function styledLines(ansi: string): Cell[][] | undefined {
@@ -19,7 +19,7 @@ function styledLines(ansi: string): Cell[][] | undefined {
     if (token.startsWith("\x1b")) {
       const values = token.slice(2, -1).split(";").map(Number);
       for (let i = 0; i < values.length; i++) {
-        const value = values[i];
+        const value = values[i]!;
         // Colour payloads contain numbers such as 2 and 3; these are not attributes.
         if (value === 38 || value === 48 || value === 58) {
           const size = values[i + 1] === 2 ? 4 : values[i + 1] === 5 ? 2 : 0;

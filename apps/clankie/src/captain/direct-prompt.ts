@@ -14,7 +14,7 @@ export const DIRECT_PROMPT_MAX = 8_000;
 const WAITING = new Set(["idle", "done"]);
 
 export interface DirectPromptPort {
-  /** The agent's harness, as its input line is read (`claude`, `codex`). */
+  /** The agent's harness, as its input line is read (`claude`, `codex`, `opencode`, `pi`, `grok`). */
   readonly harness: string;
   /** The agent's status now, read fresh. */
   status(): Promise<string | undefined>;
@@ -44,7 +44,7 @@ function directPromptRefusal(
   if (input.state === "draft")
     return "Someone has a half-typed message in this agent's input line, so nothing was typed. Send it again once the input line is clear.";
   if (input.state !== "empty")
-    return ["claude", "codex"].includes(harness)
+    return ["claude", "codex", "opencode", "pi", "grok"].includes(harness)
       ? "This agent's input line shows text that may be someone's draft, so nothing was typed. Send it again once the input line is clear."
       : `This agent has no native channel, and Clankie can't yet read a ${harness} input line to keep a draft safe, so nothing was typed.`;
   return undefined;

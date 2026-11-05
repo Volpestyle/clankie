@@ -6,10 +6,12 @@ import { promisify } from "node:util";
 import { expect, test } from "vitest";
 import { createHerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { paneInputLine } from "../src/captain/pane-draft.ts";
+import { promptWhenClear } from "../src/captain/direct-prompt.ts";
 
 const exec = promisify(execFile);
 const screen = (harness: string) =>
   readFileSync(new URL(`./fixtures/pane-draft/${harness}-empty.ansi`, import.meta.url), "utf8");
+// oxlint-disable-next-line no-control-regex -- strip native SGR for the unstyled-read negative proof
 const plain = (value: string) => value.replaceAll(/\u001b\[[0-9;]*m/gu, "");
 
 test("captured native composers survive Herdr's real styled visible-read boundary without pane input", async () => {
@@ -71,6 +73,19 @@ setInterval(() => {}, 60000);
           timeout: 10_000,
         })
         .toMatchObject({ state: "empty" });
+      const guarded = await promptWhenClear(
+        {
+          harness,
+          status: async () => "idle",
+          input: async () => paneInputLine(harness, await runner.readPane!(pane.pane_id, "visible", "ansi")),
+          prompt: async () => {
+            throw new Error("No pane input is permitted in this proof");
+          },
+        },
+        "Read the fixture",
+        () => false,
+      );
+      expect(guarded).toEqual({ sent: false, detail: "Authority changed before typing; nothing was sent." });
       expect(paneInputLine(harness, await runner.readPane!(pane.pane_id, "visible", "text"))).toEqual({
         state: "unknown",
       });
@@ -109,6 +124,12 @@ test("Pi reads a draft, including a typed rule, instead of mistaking it for the 
   });
   rows[1] = "\u001b[0m────────────";
   expect(paneInputLine("pi", rows.join("\n"))).toEqual({ state: "draft", text: "────────────", typed: true });
+  rows[1] = "\u001b[0mReview café 🐈\ncontinued";
+  expect(paneInputLine("pi", rows.join("\n"))).toEqual({
+    state: "draft",
+    text: "Review café 🐈\ncontinued",
+    typed: true,
+  });
   rows[0] = rows[0]!.replace("────────", "── ↑ 2 more ──");
   expect(paneInputLine("pi", rows.join("\n"))).toEqual({ state: "unknown" });
 });
@@ -123,6 +144,11 @@ test("Grok retains input and wrapped lines inside the frame, including dim text"
     text: "Review the fixture",
     typed: true,
   });
+  const continuation = screen("grok").split("\n")[1]!.replace("❯ ", "  continued").replace(" ".repeat(9), "");
+  rows.splice(2, 0, continuation);
+  const wrapped = paneInputLine("grok", rows.join("\n"));
+  expect(wrapped.state).toBe("draft");
+  expect(wrapped.text).toMatch(/Review the fixture\s+continued/u);
 });
 
 test("OpenCode distinguishes a native ghost from the same words typed normally or dimmed by its leader key", () => {
@@ -135,8 +161,38 @@ test("OpenCode distinguishes a native ghost from the same words typed normally o
   );
   expect(paneInputLine("opencode", typed)).toEqual({ state: "draft", text: words, typed: true });
   const leader = ansi.replaceAll("\u001b[38;2;238;238;238m", "\u001b[38;2;128;128;128m");
-  expect(paneInputLine("opencode", leader).state).not.toBe("empty");
+  expect(paneInputLine("opencode", leader)).toEqual({ state: "unknown" });
   const rows = ansi.split("\n");
   rows.splice(1, 0, rows[1]!.replace(words, "Review the fixture"), rows[0]!);
   expect(paneInputLine("opencode", rows.join("\n")).state).not.toBe("empty");
+});
+
+test.each(["pi", "grok", "opencode"])(
+  "%s unknown observations cannot pass the real direct-prompt guard",
+  async (harness) => {
+    for (const ansi of [plain(screen(harness)), "\u001b[0m", screen(harness).replace(/[─▀╯]/gu, " ")]) {
+      const result = await promptWhenClear(
+        {
+          harness,
+          status: async () => "idle",
+          input: async () => paneInputLine(harness, ansi),
+          prompt: async () => {
+            throw new Error("Unknown input must not dispatch");
+          },
+        },
+        "Read the fixture",
+      );
+      expect(result).toEqual({
+        sent: false,
+        detail:
+          "This agent's input line shows text that may be someone's draft, so nothing was typed. Send it again once the input line is clear.",
+      });
+    }
+  },
+);
+
+test("Pi refuses multiple possible native borders instead of losing earlier input", () => {
+  const rows = screen("pi").split("\n");
+  rows.splice(1, 0, "\u001b[0mearlier draft", rows[0]!);
+  expect(paneInputLine("pi", rows.join("\n"))).toEqual({ state: "unknown" });
 });

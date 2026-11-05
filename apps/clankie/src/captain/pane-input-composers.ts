@@ -35,16 +35,19 @@ function pi(rows: readonly Row[]): PaneInputLine {
   )
     return unknown();
   const border = rows[end]!.find((cell) => cell.text === "─")!.foreground;
-  for (let start = end - 2; start >= Math.max(0, end - 14); start--) {
-    if (!rule(rows[start]!, /^─{8,}$/u, border)) continue;
-    const input = rows.slice(start + 1, end);
-    // A coloured rule or scroll indicator inside the slice makes the boundary ambiguous.
-    if (input.some((row) => row.some((cell) => cell.text.trim() && cell.foreground === border)))
-      return unknown();
-    if (plain(rows[start]!).length !== plain(rows[end]!).length) return unknown();
-    return content(input);
-  }
-  return unknown();
+  const starts = rows
+    .map((row, index) => ({ row, index }))
+    .filter(
+      ({ row, index }) => index >= Math.max(0, end - 14) && index <= end - 2 && rule(row, /^─{8,}$/u, border),
+    );
+  if (starts.length !== 1) return unknown();
+  const start = starts[0]!.index;
+  const input = rows.slice(start + 1, end);
+  // A coloured rule or scroll indicator inside the slice makes the boundary ambiguous.
+  if (input.some((row) => row.some((cell) => cell.text.trim() && cell.foreground === border)))
+    return unknown();
+  if (plain(rows[start]!).length !== plain(rows[end]!).length) return unknown();
+  return content(input);
 }
 
 function grok(rows: readonly Row[]): PaneInputLine {
@@ -100,7 +103,7 @@ function opencode(rows: readonly Row[]): PaneInputLine {
   const dot = metadata.findIndex((cell) => cell.text === "·");
   if (dot <= left || metadata[left]?.text !== "┃" || metadata[left]?.foreground !== border) return unknown();
   const model = metadata.slice(dot + 1).find((cell) => cell.text.trim());
-  if (!model?.foreground) return unknown();
+  if (!model?.foreground || model.foreground === metadata[dot]?.foreground) return unknown();
   const rail = (row: Row) =>
     row[left]?.text === "┃" && row[left]?.foreground === border && !plain(row.slice(0, left)).trim();
   if (!rail(rows[end - 2]!) || plain(rows[end - 2]!.slice(left + 1)).trim()) return unknown();
@@ -113,18 +116,21 @@ function opencode(rows: readonly Row[]): PaneInputLine {
   if (result.state === "empty") return result;
   // Never erase a leader-key draft: OpenCode dims BOTH its textarea and model then.
   // Ghost recognition needs the native, distinct model/placeholder colours as well as words.
+  const text = result.text;
+  if (text === undefined) return unknown();
   const cells = input.flat().filter((cell) => cell.text.trim());
   const ghostColour = cells[0]?.foreground;
   if (
-    /^Ask anything… "[^"\n]+"$/u.test(result.text ?? "") &&
+    /^Ask anything… "[^"\n]+"$/u.test(text) &&
     ghostColour !== undefined &&
     ghostColour !== model.foreground &&
+    ghostColour === metadata[dot]?.foreground &&
     cells.every((cell) => cell.foreground === ghostColour)
   )
-    return { state: "empty", text: result.text, typed: false };
+    return { state: "empty", text, typed: false };
   if (cells.every((cell) => cell.foreground === model.foreground && !cell.faint && !cell.italic))
     return result;
-  return { state: "unknown", text: result.text };
+  return { state: "unknown", text };
 }
 
 export function additionalPaneInputLine(harness: string, rows: readonly Row[]): PaneInputLine {
