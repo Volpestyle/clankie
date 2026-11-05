@@ -22,7 +22,7 @@ import {
   SPAWN_READY_WAIT_MS,
   shellWord,
 } from "./herdr-watch-shared.ts";
-import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch.ts";
+import type { HerdrAgentSnapshot, HerdrWatchRunner } from "./herdr-watch-types.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
