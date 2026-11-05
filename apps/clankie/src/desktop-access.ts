@@ -62,6 +62,7 @@ export class DesktopAccess {
     machineId: string,
     input: { expectedRevision: string; mode: DesktopMode; lead?: string | undefined },
     guard: () => Promise<void>,
+    prepare: () => Promise<void>,
   ): Promise<DesktopAccessSnapshot> {
     if (!this.settings.update) throw Error("desktop_settings_unavailable");
     let before: string | undefined;
@@ -85,10 +86,14 @@ export class DesktopAccess {
       },
       async () => {
         await guard();
+        await prepare();
         if (JSON.stringify(await this.settings.load()) !== before) throw Error("desktop_mode_conflict");
         // Recheck the independently verified sandbox/join ceiling at the commit boundary.
         if (!desktopModeAllowed(input.mode, this.access(await this.settings.load(), machineId)))
           throw Error("desktop_mode_above_ceiling");
+        // All asynchronous preparation is complete. Recheck the shared owner decision
+        // as the final guard before SettingsStore issues its durable rename.
+        await guard();
       },
     );
     return this.snapshot(updated, machineId, input.lead);

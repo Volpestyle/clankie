@@ -61,10 +61,16 @@ export function createDesktopAccessRoutes(options: {
     if (!(await machine(id))) return context.json({ error: "unknown_machine" }, 404);
     try {
       return context.json(
-        await options.desktop.set(id, input.data, async () => {
-          if ((await options.write(context.req.raw)) !== true) throw Error("desktop_owner_revoked");
-          if (!(await options.known(id))) throw Error("unknown_machine");
-        }),
+        await options.desktop.set(
+          id,
+          input.data,
+          async () => {
+            if ((await options.write(context.req.raw)) !== true) throw Error("desktop_owner_revoked");
+          },
+          async () => {
+            if (!(await options.known(id))) throw Error("unknown_machine");
+          },
+        ),
       );
     } catch (error) {
       const code = error instanceof Error ? error.message : "desktop_mode_conflict";

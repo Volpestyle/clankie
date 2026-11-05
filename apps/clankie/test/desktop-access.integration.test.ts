@@ -147,6 +147,11 @@ async function fixture(withAccountRecords = false) {
     DesktopAccessSnapshotSchema.parse(await (await request(DESKTOP_ACCESS_PATH + query)).json());
   return {
     settings,
+    resetAuthCalls: () => {
+      authCalls = 0;
+      revokeAt = Infinity;
+    },
+    authCalls: () => authCalls,
     joins,
     pair,
     token: (deviceId: string) =>
@@ -395,3 +400,44 @@ it("owner desktop choices remain available to a real owner pairing and its child
   expect((await f.settings.load()).machineAccess).toEqual({ pc: "workers" });
   expect((await f.state()).desktopMode).toBe("host");
 });
+
+it.each([1, 2, 3])(
+  "paired owner revocation during final settings read %s prevents desktop persistence",
+  async (readAt) => {
+    const f = await fixture();
+    const token = await f.pair(TAKE_CONTROL_GRANTS);
+    const claims = new DeviceSessionSigner(new Uint8Array(32).fill(19)).verify(
+      token,
+      Math.floor(f.now() / 1000),
+    );
+    const initial = await f.state();
+    f.resetAuthCalls();
+    let injected = false;
+    let afterOwnerReads = 0;
+    const load = f.settings.load.bind(f.settings);
+    f.settings.load = async () => {
+      const current = await load();
+      // The first two auth calls are route admission and the existing store guard.
+      // Suspend each subsequent real read while a concurrent HTTP revoke completes.
+      if (!injected && f.authCalls() === 2 && ++afterOwnerReads === readAt) {
+        injected = true;
+        const revoked = await f.request(`/v1/devices/${claims.deviceId}/revoke`, {}, "owner");
+        expect(revoked.status).toBe(200);
+      }
+      return current;
+    };
+    const response = await f.request(
+      DESKTOP_ACCESS_PATH,
+      { schemaVersion: 1, expectedRevision: initial.revision, mode: "host" },
+      token,
+    );
+    const data = await response.json();
+    const persisted = (await new SettingsStore(f.settings.path).load()).computer.machines;
+    const ownerRead = await f.request(DESKTOP_ACCESS_PATH, undefined, token);
+    expect(injected).toBe(true);
+    expect(ownerRead.status).toBe(401);
+    expect(response.status, JSON.stringify(data)).toBe(403);
+    expect(data.error).toBe("desktop_owner_revoked");
+    expect(persisted).toEqual({});
+  },
+);
