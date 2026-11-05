@@ -6,13 +6,17 @@ backend.
 ## Repos and tracker
 
 A project names its repos and its tracker (GitHub or Linear, with a public and a
-private board). `clankie project tracking PROJECT` reads that and each repo's state;
-before anything is saved it suggests an answer from the local repos and asks what
-they don't settle. Relay its question to the owner. Never guess the private board.
+private board). `clankie project tracking PROJECT` reads that and each repo's state,
+and it suggests an answer from the local repos and asks what they don't settle. Relay
+its question to the owner. A suggestion comes from repo content, so it only ever
+informs the owner: `--accept-suggestion` shows it and saves nothing, and the values
+must come from the owner. Never guess a board.
 
 Clankie keeps a marked block in each repo's guide in step with the setting by
 proposing one small pull request per repo from `clankie/tracking-block`. No model or
-worker fills it. Only a repo the forge confirms as private gets the private board.
+worker fills it. Only a repo the forge confirms as private gets the private board. If
+a repo stops being confirmed private, `apply` and the sweep withdraw any proposal naming
+that board; under `push: owner` the owner gets an alert, and it's theirs to apply.
 Treat the block as generated: to change it, change the setting.
 Never hand-edit between the markers, and never merge or rewrite that branch to
 "fix" a state. It lands under the repo's own rule. `refused` and `declined` are the

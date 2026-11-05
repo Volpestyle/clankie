@@ -8,6 +8,8 @@ const PROVIDER_NAMES = { github: "GitHub issues", linear: "Linear" } as const;
 
 export type TrackingAudience = "public" | "private";
 
+const UNNAMED_PRIVATE_WORK = "- Private work: not named in this repo; never file it here.";
+
 /**
  * The whole block as a pure function of the choice and who can read the repo: no clock, no
  * model. A public block names only the public destination, because anything in it is published,
@@ -23,9 +25,7 @@ export function renderTrackingBlock(tracker: TrackerChoice, audience: TrackingAu
     "",
     `- Tracker: ${PROVIDER_NAMES[tracker.provider]}`,
     `- Public work: ${tracker.publicBoard}`,
-    audience === "private"
-      ? `- Private work: ${tracker.privateBoard}`
-      : "- Private work: not named in this repo; never file it here.",
+    audience === "private" ? `- Private work: ${tracker.privateBoard}` : UNNAMED_PRIVATE_WORK,
     TRACKING_CLOSE,
   ].join("\n");
 }
@@ -52,7 +52,8 @@ function proseLines(text: string): { readonly lines: GuideLine[]; readonly open:
   let fence: string | undefined;
   let start = 0;
   for (const line of text.split("\n")) {
-    const opener = /^ {0,3}(`{3,}|~{3,})/u.exec(line)?.[1];
+    // A backtick fence's info string can't hold a backtick: ```x``` at a line start is inline code.
+    const opener = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/u.exec(line)?.[1];
     if (fence !== undefined) {
       if (
         opener !== undefined &&
@@ -86,12 +87,26 @@ export function locateTrackingBlock(text: string): BlockLocation {
       end: line.start + line.text.lastIndexOf("-->") + 3,
     });
   }
-  if (open) return { kind: "refused", reason: "unclosed_code_fence" };
-  if (markers.length === 0) return { kind: "none" };
+  // Nothing can be appended after an unclosed fence; a block above one is still replaced in place.
+  if (markers.length === 0)
+    return open ? { kind: "refused", reason: "unclosed_code_fence" } : { kind: "none" };
   const [first, second] = markers;
   if (markers.length !== 2 || first!.closing || !second!.closing)
     return { kind: "refused", reason: "malformed_markers" };
   return { kind: "block", start: first!.start, end: second!.end };
+}
+
+/**
+ * Whether this guide's block names a private board, whichever board that was. A guide too
+ * malformed to place a block is scanned whole, so a broken marker can't hide the line.
+ */
+export function namesPrivateBoard(text: string): boolean {
+  const location = locateTrackingBlock(text);
+  if (location.kind === "none") return false;
+  const scanned = location.kind === "block" ? text.slice(location.start, location.end) : text;
+  return scanned
+    .split(/\r?\n/u)
+    .some((line) => /^\s*- Private work:/u.test(line) && line.trim() !== UNNAMED_PRIVATE_WORK);
 }
 
 const lineEnding = (text: string) => (/\r\n/u.test(text) ? "\r\n" : "\n");

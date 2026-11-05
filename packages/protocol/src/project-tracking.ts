@@ -38,6 +38,23 @@ export const TrackerChoiceSchema = z
   .strict();
 export type TrackerChoice = z.infer<typeof TrackerChoiceSchema>;
 
+const GITHUB_URL = /^(?:[a-z]+:\/\/)?(?:[\w.-]+@)?(?:www\.)?github\.com[/:]/iu;
+
+/**
+ * Which GitHub repo a board means, in any spelling. `unreadable` looks like GitHub but names no
+ * repo, so nobody can confirm who sees it; `other` is a board with no repo to ask about.
+ */
+export function trackingBoardRepo(
+  provider: TrackerChoice["provider"],
+  board: string,
+): { readonly kind: "repo"; readonly slug: string } | { readonly kind: "unreadable" | "other" } {
+  const url = GITHUB_URL.exec(board);
+  if (!url && provider !== "github") return { kind: /github\./iu.test(board) ? "unreadable" : "other" };
+  const [owner, name] = (url ? board.slice(url[0].length) : board).split(/[?#]/u, 1)[0]!.split("/");
+  const slug = `${owner}/${(name ?? "").replace(/\.git$/iu, "")}`;
+  return TrackingRepoSchema.safeParse(slug).success ? { kind: "repo", slug } : { kind: "unreadable" };
+}
+
 /** A project's repos and where its work is filed; the source of each repo's tracking block. */
 export const ProjectTrackingSchema = z
   .object({
@@ -48,7 +65,10 @@ export const ProjectTrackingSchema = z
   .superRefine((tracking, ctx) => {
     if (new Set(tracking.repos.map((repo) => repo.toLowerCase())).size !== tracking.repos.length)
       ctx.addIssue({ code: "custom", message: "Repos must be unique" });
-    const board = (value: string) => value.toLowerCase().replace(/\/overview\/?$|\/$/u, "");
+    const board = (value: string) => {
+      const parsed = trackingBoardRepo(tracking.tracker.provider, value);
+      return (parsed.kind === "repo" ? parsed.slug : value).toLowerCase().replace(/\/overview\/?$|\/$/u, "");
+    };
     if (board(tracking.tracker.publicBoard) === board(tracking.tracker.privateBoard))
       ctx.addIssue({ code: "custom", message: "Public and private work need separate boards" });
   });
@@ -60,8 +80,12 @@ export type ProjectTracking = z.infer<typeof ProjectTrackingSchema>;
  * - `drifted`: the block is missing or differs, and no proposal is open.
  * - `proposed`: a proposal for this exact block is open, waiting on the repo's own landing rule.
  * - `declined`: the owner closed this exact proposal; a sweep leaves it, `apply` reopens it.
- * - `refused`: Clankie will not write here; `reason` says why, and the owner has to act.
+ * - `refused`: Clankie will not write here; `reason` says why, and the owner has to act. On
+ *   `private_board_exposed`, `pull` is the proposal still naming the private board.
  * - `unavailable`: the forge could not be read or written; a later pass retries.
+ *
+ * Any state can carry `withdrawnPull`: this pass closed that proposal and deleted its branch,
+ * because the repo is no longer confirmed private and the proposal named the private board.
  */
 export const TrackingRepoStateSchema = z.enum([
   "in_step",
@@ -80,6 +104,7 @@ export const TrackingRepoStatusSchema = z
     pull: TrackingPullSchema.optional(),
     confirmedPull: TrackingPullSchema.optional(),
     stalePull: TrackingPullSchema.optional(),
+    withdrawnPull: TrackingPullSchema.optional(),
     reason: z.string().max(400).optional(),
   })
   .strict();

@@ -11947,14 +11947,16 @@ Clankie Work store shows both effects
 ### Project repos and tracker
 
 `clankie project tracking PROJECT` reads a project's repos and tracker and each
-repo's state. Before anything is saved it opens with what the local repos suggest,
-and asks about what they don't settle. The private board is always asked.
+repo's state. It opens with what the local repos suggest and asks about what they
+don't settle. A suggestion is read from repo content, so it never decides anything:
+`--accept-suggestion` only shows it, saving and proposing nothing, and you set each
+value yourself.
 
 ```sh
 clankie project tracking PROJECT
 clankie project tracking PROJECT --provider github --public-board owner/public \
   --private-board owner/private --repo owner/one --repo owner/two
-clankie project tracking PROJECT --accept-suggestion --private-board BOARD
+clankie project tracking PROJECT --accept-suggestion
 clankie project tracking PROJECT apply
 clankie project tracking PROJECT clear
 ```
@@ -11968,8 +11970,9 @@ Clankie fills a block between `<!-- clankie:tracking -->` and
 markers. Each repo gets one small pull request from `clankie/tracking-block`, which
 Clankie never merges. An hourly sweep repeats this for drift and only reads when the
 project's `push` preference is `owner`. Only a repo GitHub confirms as private gets
-the private board; every other repo's block names just the public board. A changed
-tracker moves no issues; the result offers that as separate work. See
+the private board; every other repo's block names just the public board, and no pull
+request body holds a block. A changed tracker moves no issues; the result offers that
+as separate work. See
 [ADR 0362](adr/0362-a-project-owns-its-repos-and-tracker.md).
 
 | State         | Meaning                                                                       |
@@ -11983,10 +11986,23 @@ tracker moves no issues; the result offers that as separate work. See
 
 `refused` reasons: `malformed_markers`, `unclosed_code_fence`, `duplicate_blocks`,
 `unsupported_guide`, `guide_too_large`, `guide_not_utf8`, `repository_archived`,
-`repository_moved`, `public_board_not_public` and `proposal_branch_edited`.
-`public_board_not_public` means the public board is a GitHub repo that GitHub won't
-show as public: pick a public one. `proposal_branch_edited` means someone else's commit
-is on the proposal branch: merge or delete it.
+`repository_moved`, `repo_in_two_projects`, `public_board_not_public`,
+`private_board_exposed` and `proposal_branch_edited`. `public_board_not_public` means
+the public board looks like GitHub but isn't a repo GitHub shows as public: pick a
+public repo, in any spelling. A GitHub Project URL counts, because nothing says who can
+see it. `repo_in_two_projects` means another project claims the repo: remove it from
+one. `proposal_branch_edited` means someone else's commit is on the proposal branch:
+merge or delete it.
+
+When a repo is no longer confirmed private and `clankie/tracking-block` names a private
+board, `apply` and the sweep close its open pull requests and delete the branch, even
+with someone else's commit on top; the result names the pull as `withdrawnPull`. Under
+`push: owner` the sweep writes nothing: the read shows `private_board_exposed` and you
+get an alert, and `apply` withdraws it. You also get an alert if a withdrawal fails, or
+if the default branch itself still names the board (`private_board_published`), where
+`apply` proposes the public block. The repo's own merged history is yours to manage:
+withdrawing can't remove merged commits, and GitHub keeps a closed pull request's diff
+on its page until GitHub Support removes it.
 
 ### Work tracker settings
 

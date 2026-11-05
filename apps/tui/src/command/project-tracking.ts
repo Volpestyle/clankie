@@ -11,7 +11,7 @@ import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings
 import { runProjectSettingsCommand } from "./project-settings.ts";
 
 const USAGE =
-  "Usage: clankie project tracking PROJECT [apply | clear | [--provider github|linear] [--public-board BOARD] [--private-board BOARD] [--repo OWNER/NAME]... [--accept-suggestion] [--no-apply]]";
+  "Usage: clankie project tracking PROJECT [apply | clear | [--provider github|linear] [--public-board BOARD] [--private-board BOARD] [--repo OWNER/NAME]... [--no-apply] | --accept-suggestion]";
 
 const VALUE_FLAGS = new Set(["--provider", "--public-board", "--private-board", "--repo"]);
 
@@ -78,17 +78,22 @@ export async function runProjectTrackingCommand(
     };
   }
   const { values, repos, acceptSuggestion, apply: applyAfter } = parseFlags(rest);
+  // A suggestion is read from repo content, so it is only ever shown: the owner types the values.
+  if (acceptSuggestion) {
+    const { suggestion } = await view();
+    return {
+      projectId,
+      ...(suggestion ? { suggestion } : {}),
+      note: "Nothing was saved. Set what you want with --provider, --public-board, --private-board and --repo.",
+    };
+  }
   const { revision, saved } = await read();
-  const suggestion = acceptSuggestion ? (await view()).suggestion : undefined;
-  const pick = (flag: string, suggested: string | undefined, current: string | undefined) =>
-    values.get(flag) ?? suggested ?? current;
-  const repoList = repos.length > 0 ? repos : suggestion?.repos.length ? suggestion.repos : saved?.repos;
   const tracking = ProjectTrackingSchema.safeParse({
-    repos: repoList,
+    repos: repos.length > 0 ? repos : saved?.repos,
     tracker: {
-      provider: pick("--provider", suggestion?.provider, saved?.tracker.provider),
-      publicBoard: pick("--public-board", suggestion?.publicBoard, saved?.tracker.publicBoard),
-      privateBoard: pick("--private-board", undefined, saved?.tracker.privateBoard),
+      provider: values.get("--provider") ?? saved?.tracker.provider,
+      publicBoard: values.get("--public-board") ?? saved?.tracker.publicBoard,
+      privateBoard: values.get("--private-board") ?? saved?.tracker.privateBoard,
     },
   });
   if (!tracking.success)

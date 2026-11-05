@@ -21,9 +21,10 @@ interface FixturePull {
   html_url: string;
   state: "open" | "closed";
   merged_at: string | null;
+  updated_at: string;
   title: string;
   body: string;
-  head: { ref: string; sha: string; repo: { full_name: string } };
+  head: { ref: string; sha: string; repo: { full_name: string } | null };
   base: { ref: string };
 }
 
@@ -37,7 +38,7 @@ const VISIBILITY_FIELDS = {
 } as const;
 
 export interface FixtureFile {
-  readonly content: string;
+  readonly content: string | Buffer;
   /** Git mode; `120000` makes `content` a symlink target. */
   readonly mode?: string;
 }
@@ -46,11 +47,22 @@ export interface FixtureFile {
  * GitHub's git-data and pull endpoints over real bare repositories, on 127.0.0.1 only. There
  * is no merge endpoint and no issues endpoint: a client that reaches for either gets a 404
  * recorded in `requests`, and merging is the fixture's own `merge`, standing in for a person.
+ *
+ * It keeps GitHub's rules a client can break: the repo's own default branch, a 403 on any write
+ * to an archived repo, a 422 on a non-fast-forward ref update without `force` and on a pull to a
+ * missing base, the new `full_name` after a rename, pulls sorted by when they were last updated
+ * and paged with a `Link` header, and a deleted head closing its open pull.
  */
 export async function startLoopbackForge() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "loopback-forge-")));
   const pulls = new Map<string, FixturePull[]>();
   const visibility = new Map<string, FixtureVisibility>();
+  const defaultBranches = new Map<string, string>();
+  const archived = new Set<string>();
+  const undeletable = new Set<string>();
+  const fullNames = new Map<string, string>();
+  let clock = Date.parse("2026-11-05T00:00:00Z");
+  const tick = () => new Date((clock += 1000)).toISOString();
   const requests: { readonly method: string; readonly path: string }[] = [];
   const bare = (slug: string) => join(root, `${slug}.git`);
   const git = async (slug: string, ...args: string[]) =>
@@ -86,12 +98,15 @@ export async function startLoopbackForge() {
     const rest = parts[2] ?? "";
     if (!pulls.has(slug)) return { status: 404, value: { message: "Not Found" } };
     const route = `${method} ${rest}`;
+    if (method !== "GET" && archived.has(slug))
+      return { status: 403, value: { message: "Repository was archived so is read-only." } };
     if (route === "GET ")
       return {
         status: 200,
         value: {
-          full_name: slug,
-          default_branch: "main",
+          full_name: fullNames.get(slug) ?? slug,
+          default_branch: defaultBranches.get(slug),
+          archived: archived.has(slug),
           ...VISIBILITY_FIELDS[visibility.get(slug) ?? "public"],
         },
       };
@@ -158,30 +173,63 @@ export async function startLoopbackForge() {
       return { status: 201, value: {} };
     }
     if (method === "PATCH" && (match = /^git\/refs\/(heads\/.+)$/u.exec(rest))) {
+      const tip = await git(slug, "rev-parse", `refs/${match[1]!}`);
+      const fastForward = await git(slug, "merge-base", "--is-ancestor", tip, body.sha as string).then(
+        () => true,
+        () => false,
+      );
+      if (!fastForward && body.force !== true)
+        return { status: 422, value: { message: "Update is not a fast forward" } };
       await git(slug, "update-ref", `refs/${match[1]!}`, body.sha as string);
       for (const pull of pulls.get(slug)!)
-        if (pull.state === "open" && `heads/${pull.head.ref}` === match[1])
+        if (pull.state === "open" && `heads/${pull.head.ref}` === match[1]) {
           pull.head.sha = body.sha as string;
+          pull.updated_at = tick();
+        }
       return { status: 200, value: {} };
+    }
+    if (method === "DELETE" && (match = /^git\/refs\/(heads\/.+)$/u.exec(rest))) {
+      if (undeletable.has(`${slug}:${match[1]!}`))
+        return { status: 422, value: { message: "Cannot delete this protected branch" } };
+      if ((await git(slug, "rev-parse", "--verify", `refs/${match[1]!}`).catch(() => "")) === "")
+        return { status: 422, value: { message: "Reference does not exist" } };
+      await git(slug, "update-ref", "-d", `refs/${match[1]!}`);
+      for (const pull of pulls.get(slug)!)
+        if (pull.state === "open" && `heads/${pull.head.ref}` === match[1]) pull.state = "closed";
+      return { status: 204, value: undefined };
     }
     if (route === "GET pulls") {
       const wanted = url.searchParams.get("head")?.split(":")[1];
-      const list = pulls.get(slug)!.filter((pull) => wanted === undefined || pull.head.ref === wanted);
-      return { status: 200, value: list.toReversed() };
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const size = Number(url.searchParams.get("per_page") ?? "30");
+      const list = pulls
+        .get(slug)!
+        .filter((pull) => wanted === undefined || pull.head.ref === wanted)
+        .toSorted((a, b) => b.updated_at.localeCompare(a.updated_at) || b.number - a.number);
+      const next = new URL(url);
+      next.searchParams.set("page", String(page + 1));
+      return {
+        status: 200,
+        value: list.slice((page - 1) * size, page * size),
+        ...(page * size < list.length ? { link: `<${next.href}>; rel="next"` } : {}),
+      };
     }
     if (route === "POST pulls") {
+      if (!(await refOf(slug, body.base as string).catch(() => undefined)))
+        return { status: 422, value: { message: "Validation Failed: base" } };
       const number = pulls.get(slug)!.length + 1;
       const pull: FixturePull = {
         number,
         html_url: `https://forge.invalid/${slug}/pull/${String(number)}`,
         state: "open",
         merged_at: null,
+        updated_at: tick(),
         title: body.title as string,
         body: body.body as string,
         head: {
           ref: body.head as string,
           sha: await refOf(slug, body.head as string),
-          repo: { full_name: slug },
+          repo: { full_name: fullNames.get(slug) ?? slug },
         },
         base: { ref: body.base as string },
       };
@@ -191,29 +239,35 @@ export async function startLoopbackForge() {
     if (method === "PATCH" && (match = /^pulls\/(\d+)$/u.exec(rest))) {
       const pull = pulls.get(slug)![Number(match[1]) - 1]!;
       if (typeof body.body === "string") pull.body = body.body;
+      if (body.state === "closed") pull.state = "closed";
+      pull.updated_at = tick();
       return { status: 200, value: pull };
     }
     return { status: 404, value: { message: "Not Found" } };
   };
 
+  let port = 0;
   const server: Server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
       const method = request.method ?? "GET";
       requests.push({ method, path: url.pathname });
       const text = Buffer.concat(chunks).toString("utf8");
       void handle(method, url, text ? (JSON.parse(text) as Record<string, unknown>) : {})
         .catch((error: unknown) => ({ status: 500, value: { message: String(error) } }))
-        .then(({ status, value }) => {
-          response.writeHead(status, { "content-type": "application/json" });
-          response.end(JSON.stringify(value));
+        .then((reply: { status: number; value: unknown; link?: string }) => {
+          response.writeHead(reply.status, {
+            "content-type": "application/json",
+            ...(reply.link ? { link: reply.link } : {}),
+          });
+          response.end(reply.value === undefined ? undefined : JSON.stringify(reply.value));
         });
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const port = (server.address() as AddressInfo).port;
+  port = (server.address() as AddressInfo).port;
 
   return {
     baseUrl: `http://127.0.0.1:${String(port)}`,
@@ -221,15 +275,73 @@ export async function startLoopbackForge() {
     /** Every request since `mark` that was not a read. */
     writesSince: (mark: number) => requests.slice(mark).filter((request) => request.method !== "GET"),
     pulls: (slug: string) => pulls.get(slug) ?? [],
-    async addRepo(slug: string, files: Record<string, FixtureFile>, seen: FixtureVisibility = "public") {
+    async addRepo(
+      slug: string,
+      files: Record<string, FixtureFile>,
+      seen: FixtureVisibility = "public",
+      defaultBranch = "main",
+    ) {
       visibility.set(slug, seen);
+      defaultBranches.set(slug, defaultBranch);
       await mkdir(join(root, slug.split("/")[0]!), { recursive: true });
-      await run("git", ["init", "--bare", "--quiet", "--initial-branch=main", bare(slug)]);
+      await run("git", ["init", "--bare", "--quiet", `--initial-branch=${defaultBranch}`, bare(slug)]);
       pulls.set(slug, []);
-      await git(slug, "update-ref", "refs/heads/main", await commitFiles(slug, undefined, files));
+      await git(slug, "update-ref", `refs/heads/${defaultBranch}`, await commitFiles(slug, undefined, files));
     },
     /** The owner flipping a repo's visibility on the forge. */
     setVisibility: (slug: string, seen: FixtureVisibility) => visibility.set(slug, seen),
+    archive: (slug: string) => archived.add(slug),
+    /** A branch rule that refuses deletion, until `allowDelete`. */
+    protectBranch: (slug: string, branch: string) => undeletable.add(`${slug}:heads/${branch}`),
+    allowDelete: (slug: string, branch: string) => undeletable.delete(`${slug}:heads/${branch}`),
+    /** Someone deleting a branch, or the repo's delete-on-merge setting doing it. */
+    deleteBranch: (slug: string, branch: string) => git(slug, "update-ref", "-d", `refs/heads/${branch}`),
+    /** The old name keeps answering, as GitHub's redirect does, with the new `full_name`. */
+    rename(slug: string, fullName: string) {
+      fullNames.set(slug, fullName);
+      for (const pull of pulls.get(slug)!) pull.head.repo = { full_name: fullName };
+    },
+    /** A comment: nothing but `updated_at` moves, which is what GitHub sorts on. */
+    comment(slug: string, number: number) {
+      pulls.get(slug)![number - 1]!.updated_at = tick();
+    },
+    /** A pull from `headRepo`, with the commit in this repo's object store as a fork network shares it. */
+    async forkPull(slug: string, headRepo: string | null, ref: string) {
+      const sha = await commitFiles(slug, await refOf(slug, defaultBranches.get(slug)!), {
+        "FORK.md": { content: "From a fork.\n" },
+      });
+      const number = pulls.get(slug)!.length + 1;
+      pulls.get(slug)!.push({
+        number,
+        html_url: `https://forge.invalid/${slug}/pull/${String(number)}`,
+        state: "open",
+        merged_at: null,
+        updated_at: tick(),
+        title: "From a fork",
+        body: "",
+        head: { ref, sha, repo: headRepo === null ? null : { full_name: headRepo } },
+        base: { ref: defaultBranches.get(slug)! },
+      });
+      return number;
+    },
+    /** Merged proposals from long ago, enough to push an older pull onto a later page. */
+    async seedMergedPulls(slug: string, count: number, ref: string) {
+      const sha = await refOf(slug, defaultBranches.get(slug)!);
+      for (let index = 0; index < count; index += 1) {
+        const number = pulls.get(slug)!.length + 1;
+        pulls.get(slug)!.push({
+          number,
+          html_url: `https://forge.invalid/${slug}/pull/${String(number)}`,
+          state: "closed",
+          merged_at: "2026-01-01T00:00:00Z",
+          updated_at: tick(),
+          title: "Seeded",
+          body: "",
+          head: { ref, sha, repo: { full_name: fullNames.get(slug) ?? slug } },
+          base: { ref: defaultBranches.get(slug)! },
+        });
+      }
+    },
     /** Someone pushing to the default branch, or to a proposal branch. */
     async push(slug: string, branch: string, files: Record<string, FixtureFile>) {
       await git(
@@ -251,9 +363,12 @@ export async function startLoopbackForge() {
       await git(slug, "update-ref", `refs/heads/${pull.base.ref}`, pull.head.sha);
       pull.state = "closed";
       pull.merged_at = "2026-11-05T00:00:00Z";
+      pull.updated_at = tick();
     },
     close(slug: string, number: number) {
-      pulls.get(slug)![number - 1]!.state = "closed";
+      const pull = pulls.get(slug)![number - 1]!;
+      pull.state = "closed";
+      pull.updated_at = tick();
     },
     async stop() {
       await new Promise((resolve) => server.close(resolve));

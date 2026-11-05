@@ -1072,6 +1072,7 @@ const projectTracking = createProjectTrackingService({
   forge: () => workItems.githubForge(),
   suggest: suggestProjectTracking,
   logger,
+  alert: (text) => captain.notifyRuntimeHealthAlert(text),
 });
 const projectWorktreeRoot: ObserveProjectWorktreeRoot = (input) =>
   input.machineId === "local" ? observeLocalProjectWorktreeRoot(input) : remoteWorktreeRoot(input);
