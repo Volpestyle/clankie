@@ -211,6 +211,7 @@ export class HerdrWatchStore implements HerdrWatchPort {
   private state: PersistedHerdrWatches;
   private wake: InternalWake | undefined;
   /** Host policy resolution and escalation reuse the owner's ask store. */
+  public watching: (() => Promise<boolean>) | undefined;
   public permissionLeadAllowed: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   public questionGate:
     | ((agent: HerdrAgentSnapshot, question: SeatQuestion) => Promise<"allow" | "lead" | "owner">)
@@ -1669,6 +1670,9 @@ export class HerdrWatchStore implements HerdrWatchPort {
         return store.requireWorkerAccess;
       },
       watchHiredSeat: (...args) => store.watchHiredSeat(...args),
+      get watching() {
+        return store.watching;
+      },
       get permissionLeadAllowed() {
         return store.permissionLeadAllowed;
       },

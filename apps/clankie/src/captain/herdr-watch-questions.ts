@@ -35,6 +35,7 @@ type Context = Pick<
   | "seatControl"
   | "wake"
   | "watchHiredSeat"
+  | "watching"
 >;
 
 export function createHerdrWatchQuestions(ctx: Context) {
@@ -252,6 +253,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     question: SeatQuestion,
   ): Promise<boolean> {
     return (
+      (await ctx.watching?.()) === true ||
       (question.permission !== undefined &&
         (question.permission.transport === "channel" ||
           owner.discord !== undefined ||
@@ -273,6 +275,8 @@ export function createHerdrWatchQuestions(ctx: Context) {
     await ctx.escalateQuestion(owner, agent, question, guard);
     asked?.();
     await guard();
+    // The feed is a read surface; Watch never sends even an escalation notice to a lead.
+    if (await ctx.watching?.()) return;
     await ctx.wake(
       owner.conversationId,
       `Worker ${agent.terminalId} escalated question ${String(question.requestId)} to the owner. The lead cannot approve it; answer the structured ask.`,

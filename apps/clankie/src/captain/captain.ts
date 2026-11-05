@@ -2594,6 +2594,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
       (selected !== null && typeof selected === "object" && "mode" in selected && selected.mode === "owner")
     );
   };
+  herdrWatches.watching = () => watch.watching();
   herdrWatches.permissionLeadAllowed = async (owner) => {
     const conversation = conversations.conversation(owner.conversationId);
     return (

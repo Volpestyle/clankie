@@ -100,6 +100,7 @@ export interface HerdrWatchContext {
     start?: boolean,
     messageId?: string,
   ): HerdrWatchRecord | undefined;
+  watching: (() => Promise<boolean>) | undefined;
   permissionLeadAllowed: ((owner: ConversationOwner) => Promise<boolean>) | undefined;
   questionGate:
     | ((agent: HerdrAgentSnapshot, question: SeatQuestion) => Promise<"allow" | "lead" | "owner">)
