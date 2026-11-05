@@ -464,8 +464,8 @@ export function createHerdrWatchRecovery(ctx: Context) {
             candidate.request.harness,
             candidate.request.workingDirectory,
             "new",
+            ...(candidate.request.freshIntent ? ["fresh", candidate.request.freshIntent.id] : []),
           ]) ||
-          candidate.request.freshIntent ||
           candidate.pane !== undefined ||
           candidate.seat !== undefined ||
           candidate.occupantId !== undefined ||
@@ -508,8 +508,7 @@ export function createHerdrWatchRecovery(ctx: Context) {
         .entries()
         .filter(
           ([key, receipt]) =>
-            (receipt.hireBaseKey ?? key) === baseKey &&
-            !receipt.freshHire &&
+            (receipt.freshHire?.baseKey ?? receipt.hireBaseKey ?? key) === baseKey &&
             receipt.remoteLaunchCommitted === true &&
             receipt.remoteCommandUnsent === true &&
             receipt.paneId === undefined &&

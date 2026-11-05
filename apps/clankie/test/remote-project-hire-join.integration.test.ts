@@ -437,6 +437,49 @@ nativeIt(
 );
 
 nativeIt(
+  "a fresh remote project attempt whose create never answered settles and releases its own allocation without replay",
+  async () => {
+    const f = await fixture(PC_SILENT);
+    try {
+      const directory = join(f.home, "fresh-project-place");
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      const next = f.store.nextFreshIntent("pc", "claude", directory);
+      expect(next).toBeDefined();
+      const fresh = await f.hire(directory, next, "Inspect a distinct fresh fixture issue.");
+      expect(fresh).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      const [, original] = f.receipt();
+      expect(original).toMatchObject({
+        freshHire: { id: next!.id },
+        remoteLaunchCommitted: true,
+        remoteCommandUnsent: true,
+      });
+      const allocation = (await f.allocations()).find((a) => !a.gone)!;
+      expect(allocation).toMatchObject({ started: true, gone: false });
+      f.restart();
+      await f.hire(directory, undefined, "Inspect the initial fixture issue.");
+      expect(new DeliveryFence(f.nativePath).settlement(original.messageId)).toMatchObject({
+        journal: "launch-committed-command-unsent",
+      });
+      expect((await f.allocations()).find((a) => a.id === allocation.id)).toMatchObject({ gone: true });
+      expect(f.creates).toHaveLength(2);
+      expect(f.effects).toEqual([]);
+      const following = f.store.nextFreshIntent("pc", "claude", directory);
+      expect(following).toMatchObject({ afterReceiptId: original.messageId });
+      expect(following!.id).not.toBe(next!.id);
+      const third = await f.hire(directory, following, "Inspect a third distinct fixture issue.");
+      expect(third).toMatchObject({ outcome: "failed", reason: "start_unconfirmed" });
+      expect(f.creates).toHaveLength(3);
+      expect(f.receipt()[1].messageId).not.toBe(original.messageId);
+      expect(f.effects).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  },
+  120_000,
+);
+
+nativeIt(
   "a create that landed late keeps the original receipt and allocation held",
   async () => {
     const f = await fixture(PC_SILENT);
