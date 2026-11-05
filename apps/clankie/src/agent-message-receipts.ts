@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import type { SeatEvent } from "@clankie/agent-hosts";
 import { z } from "zod";
@@ -222,6 +222,7 @@ export class AgentMessageReceipts {
     const result = structuredClone(record.result!);
     if (!this.nativeEvidencePath || !record.messageId) return result;
     try {
+      if (!statSync(this.nativeEvidencePath, { throwIfNoEntry: false })?.isFile()) return result;
       const journal = z
         .object({
           schemaVersion: z.literal(1),
