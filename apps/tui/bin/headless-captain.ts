@@ -510,6 +510,13 @@ export async function runHeadlessCaptainCommand(
       return 0;
     }
     if (command === "fleet") {
+      if (rest[0] === "digest") {
+        const { runFleetDigestCommand, formatFleetDigest } = await import("../src/command/fleet-digest.ts");
+        const digest = await runFleetDigestCommand(rest.slice(1), options);
+        if (rest.includes("--json")) outputJson(stdout, digest);
+        else stdout.write(formatFleetDigest(digest));
+        return 0;
+      }
       if (rest[0] === "permits") {
         outputJson(
           stdout,

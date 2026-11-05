@@ -1,3 +1,4 @@
+import type { OperatorConversationServiceResult } from "@clankie/protocol";
 import type { CaptainPort } from "./captain/port.ts";
 import type { WorkItemsService } from "./work-items.ts";
 import { leadChangeRecord, type LeadChangeSnapshot } from "./lead-changes.ts";
@@ -9,11 +10,13 @@ export async function collectLeadChanges(input: {
   readonly deviceId?: string;
   readonly herdr: boolean;
   readonly signal?: AbortSignal;
+  /** Reuse the same canonical fleet read when an owner projection also needs close history. */
+  readonly fleet?: Promise<Extract<OperatorConversationServiceResult, { op: "fleet" }> | undefined>;
 }): Promise<readonly LeadChangeSnapshot[]> {
   const [canonical, fleet, pulls] = await Promise.allSettled([
     input.captain.leadChangeSources?.(input.deviceId, input.herdr) ?? Promise.resolve([]),
     input.herdr
-      ? input.captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 })
+      ? (input.fleet ?? input.captain.serveOperatorConversation({ op: "fleet", schemaVersion: 1 }))
       : Promise.resolve(undefined),
     input.work?.leadChangePulls(input.signal) ??
       Promise.resolve({ source: "pull_request" as const, records: [], unavailable: "work_unavailable" }),

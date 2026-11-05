@@ -126,6 +126,7 @@ import { createCaptainSeatRoutes } from "../captain-seat-routes.ts";
 import { registerSeatRoutes } from "./seat-routes.ts";
 import { remoteLeadRoutes } from "./remote-lead-routes.ts";
 import { registerAppMetricsRoutes } from "./app-metrics-routes.ts";
+import { registerFleetDigestRoutes } from "./fleet-digest-routes.ts";
 import { registerFleetHealthMetricsRoutes } from "./fleet-health-metrics-routes.ts";
 import { registerLeadRestartRoutes } from "./lead-restart-routes.ts";
 import { registerSeatRestartRoutes } from "./seat-restart-routes.ts";
@@ -2686,6 +2687,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
   const promptAnswers = new ConnectorPromptAnswers(dependencies.connectorPromptAnswersPath);
   const detection = dependencies.connectorDetection ?? new ConnectorDetection();
+  registerFleetDigestRoutes(app, dependencies, { herdr: () => detection.multiplexer("herdr") });
   registerConnectorRoutes({
     dependencies,
     app,
