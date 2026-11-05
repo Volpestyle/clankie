@@ -92,6 +92,23 @@ export interface ConversationAuthority {
   readonly authorize: () => Promise<boolean>;
 }
 
+/** Async preparation plus a retained synchronous authority check for final state changes. */
+export type AuthorityGuard = (() => Promise<void>) & { readonly assertCurrent?: () => void };
+
+/** A service-owned automatic operation may have no turn; a supplied turn remains current. */
+export function conversationAuthorityGuard(source: ConversationAuthority | undefined): AuthorityGuard {
+  const assertCurrent = () => {
+    if (source && !source.current()) throw new Error("Conversation authority changed");
+  };
+  return Object.assign(
+    async () => {
+      if (source) await assertConversationAuthority(source);
+      assertCurrent();
+    },
+    { assertCurrent },
+  );
+}
+
 /** Missing conversation binding, distinct from an expired or denied authority. */
 export class ConversationRequiredError extends Error {
   constructor(message = "Turn conversation attribution is unavailable") {

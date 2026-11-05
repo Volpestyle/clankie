@@ -12,6 +12,7 @@ import {
   captureConversationAuthority,
   ConversationRequiredError,
   assertConversationAuthority,
+  conversationAuthorityGuard,
   type ConversationAuthority,
 } from "./conversation-owner.ts";
 import type { BodyConversationIdentity } from "../body-lease-router.ts";
@@ -1281,7 +1282,7 @@ function herdrWatchTools(
               return json(
                 await watches.settleHireReceipt!(
                   input.receiptId,
-                  () => assertConversationAuthority(authority),
+                  conversationAuthorityGuard(authority),
                   input.disposition,
                   operator ? undefined : authority.owner,
                 ),

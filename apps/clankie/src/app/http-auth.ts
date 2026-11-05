@@ -40,13 +40,26 @@ export async function readJson(request: Request): Promise<unknown> {
 export function createBearerAuthenticator<T>(
   token: string,
   identity: T,
-): (request: Request) => Promise<T | undefined> {
+): ((request: Request) => Promise<T | undefined>) & {
+  readFence(request: Request): { assertCurrent(): void };
+} {
   if (token.length === 0) throw new Error("Authentication token must not be empty");
   const expected = createHash("sha256").update(`Bearer ${token}`).digest();
-  return (request) => {
+  const authenticate = (request: Request) => {
     const actual = createHash("sha256")
       .update(request.headers.get("authorization") ?? "")
       .digest();
     return Promise.resolve(timingSafeEqual(actual, expected) ? identity : undefined);
   };
+  return Object.assign(authenticate, {
+    readFence(request: Request) {
+      const header = request.headers.get("authorization");
+      return {
+        assertCurrent() {
+          if (request.signal.aborted || request.headers.get("authorization") !== header)
+            throw new Error("Authentication request changed");
+        },
+      };
+    },
+  });
 }

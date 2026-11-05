@@ -259,6 +259,8 @@ workspace create can recover automatically before the next hire's checkout and
 allocation checks. The host must seal the original as not launched; the allocation
 must retain a unique causal link to that receipt, still belong to the resolved
 project, and pass unchanged-allocation and complete before/after inventory checks.
+Settlement also retains its host authority through the final allocation write;
+if that authority cannot be verified, the allocation stays held.
 Legacy allocations without the link, live or possibly starting workers and fresh
 intents remain held. Keep the settled original; never replay it. New work uses its
 own brief and the returned `freshIntent`. No real-PC acceptance is implied by a

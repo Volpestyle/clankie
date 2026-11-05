@@ -1,3 +1,4 @@
+import type { AuthorityGuard } from "./conversation-owner.ts";
 import { ProjectCreationSchema } from "./project-onboarding.ts";
 import { realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -33,10 +34,20 @@ export interface QuestionAuthority {
   readonly principal: { readonly kind: "operator" | "device"; readonly id: string };
   readonly authorize: () => Promise<boolean>;
   readonly current: () => boolean;
+  /** Complete synchronous host authentication witness, when the source supplies one. */
+  readonly assertCurrent?: () => void;
 }
 export async function authorizeQuestion(authority: QuestionAuthority | undefined): Promise<void> {
   if (!authority || !authority.current() || !(await authority.authorize()) || !authority.current())
     throw new Error("question_owner_unavailable");
+}
+export function questionAuthorityGuard(authority: QuestionAuthority): AuthorityGuard {
+  return Object.assign(() => authorizeQuestion(authority), {
+    assertCurrent() {
+      if (!authority.assertCurrent) throw new Error("question_owner_unavailable");
+      authority.assertCurrent();
+    },
+  });
 }
 export const QuestionDraftSchema = z
   .object({

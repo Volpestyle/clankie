@@ -25,7 +25,11 @@ import { savedSessionHarness } from "../agent-sessions.ts";
 import { type HerdrFleet } from "../herdr-fleet.ts";
 import { AutonomyStore } from "./autonomy.ts";
 import { type CaptainOptions } from "./captain-types.ts";
-import { assertConversationAuthority, captureConversationAuthority } from "./conversation-owner.ts";
+import {
+  assertConversationAuthority,
+  captureConversationAuthority,
+  conversationAuthorityGuard,
+} from "./conversation-owner.ts";
 import { ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
 import { DesktopExpressions } from "./desktop.ts";
@@ -248,11 +252,7 @@ export function createHiring(ctx: HiringContext) {
         const projectId = await resolveHireProject(request, current.projects, authority);
         if (request.projectId !== undefined && request.projectId !== projectId)
           throw new Error("The selected project does not match this hiring conversation or workspace.");
-        await herdrWatches.retireUnsentRemoteAt(
-          request,
-          () => assertConversationAuthority(authority),
-          projectId,
-        );
+        await herdrWatches.retireUnsentRemoteAt(request, conversationAuthorityGuard(authority), projectId);
         await assertConversationAuthority(authority);
       }
       let retained: HireWorktreeRelocation | undefined;

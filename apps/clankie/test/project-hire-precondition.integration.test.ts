@@ -106,7 +106,7 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
     const { isolatedHerdr } = await import("./fixtures/local-fleet-proof/herdr-fixture.ts");
     const { createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
     const { createCaptain } = await import("../src/captain/captain.ts");
-    const { createClankieApp } = await import("../src/app.ts");
+    const { createClankieApp, createBearerAuthenticator } = await import("../src/app.ts");
     const { SettingsStore } = await import("@clankie/settings");
     const { runHireReceiptCommand } = await import("../../tui/src/command/hire-receipt.ts");
     const root = await realpath(await mkdtemp(join(tmpdir(), "hire-allocation-api-")));
@@ -138,10 +138,7 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
       );
       service = await createClankieApp({
         captain,
-        authenticateOperator: async (req) =>
-          req.headers.get("authorization") === "Bearer fixture-owner"
-            ? { operatorId: "fixture-owner" }
-            : undefined,
+        authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "fixture-owner" }),
       });
       const ledgerPath = join(stateDir, "herdr-watches.json.project-hires.json"),
         ledger = new ProjectHires(ledgerPath);

@@ -112,7 +112,10 @@ export interface TrustedOperatorIdentity {
   operatorId: string;
   steerSourceLane?: "tui" | "api";
 }
-export type OperatorAuthenticator = (request: Request) => Promise<TrustedOperatorIdentity | undefined>;
+export type OperatorAuthenticator = ((request: Request) => Promise<TrustedOperatorIdentity | undefined>) & {
+  /** Host-only witness captured before asynchronous authentication; never supplied by a caller. */
+  readonly readFence?: (request: Request) => { assertCurrent(): void };
+};
 
 interface PairingOfferPublisher {
   protectPairingOffer?(offer: StoredPairingOffer): ReturnType<typeof pairingOfferWire>;

@@ -1,4 +1,8 @@
-import { resolveOperatorCredential, type CredentialStore } from "@clankie/credential-broker";
+import {
+  resolveOperatorCredential,
+  operatorCredentialReadFence,
+  type CredentialStore,
+} from "@clankie/credential-broker";
 import {
   createBearerAuthenticator,
   type OperatorAuthenticator,
@@ -21,7 +25,7 @@ export interface CredentialBackedOperatorAuthenticatorOptions {
 export function createCredentialBackedOperatorAuthenticator(
   options: CredentialBackedOperatorAuthenticatorOptions,
 ): OperatorAuthenticator {
-  return async (request) => {
+  const authenticate: OperatorAuthenticator = async (request) => {
     try {
       const credential = await resolveOperatorCredential({
         env: options.env ?? process.env,
@@ -34,4 +38,22 @@ export function createCredentialBackedOperatorAuthenticator(
       return undefined;
     }
   };
+  return Object.assign(authenticate, {
+    readFence(request: Request) {
+      const fence = operatorCredentialReadFence(options);
+      const header = request.headers.get("authorization");
+      const operatorId = options.identity.operatorId;
+      return {
+        assertCurrent() {
+          if (
+            request.signal.aborted ||
+            request.headers.get("authorization") !== header ||
+            options.identity.operatorId !== operatorId
+          )
+            throw new Error("Operator authentication context changed");
+          fence.assertCurrent();
+        },
+      };
+    },
+  });
 }
