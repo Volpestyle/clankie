@@ -25,26 +25,26 @@ prices, release channels, or full command catalogs into those guides.
 
 ## Sources
 
-| Page              | Source                                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`               | `site/index.html`, hand-authored                                                                                                                        |
-| `/get-started/`   | `content/get-started.md`: installation, setup and pairing                                                                                               |
-| `/using-clankie/` | `content/using-clankie.md`: everyday use, memory, making things, and the app                                                                            |
-| `/diy/`           | `content/diy.md`: leads, models, skills, agents, integrations, and extension points                                                                     |
-| `/pokemon-on-stream/` | `content/pokemon-on-stream.md`: An AI that plays Pokémon while you watch and talk, and what the game and viewer need. |
-| `/discord-ai-bot/` | `content/discord-ai-bot.md`: Run your own Discord bot, configure voice and consent, and choose who can ask for work. |
-| `/self-hosted-ai-assistant/` | `content/self-hosted-ai-assistant.md`: Install the free service on your own Mac, choose models and pair your devices. |
-| `/claude-code-and-codex/` | `content/claude-code-and-codex.md`: Prepare native coding workers, brief a lead and follow the work. |
-| `/add-a-machine/` | `content/add-a-machine.md`: Join another computer, approve its folders and access, and check or remove the connection. |
-| `/changelog/` | `content/changelog.md`: Published service releases, with summaries, release notes and downloads. |
-| `/reference/`     | `content/reference.md`: links by task into the canonical library                                                                                        |
-| `/how-it-works/`  | `content/how-it-works.md`, a product-depth digest of [`docs/architecture.md`](../../docs/architecture.md)                                               |
-| `/console/`       | `content/console.md` plus the slash-command literals in `apps/tui/src` and the Workspaces and Operator behavior sections of the TUI README              |
-| `/cli/`           | [`docs/cli.md`](../../docs/cli.md)                                                                                                                      |
-| `/api/`           | [`apps/clankie/openapi.yaml`](../../apps/clankie/openapi.yaml), also served raw at `/api/openapi.yaml`                                                  |
-| `/network/`       | `site/network/index.html` with the route table rendered from [`packages/protocol/src/public-gateway.ts`](../../packages/protocol/src/public-gateway.ts) |
-| `/llms.txt`       | Generated index of the pages above and the repository                                                                                                   |
-| `/llms-full.txt`  | Every page plus `docs/architecture.md`; static pages retain their semantic HTML inside Markdown                                                         |
+| Page                         | Source                                                                                                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                          | `site/index.html`, hand-authored                                                                                                                        |
+| `/get-started/`              | `content/get-started.md`: installation, setup and pairing                                                                                               |
+| `/using-clankie/`            | `content/using-clankie.md`: everyday use, memory, making things, and the app                                                                            |
+| `/diy/`                      | `content/diy.md`: leads, models, skills, agents, integrations, and extension points                                                                     |
+| `/pokemon-on-stream/`        | `content/pokemon-on-stream.md`: An AI that plays Pokémon while you watch and talk, and what the game and viewer need.                                   |
+| `/discord-ai-bot/`           | `content/discord-ai-bot.md`: Run your own Discord bot, configure voice and consent, and choose who can ask for work.                                    |
+| `/self-hosted-ai-assistant/` | `content/self-hosted-ai-assistant.md`: Install the free service on your own Mac, choose models and pair your devices.                                   |
+| `/claude-code-and-codex/`    | `content/claude-code-and-codex.md`: Prepare native coding workers, brief a lead and follow the work.                                                    |
+| `/add-a-machine/`            | `content/add-a-machine.md`: Join another computer, approve its folders and access, and check or remove the connection.                                  |
+| `/changelog/`                | `content/changelog.md`: Published service releases, with summaries, release notes and downloads.                                                        |
+| `/reference/`                | `content/reference.md`: links by task into the canonical library                                                                                        |
+| `/how-it-works/`             | `content/how-it-works.md`, a product-depth digest of [`docs/architecture.md`](../../docs/architecture.md)                                               |
+| `/console/`                  | `content/console.md` plus the slash-command literals in `apps/tui/src` and the Workspaces and Operator behavior sections of the TUI README              |
+| `/cli/`                      | [`docs/cli.md`](../../docs/cli.md)                                                                                                                      |
+| `/api/`                      | [`apps/clankie/openapi.yaml`](../../apps/clankie/openapi.yaml), also served raw at `/api/openapi.yaml`                                                  |
+| `/network/`                  | `site/network/index.html` with the route table rendered from [`packages/protocol/src/public-gateway.ts`](../../packages/protocol/src/public-gateway.ts) |
+| `/llms.txt`                  | Generated index of the pages above and the repository                                                                                                   |
+| `/llms-full.txt`             | Every page plus `docs/architecture.md`; static pages retain their semantic HTML inside Markdown                                                         |
 
 `scripts/build.mjs` copies `site/` to `dist/`, adds the product logo, fills the
 shared header nav into every page, renders Markdown with `marked`, parses the

@@ -52,12 +52,12 @@ for later commands.
 
 Each level includes the levels above it:
 
-| Level | What you allow |
-| ----- | -------------- |
-| `portal` | A connection to talk through; no work on this computer. |
-| `workers` | Hire coding agents into Herdr in approved folders. |
-| `shell` | Also run Clankie's own shell commands on this computer. |
-| `screen` | Also request desktop observation and control, where a supported native helper is available. Screen sessions have their own consent. |
+| Level     | What you allow                                                                                                                      |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `portal`  | A connection to talk through; no work on this computer.                                                                             |
+| `workers` | Hire coding agents into Herdr in approved folders.                                                                                  |
+| `shell`   | Also run Clankie's own shell commands on this computer.                                                                             |
+| `screen`  | Also request desktop observation and control, where a supported native helper is available. Screen sessions have their own consent. |
 
 Start with **workers** for a coding computer. Choose portal if you only want
 the connection; add shell or screen only when you need that kind of work.
@@ -144,7 +144,12 @@ pnpm exec tsx apps/tui/bin/clankie.ts join --help
 pnpm exec tsx apps/tui/bin/clankie.ts join --gateway https://YOUR_GATEWAY --host HOST_ID --directory 'C:\Projects\my-project'
 ```
 
-Approve the same Windows folder on the home computer, quoting it there too.
+Approve the same Windows folder on the home computer, quoting it there too:
+
+```sh
+clankie join approve CODE --access workers --directory 'C:\Projects\my-project'
+```
+
 Use `pnpm exec tsx apps/tui/bin/clankie.ts` in place of `clankie` for status,
 resume and leave on a source-only PC. Screen access additionally needs the
 [native screen setup](https://github.com/Volpestyle/clankie/blob/main/docs/desktop-control.md#lend-a-joined-screen);
@@ -152,14 +157,14 @@ a screen-level approval by itself does not make it ready to drive.
 
 ## If it does not connect or hire
 
-| What you see | What to check |
-| ------------ | ------------- |
-| Code expired | Start a new join and approve its new code within five minutes. |
+| What you see           | What to check                                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Code expired           | Start a new join and approve its new code within five minutes.                                                                         |
 | New joins are disabled | Ask the owner to check `clankie machines legacy-joins`; this setting controls new outbound joins too. Existing approvals keep working. |
-| Computer disconnected | Keep join or resume running, and check the gateway and the home computer's connection. |
-| Access refused | Read the machine's diagnosis. The owner must approve the required level; a worker cannot raise its own access. |
-| Folder refused | Use an offered, approved folder. To change that consent, leave and join again. |
-| Agent does not start | Open that harness locally, check its sign-in and Herdr, then read the hire's refusal before retrying. Do not resend an uncertain hire. |
+| Computer disconnected  | Keep join or resume running, and check the gateway and the home computer's connection.                                                 |
+| Access refused         | Read the machine's diagnosis. The owner must approve the required level; a worker cannot raise its own access.                         |
+| Folder refused         | Use an offered, approved folder. To change that consent, leave and join again.                                                         |
+| Agent does not start   | Open that harness locally, check its sign-in and Herdr, then read the hire's refusal before retrying. Do not resend an uncertain hire. |
 
 ## Existing SSH connections
 
