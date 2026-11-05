@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { FileCredentialStore } from "@clankie/credential-broker";
@@ -117,4 +117,19 @@ it("reports a copy that predates tool reporting as needing a refresh", async () 
   expect(report.catalog.claude).toEqual({ reported: false, missing: [] });
   expect(report.catalog.refreshNeeded).toBe(true);
   expect(report.catalog.reason).toMatch(/^Claude's worker bridge predates tool reporting on studio;/u);
+});
+
+it("names only list_report_leads when a cached seat-tools module predates that tool", async () => {
+  const { report } = await inspect(async (worker) => {
+    const path = join(worker, "bin", "seat-tools.mjs");
+    const source = await readFile(path, "utf8");
+    const start = source.indexOf("\nexport const REPORT_LEADS_TOOL = {");
+    expect(start).toBeGreaterThan(0);
+    await writeFile(path, source.slice(0, start));
+  });
+  expect(report.catalog.refreshNeeded).toBe(true);
+  expect(report.catalog.claude).toEqual({ reported: true, missing: ["list_report_leads"] });
+  expect(report.catalog.reason).toBe(
+    "Claude's worker bridge lacks list_report_leads on studio; hires there fail until `clankie herdr prepare studio` refreshes it.",
+  );
 });

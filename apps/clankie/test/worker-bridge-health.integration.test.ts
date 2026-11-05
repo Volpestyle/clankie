@@ -24,6 +24,12 @@ import { SeatEfficiencyStore } from "../src/captain/seat-efficiency.ts";
 import { FleetReportFailureAlerts } from "../src/captain/fleet-review.ts";
 import { SeatOutbox } from "../src/captain/seat-outbox.ts";
 import { ToolCatalogHealthStore } from "../src/captain/tool-catalog-health.ts";
+import {
+  createToolCatalogHealth,
+  type ToolCatalogHealthContext,
+} from "../src/captain/captain-tool-catalog.ts";
+import { FleetChangeClock } from "../src/captain/herdr-fleet-changes.ts";
+import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
 import { FleetSeatToolCatalogSchema } from "@clankie/protocol/tool-catalog";
 
 const decoded = (result: unknown) =>
@@ -484,11 +490,13 @@ it.each([
     const expected = [
       "message_clankie",
       "message_clankie_status",
+      "list_report_leads",
       ...(await f.worker.expectedProjectToolNames("default")),
     ];
+    const session = { source: `herdr:${harness}`, kind: "id" as const, value: "native-session" };
     const identity = {
       paneId: f.pane,
-      occupantId: "native-session",
+      occupantId: occupantIdForHerdrSession(session),
       harness,
       sessionId: "native-session",
       bridge: "worker" as const,
@@ -507,6 +515,39 @@ it.each([
       status: "matched",
       missing: [],
     });
+    // Real bridge output through the captain's recording and live reread path;
+    // only the native harness observation is supplied by this isolated fixture.
+    const health = createToolCatalogHealth({
+      options: { projectHireTools: () => f.worker.expectedProjectToolNames("default") },
+      deps: { herdrAvailable: () => true },
+      herdrRunner: { get: async () => ({ paneId: f.pane, agent: harness, session }) },
+      settings: () => f.settings.load(),
+      conversations: f.conversations,
+      toolCatalogHealth: new ToolCatalogHealthStore(),
+      fleetChanges: new FleetChangeClock(),
+    } as unknown as ToolCatalogHealthContext);
+    const projectTools = await f.worker.expectedProjectToolNames("default");
+    expect(await health.recordNativeToolCatalog(f.pane, report(served), projectTools)).toMatchObject({
+      status: "matched",
+      missing: [],
+    });
+    expect(await health.currentCatalogHealth(identity)).toMatchObject({ status: "matched", missing: [] });
+    const withoutLeads = report(served.filter((name) => name !== "list_report_leads"));
+    expect(await health.recordNativeToolCatalog(f.pane, withoutLeads, projectTools)).toMatchObject({
+      status: "mismatch",
+      missing: ["list_report_leads"],
+    });
+    expect(await health.currentCatalogHealth(identity)).toMatchObject({
+      status: "mismatch",
+      missing: ["list_report_leads"],
+    });
+    const obsolete = await health.recordNativeToolCatalog(
+      f.pane,
+      report([...served, "obsolete_tool"]),
+      projectTools,
+    );
+    expect(obsolete).toMatchObject({ status: "mismatch", missing: [] });
+    expect(obsolete?.detail).toContain("No longer served: obsolete_tool");
     const stale = store.record(
       identity,
       report(served.filter((name) => name !== "review_verdict")),

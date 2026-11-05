@@ -349,7 +349,10 @@ tool catalog after native session start through a trusted plugin module. It uses
 the native server namespace, reports only that session's tools through the pane
 link, and shows a mismatch with one fixing action. The same verdict appears in
 the roster and `clankie doctor`; a live bridge process alone remains separate
-evidence. Operator and worker bridges report independently. Plugin reload,
+evidence. Worker catalog inspection includes the bridge-defined `list_report_leads`
+tool as well as its report, peer, review and evidence tools. A cached copy missing
+that definition still needs a refresh; a current copy is compared with the same
+served catalog in the roster. Operator and worker bridges report independently. Plugin reload,
 clear, resume and compaction trigger a fresh check. No native evidence stays
 explicitly unverified. The original interactive mod also observes the accepted
 catalog every five seconds while idle, after Claude's native MCP
