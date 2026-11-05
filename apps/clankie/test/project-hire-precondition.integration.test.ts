@@ -191,10 +191,26 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
       expect(await readFile(ledgerPath, "utf8")).toBe(history);
       const present = allocate("Pell", join(root, "pane-worktree"));
       ledger.pane(present.id, herdr.pane);
+      const originalPane = (await herdr.cli("pane", "list")).result.panes.find(
+        (pane: { pane_id: string }) => pane.pane_id === herdr.pane,
+      );
+      // This allocation retains a previously observed native occupant, even if
+      // the current pane now shows only its shell. Its handoff must stay held.
+      ledger.observe(present.id, originalPane.terminal_id, "recorded-native-occupant");
       expect(await cli(present.id)).toMatchObject({
         exit: 1,
         result: { state: "refused", detail: expect.stringContaining("still present") },
       });
+      expect(ledger.recoveryCandidate(present.id)?.gone).toBe(false);
+      // Separate shell-only case: no recorded occupant, two observations of
+      // the same real shell, so releasing the allocation remains intentional.
+      const shellOnly = allocate("Shell only", join(root, "shell-only-worktree"));
+      ledger.pane(shellOnly.id, herdr.foreignPane);
+      expect(await cli(shellOnly.id)).toMatchObject({
+        exit: 0,
+        result: { state: "allocation-released", receiptId: shellOnly.id },
+      });
+      expect(ledger.recoveryCandidate(shellOnly.id)?.gone).toBe(true);
       const confirmed = allocate("Confirmed", join(root, "confirmed-worktree"));
       ledger.confirmed(confirmed.id);
       expect(await cli(confirmed.id)).toMatchObject({ exit: 1, result: { state: "refused" } });
