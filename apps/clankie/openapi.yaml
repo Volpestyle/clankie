@@ -5156,7 +5156,12 @@ paths:
         a machine Clankie reaches (a linked machine's also needs its directory grant),
         led by `global-default`, with an optional first `prompt`. Without `machine` and
         `workingDirectory` it returns only `places`; otherwise `started` with `seatId`
-        or `refused` with `detail`. It requires `steer`.
+        or `refused` with `detail`. With `recommend: true`, it instead returns `places`
+        and a read-only `recommendation` (harness, account, machine, checkout and one-line
+        reason, or unavailable). Explicit choices constrain the advice; unknown or stale
+        capacity is never spare. It never launches, even with machine and directory,
+        and cannot be combined with startId. Host readings are advisory, not reserved
+        resources or hire authority. It requires `steer`.
         `app_notes` is the board apps signed in to the connector share (ADR 0301),
         kept in the fleet room. `action: post` takes `text` (up to 2000 characters)
         and answers `posted` with the note; only the relay's captain bearer posts,

@@ -344,6 +344,21 @@ async function startConnectorRelay(
             workingDirectory: "C:\\code\\kh2",
           },
         ];
+        if (request.recommend === true)
+          return {
+            op: "start_agent",
+            schemaVersion: 1,
+            status: "places",
+            places,
+            recommendation: {
+              status: "recommended",
+              ...places[0]!,
+              harness: "codex",
+              account: "default",
+              reason: "Known account capacity and fresh host-reported permits (advisory).",
+              unknown: ["disk"],
+            },
+          };
         if (request.startId !== undefined)
           return {
             op: "start_agent",
@@ -902,6 +917,56 @@ describe("Claude connector MCP endpoint", () => {
         expect(textOf(result)).toContain(JSON.stringify(field));
         expect(relay.seen).toHaveLength(before);
       }
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("carries read-only hire advice and explicit constraints through MCP, relay and the session adapter", async () => {
+    const relay = await startConnectorRelay();
+    const client = await connect(relay.url);
+    try {
+      const result = JSON.parse(
+        textOf(
+          await client.callTool({
+            name: "start_agent",
+            arguments: {
+              recommend: true,
+              machine: "volpe@pc1",
+              workingDirectory: "C:\\code\\kh2",
+              harness: "codex",
+              account: "default",
+            },
+          }),
+        ),
+      );
+      expect(result).toMatchObject({
+        status: "places",
+        recommendation: { status: "recommended", harness: "codex", account: "default", unknown: ["disk"] },
+      });
+      expect(relay.seen.findLast((request) => request.op === "start_agent")).toEqual({
+        op: "start_agent",
+        schemaVersion: 1,
+        appDeviceId: connectorDevice.deviceId,
+        recommend: true,
+        machine: "volpe@pc1",
+        workingDirectory: "C:\\code\\kh2",
+        harness: "codex",
+        account: "default",
+      });
+      const before = relay.seen.length;
+      expect((await client.callTool({ name: "start_agent", arguments: { recommend: "true" } })).isError).toBe(
+        true,
+      );
+      expect(
+        (
+          await client.callTool({
+            name: "start_agent",
+            arguments: { recommend: true, startId: "c5fc048e-1657-4f31-adb5-775350c9bb3d" },
+          })
+        ).isError,
+      ).toBe(true);
+      expect(relay.seen).toHaveLength(before);
     } finally {
       await client.close();
     }

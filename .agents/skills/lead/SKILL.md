@@ -113,6 +113,13 @@ cause unverified, and keep calling it that when you explain it again.
 
 ## Staff and spend
 
+For read-only harness/account/machine advice, use `clankie agents recommend`
+or the connector's `start_agent` with `recommend: true`. It gives one line of
+capacity evidence and starts nothing. Explicit choices constrain the advice;
+unknown and stale readings never count as spare. Confirm the suggested checkout
+and task fit, then hire normally: host-reported capacity reserves nothing and
+does not bypass grants, account budgets or admission.
+
 Staff within the project's worker cap, Started-issue WIP cap, profiles and
 allowed plans and models. A role is a hire profile and a station in the owner's
 world, not a stage in a relay: split work by separable result, never by phase,

@@ -1,9 +1,22 @@
 // Real fleet-capacity reader and protocol projections -> advisory recommender.
-// Account/host fixtures supply observations; connector wiring follows #911.
+// Account/host fixtures supply observations; real HTTP and the CLI reach the service.
 import { hostname } from "node:os";
-import { expect, it } from "vitest";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+import type { AddressInfo } from "node:net";
+import { afterEach, expect, it } from "vitest";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
 import { ClankieSettingsSchema, emptySettings } from "@clankie/settings";
 import {
+  OperatorConversationServiceRequestSchema,
+  OperatorConversationServiceResultSchema,
+  type OperatorConversationServiceRequest,
   FleetCapacitySchema,
   FleetMachineResourceSnapshotSchema,
   HireRecommendationSchema,
@@ -18,6 +31,12 @@ import { hireAdmissionReport } from "../src/captain/hire-admission.ts";
 import { allocateAccounts } from "../src/captain/account-allocation.ts";
 import type { WorkerAccountStatus } from "../src/captain/harness-accounts.ts";
 import { recommendHire } from "../src/captain/hire-recommendation.ts";
+
+const exec = promisify(execFile);
+const cleanups: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close();
+});
 
 type Account = FleetCapacityAccountSource;
 async function fixture() {
@@ -143,7 +162,53 @@ async function fixture() {
       fleet: "pc",
     },
   ];
+  let launches = 0;
+  const requests: OperatorConversationServiceRequest[] = [];
+  const serve = createOperatorService({
+    shutdown: new AbortController(),
+    personas: { ready: async () => {} },
+    settings: async () => settings,
+    deps: { fleets: { remoteWorkspace: async () => granted } },
+    fleetCapacity: (...args: Parameters<ReturnType<typeof createFleetCapacityReader>>) => read()(...args),
+    hireSeat: async () => {
+      launches++;
+      throw Error("A recommendation must never launch");
+    },
+  } as unknown as CreateOperatorServiceContext);
+  const http = createServer(async (req, res) => {
+    try {
+      let body = "";
+      for await (const chunk of req) body += String(chunk);
+      const request = OperatorConversationServiceRequestSchema.parse(JSON.parse(body));
+      requests.push(request);
+      const result = OperatorConversationServiceResultSchema.parse(await serve(request));
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(result));
+    } catch (error) {
+      res.writeHead(500);
+      res.end(String(error));
+    }
+  });
+  http.listen(0, "127.0.0.1");
+  await once(http, "listening");
+  const host = `http://127.0.0.1:${(http.address() as AddressInfo).port}`;
+  const dispatch = async (extra: Record<string, unknown> = {}) => {
+    const response = await fetch(host, {
+      method: "POST",
+      body: JSON.stringify({ op: "start_agent", schemaVersion: 1, recommend: true, ...extra }),
+    });
+    expect(response.status).toBe(200);
+    return OperatorConversationServiceResultSchema.parse(await response.json());
+  };
+  cleanups.push(async () => {
+    http.closeAllConnections();
+    await new Promise<void>((resolve) => http.close(() => resolve()));
+  });
   return {
+    host,
+    dispatch,
+    requests,
+    launches: () => launches,
     accounts,
     seats,
     spare,
@@ -370,4 +435,91 @@ it("never recommends account usage the real hire gate reserves or budgets for ru
     f.spare.remote = allocation.accounts[0]!.sparePerDay;
     expect((await f.advise({ machine: "pc" })).status).toBe(permitted ? "recommended" : "unavailable");
   }
+});
+
+it("exposes read-only advice through API and the shipped CLI without creating a start receipt", async () => {
+  const f = await fixture();
+  expect(await f.dispatch()).toMatchObject({
+    status: "places",
+    recommendation: {
+      status: "recommended",
+      machine: "test@pc",
+      harness: "codex",
+      account: "remote",
+    },
+  });
+  const result = await exec(
+    process.execPath,
+    [
+      "--import",
+      resolve("apps/tui/node_modules/tsx/dist/loader.mjs"),
+      resolve("apps/tui/bin/clankie.ts"),
+      "agents",
+      "recommend",
+      "--machine",
+      "local",
+      "--harness",
+      "claude",
+      "--account",
+      "primary",
+    ],
+    {
+      env: {
+        ...process.env,
+        NODE_ENV: "test",
+        CLANKIE_CAPTAIN_TOKEN: "fixture-token",
+        CLANKIE_CONTROL_PLANE_URL: f.host,
+      },
+      timeout: 30_000,
+    },
+  );
+  expect(JSON.parse(result.stdout)).toMatchObject({
+    status: "recommended",
+    machine: hostname(),
+    harness: "claude",
+    account: "primary",
+  });
+  expect(f.requests.at(-1)).toMatchObject({
+    op: "start_agent",
+    recommend: true,
+    machine: "local",
+    harness: "claude",
+    account: "primary",
+  });
+  const constrained = await f.dispatch({
+    machine: "local",
+    workingDirectory: "/fixture/local",
+    harness: "claude",
+    account: "primary",
+  });
+  expect(constrained).toMatchObject({
+    status: "places",
+    recommendation: { status: "recommended", harness: "claude", account: "primary" },
+  });
+  expect(constrained).not.toHaveProperty("startId");
+  expect(await f.dispatch({ recommend: false })).not.toHaveProperty("recommendation");
+  expect(await f.dispatch({ startId: "e3c9e88c-f9bf-4d33-b140-98d0aa90b4a1" })).toMatchObject({
+    status: "refused",
+  });
+  expect(f.launches()).toBe(0);
+});
+
+it("keeps API constraints and directory grants while declining unknown or budgeted choices", async () => {
+  const f = await fixture();
+  for (const choice of [
+    { machine: "missing" },
+    { workingDirectory: "/not-granted" },
+    { machine: "pc", harness: "claude" },
+    { machine: "local", account: "remote" },
+  ])
+    expect(await f.dispatch(choice)).toMatchObject({ recommendation: { status: "unavailable" } });
+  f.grant(false);
+  expect(await f.dispatch({ machine: "pc" })).toMatchObject({ recommendation: { status: "unavailable" } });
+  f.grant(true);
+  f.spare.remote = null;
+  expect(await f.dispatch({ machine: "pc" })).toMatchObject({ recommendation: { status: "unavailable" } });
+  f.spare.remote = 0.7;
+  f.accounts.pc = [{ ...f.accounts.pc![0]!, budget: { stopAtPercent: 10 } }];
+  expect(await f.dispatch({ machine: "pc" })).toMatchObject({ recommendation: { status: "unavailable" } });
+  expect(f.launches()).toBe(0);
 });

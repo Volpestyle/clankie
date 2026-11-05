@@ -8,7 +8,12 @@ it; none takes precedence over another.
 - **Hire on the owner's machines for building and checking.** Code changes,
   builds, test runs and anything that needs a real checkout, the owner's tools or
   their machines go to a Clankie worker with `start_agent`. Read
-  `fleet_capacity` first and pick the harness, and when it matters the account
+  `fleet_capacity` first. For a suggested harness, account and machine, call
+  `start_agent` with `recommend: true` (or `clankie agents recommend`). It starts
+  nothing, explains its choice in one line, and treats explicit fields as constraints.
+  Unknown or stale capacity is never spare; missing load, disk and context readings
+  stay labelled unknown. Host reports are advisory, not reserved permits or hire
+  authority. Then send the chosen fields in a normal start. Pick the harness, and when it matters the account
   (`account`, a label from `fleet_capacity`), the owner wants spent: an account
   the owner held is never chosen for you, but you may name it as overflow
   ([ADR 0340](../../../../docs/adr/0340-connected-apps-name-the-hire-account.md)).
