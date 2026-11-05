@@ -25,7 +25,12 @@ export function createProjectWorkReader(options: {
       project.workspaces.find((entry) => entry.id === project.trackerRef?.workspaceId) ??
       (project.tracking
         ? project.workspaces.find((entry) => entry.machineId === options.localMachineId)
-        : undefined);
+        : undefined) ??
+      (project.tracking?.repositories.find((repo) => repo.localPath)?.localPath ? {
+        path: project.tracking.repositories.find((repo) => repo.localPath)!.localPath!,
+        machineId: options.localMachineId,
+        platform: process.platform === "win32" ? "windows" : "posix",
+      } : undefined);
     if (
       !workspace ||
       workspace.machineId !== options.localMachineId ||

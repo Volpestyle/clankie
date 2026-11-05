@@ -91,6 +91,10 @@ export async function trackingForge() {
           await git(checkout, ["remote", "set-url", "origin", `https://github.com/${name}.git`]);
           return checkout;
         },
+        async publishLocal(checkout: string) {
+          await git(checkout, ["push", path, "HEAD:refs/heads/main"]);
+          await git(checkout, ["fetch", path, "main:refs/remotes/origin/main"]);
+        },
         async commitGuide(content: string, message: string, checkout: string) {
           await writeFile(join(checkout, file), content);
           await git(checkout, ["add", file]); await git(checkout, ["commit", "-m", message]);

@@ -38,7 +38,7 @@ import { alertRecoveredCrash } from "./crash-report-alert.ts";
 import { assertScratchNetwork, verifyLocalSandbox } from "@clankie/settings";
 import { startLocalCompanionIssuer } from "./local-companion-issuer.ts";
 import { LocalCompanionBoundary } from "./local-companion-boundary.ts";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { createLocalCodexCatalogCoordinator } from "./captain/local-codex-catalog-coordinator.ts";
 import { createWorkerToolRefresh } from "./worker-tool-refresh.ts";
 import { ActivityPlaySource } from "./activity-play-source.ts";
@@ -2425,6 +2425,14 @@ const projectTracking = new ProjectTrackingService(settingsStore, async () => {
     api: githubRestApi({ token: fenced.connection.token }),
     assertCurrent: () => fenced.assertCurrent(),
   };
+}, async (result) => {
+  const fingerprint = createHash("sha256").update(JSON.stringify({ proposed: result.proposed, signals: result.signals })).digest("hex");
+  await captain.requestOwnerAsk("global-default", {
+    kind: "choice", purpose: "decision",
+    prompt: `Review ${result.projectId}'s repository grouping and public/private work tracker. ${result.signals.join("; ").slice(0, 1000)}`,
+    options: [{ label: "Review setting", description: `Use clankie project tracking ${result.projectId}; apply a reviewed selection there.` }, { label: "Keep current setting", description: "No tracker or issue migration is performed by this answer." }],
+    allowFreeform: true, waitingOn: `project ${result.projectId} tracking setting`,
+  }, `project-tracking:${result.projectId}:${fingerprint}`, { exactPublication: true });
 });
 const trackingTimer = setInterval(() => {
   void projectTracking

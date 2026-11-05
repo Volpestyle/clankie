@@ -151,3 +151,17 @@ it("reports an unreadable repository or an unfetched default branch as unknown, 
     reason: "no fetched origin default branch (origin/HEAD, origin/main)",
   });
 });
+
+
+it("retains qualified GitHub issue references without treating bare PR numbers as issue keys", async () => {
+  const { workspace, git, write } = await repository();
+  await write({ "src/input.cpp": 3 });
+  await git("2026-10-12T15:00:00Z", "add", ".");
+  await git("2026-10-12T15:00:00Z", "commit", "-m", "Fix Owner/Product#17 and https://github.com/Owner/Product/issues/18; merge pull request #17; unrelated Other/Repo#17");
+  await git("2026-10-12T15:00:00Z", "push", "-q", "origin", "main");
+  await git("2026-10-12T15:00:00Z", "fetch", "-q", "origin");
+  const result = await readRepositoryChurn(workspace, { since: new Date("2026-10-11T00:00:00Z"), until: new Date("2026-10-14T00:00:00Z") });
+  if (result.state !== "known") throw new Error(result.reason);
+  expect(result.commits[0]!.issueKeys).toEqual(["owner/product#17", "owner/product#18", "other/repo#17"]);
+  expect(result.commits[0]!.issueKeys).not.toContain("#17");
+});

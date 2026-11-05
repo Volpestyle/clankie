@@ -1,3 +1,4 @@
+import { replaceTrackingBlock } from "./project-tracking-guide.ts";
 import { execFile } from "node:child_process";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
@@ -60,6 +61,9 @@ export async function inferProjectTracking(
       }
       if (guides.length !== 1) throw new Error("select exactly one guide with tracking markers");
       const guide = guides[0]!;
+      replaceTrackingBlock(guide.text, "validate markers");
+      // A confirmed setting's generated block is output, never evidence for switching it back.
+      const evidence = project.tracking ? guide.text.replace(/<!-- clankie:tracking -->[\s\S]*?<!-- \/clankie:tracking -->/u, "") : guide.text;
       repositories.push({
         repository,
         visibility: metadata.private ? "private" : "public",
@@ -69,12 +73,12 @@ export async function inferProjectTracking(
       // Explicit destinations carry both the issue store and board. Historical issue keys alone
       // cannot establish the private destination, and never fill a missing board by guessing.
       const github = [
-        ...guide.text.matchAll(
+        ...evidence.matchAll(
           /(Public|Private) work: GitHub issues in `([\w.-]+\/[\w.-]+)`; board (https:\/\/github\.com\/[^\s]+)\./gu,
         ),
       ];
       const linear = [
-        ...guide.text.matchAll(
+        ...evidence.matchAll(
           /(Public|Private) work: Linear team `([^`\n]+)`, project `([^`\n]+)`; board (https:\/\/linear\.app\/[^\s]+)\./gu,
         ),
       ];
@@ -91,6 +95,7 @@ export async function inferProjectTracking(
       );
       if (gh) candidates.push({ backend: "github", ...gh });
       if (lin) candidates.push({ backend: "linear", ...lin });
+      if (!gh && !lin && project.tracking) candidates.push(project.tracking.tracker);
       const recent = await git(["log", "-50", "--format=%s%n%b"]);
       const githubActive =
         /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|\b[\w.-]+\/[\w.-]+#\d+/u.test(recent);
@@ -108,9 +113,10 @@ export async function inferProjectTracking(
           throw new Error("saved tracker source changed");
         savedBackend = (JSON.parse(await readFile(conventionFile, "utf8")) as { backend?: unknown }).backend;
       }
+      const observedBackend = gh ? "github" : lin ? "linear" : project.tracking?.tracker.backend;
       if (
-        (gh && (linearActive || (savedBackend && savedBackend !== "github"))) ||
-        (lin && (githubActive || (savedBackend && savedBackend !== "linear"))) ||
+        (observedBackend === "github" && (linearActive || (!project.tracking && savedBackend && savedBackend !== "github"))) ||
+        (observedBackend === "linear" && (githubActive || (!project.tracking && savedBackend && savedBackend !== "linear"))) ||
         (githubActive && linearActive)
       )
         conflict = true;
@@ -132,7 +138,11 @@ export async function inferProjectTracking(
         "Confirm the repo grouping and both public/private destinations; evidence is missing or disagrees.",
       ],
     };
-  const parsed = ProjectTrackingSchema.safeParse({ repositories, tracker: distinct[0] });
+  const grouped = project.tracking ? [
+    ...project.tracking.repositories.map((saved) => repositories.find((observed) => observed.repository.toLowerCase() === saved.repository.toLowerCase()) ?? saved),
+    ...repositories.filter((observed) => !project.tracking!.repositories.some((saved) => saved.repository.toLowerCase() === observed.repository.toLowerCase())),
+  ] : repositories;
+  const parsed = ProjectTrackingSchema.safeParse({ repositories: grouped, tracker: distinct[0] });
   return parsed.success
     ? { signals, proposed: parsed.data }
     : { signals: [...signals, "The observed targets do not form one valid public/private tracker setting."] };

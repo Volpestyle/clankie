@@ -102,7 +102,7 @@ export async function syncTrackingGuide(input: {
       .parse(await call("GET", `git/blobs/${entry.sha}`));
     const bytes = Buffer.from(blob.content, "base64"),
       text = bytes.toString("utf8");
-    if (!Buffer.from(text).equals(bytes)) throw new Error("tracking_guide_not_utf8");
+    if (bytes.length !== blob.size || bytes.length > 64 * 1024 || !Buffer.from(text).equals(bytes)) throw new Error("tracking_guide_not_utf8");
     const desired = trackingBlock(input.projectId, input.tracking, repo);
     const updated = replaceTrackingBlock(text, desired);
     if (updated === text) {

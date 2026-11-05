@@ -19,9 +19,13 @@ export class ProjectTrackingService {
   private readonly github: () => Promise<Github>;
   private queue = Promise.resolve();
   private closed = false;
-  public constructor(settings: Pick<SettingsStore, "loadFenced" | "update">, github: () => Promise<Github>) {
+  private sweeping = false;
+  private readonly decisions = new Map<string, ProjectTrackingResult>();
+  private readonly onDecision: ((result: ProjectTrackingResult) => Promise<void>) | undefined;
+  public constructor(settings: Pick<SettingsStore, "loadFenced" | "update">, github: () => Promise<Github>, onDecision?: (result: ProjectTrackingResult) => Promise<void>) {
     this.settings = settings;
     this.github = github;
+    this.onDecision = onDecision;
   }
   public run(
     request: ProjectTrackingRequest,
@@ -61,7 +65,8 @@ export class ProjectTrackingService {
     if (request.action === "read") {
       await requireOwner();
       read.assertCurrent();
-      return result;
+      const decision = this.decisions.get(project.id);
+      return decision?.revision === revision ? { ...result, decision: decision.decision, signals: decision.signals, ...(decision.proposed ? { proposed: decision.proposed } : {}) } : result;
     }
     const connection = await this.github();
     const guard = async () => {
@@ -75,16 +80,17 @@ export class ProjectTrackingService {
       const inferred = await inferProjectTracking(project, connection.api);
       await guard();
       result.signals = inferred.signals;
-      if (!inferred.proposed) return result;
-      if (project.tracking)
-        return {
-          ...result,
-          proposed: inferred.proposed,
-          decision:
-            JSON.stringify(project.tracking) === JSON.stringify(inferred.proposed)
-              ? "configured"
-              : "proposal",
-        };
+      if (!inferred.proposed) {
+        const needsDecision = !project.tracking || project.workspaces.length > 0;
+        const decision = { ...result, decision: needsDecision ? "confirmation_required" as const : result.decision };
+        this.decisions.set(project.id, decision);
+        return decision;
+      }
+      if (project.tracking) {
+        const decision = { ...result, proposed: inferred.proposed, decision: JSON.stringify(project.tracking) === JSON.stringify(inferred.proposed) ? "configured" as const : "proposal" as const };
+        this.decisions.set(project.id, decision);
+        return decision;
+      }
       request = {
         action: "apply",
         projectId: request.projectId,
@@ -95,6 +101,7 @@ export class ProjectTrackingService {
     }
     if (request.action === "apply") {
       const selection = request.selection;
+      this.decisions.delete(project.id);
       // Visibility is a live forge fact, not the request's assertion about a private repo.
       for (const repo of selection.repositories) {
         const value = (await connection.api.request("GET", `repos/${repo.repository}`)) as {
@@ -161,21 +168,27 @@ export class ProjectTrackingService {
   }
   /** No tracker switching: existing settings yield proposals only; confirmed guide drift yields PRs. */
   public async sweep(): Promise<void> {
-    const read = await this.settings.loadFenced();
-    for (const project of read.settings.projects.projects) {
-      if (this.closed) return;
-      const revision = createHash("sha256").update(JSON.stringify(project)).digest("hex");
-      await this.run({ action: "infer", projectId: project.id, expectedRevision: revision });
-      const latest = (await this.settings.loadFenced()).settings.projects.projects.find(
-        (p) => p.id === project.id,
-      );
-      if (latest?.tracking)
-        await this.run({
-          action: "sync",
-          projectId: latest.id,
-          expectedRevision: createHash("sha256").update(JSON.stringify(latest)).digest("hex"),
-        });
-    }
+    if (this.sweeping || this.closed) return;
+    this.sweeping = true;
+    try {
+      const read = await this.settings.loadFenced();
+      for (const project of read.settings.projects.projects) {
+        if (this.closed) return;
+        if (!project.tracking && project.workspaces.length === 0) continue;
+        try {
+          const revision = createHash("sha256").update(JSON.stringify(project)).digest("hex");
+          const inferred = await this.run({ action: "infer", projectId: project.id, expectedRevision: revision });
+          // Existing account-free trackers remain usable. This setting's scope is GitHub/Linear.
+          const otherTracker = !project.tracking && inferred.signals.some((signal) => /saved tracker (builtin|markdown|default)/u.test(signal));
+          if (!otherTracker && ["proposal", "confirmation_required"].includes(inferred.decision)) await this.onDecision?.(inferred);
+          const latest = (await this.settings.loadFenced()).settings.projects.projects.find((p) => p.id === project.id);
+          if (latest?.tracking) await this.run({ action: "sync", projectId: latest.id, expectedRevision: createHash("sha256").update(JSON.stringify(latest)).digest("hex") });
+        } catch {
+          // A missing connection or changed project leaves its setting/guides unchanged;
+          // it must not prevent another configured project's independent drift check.
+        }
+      }
+    } finally { this.sweeping = false; }
   }
   public async close(): Promise<void> {
     this.closed = true;

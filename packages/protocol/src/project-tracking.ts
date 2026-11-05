@@ -15,7 +15,7 @@ const GithubBoard = z
   );
 const LinearBoard = z.string().regex(/^https:\/\/linear\.app\/[\w-]+\/project\/[\w-]+(?:\/overview)?\/?$/u);
 const GithubTarget = z.object({ repository: Repository, board: GithubBoard }).strict();
-const LinearTarget = z.object({ team: Text, project: Text, board: LinearBoard }).strict();
+const LinearTarget = z.object({ team: Text.max(64), project: Text.max(200), board: LinearBoard }).strict();
 export const ProjectTrackerSchema = z.discriminatedUnion("backend", [
   z.object({ backend: z.literal("github"), public: GithubTarget, private: GithubTarget }).strict(),
   z.object({ backend: z.literal("linear"), public: LinearTarget, private: LinearTarget }).strict(),
@@ -37,6 +37,13 @@ export const ProjectTrackingSchema = z
   .strict()
   .superRefine((value, context) => {
     const names = value.repositories.map((repo) => repo.repository.toLowerCase());
+    if (value.tracker.backend === "github") {
+      const tracker = value.tracker;
+      for (const audience of ["public", "private"] as const)
+        if (!value.repositories.some((repo) => repo.repository.toLowerCase() === tracker[audience].repository.toLowerCase() && repo.visibility === audience))
+          context.addIssue({ code: "custom", message: "Each issue repository must belong to this project with the matching visibility" });
+    } else if (value.tracker.public.board.replace(/\/overview\/?$|\/$/u, "") === value.tracker.private.board.replace(/\/overview\/?$|\/$/u, ""))
+      context.addIssue({ code: "custom", message: "Public and private work require separate boards" });
     if (new Set(names).size !== names.length)
       context.addIssue({ code: "custom", message: "Repositories must be unique" });
     if (
