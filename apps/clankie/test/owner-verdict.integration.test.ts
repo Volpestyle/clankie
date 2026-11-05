@@ -246,7 +246,7 @@ it("refuses a verdict on unfinished work and on finished work with no proof, lea
   expect(await f.issue(bare.id)).toMatchObject({ stage: "landed" });
 });
 
-it("refuses every hosted and support pairing, which can otherwise write; only the owner's local pairing counts", async () => {
+it("refuses every hosted and support verdict; only the owner's local pairing counts", async () => {
   const root = await mkdtemp(join(tmpdir(), "owner-verdict-devices-"));
   const evidence = trackerEvidence(root);
   const tracker = createLocalTracker({
@@ -358,9 +358,9 @@ it("refuses every hosted and support pairing, which can otherwise write; only th
     });
     expect(await stage(issue.id)).toBe("landed");
   }
-  // Hosted pairings, and a support mint that lost its grant id, can write as the app: only the
-  // owner-app rule keeps them from the verdict.
-  for (const deviceId of ["hosted-operator", "visitor", "support-mint"]) {
+  // A hosted owner still makes ordinary edits, but cannot give the owner's verdict.
+  {
+    const deviceId = "hosted-operator";
     const { issue, bundle } = await finished(`Not for ${deviceId}`);
     expect(
       await sync(deviceId, {
@@ -369,16 +369,45 @@ it("refuses every hosted and support pairing, which can otherwise write; only th
         operations: [{ name: "save_comment", arguments: { issueId: issue.id, body: "Seen" } }],
       }),
       deviceId,
-    ).toMatchObject({ result: { outcome: "applied" } });
+    ).toMatchObject({ status: 200, result: { outcome: "applied" } });
     expect(await sync(deviceId, verdict(`${deviceId}-verdict`, issue.id, bundle.id)), deviceId).toMatchObject(
       {
+        status: 200,
         result: { outcome: "refused", reason: "owner_app_required" },
       },
     );
     expect(await stage(issue.id), deviceId).toBe("landed");
   }
+  // The shared owner decision also withholds ordinary writes from these principals.
+  // Both requests must stop at admission and leave the tracker unchanged.
+  for (const deviceId of ["visitor", "support-mint"]) {
+    const { issue, bundle } = await finished(`Not for ${deviceId}`);
+    const beforeEvents = await tracker.call("list_issue_events", { issueId: issue.id });
+    const beforeAudit = await tracker.call("list_audit_events", { limit: 250 });
+    expect(
+      await sync(deviceId, {
+        action: "transaction",
+        idempotencyKey: `${deviceId}-comment`,
+        operations: [{ name: "save_comment", arguments: { issueId: issue.id, body: "Seen" } }],
+      }),
+      deviceId,
+    ).toMatchObject({ status: 401, error: "owner_required" });
+    expect(await sync(deviceId, verdict(`${deviceId}-verdict`, issue.id, bundle.id)), deviceId).toMatchObject(
+      {
+        status: 401,
+        error: "owner_required",
+      },
+    );
+    expect(await stage(issue.id), deviceId).toBe("landed");
+    expect(await tracker.call("list_comments", { issueId: issue.id }), deviceId).toMatchObject({
+      comments: [],
+    });
+    expect(await tracker.call("list_issue_events", { issueId: issue.id }), deviceId).toEqual(beforeEvents);
+    expect(await tracker.call("list_audit_events", { limit: 250 }), deviceId).toEqual(beforeAudit);
+  }
   const { issue, bundle } = await finished("For the owner");
   expect(await sync("owner", verdict("owner-verdict", issue.id, bundle.id))).toMatchObject({
+    status: 200,
     result: { outcome: "applied" },
   });
   expect(await stage(issue.id)).toBe("owner-verified");
