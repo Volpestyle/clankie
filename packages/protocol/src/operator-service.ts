@@ -352,6 +352,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     op: z.literal("lead_changes"),
     schemaVersion: z.literal(1),
     appDeviceId: z.string().min(1).max(256).optional(),
+    /** Relay-stamped deadline of the exact authenticated device session, never supplied by a connector. */
+    appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
   }).strict(),
   /** The owner's feed: pending asks and updates, newest first. Owner authority, as the mailbox. */
   FeedListRequestSchema.extend({ op: z.literal("feed_list"), schemaVersion: z.literal(1) }).strict(),

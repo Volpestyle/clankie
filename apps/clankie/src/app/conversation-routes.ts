@@ -663,6 +663,17 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     if (parsed.success && parsed.data.op === "lead_changes") {
       const request = parsed.data;
       const deviceId = request.appDeviceId;
+      const sessionDeadline =
+        request.appSessionExpiresAt === undefined ? Number.NaN : Date.parse(request.appSessionExpiresAt);
+      const authorityKind = deviceId === undefined ? owner?.principal.kind : "relay";
+      if (authorityKind === undefined) return context.json({ error: "lead_changes_forbidden" }, 403);
+      let authenticationFence: { assertCurrent(): void };
+      try {
+        if (!ctx.dependencies.leadChangesAuthorityFence) throw new Error("Authentication fence unavailable");
+        authenticationFence = ctx.dependencies.leadChangesAuthorityFence(context.req.raw, authorityKind);
+      } catch {
+        return context.json({ error: "lead_changes_unavailable" }, 503);
+      }
       const discovery = ctx.detection.multiplexer("herdr");
       const current = () => {
         if (context.req.raw.signal.aborted || ctx.detection.multiplexer("herdr") !== discovery) return false;
@@ -670,9 +681,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const record = ctx.devices.get(deviceId);
         return (
           ctx.dependencies.captain.leadChangesCurrent?.() === true &&
-          record?.status === "active" &&
-          record.scope === "connector" &&
-          record.grants.steer &&
+          workerReportDevice(record, ctx.clock()) &&
+          ctx.clock().getTime() < sessionDeadline &&
           ctx.detection.served(deviceId)
         );
       };
@@ -727,6 +737,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const finalCheck = () => {
           try {
             publication?.assertCurrent();
+            authenticationFence.assertCurrent();
           } catch {
             throw new LeadChangesRefusal("not_authorized");
           }

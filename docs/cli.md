@@ -2442,7 +2442,9 @@ The service persists the checkpoint privately on the Mac across restarts;
 cursors are authenticated and bound to the caller and current repository and
 Herdr detection scope. They do not grant access. `reset_required` requires a
 fresh bootstrap because retained source or observation history has a gap.
-Invalid, foreign and changed-scope cursors are refused.
+Invalid, foreign and changed-scope cursors are refused. If current visibility
+cannot be proved at publication, no page or cursor is published;
+refusal/unavailability never means that there were no changes.
 
 The connector's `read_changes` MCP tool uses the same operation, `lead_changes`
 on `/operator/v1/dispatch`. Connected apps must be active, served and selected

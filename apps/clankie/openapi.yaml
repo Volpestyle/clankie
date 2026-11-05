@@ -4961,7 +4961,10 @@ paths:
         ask reference and board note facts. Reading never offers/acknowledges a
         report or answers an ask. Connected apps require current served-device
         authority and apps lead mode; report selection remains device-scoped.
-        Private owner question bodies are withheld. Signed cursors persist on
+        Private owner question bodies are withheld. The relay supplies the exact
+        device-session deadline; caller-supplied device or deadline stamps are
+        refused. Unprovable current visibility publishes no page or cursor.
+        Signed cursors persist on
         the Mac and are bound to caller and current visibility scope. Invalid
         cursors or revoked authority return 403; unavailable local state returns
         503. An unavailable source is explicit and never asserts completion.

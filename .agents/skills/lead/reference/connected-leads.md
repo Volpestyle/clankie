@@ -61,7 +61,10 @@ it; none takes precedence over another.
   Drain `more` before waiting; `limit` is 1–100 (default 50), with a 64 KiB page
   budget. The Mac retains the checkpoint across service restarts. Cursors belong
   to the authenticated caller and current repository/detection scope; never share
-  them between devices. `reset_required` means retained history has a gap: start
+  them between devices. If current visibility cannot be proved, the call refuses
+  or is unavailable; that never means an empty inbox and never acknowledges
+  anything. After the owner changes visibility, bootstrap a new scope's cursor.
+  `reset_required` means retained history has a gap: start
   again without `since`. An invalid or foreign cursor is refused.
   Entries carry stable source ids and revisions: deduplicate them and apply the
   latest state, including `resolved`, `superseded` and `unknown`. This is a

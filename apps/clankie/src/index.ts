@@ -1,4 +1,5 @@
 import { createDesktopPermissionCheck } from "./desktop-permission-check.ts";
+import { operatorCredentialReadFence } from "@clankie/credential-broker";
 import { LeadChanges } from "./lead-changes.ts";
 import { joinedFleetResources } from "./joined-fleet-resources.ts";
 import { createMachineFleetResources } from "./machine-fleet-resources.ts";
@@ -303,7 +304,7 @@ import {
   type EvidenceReference,
   type TrackerActor,
 } from "@clankie/work-items";
-import { createAccounts, githubConnection, oauthAppsFrom } from "./accounts.ts";
+import { createAccounts, githubConnection, githubConnectionFenced, oauthAppsFrom } from "./accounts.ts";
 import { ConnectorDetection } from "./app/connector-detection.ts";
 import { CLANKIE_VERSION } from "./app/log.ts";
 
@@ -960,6 +961,7 @@ const workItems = createWorkItemsService({
       : createLocalTracker({ ...builtInTrackerOptions, assertIssueWrite }),
   mcpHost,
   githubConnection: () => githubConnection(operatorCredentialStore),
+  githubConnectionFence: () => githubConnectionFenced(operatorCredentialStore),
   posting: trackerPosting,
   // The captain starts below; until then a read keeps the tracker's own status.
   liveHolders: () => {
@@ -2551,6 +2553,14 @@ const clankie = await createClankieApp({
   discordTurnReceiptPath: join(stateRoot, "discord-turn-receipts.json"),
   seatCallReceiptPath: join(stateRoot, "operator-seat-call-receipts.json"),
   leadChanges: new LeadChanges(join(stateRoot, "lead-changes")),
+  leadChangesAuthorityFence: (_request, kind) =>
+    kind === "operator"
+      ? operatorCredentialReadFence({
+          env: process.env,
+          store: operatorCredentialStore,
+          protectedFirst: true,
+        })
+      : { assertCurrent() {} }, // Relay bearer is fixed for this service lifetime; device currentness uses the registry/session fence.
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
   leadWakes,

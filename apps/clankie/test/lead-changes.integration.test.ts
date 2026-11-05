@@ -13,7 +13,15 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CONNECTOR_GRANTS, LeadChangesResultSchema, type LeadChangesResult } from "@clankie/protocol";
 import { SettingsStore } from "@clankie/settings";
+import {
+  FileCredentialStore,
+  mintOperatorToken,
+  operatorCredentialReadFence,
+} from "@clankie/credential-broker";
+import { githubConnection, githubConnectionFenced } from "../src/accounts.ts";
 import { afterEach, expect, it, vi } from "vitest";
+import { ProjectSchema } from "@clankie/protocol/projects";
+import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { createClankieApp } from "../src/app.ts";
 import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
@@ -77,7 +85,9 @@ afterEach(async () => {
   vi.unstubAllEnvs();
 });
 
-async function fixture() {
+async function fixture(
+  options: { runTtlMs?: number; noAccountFence?: boolean; noAuthorityFence?: boolean } = {},
+) {
   const root = await mkdtemp(join(tmpdir(), "lead-changes-"));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const repo = join(root, "repo");
@@ -233,20 +243,61 @@ async function fixture() {
   });
   const githubUrl = "http://127.0.0.1:" + (github.address() as { port: number }).port;
   let githubConnectionHook: undefined | (() => Promise<void>);
+  const credentials = new FileCredentialStore(join(root, "github-credentials.json"));
+  await credentials.set("github", { type: "api", key: "fixture-github-account-a" });
+  const ownerToken = mintOperatorToken();
+  const operatorEnv: NodeJS.ProcessEnv = {};
+  const operatorCredentials = new FileCredentialStore(join(root, "operator-credentials.json"));
+  await operatorCredentials.set("clankie_operator", { type: "api", key: ownerToken });
+  let workspace = repo;
   const work = createWorkItemsService({
     stateDirectory: join(root, "work"),
-    workspace: () => repo,
-    githubToken: async () => {
-      await githubConnectionHook?.();
-      return "fixture-github-token";
+    workspace: () => workspace,
+    projects: async () => (await settings.read()).projects,
+    projectsFence: async () => {
+      const snapshot = await settings.loadFenced();
+      return { projects: snapshot.settings.projects, assertCurrent: snapshot.assertCurrent };
     },
+    localMachineId: "local",
+    githubConnection: () =>
+      githubConnection(
+        {
+          get: async (provider) => {
+            const captured = await credentials.get(provider);
+            await githubConnectionHook?.();
+            return captured;
+          },
+          update: credentials.update.bind(credentials),
+        },
+        { now: () => now },
+      ),
+    githubConnectionFence: () =>
+      githubConnectionFenced(
+        {
+          ...(options.noAccountFence ? {} : { readFence: credentials.readFence.bind(credentials) }),
+          get: async (provider) => {
+            const captured = await credentials.get(provider);
+            await githubConnectionHook?.();
+            return captured;
+          },
+          update: credentials.update.bind(credentials),
+        },
+        { now: () => now },
+      ),
     githubApiBase: githubUrl,
   });
+  let publicationHook: undefined | (() => Promise<void> | void);
+  const prepareScope = work.prepareLeadChangeScope.bind(work);
+  work.prepareLeadChangeScope = async () => {
+    const fence = await prepareScope();
+    await publicationHook?.();
+    return fence;
+  };
   const detection = new ConnectorDetection();
   const eventLogPath = join(root, "events.jsonl"),
-    sessionKey = randomBytes(32),
-    now = Date.now();
-  const events = ["app-a", "app-b"].flatMap((deviceId) =>
+    sessionKey = randomBytes(32);
+  let now = Date.now();
+  const events = ["app-a", "app-b", "owner-device"].flatMap((deviceId) =>
     [
       {
         type: "device.pairing.redeemed",
@@ -254,15 +305,29 @@ async function fixture() {
           offerId: deviceId,
           name: deviceId,
           platform: "unknown",
-          offeredGrants: CONNECTOR_GRANTS,
+          offeredGrants:
+            deviceId === "owner-device" ? { ...CONNECTOR_GRANTS, terminalControl: true } : CONNECTOR_GRANTS,
           mintedBy: "local-operator",
-          scope: "connector",
+          ...(options.runTtlMs === undefined
+            ? {}
+            : {
+                run: {
+                  runId: "fixture-proof",
+                  purpose: "proof",
+                  expiresAt: new Date(now + options.runTtlMs).toISOString(),
+                },
+              }),
+          ...(deviceId === "owner-device" ? {} : { scope: "connector" }),
           pendingExpiresAt: new Date(now + 60_000).toISOString(),
         },
       },
       {
         type: "device.activated",
-        data: { grants: CONNECTOR_GRANTS, sessionExpiresAt: new Date(now + 3600_000).toISOString() },
+        data: {
+          grants:
+            deviceId === "owner-device" ? { ...CONNECTOR_GRANTS, terminalControl: true } : CONNECTOR_GRANTS,
+          sessionExpiresAt: new Date(now + 3600_000).toISOString(),
+        },
       },
     ].map((event) => ({
       id: randomUUID(),
@@ -323,10 +388,20 @@ async function fixture() {
       workItems: work,
       connectorDetection: detection,
       leadChanges: new LeadChanges(join(root, "changes")),
-      authenticateOperator: async (request) =>
-        request.headers.get("authorization") === "Bearer fixture-owner-token-for-lead-changes"
-          ? { operatorId: "owner" }
-          : undefined,
+      clock: () => new Date(now),
+      ...(options.noAuthorityFence
+        ? {}
+        : {
+            leadChangesAuthorityFence: (_request, kind) =>
+              kind === "operator"
+                ? operatorCredentialReadFence({ store: operatorCredentials, env: operatorEnv })
+                : { assertCurrent() {} },
+          }),
+      authenticateOperator: createCredentialBackedOperatorAuthenticator({
+        store: operatorCredentials,
+        env: operatorEnv,
+        identity: { operatorId: "owner" },
+      }),
       authenticateCaptain: async (request) =>
         request.headers.get("authorization") === "Bearer fixture-relay-token-for-lead-changes"
           ? { captainId: "relay", steerSourceLane: "api" }
@@ -378,10 +453,10 @@ async function fixture() {
   });
   relayUrl = "http://127.0.0.1:" + (relay.address() as { port: number }).port;
   const post = (body: unknown, who = "app-a") =>
-    fetch((who === "owner" ? primaryUrl : relayUrl) + "/operator/v1/dispatch", {
+    fetch((who === "owner" || who === "owner-device" ? primaryUrl : relayUrl) + "/operator/v1/dispatch", {
       method: "POST",
       headers: {
-        authorization: "Bearer " + (who === "owner" ? "fixture-owner-token-for-lead-changes" : token(who)),
+        authorization: "Bearer " + (who === "owner" ? ownerToken : token(who)),
         "content-type": "application/json",
       },
       body: JSON.stringify(body),
@@ -415,6 +490,29 @@ async function fixture() {
     detection,
     githubRequests,
     nativeMethods,
+    credentials,
+    afterScopePrepared: (hook: () => Promise<void> | void) => {
+      publicationHook = hook;
+    },
+    direct: (request: Request) => service.app.fetch(request),
+    operatorCredentials,
+    operatorEnv,
+    ownerToken,
+    settings,
+    clockNow: () => now,
+    advanceClock: (ms: number) => {
+      now += ms;
+    },
+    changeWorkspace: () => {
+      workspace = root;
+    },
+    changeRegistry: async () => {
+      await mkdir(join(root, "work"), { recursive: true });
+      await writeFile(
+        join(root, "work", "work-repos.json"),
+        JSON.stringify({ repos: [{ id: "changed", path: root, name: "Changed" }] }),
+      );
+    },
     hookGithubConnection: (hook: () => Promise<void>) => {
       githubConnectionHook = hook;
     },
@@ -497,7 +595,7 @@ it("reads real stores through signed relay, MCP and CLI without acknowledging or
         PATH: process.env.PATH,
         HOME: f.root,
         NODE_ENV: "test",
-        CLANKIE_OPERATOR_TOKEN: "fixture-owner-token-for-lead-changes",
+        CLANKIE_OPERATOR_TOKEN: f.ownerToken,
         CLANKIE_CONTROL_PLANE_URL: f.primaryUrl,
       },
       timeout: 30_000,
@@ -526,7 +624,7 @@ it("reads real stores through signed relay, MCP and CLI without acknowledging or
           PATH: process.env.PATH,
           HOME: f.root,
           NODE_ENV: "test",
-          CLANKIE_OPERATOR_TOKEN: "fixture-owner-token-for-lead-changes",
+          CLANKIE_OPERATOR_TOKEN: f.ownerToken,
           CLANKIE_CONTROL_PLANE_URL: f.primaryUrl,
         },
         timeout: 30_000,
@@ -671,7 +769,7 @@ it("refuses an in-flight source read after serving or device revocation", async 
   await revokeGate.entered;
   const revoke = await fetch(f.primaryUrl + "/v1/devices/app-a/revoke", {
     method: "POST",
-    headers: { authorization: "Bearer fixture-owner-token-for-lead-changes" },
+    headers: { authorization: "Bearer " + f.ownerToken },
   });
   expect(revoke.status).toBe(200);
   revokeGate.release();
@@ -807,6 +905,214 @@ it("the synchronous publication fence detects an origin changed during scope pre
   const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
   expect(reads).toBe(4);
   expect(changed).toBe(true);
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("a broker reconnect after the last credential read must refuse publication", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read());
+  f.mergePr();
+  let reads = 0,
+    changed = false;
+  cleanupFence.callback = async () => {
+    f.hookLeadStatus(async () => {
+      if (++reads === 4)
+        f.hookGithubConnection(async () => {
+          if (changed) return;
+          changed = true;
+          await f.credentials.set("github", { type: "api", key: "fixture-github-account-b" });
+        });
+    });
+  };
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  const current = await f.credentials.get("github");
+  expect(reads).toBe(4);
+  const replay = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  expect(replay.status).toBe(403);
+  expect(changed).toBe(true);
+  expect(current).toMatchObject({ type: "api", key: "fixture-github-account-b" });
+  expect(response.status).toBe(403);
+});
+it.each([
+  "disconnect",
+  "reconnect_aba",
+  "projects",
+  "registry",
+  "workspace",
+  "origins",
+  "discovery",
+  "served",
+  "lead",
+  "device",
+  "session",
+  "run",
+  "provider_expiry",
+] as const)("fences the %s input after scope preparation", async (input) => {
+  const f = await fixture(input === "run" ? { runTtlMs: 60_000 } : {});
+  if (input === "provider_expiry")
+    await f.credentials.set("github", {
+      type: "oauth",
+      access: "fixture-github-account-a",
+      refresh: "unused",
+      expires: f.clockNow() + 600_000,
+      metadata: { connectionId: "fixture-a", refreshRejectedAt: new Date().toISOString() },
+    });
+  const initial = f.ready(await f.read());
+  let changed = false;
+  f.afterScopePrepared(async () => {
+    changed = true;
+    if (input === "disconnect") await f.credentials.delete("github");
+    if (input === "reconnect_aba") {
+      await f.credentials.set("github", { type: "api", key: "fixture-b" });
+      await f.credentials.set("github", { type: "api", key: "fixture-github-account-a" });
+    }
+    if (input === "projects")
+      await f.settings.update((current) => ({
+        ...current,
+        projects: {
+          ...current.projects,
+          projects: [ProjectSchema.parse({ id: "changed", name: "Changed" })],
+        },
+      }));
+    if (input === "registry") await f.changeRegistry();
+    if (input === "workspace") f.changeWorkspace();
+    if (input === "origins")
+      await exec("git", [
+        "-C",
+        f.repo,
+        "remote",
+        "set-url",
+        "origin",
+        "https://github.com/fixture/other.git",
+      ]);
+    if (input === "discovery") f.detection.setMultiplexer("herdr", false);
+    if (input === "served") f.detection.setServed("app-a", false);
+    if (input === "lead")
+      expect(
+        (await f.post({ op: "lead", schemaVersion: 1, command: { action: "set", lead: "clankie" } }, "owner"))
+          .status,
+      ).toBe(200);
+    if (input === "device")
+      expect(
+        (
+          await fetch(f.primaryUrl + "/v1/devices/app-a/revoke", {
+            method: "POST",
+            headers: { authorization: "Bearer " + f.ownerToken },
+          })
+        ).status,
+      ).toBe(200);
+    if (input === "session") f.advanceClock(3600_001);
+    if (input === "run") f.advanceClock(60_001);
+    if (input === "provider_expiry") f.advanceClock(600_001);
+  });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
+  expect(changed).toBe(true);
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("fences the owner's operator credential through a real broker rotation", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read(undefined, 100, "owner"));
+  let changed = false;
+  f.afterScopePrepared(async () => {
+    changed = true;
+    await f.operatorCredentials.set("clankie_operator", { type: "api", key: mintOperatorToken() });
+  });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next }, "owner");
+  expect(changed).toBe(true);
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("fences cancellation at publication without returning a cursor", async () => {
+  const f = await fixture();
+  const controller = new AbortController();
+  f.afterScopePrepared(() => controller.abort());
+  const response = await f.direct(
+    new Request(f.primaryUrl + "/operator/v1/dispatch", {
+      method: "POST",
+      headers: { authorization: "Bearer " + f.ownerToken, "content-type": "application/json" },
+      body: JSON.stringify({ op: "lead_changes", schemaVersion: 1 }),
+      signal: controller.signal,
+    }),
+  );
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("fails unavailable when the connection source cannot supply a publication witness", async () => {
+  const f = await fixture({ noAccountFence: true });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1 });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "lead_changes_unavailable" });
+});
+
+it("refuses a caller-supplied session deadline stamp", async () => {
+  const f = await fixture();
+  const response = await f.post({
+    op: "lead_changes",
+    schemaVersion: 1,
+    appSessionExpiresAt: new Date(Date.now() + 86400_000).toISOString(),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "lead_changes_app_is_stamped" });
+});
+
+it.each(["expiry", "revocation"] as const)("fences an owner-device %s at publication", async (input) => {
+  const f = await fixture();
+  const initial = f.ready(await f.read(undefined, 100, "owner-device"));
+  let changed = false;
+  f.afterScopePrepared(async () => {
+    changed = true;
+    if (input === "expiry") f.advanceClock(3600_001);
+    else
+      expect(
+        (
+          await fetch(f.primaryUrl + "/v1/devices/owner-device/revoke", {
+            method: "POST",
+            headers: { authorization: "Bearer " + f.ownerToken },
+          })
+        ).status,
+      ).toBe(200);
+  });
+  const response = await f.post(
+    { op: "lead_changes", schemaVersion: 1, since: initial.next },
+    "owner-device",
+  );
+  expect(changed).toBe(true);
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("fences the operator environment source after its final credential read", async () => {
+  const f = await fixture();
+  const initial = f.ready(await f.read(undefined, 100, "owner"));
+  f.afterScopePrepared(() => {
+    f.operatorEnv.CLANKIE_OPERATOR_TOKEN = mintOperatorToken();
+  });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next }, "owner");
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({ error: "not_authorized" });
+});
+
+it("fails unavailable when the host authentication cannot supply a publication witness", async () => {
+  const f = await fixture({ noAuthorityFence: true });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1 });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "lead_changes_unavailable" });
+});
+
+it("fences an absent Git origin becoming configured after preparation", async () => {
+  const f = await fixture();
+  f.changeWorkspace();
+  const initial = f.ready(await f.read());
+  f.afterScopePrepared(async () => {
+    await exec("git", ["init", "--quiet", f.root]);
+    await exec("git", ["-C", f.root, "remote", "add", "origin", "https://github.com/fixture/project.git"]);
+  });
+  const response = await f.post({ op: "lead_changes", schemaVersion: 1, since: initial.next });
   expect(response.status).toBe(403);
   expect(await response.json()).toEqual({ error: "not_authorized" });
 });

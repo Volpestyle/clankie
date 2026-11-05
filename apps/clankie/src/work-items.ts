@@ -391,6 +391,13 @@ export interface WorkItemsServiceOptions {
   readonly githubConnection?: () => Promise<
     { readonly token: string; readonly binding?: string; readonly installUrl?: string } | undefined
   >;
+  /** Capture the canonical broker witness before reading its connection. Required for a publication fence. */
+  readonly githubConnectionFence?: () => Promise<{
+    readonly connection:
+      | { readonly token: string; readonly binding?: string; readonly installUrl?: string }
+      | undefined;
+    readonly assertCurrent: () => void;
+  }>;
   readonly hosted?: boolean;
   /** Test seams; production shells out to git and gh and calls api.github.com. */
   readonly run?: CommandRunner;
@@ -1924,8 +1931,12 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (slug && !repos.some((repo) => repo.slug.toLowerCase() === slug.toLowerCase()))
         repos.push({ id: entry.id, slug });
     }
-    const connection = await githubSnapshot();
+    if (fenced && (options.githubConnection || options.githubToken) && !options.githubConnectionFence)
+      throw new Error("GitHub connection publication cannot be fenced here");
+    const accountFence = fenced ? await options.githubConnectionFence?.() : undefined;
+    const connection = accountFence ? accountFence.connection : await githubSnapshot();
     const assertCurrent = () => {
+      accountFence?.assertCurrent();
       projectFence?.assertCurrent();
       if (fileVersion(registryPath) !== registryVersion || options.workspace?.() !== workspace)
         throw new Error("Saved work repository scope changed");
@@ -1947,6 +1958,9 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
         if (remote !== expected) throw new Error("Project repository scope changed");
       }
       projectFence?.assertCurrent();
+      accountFence?.assertCurrent();
+      if (fileVersion(registryPath) !== registryVersion || options.workspace?.() !== workspace)
+        throw new Error("Saved work repository scope changed");
     };
     return {
       repos,
