@@ -55,6 +55,7 @@ const FLEET_USAGE = [
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
+  "       clankie fleet digest [--json]",
   "       clankie fleet leads [--json]",
   "       clankie fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
   "       clankie fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]",

@@ -202,3 +202,18 @@ and bookkeeping completion are not evidence. A correlated final turn can prove
 an answer without supplying a separate read timestamp. An expired or unknown
 receipt never proves non-delivery and never authorizes a retry. Older hosts may
 refuse receipt opt-in; do not resend an uncertain original without it.
+
+## Owner fleet digest
+
+`clankie fleet digest` (or `--json`) reads the owner's aggregate snapshot at
+`GET /v1/fleet/digest`. It uses the existing changes projections and
+`fleet_capacity`; owner decisions are first. It requires the owner's operator
+credential, not a worker or connector credential. It sends no report, changes
+no decision and acknowledges nothing.
+
+The output deliberately omits private text and identities. Counts do not prove
+work landed: done reports are reports, confirmed closes come from retained
+close history, and current hires are not today's hiring total. PR totals use
+the feed's retained window. Treat `unknown` and partial sources as missing
+evidence. Account burn includes known observations only. For the exact fields
+and UTC-day limits, see the [fleet digest guide](../../../../docs/fleet-digest.md).

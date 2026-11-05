@@ -11601,6 +11601,26 @@ command is sent, and a call that cannot be recorded is refused. The audit stores
 only the digest, but the full command text stays in that conversation's session
 transcript. The digest is a convention, not secrecy.
 
+### `fleet digest [--json]`
+
+Read the owner's aggregate daily fleet digest through `GET /v1/fleet/digest`.
+The default is readable text; `--json` returns the strict snapshot. Owner
+operator authentication is required. Pending owner decisions appear first,
+followed by blocked workers and incomplete source observations.
+
+The digest reuses the changes-feed projections and `fleet_capacity`, with
+confirmed closes from retained fleet history. It contains counts, timestamps
+and availability only: no report/question bodies, worker or PR titles,
+repository identifiers, account labels, credentials, paths or raw errors.
+Missing data stays `unknown`. Today's report/close counts use UTC; current
+hires are not a count of hires made today, and merged PR counts cover the
+feed's retained records rather than an asserted daily merge total.
+
+The read sends nothing, acknowledges nothing, and changes no repository or
+owner decision. It is generated on demand, without a model call or daily
+notification. See [the digest guide](fleet-digest.md) for retention and account
+burn coverage.
+
 ### `fleet leads [--json] [--channels]`
 
 Reads `GET /v1/fleet/leads` through the same owner-only boundary as the roster.

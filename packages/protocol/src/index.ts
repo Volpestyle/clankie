@@ -894,3 +894,5 @@ export * from "./desktop-access.ts";
 export { HireRecommendationSchema, type HireRecommendation } from "./hire-recommendation.ts";
 
 export * from "./agent-message-receipts.ts";
+
+export * from "./fleet-digest.ts";

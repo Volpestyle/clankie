@@ -61,6 +61,7 @@
     "./routines": "./src/routines.ts",
     "./settings-proposals": "./src/settings-proposals.ts",
     "./fleet-leads": "./src/fleet-leads.ts",
+    "./fleet-digest": "./src/fleet-digest.ts",
     "./fleet-roster": "./src/fleet-roster.ts",
     "./fleet-resources": "./src/fleet-resources.ts",
     "./skin-drafts": "./src/skin-drafts.ts",
