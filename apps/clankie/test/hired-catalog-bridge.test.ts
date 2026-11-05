@@ -611,6 +611,7 @@ it("strict client contract: fleet stdio tools/list includes mailbox, peers and c
     assertMcpToolsList(listed, "fleet stdio bridge");
     expect(listed.tools.map((tool) => tool.name)).toEqual([
       "message_clankie",
+      "list_report_leads",
       "message_clankie_status",
       "clankie_tools",
       "clankie_call",

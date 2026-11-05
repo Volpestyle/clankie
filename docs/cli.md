@@ -416,6 +416,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   maximum-trust-mode [status|on|off]
                            Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you (JSON)
   fleet leads [--json]  Read active Clankie and connected app leads
+  fleet report-leads PANE [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
   fleet permits [status | on --user USER [--max-leases N] [--max-hold-minutes M] | off]
                            Owner-only: let one other local account (a CI runner) queue for heavy slots
