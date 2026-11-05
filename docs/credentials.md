@@ -178,7 +178,8 @@ form only when the page, its fields and its form's action are on the exact
 origin the worker named, then retires the tab. The worker reads only `filled`,
 `declined` or `failed` with a reason code. Requests live in the service's
 memory; a restart, or ten minutes without an answer, closes them. Nothing is
-saved yet.
+saved yet, and Chrome's own password manager is off in Clankie's browser.
+That browser has no DevTools port another program could attach to.
 
 ## Local Clankie bearers
 

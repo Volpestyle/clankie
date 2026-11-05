@@ -1,8 +1,10 @@
+import { spawn } from "node:child_process";
 import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import type { CallBrowserToolResult } from "@clankie/protocol";
@@ -38,6 +40,7 @@ const foreignHits: string[] = [];
 let worker: WorkerMcp;
 let mcpSession: string;
 let app: Awaited<ReturnType<typeof createClankieApp>>["app"];
+const intruders: Array<{ kill(): boolean }> = [];
 
 const form = (action = "/session", method = "post") =>
   `<form method="${method}" action="${action}"><input id="user" name="user" type="text"><input id="pass" name="pass" type="password"><button>Sign in</button></form>`;
@@ -126,6 +129,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterAll(async () => {
+  for (const intruder of intruders) intruder.kill();
   await host?.close();
   siteA?.close();
   siteB?.close();
@@ -192,14 +196,49 @@ const fields = [
   { kind: "username", selector: "#user" },
   { kind: "password", selector: "#pass" },
 ];
+/** A separate process of the owner's user going straight at the browser (fixtures/devtools-intruder.mjs). */
+async function startIntruder(sealedTab: string, copied: string[]) {
+  const child = spawn(
+    process.execPath,
+    [
+      join(import.meta.dirname, "fixtures/devtools-intruder.mjs"),
+      join(root, "state", "browser", "profile"),
+      sealedTab,
+      ...copied,
+    ],
+    { stdio: ["pipe", "pipe", "inherit"] },
+  );
+  intruders.push(child);
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  const next = async () => JSON.parse((await lines.next()).value as string);
+  const { held } = (await next()) as { held: number };
+  return {
+    held,
+    go: () => child.stdin.write("go\n"),
+    async stop() {
+      child.stdin.write("stop\n");
+      return (await next()) as { heldOpenAtStop: number; reached: string[]; read: string[] };
+    },
+  };
+}
 
 it("fills an exact-origin form for the owner while the tab is sealed, then hands back a fresh tab", async () => {
   await browse("hire", "browser_use_open", { url: `${a}/login` });
   const sealedTab = await currentTab("hire");
   await browse("other", "browser_use_open", { url: `${a}/home` });
+  // Chrome's password manager logs each save decision here, prompt or not.
+  await browse("pm", "browser_use_open", { url: "chrome://password-manager-internals" });
+  // Machine JavaScript can copy its own endpoint out before a seal.
+  const copied = content(
+    await browse("other", "browser_use_javascript", { code: "console.log(browser.endpoint)" }),
+  ).trim();
+  const intruder = await startIntruder(sealedTab, [copied]);
+  expect(intruder.held).toBeGreaterThan(0);
 
   const pending = await request({ conversation: "hire", origin: a, fields });
   expect(pending.outcome).toBe("pending");
+  // From the seal through the fill, it keeps trying every direct way into the browser.
+  intruder.go();
   expect(pending.note).toContain(`Waiting for sign-in to ${a}`);
 
   // Sealed: nothing reads the tab, and no conversation runs machine JavaScript.
@@ -228,6 +267,10 @@ it("fills an exact-origin form for the owner while the tab is sealed, then hands
   const answered = await owner(["answer", pending.requestId!], [USER, SECRET]);
   expect(answered).toMatchObject({ outcome: "settled", request: { outcome: "filled" } });
   expect(posts).toContain(`user=${USER}&pass=${SECRET}`);
+  expect(await intruder.stop()).toEqual({ heldOpenAtStop: 0, reached: [], read: [] });
+  const decisions = content(await browse("pm", "browser_use_read"));
+  expect(decisions).toContain("Saving disabled");
+  expect(decisions).not.toContain("Show password prompt");
   expect(await request({ requestId: pending.requestId! })).toEqual({
     requestId: pending.requestId,
     outcome: "filled",

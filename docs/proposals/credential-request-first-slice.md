@@ -28,5 +28,10 @@ worker MCP, owner API and CLI, broker and a real Chrome against loopback sign-in
 pages it owns. It covers a fill and fresh-tab handoff; refusal of a wrong
 origin, a redirect to another origin, a form inside another origin's frame and
 a form posting to another origin; refused read-backs while sealed; withdrawn and
-replaced requests; and a decline. It then searches every captured tool result,
-API response, log line and file under its state root for the test secret.
+replaced requests; and a decline. While the request is sealed and filled, a
+separate process keeps trying every direct way into the browser (the profile's
+`DevToolsActivePort`, any port Chrome listens on, and an endpoint a script
+copied out before the seal) and must never reach the sealed tab; Chrome's
+password-manager log must show saving disabled and no prompt. It then searches
+every captured tool result, API response, log line and file under its state
+root for the test secret.

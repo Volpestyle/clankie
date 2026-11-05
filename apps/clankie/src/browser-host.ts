@@ -1,6 +1,6 @@
 /** Clankie's private browser, driven directly through Browser Use Pi's public SDK. */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   Browser,
@@ -21,6 +21,7 @@ import {
   type CallBrowserToolRequest,
   type CallBrowserToolResult,
 } from "@clankie/protocol";
+import { launchPipedChrome, type PipedChrome } from "./browser-pipe.ts";
 import { startBrowserRecording } from "./browser-recording.ts";
 import {
   launchPublicWebChrome,
@@ -187,8 +188,9 @@ export async function createBrowserHost(
   >();
   /** Open credential seals; while any is open, no conversation runs browser JavaScript. */
   let seals = 0;
-  let owner: BrowserUse | undefined;
+  let owner: PipedChrome | undefined;
   let connection: CDP | undefined;
+  /** The host's own endpoint on the pipe; it never leaves this process. */
   let endpoint: string | undefined;
   let headed = false;
   let closing = false;
@@ -264,28 +266,14 @@ export async function createBrowserHost(
         await recoverChrome();
       }
     }
-    await mkdir(profileDir, { recursive: true, mode: 0o700 });
-    owner = await BrowserUse.create({
-      model: "openai/gpt-5.4",
-      streamFn: () => {
-        throw new Error("No nested browser agent");
-      },
-      browser: Browser.chromium({
-        profileDir,
-        headless: !headed,
-        ...(env.CLANKIE_BROWSER_EXECUTABLE ? { executablePath: env.CLANKIE_BROWSER_EXECUTABLE } : {}),
-      }),
-      workspace: join(root, "lifecycle"),
-      telemetry: false,
-      log: false,
+    // DevTools only on a pipe: no port another process of the owner's could reach.
+    owner = await launchPipedChrome({
+      profileDir,
+      headless: !headed,
+      executablePath: env.CLANKIE_BROWSER_EXECUTABLE,
     });
     try {
-      const [port, path] = (await readFile(join(profileDir, "DevToolsActivePort"), "utf8"))
-        .trim()
-        .split("\n");
-      if (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/"))
-        throw new Error("Owned Chrome did not publish its browser endpoint");
-      endpoint = `ws://127.0.0.1:${port}${path}`;
+      endpoint = owner.mint();
       connection = await CDP.connect(endpoint, 15_000);
     } catch (error) {
       await stopChrome();
@@ -429,9 +417,12 @@ export async function createBrowserHost(
     if (!cdp) return undefined;
     // allow-swallowed-rejection -- a tab already gone is retired; the fresh tab is still made.
     await cdp.send("Target.closeTarget", { targetId }).catch(() => undefined);
-    const remaining = await cdp.send("Target.getTargets");
-    if (remaining.targetInfos.some((target) => target.targetId === targetId))
-      throw new Error("credential tab did not close");
+    // closeTarget answers before the tab is gone; wait for it to leave the target list.
+    for (const deadline = Date.now() + 5000; ; await new Promise((resolve) => setTimeout(resolve, 50))) {
+      const remaining = await cdp.send("Target.getTargets");
+      if (!remaining.targetInfos.some((target) => target.targetId === targetId)) break;
+      if (Date.now() > deadline) throw new Error("credential tab did not close");
+    }
     const contexts = lane.contextId ? (await cdp.send("Target.getBrowserContexts")).browserContextIds : [];
     const { targetId: fresh } = await cdp.send("Target.createTarget", {
       url: landing,
@@ -459,6 +450,7 @@ export async function createBrowserHost(
       const sealed = await locked(async () => {
         const targetId = lane.workspace?.currentTarget() ?? lane.resumeTarget;
         if (!connection || !targetId) return { refused: "no_open_tab" };
+        // allow-swallowed-rejection -- a tab that is already gone is refused below, never sealed.
         const info = await connection.send("Target.getTargetInfo", { targetId }).catch(() => undefined);
         if (!info || exactOrigin(info.targetInfo.url) !== origin) return { refused: "wrong_origin" };
         lane.sealed = { targetId };
@@ -472,6 +464,9 @@ export async function createBrowserHost(
           // close() drains the workspace's accepted call before ending its session.
           await workspace.close();
         }
+        // Then end every other client of this Chrome, including any endpoint a
+        // script copied out before the seal: only the host's own reaches the tab.
+        await owner!.revokeExcept([endpoint!]);
         return { targetId, url: info.targetInfo.url };
       });
       if (sealed.refused !== undefined) {
@@ -680,7 +675,8 @@ export async function createBrowserHost(
             await authority?.guard?.();
             if (!current.workspace) {
               const cdp = current.restricted ? publicChrome!.connection : connection!;
-              const cdpUrl = current.restricted ? publicChrome!.endpoint : endpoint!;
+              // Each signed-in workspace gets its own endpoint, which a seal can revoke.
+              const cdpUrl = current.restricted ? publicChrome!.endpoint : owner!.mint();
               // Each restricted conversation also gets its own disposable context in that Chrome.
               if (current.isolated || current.restricted)
                 current.contextId = (
@@ -706,7 +702,7 @@ export async function createBrowserHost(
                 createHash("sha256").update(id).digest("hex"),
                 current.targets,
                 current.contextId,
-                current.restricted ? cdpUrl : undefined,
+                { endpoint: cdpUrl, restricted: current.restricted },
               );
             }
           });
@@ -754,10 +750,10 @@ async function createBrowserWorkspace(
   key: string,
   targets: Set<string>,
   contextId?: string,
-  /** The public-web Chrome's endpoint; set only for turns without machine access. */
-  publicEndpoint?: string,
+  /** Where this workspace's own connection goes; restricted marks the public-web Chrome. */
+  access?: { endpoint: string; restricted: boolean },
 ): Promise<BrowserWorkspace> {
-  const restricted = publicEndpoint !== undefined;
+  const restricted = access?.restricted === true;
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
@@ -839,15 +835,8 @@ async function createBrowserWorkspace(
     });
     try {
       const initial = await session.execute("await page.info()");
-      const [port, path] = publicEndpoint
-        ? []
-        : (await readFile(join(profileDir, "DevToolsActivePort"), "utf8")).trim().split("\n");
-      if (
-        !initial.targetId ||
-        (!publicEndpoint && (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/")))
-      )
-        throw new Error("Owned Chrome did not publish its browser endpoint");
-      connection = await CDP.connect(publicEndpoint ?? `ws://127.0.0.1:${port}${path}`, 15_000);
+      if (!initial.targetId || !access) throw new Error("Owned Chrome did not publish its browser endpoint");
+      connection = await CDP.connect(access.endpoint, 15_000);
       await select(initial.targetId);
       try {
         recordingRequested = (await options.recordSessions?.()) ?? false;
@@ -861,7 +850,7 @@ async function createBrowserWorkspace(
         {
           event: "browser.host.ready",
           provider: "browser-use-pi",
-          profileDir: publicEndpoint ? "public" : profileDir,
+          profileDir: restricted ? "public" : profileDir,
         },
         "browser ready",
       );

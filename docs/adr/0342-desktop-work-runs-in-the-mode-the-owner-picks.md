@@ -254,8 +254,19 @@ withdrawal or expiry returns the untouched tab.
 
 Not built in this slice: the app, pet and Discord cards, saving a login
 ("save for this site" and the `saved` result), `clankie credentials
-list|revoke|log` over saved logins, the guest fill and password managers. Two
-gaps are left for review: any process of the owner's user can still reach the
-private Chrome's DevTools port directly (a pipe transport would close it), and
-Chrome's own password manager in a headed window may offer to save what was
-typed.
+list|revoke|log` over saved logins, the guest fill and password managers.
+
+The private Chrome has no DevTools port: it serves DevTools only on a pipe the
+service holds, and lends it to the service's own clients through a loopback
+WebSocket whose path carries a 256-bit token minted in memory, never in argv,
+the environment or a file
+([`browser-pipe.ts`](../../apps/clankie/src/browser-pipe.ts), the pattern of
+[ADR 0349](0349-playwright-reaches-agent-browser-panes-through-a-guarded-pipe.md)).
+Each client gets its own browser session and sees only the sessions it opened.
+Opening a seal revokes every token but the broker's, so an endpoint a
+machine-authorized script copied out earlier stops working and its sessions end
+before any value is typed. Chrome's password manager and form autofill are off
+in that profile, so Chrome neither offers to save a typed password nor keeps a
+username. Still open: same-user memory inspection of the service or a REPL
+worker (needs debugger rights), and a same-origin page an agent left open
+before the seal (it can still script the sealed tab through the page itself).

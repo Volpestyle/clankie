@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BrowserUse, CDP, Page, CellError, type BrowserUseOptions } from "@browser_use/pi";
+import { BrowserUse, CDP, Page, CellError } from "@browser_use/pi";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { browserEnabled, createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
+import { launchPipedChrome } from "../src/browser-pipe.ts";
 import { startBrowserRecording } from "../src/browser-recording.ts";
 
 vi.mock("../src/browser-recording.ts", () => ({ startBrowserRecording: vi.fn() }));
+vi.mock("../src/browser-pipe.ts", () => ({ launchPipedChrome: vi.fn() }));
 
 const logger = { info: vi.fn(), warn: vi.fn() };
 const jpeg = Buffer.from("test screenshot bytes");
@@ -39,12 +41,14 @@ beforeEach(async () => {
     targetId: "tab-1",
   }));
   stateRoot = await mkdtemp(join(tmpdir(), "clankie-browser-unit-"));
-  vi.spyOn(BrowserUse, "create").mockImplementation(async (options: BrowserUseOptions) => {
-    const browser = options.browser;
-    if (browser && "profileDir" in browser && browser.profileDir)
-      await writeFile(join(browser.profileDir, "DevToolsActivePort"), "1234\n/devtools/browser/test");
-    return { execute, close } as unknown as BrowserUse;
-  });
+  vi.mocked(launchPipedChrome).mockImplementation(async () => ({
+    mint: () => "ws://127.0.0.1:1/devtools/browser/test",
+    revokeExcept: async () => {},
+    close,
+  }));
+  vi.spyOn(BrowserUse, "create").mockImplementation(
+    async () => ({ execute, close }) as unknown as BrowserUse,
+  );
   vi.spyOn(CDP, "connect").mockResolvedValue({
     close: vi.fn(),
     send: vi.fn(async () => ({ targetId: "tab-1", targetInfos: [], browserContextIds: [] })),
@@ -87,6 +91,7 @@ describe("browser host", () => {
       expect.objectContaining({ name: "browser_use_javascript", requiresShell: true }),
     );
     expect(BrowserUse.create).not.toHaveBeenCalled();
+    expect(launchPipedChrome).not.toHaveBeenCalled();
   });
   it("refuses Node execution without host-stamped machine authority, including forged arguments", async () => {
     const current = await build();
@@ -128,16 +133,11 @@ describe("browser host", () => {
       ),
     ).toMatchObject({ content: "useful text ".repeat(6000) });
     await current.call(code(), undefined, { shell: true });
-    expect(BrowserUse.create).toHaveBeenCalledTimes(2);
-    expect(BrowserUse.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        telemetry: false,
-        workspace: join(stateRoot, "browser", "lifecycle"),
-        browser: expect.objectContaining({
-          profileDir: join(stateRoot, "browser", "profile"),
-          headless: true,
-        }),
-      }),
+    expect(BrowserUse.create).toHaveBeenCalledTimes(1);
+    expect(BrowserUse.create).toHaveBeenCalledWith(expect.objectContaining({ telemetry: false }));
+    expect(launchPipedChrome).toHaveBeenCalledTimes(1);
+    expect(launchPipedChrome).toHaveBeenCalledWith(
+      expect.objectContaining({ profileDir: join(stateRoot, "browser", "profile"), headless: true }),
     );
   });
   it("saves screenshots as hash-bound artifacts", async () => {
@@ -159,14 +159,10 @@ describe("browser host", () => {
     await current.call(open(), undefined, machine);
     await current.call(open(true), undefined, machine);
     expect(close).toHaveBeenCalledTimes(2);
-    expect(BrowserUse.create).toHaveBeenCalledWith(
-      expect.objectContaining({ browser: expect.objectContaining({ headless: false }) }),
-    );
+    expect(launchPipedChrome).toHaveBeenCalledWith(expect.objectContaining({ headless: false }));
     await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(4));
     await current.call(open(), undefined, machine);
-    expect(BrowserUse.create).toHaveBeenCalledWith(
-      expect.objectContaining({ browser: expect.objectContaining({ headless: true }) }),
-    );
+    expect(launchPipedChrome).toHaveBeenLastCalledWith(expect.objectContaining({ headless: true }));
   });
   it("drains accepted calls before shutdown and rejects later calls", async () => {
     const current = await build();
@@ -194,7 +190,7 @@ describe("browser host", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
   it("reports missing Chrome as unavailable without crashing service creation", async () => {
-    vi.mocked(BrowserUse.create).mockRejectedValueOnce(new Error("Chrome not found"));
+    vi.mocked(launchPipedChrome).mockRejectedValueOnce(new Error("Chrome not found"));
     const current = await build();
     expect(await current.call(open(), undefined, machine)).toMatchObject({
       outcome: "refused",
@@ -267,6 +263,7 @@ describe("browser host", () => {
       await current.call({ ...open(), arguments: { extraArgs: ["--user-data-dir=/private"] } }),
     ).toMatchObject({ isError: true });
     expect(BrowserUse.create).not.toHaveBeenCalled();
+    expect(launchPipedChrome).not.toHaveBeenCalled();
   });
 });
 
