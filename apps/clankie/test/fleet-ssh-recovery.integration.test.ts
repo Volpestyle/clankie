@@ -1,4 +1,5 @@
-import { execFile, type ExecFileException } from "node:child_process";
+import { execFile, spawn, type ChildProcess, type ExecFileException } from "node:child_process";
+import { once } from "node:events";
 import { FileCredentialStore } from "@clankie/credential-broker";
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -325,6 +326,67 @@ it("streams a 32 KB finite POSIX command without expanding the SSH control reque
   expect(await shell(remoteProgramCommand("posix", "fixtureprobe", [text]))).toContain('"accepted":true');
   expect((await f.programs()).at(-1)?.args).toEqual([text]);
   expect((await f.ssh()).at(-1)?.command).toBe("sh -s");
+});
+
+it("does not discover a closed link from buffered SSH output", async () => {
+  const f = await fixture();
+  let child: ChildProcess | undefined;
+  const notice = Promise.withResolvers<void>();
+  const buffered: unknown[][] = [];
+  let release = () => {};
+  const pending: Promise<string>[] = [];
+  const shell = createFleetShellRun(fleet, { controlDirectory: f.controlDirectory });
+  const links = new FleetLinks({
+    spawn: ((...args: Parameters<typeof spawn>) => {
+      child = spawn(...args);
+      const output = child.stderr!;
+      const emit = output.emit.bind(output);
+      let holding = true;
+      output.emit = ((event: string | symbol, ...values: unknown[]) => {
+        if (event === "data" && holding) {
+          buffered.push(values);
+          notice.resolve();
+          return true;
+        }
+        return emit(event, ...values);
+      }) as typeof output.emit;
+      release = () => {
+        holding = false;
+        for (const values of buffered) emit("data", ...values);
+      };
+      return child;
+    }) as typeof spawn,
+    shell:
+      () =>
+      (...args) => {
+        const command = shell(...args);
+        pending.push(command);
+        return command;
+      },
+  });
+  linksToClose.push(links);
+  links.start([fleet], 4567);
+  const forward = child!;
+  // Keep the real fixture SSH process's allocation notice buffered until the
+  // link is closed, then deliver it as an already-queued native stream event.
+  await notice.promise;
+  const closed = once(forward, "close");
+  links.close();
+  // The following fixture has its own PATH and journal. A stale discovery
+  // must not run in that later environment or displace its POSIX command.
+  const next = await fixture();
+  const posixFleet: HerdrFleet = { ...fleet, ssh: { ...fleet.ssh, shell: "posix" } };
+  const nextShell = createFleetShellRun(posixFleet, { controlDirectory: next.controlDirectory });
+  const text = "x".repeat(32_768);
+  expect(await nextShell(remoteProgramCommand("posix", "fixtureprobe", [text]))).toContain('"accepted":true');
+  release();
+  await closed;
+  await Promise.allSettled(pending);
+  expect((await f.ssh()).filter((call) => call.kind === "command")).toHaveLength(0);
+  expect((await next.programs()).at(-1)?.args).toEqual([text]);
+  expect((await next.ssh()).at(-1)?.command).toBe("sh -s");
+  expect((await next.ssh()).filter((call) => call.kind === "command")).toHaveLength(1);
+  expect(links.status(fleet.id)).toBeUndefined();
 });
 
 it("does not treat an application's mux-looking stderr as proof it was never dispatched", async () => {

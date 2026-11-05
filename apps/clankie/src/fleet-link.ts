@@ -172,7 +172,7 @@ class FleetLink {
       let failure: string | undefined;
       let port: number | undefined;
       const publish = (allocatedPort: number) => {
-        if (port !== undefined) return;
+        if (this.closed || this.child !== child || port !== undefined) return;
         port = allocatedPort;
         void this.socket()
           .then((socket) => {
@@ -200,6 +200,7 @@ class FleetLink {
       };
       child.stderr?.setEncoding("utf8");
       child.stderr?.on("data", (chunk: string) => {
+        if (this.closed || this.child !== child) return;
         stderr = `${stderr}${chunk}`.slice(-4096);
         const allocated = /Allocated port (\d+) for remote forward/u.exec(stderr);
         if (!allocated) return;
