@@ -274,6 +274,7 @@ export function createSeatDelivery(ctx: SeatDeliveryContext) {
       deliveryOptions = {
         ...previous,
         guard,
+        ...(agentMessage.nativeObservation ? { nativeObservation: agentMessage.nativeObservation } : {}),
         stableReceiptKey: previous?.stableReceiptKey ?? agentMessage.receiptId,
         fence: withCurrent(
           async (agent: import("./herdr-watch.ts").HerdrAgentSnapshot | undefined) => {

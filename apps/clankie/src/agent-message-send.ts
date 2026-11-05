@@ -6,6 +6,8 @@ import type {
 import type { CaptainPort } from "./captain/port.ts";
 import { AgentMessageReceipts } from "./agent-message-receipts.ts";
 import type { AgentMessageReceiptAuthority } from "./agent-message-receipt-service.ts";
+import type { AgentMessageObservations } from "./agent-message-observations.ts";
+import type { NativeMessageObservation } from "./agent-message-dispatch.ts";
 
 /** Reserve an authenticated original before the existing send path; duplicates never enter that path. */
 export async function sendAgentMessageWithReceipt(input: {
@@ -14,6 +16,7 @@ export async function sendAgentMessageWithReceipt(input: {
   receipts: AgentMessageReceipts;
   authorize: () => Promise<AgentMessageReceiptAuthority | undefined>;
   current: () => boolean;
+  observations?: AgentMessageObservations;
 }): Promise<Extract<OperatorConversationServiceResult, { op: "send" }>> {
   const { request, captain, receipts } = input;
   if (!request.receiptRequestId) throw new Error("receipt_request_required");
@@ -103,11 +106,15 @@ export async function sendAgentMessageWithReceipt(input: {
     return { op: "send", schemaVersion: 1, receiptId, result };
   }
   await authorize();
+  let native: NativeMessageObservation | undefined;
   const served = await captain.serveOperatorConversation(request, undefined, undefined, undefined, {
     receiptId,
     binding,
     authorize,
     current: input.current,
+    nativeObservation: (source) => {
+      native = source;
+    },
     delivered: (delivery) => {
       if ("messageId" in delivery && delivery.messageId)
         receipts.bindNativeMessage(receiptId, binding, delivery.messageId);
@@ -125,6 +132,19 @@ export async function sendAgentMessageWithReceipt(input: {
               ? "refused"
               : "uncertain",
       );
+      const originalNative = native;
+      if (
+        delivery.outcome === "delivered" &&
+        originalNative &&
+        originalNative.messageId === delivery.messageId
+      )
+        void input.observations?.start({
+          receiptId,
+          binding,
+          native: originalNative,
+          authorize,
+          current: input.current,
+        });
     },
   });
   if (served.op !== "send") throw new Error("Unexpected send result");

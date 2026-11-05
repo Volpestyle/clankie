@@ -17,6 +17,7 @@ This directory and the module READMEs hold the technical references.
 | [Deploy holds](deploy-holds.md)                          | Timed holds that keep runtime updates off the running service               |
 | [Console](../apps/tui/README.md)                         | Terminal interaction, workspaces, and launcher behavior                     |
 | [Distribution](distribution.md)                          | Installed layout, runtime ownership, release build and verification         |
+| [Agent message receipts](agent-message-receipts.md)      | Original-input progress, timestamps and sender-bound lookup                 |
 | [Fleet digest](fleet-digest.md)                          | Owner attention, current workers, retained activity and aggregate burn      |
 | [Fleet resources](../packages/fleet-resources/README.md) | Shared heavy permits, slot queues and simulator ownership                   |
 | [Credentials](credentials.md)                            | Secret identities, setup, rotation, and authority                           |

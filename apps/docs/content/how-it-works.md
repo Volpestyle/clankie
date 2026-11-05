@@ -51,7 +51,9 @@ closes, pi takes over again.
 fleet through a narrow connector the host serves, signing in with OAuth to your own
 machine ([bring your own lead](/diy/#bring-your-own-lead)). A connected lead can
 be woken at its own webhook. The owner can hand the lead to these apps, which holds
-the built-in lead's own turns until the owner hands it back.
+the built-in lead's own turns until the owner hands it back. Message receipts let
+a connected lead look up proven native handling later without sending again
+([receipt evidence](https://github.com/Volpestyle/clankie/blob/main/docs/agent-message-receipts.md)).
 
 Requests from Discord text or voice run as their own visible threads under
 the built-in lead, several at once, and the answer returns to the room that asked.

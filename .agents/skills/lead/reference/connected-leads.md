@@ -203,6 +203,12 @@ an answer without supplying a separate read timestamp. An expired or unknown
 receipt never proves non-delivery and never authorizes a retry. Older hosts may
 refuse receipt opt-in; do not resend an uncertain original without it.
 
+Progress is observed on the original native connection and input ID while the
+original caller and recipient bindings remain valid. Revocation, expiry, native
+replacement or host shutdown ends that observation. Recorded progress survives
+restart; lookup only reads retained evidence and starts no new observation.
+See [agent message receipts](../../../../docs/agent-message-receipts.md).
+
 ## Owner fleet digest
 
 `clankie fleet digest` (or `--json`) reads the owner's aggregate snapshot at

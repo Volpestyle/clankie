@@ -2701,31 +2701,32 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     promptAnswers,
     detection,
   });
-  const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
-    detection,
-    authorizeOwner: authorizeOwnerSecrets,
-    get app() {
-      return app;
-    },
-    get dependencies() {
-      return dependencies;
-    },
-    get authenticateDevice() {
-      return authenticateDevice;
-    },
-    get devices() {
-      return devices;
-    },
-    get clock() {
-      return clock;
-    },
-    get recordEvent() {
-      return recordEvent;
-    },
-    get promptAnswers() {
-      return promptAnswers;
-    },
-  });
+  const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite, closeReceiptObservations } =
+    registerConversationRoutes({
+      detection,
+      authorizeOwner: authorizeOwnerSecrets,
+      get app() {
+        return app;
+      },
+      get dependencies() {
+        return dependencies;
+      },
+      get authenticateDevice() {
+        return authenticateDevice;
+      },
+      get devices() {
+        return devices;
+      },
+      get clock() {
+        return clock;
+      },
+      get recordEvent() {
+        return recordEvent;
+      },
+      get promptAnswers() {
+        return promptAnswers;
+      },
+    });
 
   mountExtensionRoutes("owner");
 
@@ -2795,7 +2796,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {
-      const closing = [remoteLeads.close(), joinedSeats?.close()];
+      const closing = [remoteLeads.close(), joinedSeats?.close(), closeReceiptObservations()];
       dependencies.modelKeys?.close?.();
       stopBodyRequests();
       clearInterval(supportTimer);

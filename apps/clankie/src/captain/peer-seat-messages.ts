@@ -81,6 +81,10 @@ export function withCurrent<T extends (...args: never[]) => unknown>(
   });
 }
 export interface PeerDeliveryOptions {
+  /** Host-only receipt observation; never decoded from a peer or app request. */
+  readonly nativeObservation?: (
+    source: import("../agent-message-dispatch.ts").NativeMessageObservation,
+  ) => void;
   /** An owner restriction does not turn an operator message into peer output. */
   readonly source?: "operator" | "peer";
   /** Owner send intent, absent for peer messages and automatic delivery. */
