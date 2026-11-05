@@ -87,7 +87,14 @@ export async function createOpenCodeController(input: {
   let acceptedOnce = false;
   let candidate = false;
   let lastAcknowledgment: string | undefined;
-  let activeSend: { messageId: string; text: string; delivery?: "steer" | "queue" | undefined } | undefined;
+  let activeSend:
+    | {
+        messageId: string;
+        text: string;
+        delivery?: "steer" | "queue" | undefined;
+        beforeDispatch?: (() => Promise<boolean>) & CurrentCheck;
+      }
+    | undefined;
   let activeExit:
     | { beforeDispatch?: (() => Promise<boolean>) & CurrentCheck & { readonly assertCurrent?: () => void } }
     | undefined;
@@ -167,6 +174,7 @@ export async function createOpenCodeController(input: {
       return;
     }
     try {
+      let sendAdmission: ((() => Promise<boolean>) & CurrentCheck) | undefined;
       await current();
       if (original !== peer) throw unavailable();
       if (frame.method === "authorize") {
@@ -176,6 +184,10 @@ export async function createOpenCodeController(input: {
           })
           .parse(frame.input).action;
         if (action !== "initialize" && !sessionId) throw unavailable();
+        if (action === "send") {
+          if (!activeSend) throw unavailable();
+          sendAdmission = activeSend.beforeDispatch;
+        }
         if (action === "exit") {
           if (!activeExit || (activeExit.beforeDispatch && !(await activeExit.beforeDispatch())))
             throw unavailable();
@@ -193,6 +205,7 @@ export async function createOpenCodeController(input: {
           activeSend.text !== claim.text
         )
           throw unavailable();
+        sendAdmission = activeSend.beforeDispatch;
         fence.begin(sessionId, {
           sessionId,
           messageId: claim.messageId,
@@ -212,7 +225,17 @@ export async function createOpenCodeController(input: {
       await current();
       if (frame.method === "authorize" && (frame.input as { action?: unknown })?.action === "exit")
         activeExit?.beforeDispatch?.assertCurrent?.();
-      original?.send(JSON.stringify({ id: frame.id, result: true }));
+      if (sendAdmission && !(await sendAdmission())) throw unavailable();
+      // These are permission replies, not acknowledgments: nothing may await
+      // between the retained sender witness and the native admission write.
+      if (
+        sendAdmission?.current?.() === false ||
+        retired ||
+        original !== peer ||
+        original?.readyState !== WebSocket.OPEN
+      )
+        throw unavailable();
+      original.send(JSON.stringify({ id: frame.id, result: true }));
     } catch {
       if (original?.readyState === WebSocket.OPEN)
         original.send(JSON.stringify({ id: frame.id, error: "Control admission refused" }));
@@ -322,8 +345,8 @@ export async function createOpenCodeController(input: {
             outcome: "unavailable",
             detail: "Peer authority changed before native dispatch; nothing was sent.",
           };
-        if (activeSend) throw new Error("Another native dispatch is pending");
-        activeSend = z
+        if (activeSend || fence.pending(sessionId!)) throw new Error("Another native dispatch is pending");
+        const command = z
           .object({
             messageId: MessageId,
             text: z
@@ -334,6 +357,7 @@ export async function createOpenCodeController(input: {
             delivery: z.enum(["steer", "queue"]).optional(),
           })
           .parse(value);
+        activeSend = { ...command, ...(beforeDispatch ? { beforeDispatch } : {}) };
       }
       const id = randomUUID();
       try {

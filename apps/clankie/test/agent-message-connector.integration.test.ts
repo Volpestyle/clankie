@@ -1,3 +1,11 @@
+import { grokReceiptFixture } from "./fixtures/grok-message-receipts.ts";
+import {
+  primeReceiptFixture,
+  codexReceiptFixture,
+  claudeReceiptFixture,
+  externalCodexReceiptFixture,
+} from "./fixtures/native-single-admission-receipts.ts";
+import { openCodeReceiptFixture } from "./fixtures/opencode-message-receipts.ts";
 import { piFixture } from "./fixtures/pi-message-receipts.ts";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { execFile } from "node:child_process";
@@ -69,7 +77,7 @@ const decoded = (value: Awaited<ReturnType<Client["callTool"]>>) => {
   if (value.isError) throw new Error(text);
   return JSON.parse(text);
 };
-async function fixture(pi?: { control: SeatControl; file: string }) {
+async function fixture(pi?: { control: SeatControl; file?: string }) {
   const root = await mkdtemp(join(tmpdir(), "agent-message-connector-"));
   closes.push(() => rm(root, { recursive: true, force: true }));
   vi.stubEnv("HC_SOCKET", join(root, "no-owner-desktop.sock"));
@@ -87,16 +95,18 @@ async function fixture(pi?: { control: SeatControl; file: string }) {
     paneId: "fixture-pane",
     terminalId: "fixture-seat",
     name: "fixture-worker",
-    agent: pi ? "pi" : "claude",
+    agent: pi ? pi.control.ref.harness : "claude",
     status: "idle",
     title: "Receipt fixture",
     workingDirectory: root,
     session: pi
-      ? { source: "herdr:pi", kind: "path", value: pi.file }
+      ? pi.control.ref.harness === "pi"
+        ? { source: "herdr:pi", kind: "path", value: pi.file! }
+        : { source: `herdr:${pi.control.ref.harness}`, kind: "id", value: nativeId }
       : { source: "herdr:claude", kind: "id", value: nativeId },
   });
   const controller: SeatControl = {
-    ref: { harness: pi ? "pi" : "claude", sessionId: nativeId, paneId: "fixture-pane" },
+    ref: { harness: pi ? pi.control.ref.harness : "claude", sessionId: nativeId, paneId: "fixture-pane" },
     status: async () => "idle",
     interrupt: async () => false,
     close: async () => {},
@@ -121,7 +131,7 @@ async function fixture(pi?: { control: SeatControl; file: string }) {
     },
   };
   const adapter: HarnessSeatAdapter = {
-    harness: pi ? "pi" : "claude",
+    harness: pi ? pi.control.ref.harness : "claude",
     start: async () => {
       throw new Error("No hire or model start is permitted");
     },
@@ -841,4 +851,81 @@ it("never persists synthetic native detail or credential canaries, including rep
     ).outcome,
   ).toBe("found");
   expect(JSON.stringify(await f.receiptSnapshot())).not.toContain("PRIVATE_NATIVE_DETAIL_CANARY");
+});
+
+it.each([1, 2] as const)(
+  "rechecks the original sender at each production OpenCode %s reply",
+  async (version) => {
+    for (const phase of ["authorize", "authorize-proof", "claim", "claim-proof", "stable"] as const) {
+      const native = await openCodeReceiptFixture(version);
+      const f = await fixture({ control: native.control }),
+        client = await f.client();
+      native.pauseAt(phase, async () => {
+        expect((await f.revoke()).status).toBe(200);
+      });
+      const result = await client.callTool({
+        name: "message_agent",
+        arguments: { agent: "herdr:" + f.seat.seatId, message: "Native OpenCode admission", receipt: true },
+      });
+      expect(native.admitted()).toBe(phase === "stable" ? 1 : 0);
+      expect(native.positiveReplies()).toEqual(
+        phase === "stable" ? ["authorize", "claim"] : phase.startsWith("claim") ? ["authorize"] : [],
+      );
+      if (phase === "stable") expect(decoded(result).status).toBe("delivered");
+    }
+  },
+);
+
+it.each([
+  ["prime", primeReceiptFixture],
+  ["codex", codexReceiptFixture],
+  ["claude", claudeReceiptFixture],
+  ["grok", grokReceiptFixture],
+] as const)("gates the production %s native admission after preparation", async (_harness, makeNative) => {
+  for (const revoke of [false, true]) {
+    const native = await makeNative(),
+      f = await fixture({ control: native.control }),
+      client = await f.client();
+    if (revoke)
+      native.beforeMutation(async () => {
+        expect((await f.revoke()).status).toBe(200);
+      });
+    const result = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Original must pass its final native admission gate",
+        receipt: true,
+      },
+    });
+    expect(native.admitted()).toBe(revoke ? 0 : 1);
+    if (!revoke) expect(result.isError).not.toBe(true);
+  }
+});
+
+it.each([
+  ["queue", false],
+  ["steer", false],
+  ["queue", true],
+  ["steer", true],
+] as const)("rechecks sender after Codex %s discovery (remote=%s)", async (mode, remote) => {
+  for (const revoke of [false, true]) {
+    const native = await externalCodexReceiptFixture(mode, remote),
+      f = await fixture({ control: native.control }),
+      client = await f.client();
+    if (revoke)
+      native.beforeMutation(async () => {
+        expect((await f.revoke()).status).toBe(200);
+      });
+    const result = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Exact native Codex socket admission",
+        receipt: true,
+      },
+    });
+    expect(native.admitted()).toBe(revoke ? 0 : 1);
+    if (!revoke) expect(result.isError).not.toBe(true);
+  }
 });
