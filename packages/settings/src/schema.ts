@@ -1,6 +1,6 @@
 import { ComputerSettingsSchema } from "@clankie/protocol/desktop-access";
 import { CaptainSeatSchema } from "@clankie/protocol/captain-seat";
-import { WorkTrackerSelectionSchema } from "@clankie/protocol";
+import { WorkTrackerSelectionSchema } from "@clankie/protocol/work-tracker-settings";
 import {
   EvidenceSettingsSchema,
   ForeignHeavyPermitsSettingsSchema,

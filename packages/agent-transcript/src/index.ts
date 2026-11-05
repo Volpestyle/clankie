@@ -20,7 +20,7 @@ import {
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_CONVERSATION_TEXT_MAX,
   OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
-} from "@clankie/protocol";
+} from "@clankie/protocol/transcript-limits";
 
 export interface HerdrAgentSession {
   readonly source: string;

@@ -15,8 +15,8 @@ import { redactSensitiveText } from "@clankie/observability";
 import {
   OPERATOR_CONVERSATION_REF_MAX,
   OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
-  type OperatorSeatSubagents,
-} from "@clankie/protocol";
+} from "@clankie/protocol/transcript-limits";
+import type { OperatorSeatSubagents } from "@clankie/protocol";
 import {
   resolveHerdrSeatTranscriptPath,
   resolveHerdrSeatTranscriptPathAsync,

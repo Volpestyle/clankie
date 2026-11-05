@@ -2,8 +2,12 @@
   "name": "@clankie/protocol",
   "version": "0.1.0",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
+    "./transcript-limits": "./src/transcript-limits.ts",
+    "./agent-work": "./src/agent-work.ts",
+    "./work-tracker-settings": "./src/work-tracker-settings.ts",
     "./canonical-json": "./src/canonical-json.ts",
     "./remote-leads": "./src/remote-leads.ts",
     "./machine-join": "./src/machine-join.ts",

@@ -1,4 +1,4 @@
-import { DEFAULT_CONTROL_PLANE_URL } from "../../bin/pairing-offer.ts";
+import { DEFAULT_CONTROL_PLANE_URL } from "../control-plane-url.ts";
 
 export type Writable = { write(chunk: string): unknown };
 

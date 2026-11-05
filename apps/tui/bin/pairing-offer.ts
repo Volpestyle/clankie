@@ -1,5 +1,6 @@
 import { PairingOfferWireSchema, type PairingOfferRequest, type PairingOfferWire } from "@clankie/protocol";
 import { operatorRequest } from "./operator-request.ts";
+import { DEFAULT_CONTROL_PLANE_URL } from "../src/control-plane-url.ts";
 
 // Narrow client for the device pairing-offer boundary. `clankie pair`
 // requests a short-lived, single-use pairing offer from the clankie service and
@@ -8,7 +9,7 @@ import { operatorRequest } from "./operator-request.ts";
 // redeems the rendered offer against `/v1/pairing/redeem` separately.
 
 /** Default clankie service origin; the pairing route is expected to live here (loopback dev). */
-export const DEFAULT_CONTROL_PLANE_URL = "http://127.0.0.1:4310";
+export { DEFAULT_CONTROL_PLANE_URL } from "../src/control-plane-url.ts";
 
 /** Pairing-offer route on the clankie service. */
 const PAIRING_OFFER_PATH = "/v1/pairing/offer";
