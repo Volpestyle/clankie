@@ -22,7 +22,7 @@ import { createBearerAuthenticator } from "../src/app/http-auth.ts";
 import { DeployHolds } from "../src/deploy-holds.ts";
 import { createLeadWakes } from "../src/lead-wakes.ts";
 import { RuntimeCanary } from "../src/runtime-canary.ts";
-import { createRuntimeHealthSampler } from "../src/runtime-health-sample.ts";
+import { updateWakeHealth } from "./fixtures/update-wake-health.ts";
 import { createRuntimeUpdateRoutes } from "../src/runtime-update-routes.ts";
 
 // How an update ends reaches a lead (ADR 0355), over the real path: the CLI's --notify
@@ -34,12 +34,15 @@ afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
 
-async function fixture() {
+async function fixture(options: { observerPauseMs?: number; sampledPauseMs?: number } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "clankie-update-wake-")));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const updates = join(root, "updates");
   await mkdir(updates, { mode: 0o700 });
-  const runtime = { root, commit: "b".repeat(40), instanceId: randomUUID(), pid: process.pid };
+  const health = await updateWakeHealth(root, options.sampledPauseMs);
+  cleanup.push(() => health.close());
+  const runtime = health.runtime;
+  let observerPause: { from: number; until: number } | undefined;
 
   const received: Array<{ lead: string; kind: string; text: string; reply?: string }> = [];
   let answer = 200;
@@ -78,7 +81,6 @@ async function fixture() {
     },
   } as unknown as RuntimeUpdater;
   const app = new Hono();
-  app.get("/health", (context) => context.json({ ok: true, service: "clankie", runtime }));
   app.route(
     "/",
     createRuntimeUpdateRoutes({
@@ -109,7 +111,17 @@ async function fixture() {
       updatesDirectory: updates,
       runtime,
       holds,
-      sample: createRuntimeHealthSampler({ healthUrl: `${host}/health` }),
+      now: health.now,
+      sample: async () => {
+        const reading = await health.sample();
+        if (options.observerPauseMs && !observerPause) {
+          const from = Date.now();
+          // Native suspension of this observer; the sampled child keeps serving HTTP.
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.observerPauseMs);
+          observerPause = { from, until: Date.now() };
+        }
+        return reading;
+      },
       pressure: () => ({ load1: 0, load15: 0, cores: 8 }),
       alert: async (text) => {
         alerts.push(text);
@@ -140,6 +152,8 @@ async function fixture() {
   };
   return {
     updates,
+    healthReadings: health.readings,
+    observerPause: () => observerPause,
     received,
     warnings,
     alerts,
@@ -206,7 +220,49 @@ it("sends a passed canary to nobody while Clankie leads and no lead was named", 
       timeout: 10_000,
     })
     .toBe("none");
-  expect(readRuntimeUpdate(directory).canary?.state).toBe("passed");
+  const observed = readRuntimeUpdate(directory).canary;
+  expect(observed?.state, observed?.error ?? "canary has no failure reason").toBe("passed");
+  expect(f.received).toEqual([]);
+});
+
+it("a 500 ms observer pause preserves a passed canary on the sampled process timeline", async () => {
+  const f = await fixture({ observerPauseMs: 500 });
+  f.policy({ windowMs: 1000, sampleIntervalMs: 100 });
+  const { directory } = await f.operation({ initiator: { kind: "cli" } });
+  const canary = f.canary();
+  await canary.recover();
+  canary.start();
+  const outcome = join(directory, "lead-wake-outcome.json");
+  await expect
+    .poll(async () => (existsSync(outcome) ? JSON.parse(await readFile(outcome, "utf8")) : undefined), {
+      timeout: 10_000,
+    })
+    .toBe("none");
+  const observed = readRuntimeUpdate(directory).canary;
+  expect(observed?.state, observed?.error ?? "canary has no failure reason").toBe("passed");
+  expect(f.received).toEqual([]);
+  const pause = f.observerPause()!;
+  expect(pause.until - pause.from).toBeGreaterThanOrEqual(500);
+  expect(
+    f.healthReadings.filter(
+      (r) => Date.parse(r.observedAt) >= pause.from && Date.parse(r.observedAt) <= pause.until,
+    ).length,
+  ).toBeGreaterThanOrEqual(2);
+});
+
+it("a genuine 500 ms gap in the sampled process still fails the 300 ms canary budget", async () => {
+  const f = await fixture({ sampledPauseMs: 500 });
+  f.policy({ windowMs: 1000, sampleIntervalMs: 100 });
+  const { directory } = await f.operation({ initiator: { kind: "cli" } });
+  const canary = f.canary();
+  await canary.recover();
+  canary.start();
+  await expect.poll(() => readRuntimeUpdate(directory).canary?.state, { timeout: 10_000 }).toBe("failed");
+  const observed = readRuntimeUpdate(directory).canary;
+  expect(observed?.error).toMatch(
+    /runtime-canary-sampling-gap: \d+ms without verified health \(budget 300ms\)/,
+  );
+  expect(f.healthReadings.some((r) => r.intervalMs >= 500)).toBe(true);
   expect(f.received).toEqual([]);
 });
 
