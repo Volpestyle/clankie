@@ -132,6 +132,8 @@ export interface SessionPlace {
 }
 
 export interface SessionStartRequest {
+  /** Advice only; never launches, even with machine and directory. */
+  readonly recommend?: boolean;
   readonly startId?: string;
   readonly notify?: import("@clankie/protocol/connector").WorkerNotify;
   readonly machine?: string;
@@ -153,6 +155,7 @@ export interface SessionStartRequest {
  * `refused`: inspect detail for the admission or startup failure.
  */
 export interface SessionStartResult {
+  readonly recommendation?: import("@clankie/protocol").HireRecommendation;
   readonly status: "places" | "pending" | "started" | "refused";
   readonly startId?: string;
   readonly id?: string;

@@ -14,6 +14,8 @@ import {
   OperatorAgentNameSchema,
   type OperatorAgentPersona,
   type OperatorAgentRole,
+  OPERATOR_CONVERSATION_DISPATCH_PATH,
+  OperatorConversationServiceResultSchema,
   OperatorConversationServiceRequestSchema,
   WorkerReportPageSchema,
   fleetSeatMessagesPath,
@@ -29,6 +31,7 @@ import { z } from "zod";
 
 const AGENTS_USAGE =
   "Usage: clankie agents contacts\n" +
+  "       clankie agents recommend [--machine ID] [--working-directory PATH] [--harness claude|codex] [--account LABEL]\n" +
   "       clankie agents retire PANE --conversation ID --reason TEXT [--report PATH] [--unlanded-reason TEXT]\n" +
   "       clankie agents keep|unkeep PANE --conversation ID [--reason TEXT]\n" +
   "       clankie agents processes [retire] (local host; own confirmed closed hires only)\n" +
@@ -102,6 +105,38 @@ export async function runAgentsCommand(
     repoRoot?: string;
   } = {},
 ): Promise<unknown> {
+  if (args[0] === "recommend") {
+    const values = flags(args.slice(1), ["--machine", "--working-directory", "--harness", "--account"]);
+    const request = OperatorConversationServiceRequestSchema.parse({
+      op: "start_agent",
+      schemaVersion: 1,
+      recommend: true,
+      ...(values.has("--machine") ? { machine: values.get("--machine") } : {}),
+      ...(values.has("--working-directory") ? { workingDirectory: values.get("--working-directory") } : {}),
+      ...(values.has("--harness") ? { harness: values.get("--harness") } : {}),
+      ...(values.has("--account") ? { account: values.get("--account") } : {}),
+    });
+    const token = await resolveCaptainRouteToken({ env: options.env ?? process.env });
+    const route = createCaptainRouteClient({
+      host: commandHost(options),
+      ...(token ? { captainToken: token } : {}),
+      fetchImpl: (url, init) =>
+        (options.fetchImpl ?? fetch)(url, {
+          ...init,
+          signal: AbortSignal.any([AbortSignal.timeout(12_000), ...(init?.signal ? [init.signal] : [])]),
+        }),
+    });
+    const response = await route.fetch(OPERATOR_CONVERSATION_DISPATCH_PATH, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    if (!response.ok) throw new Error(`Hire recommendation failed with status ${response.status}`);
+    const result = OperatorConversationServiceResultSchema.parse(await response.json());
+    if (result.op !== "start_agent" || result.recommendation === undefined)
+      throw new Error("This service does not support hire recommendations.");
+    return result.recommendation;
+  }
   if (args[0] === "call-receipt") {
     const action = args[1];
     const receiptId = args[2];

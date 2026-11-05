@@ -15,6 +15,7 @@ import {
   LeadWakeResultSchema,
   SeatImageResultSchema,
 } from "./connector.ts";
+import { HireRecommendationSchema } from "./hire-recommendation.ts";
 import { FleetCapacitySchema } from "./fleet-capacity.ts";
 import {
   AppNotesRequestSchema,
@@ -869,6 +870,8 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
        * Without a machine and directory it only names the places it can start.
        */
       op: z.literal("start_agent"),
+      /** Read-only advice; explicit choices constrain it, and nothing starts. */
+      recommend: z.boolean().optional(),
       schemaVersion: z.literal(1),
       channel: z.string().trim().min(1).max(64).optional(),
       /** Read an accepted start; never launches or replays a brief. */
@@ -1673,6 +1676,7 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       /** `places` lists where it can start; `pending` retains the start and original brief under startId; `started` names the new seat; `refused` keeps the service's own detail. A lost answer is transport uncertainty, never an inferred refusal. */
       status: z.enum(["places", "pending", "started", "refused"]),
       places: z.array(StartAgentPlaceSchema).max(256),
+      recommendation: HireRecommendationSchema.optional(),
       seatId: z.string().max(OPERATOR_CONVERSATION_REF_MAX).optional(),
       detail: z.string().max(1200).optional(),
     })

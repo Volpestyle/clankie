@@ -249,6 +249,8 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   access project NAME SERVER [--tool NAME]...
                            Delegate connected MCP tools to a worker (JSON)
   agents contacts          Known agent identities and availability (JSON)
+  agents recommend [--machine ID] [--working-directory PATH] [--harness claude|codex] [--account LABEL]
+                           Read-only capacity advice; explicit choices constrain it; starts nothing
   agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split --mcp-servers NAME,...|inherit]
   agents role NAME|ID ROLE|none [--project PROJECT] | roles | rename NAME|ID NEW_NAME
                            Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)
@@ -2292,6 +2294,22 @@ goes to a Codex computer-use seat, `harness: "codex"` with
 after its project and that, such as `clankie · Worker names`, in the owner's
 app and Herdr; left out, the prompt's first line names it, and with neither it
 is the project alone. Clankie's own hires keep the person names he gives them.
+<a id="hire-recommendations"></a>
+
+For a recommendation without hiring, call `start_agent` with `recommend: true`
+or run `clankie agents recommend [--machine ID] [--working-directory PATH]
+[--harness claude|codex] [--account LABEL]`. The response names a harness,
+account, machine and checkout with one line of evidence. Explicit choices
+constrain it; none is replaced. Only granted checkouts with known positive
+account headroom and spare-per-day, and fresh free full/light permits, qualify.
+Held accounts, usage reserved by the existing hire gate or owner budget, and host low-disk warnings are excluded. Missing context, load
+or disk readings stay labelled unknown; they earn no ranking advantage. No
+qualifying choice returns `unavailable`, never an invented fallback. This is
+advice from host-reported observations: no permits are reserved and the normal
+hire authorization, account and admission checks still apply. Omit `recommend`
+when you send the chosen fields to actually start. Do not combine it with a
+start receipt.
+
 `fleet_capacity` reads what
 the fleet can afford before a hire
 ([ADR 0313](adr/0313-the-connector-can-read-what-the-fleet-can-afford.md)):

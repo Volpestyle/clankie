@@ -134,6 +134,7 @@ const HEADLESS_COMMAND_HELP = [
     nouns: ["agents", "sessions"],
     lines: [
       "  agents contacts          Known agent identities and availability (JSON)",
+      "  agents recommend [--machine ID] [--working-directory PATH] [--harness claude|codex] [--account LABEL]\n                           Read-only capacity advice; explicit choices constrain it; starts nothing",
       "  agents role ROLE --project PROJECT [--harness KIND --model NAME --effort LEVEL --subagent-model NAME --subagent-effort LEVEL --delegation native-first|panes --account LABEL --placement new-tab|split --mcp-servers NAME,...|inherit]\n  agents role NAME|ID ROLE|none [--project PROJECT] | roles | rename NAME|ID NEW_NAME",
       '                           Built-in (planner, builder, ...) or "custom role"; roles lists in use (JSON)',
       "  sessions                 Alias for agents session commands",

@@ -346,10 +346,14 @@ function connectorServer(
         name: "start_agent",
         title: "Start an agent",
         description:
-          "Start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass the first task as prompt; unknown arguments (including brief) are refused before anything starts. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. A lead with no stored webhook is refused with unknown_lead and the names that have one, and nothing starts. list_agents and read_reports show the hire's notify state (not_set, refused or uncertain mean wakes aren't arriving; the reports stay readable). Wakes contain only service-owned facts and the report's kind; a blocked report wakes you at once. Read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
+          "Pass recommend:true for read-only harness/account/machine advice with a one-line reason; explicit choices constrain it, unknown capacity is not spare, and nothing starts. Otherwise start one coding agent (Claude Code or Codex) in a known project's checkout on one of the owner's machines. Pass the first task as prompt; unknown arguments (including brief) are refused before anything starts. Pass notify {lead, ref} to wake your stored lead webhook when it reports or settles; ref identifies your thread. A lead with no stored webhook is refused with unknown_lead and the names that have one, and nothing starts. list_agents and read_reports show the hire's notify state (not_set, refused or uncertain mean wakes aren't arriving; the reports stay readable). Wakes contain only service-owned facts and the report's kind; a blocked report wakes you at once. Read the worker output with read_reports using agent and newest. Clankie leads it like his own hires; list_agents shows it once it's up, and message_agent reaches it. list_places shows the places an agent can start. If the answer says it couldn't tell whether the agent started, check list_agents before trying again. close_agent closes it once it has finished.",
         inputSchema: {
           type: "object" as const,
           properties: {
+            recommend: {
+              type: "boolean",
+              description: "Only recommend a known-capacity choice; never start a worker.",
+            },
             startId: {
               type: "string",
               description:
@@ -982,6 +986,10 @@ function connectorServer(
         return text({ places });
       }
       if (call.params.name === "start_agent") {
+        if (args.recommend !== undefined && typeof args.recommend !== "boolean")
+          return failure("recommend is a boolean.");
+        if (args.recommend === true && args.startId !== undefined)
+          return failure("A recommendation cannot read a start receipt. Omit startId.");
         const harness = optionalString(args.harness);
         if (harness !== undefined && harness !== "claude" && harness !== "codex")
           return failure("harness is claude or codex.");
@@ -1025,6 +1033,7 @@ function connectorServer(
             "notify requires a lead wake name and a 1-128 character ref using letters, digits, dot, underscore, colon or dash.",
           );
         const starting = sessions.start({
+          ...(args.recommend === undefined ? {} : { recommend: args.recommend as boolean }),
           ...(startId === undefined ? {} : { startId }),
           ...(notify.data === undefined ? {} : { notify: notify.data }),
           ...(machine === undefined ? {} : { machine }),
@@ -1037,7 +1046,7 @@ function connectorServer(
         });
         // A hire keeps going after its answer is lost, so a lost answer is not a refusal (ADR 0207).
         const { id, ...started } = await starting.catch((error: unknown) => {
-          if (startNeverRan(error)) throw error;
+          if (args.recommend === true || startNeverRan(error)) throw error;
           throw new StartUncertain(error);
         });
         if (started.status === "refused") return failure(started.detail ?? "Nothing started.");

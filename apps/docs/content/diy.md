@@ -220,7 +220,7 @@ explains provider resolution.
 “Implement this feature with Codex and have a second agent review it.” The
 built-in lead runs on [pi](https://pi.dev); its workers can be Claude Code, Codex,
 Pi, OpenCode, Grok Build, or Prime Agent, within each harness's limits. A connected
-app starts Claude Code or Codex. Install and sign in to the ones you want on the machine
+app starts Claude Code or Codex and can ask for [capacity-based hire advice](/cli/#hire-recommendations) before starting one. Install and sign in to the ones you want on the machine
 that runs them. [Herdr](https://herdr.dev) holds their real terminals, and
 Clankie messages them through each harness's own channel, never by typing into
 the pane.

@@ -1,3 +1,4 @@
+import { recommendHire } from "./hire-recommendation.ts";
 import { ConnectorStarts } from "./connector-starts.ts";
 import { WatchingError } from "../watch.ts";
 import {
@@ -128,6 +129,7 @@ export interface CreateOperatorServiceContext {
   /** What the fleet can afford, from accounts and permits Clankie already tracks (ADR 0313). */
   readonly fleetCapacity?: (
     includeMachineResources?: boolean,
+    includePressure?: boolean,
   ) => Promise<Extract<OperatorConversationServiceResult, { op: "fleet_capacity" }>["result"]>;
   /** One image inside a seated agent's working directory (ADR 0315). */
   readonly seatImage?: (
@@ -1063,6 +1065,12 @@ export function createOperatorService(
           places: places.map(({ place }) => place),
           ...extra,
         }) as const;
+      if (request.recommend === true) {
+        if (request.startId !== undefined)
+          return answer("refused", { detail: "A recommendation cannot read a start receipt. Omit startId." });
+        const capacity = await ctx.fleetCapacity?.(true, true);
+        return { ...answer("places"), recommendation: recommendHire(places, request, capacity) };
+      }
       if (request.machine === undefined || request.workingDirectory === undefined) return answer("places");
       const machine = request.machine.toLowerCase();
       const chosen = places.find(
@@ -1882,7 +1890,7 @@ export function createOperatorService(
   return async function serveOperatorConversation(request, authority, readSignal, leadOwner) {
     if (ctx.shutdown.signal.aborted) throw new ServiceShuttingDownError();
     try {
-      if (request.op === "start_agent") {
+      if (request.op === "start_agent" && request.recommend !== true) {
         const caller =
           request.appDeviceId ??
           `${authority?.principal.kind ?? "operator"}:${authority?.principal.id ?? "local"}`;
