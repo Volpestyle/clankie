@@ -12,6 +12,7 @@ import {
   type HerdrWatchRunner,
 } from "../src/captain/herdr-watch.ts";
 import { HireOwners } from "../src/captain/hire-owners.ts";
+import { conversationAuthorityGuard } from "../src/captain/conversation-owner.ts";
 
 const roots: string[] = [];
 const stores: HerdrWatchStore[] = [];
@@ -549,6 +550,12 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
   const { ProjectHires } = await import("../src/captain/project-hires.ts");
   const { ProjectsSettingsSchema } = await import("@clankie/protocol/projects");
   const f = await fixture();
+  // Controller settlement uses the same retained host authority as production.
+  const guard = conversationAuthorityGuard({
+    owner: { conversationId: "settlement-fixture" },
+    current: () => true,
+    authorize: async () => true,
+  });
   const path = join(f.root, "recovery-watch.json");
   const ledger = new ProjectHires(`${path}.project-hires.json`);
   const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "clankie", name: "Clankie" }] });
@@ -591,15 +598,15 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
     return store;
   };
   const store = open();
-  expect(await store.settleHireReceipt(allocation.id, async () => {}, "release-allocation")).toMatchObject({
+  expect(await store.settleHireReceipt(allocation.id, guard, "release-allocation")).toMatchObject({
     state: "refused",
   });
-  expect(await store.settleHireReceipt(allocation.id, async () => {}, "abandoned")).toMatchObject({
+  expect(await store.settleHireReceipt(allocation.id, guard, "abandoned")).toMatchObject({
     state: "refused",
   });
   inventory = [];
   // Settling the original frees its allocation too, so the place takes a new hire.
-  expect(await store.settleHireReceipt(allocation.id, async () => {}, "abandoned")).toMatchObject({
+  expect(await store.settleHireReceipt(allocation.id, guard, "abandoned")).toMatchObject({
     state: "abandoned",
     receiptId: original.messageId,
     evidence: { journal: "local-host-inventory", pane: { paneId: f.agent.paneId, present: false } },
@@ -612,12 +619,12 @@ it("settles a legacy pane-absent failed start by allocation ID and releases it w
   });
   store.close();
   const restored = open();
-  expect(await restored.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+  expect(await restored.settleHireReceipt(original.messageId, guard, "abandoned")).toMatchObject({
     state: "abandoned",
   });
-  expect(await restored.settleHireReceipt(allocation.id, async () => {}, "release-allocation")).toMatchObject(
-    { state: "allocation-released" },
-  );
+  expect(await restored.settleHireReceipt(allocation.id, guard, "release-allocation")).toMatchObject({
+    state: "allocation-released",
+  });
   expect(censuses).toBeGreaterThanOrEqual(4);
   expect(new ProjectHires(`${path}.project-hires.json`).recoveryCandidate(allocation.id)).toMatchObject({
     gone: true,
@@ -630,6 +637,12 @@ it("settling a failed start whose pane kept only its shell frees its allocation,
   const { ProjectHires } = await import("../src/captain/project-hires.ts");
   const { ProjectsSettingsSchema } = await import("@clankie/protocol/projects");
   const f = await fixture();
+  // Controller settlement uses the same retained host authority as production.
+  const guard = conversationAuthorityGuard({
+    owner: { conversationId: "settlement-fixture" },
+    current: () => true,
+    authorize: async () => true,
+  });
   const path = join(f.root, "shell-watch.json");
   const ledger = new ProjectHires(`${path}.project-hires.json`);
   const settings = ProjectsSettingsSchema.parse({ projects: [{ id: "clankie", name: "Clankie" }] });
@@ -662,7 +675,7 @@ it("settling a failed start whose pane kept only its shell frees its allocation,
   stores.push(store);
   // Another worker in the same directory keeps the place held; the settlement still stands.
   inventory = [shell, { ...f.agent, paneId: "w9:p9", terminalId: "term_other", workingDirectory: f.root }];
-  expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+  expect(await store.settleHireReceipt(original.messageId, guard, "abandoned")).toMatchObject({
     state: "abandoned",
     evidence: { pane: { paneId: f.agent.paneId, present: true, shellPid: 7 } },
     allocationId: allocation.id,
@@ -673,7 +686,16 @@ it("settling a failed start whose pane kept only its shell frees its allocation,
   });
   // Settling the same receipt again, once the directory is clear, frees the place.
   inventory = [shell];
+  // An old async-only caller cannot release the allocation even in a clear
+  // directory. Keep this refusal distinct from the live-worker refusal above.
+  const beforeUnfenced = await readFile(`${path}.project-hires.json`, "utf8");
   expect(await store.settleHireReceipt(original.messageId, async () => {}, "abandoned")).toMatchObject({
+    state: "abandoned",
+    allocationId: allocation.id,
+    detail: expect.stringContaining("authority cannot be fenced"),
+  });
+  expect(await readFile(`${path}.project-hires.json`, "utf8")).toBe(beforeUnfenced);
+  expect(await store.settleHireReceipt(original.messageId, guard, "abandoned")).toMatchObject({
     state: "abandoned",
     allocationId: allocation.id,
     detail: expect.stringContaining("released too"),
