@@ -1,6 +1,9 @@
 # Migration and compatibility inventory
 
 This is the retirement ledger for [#337](https://github.com/Volpestyle/clankie/issues/337).
+The current [real-file proof map](migration-file-coverage.md) records the settings,
+project and conversation source-shape release evidence and kept-reader checks.
+
 The [original source inventory](https://github.com/Volpestyle/clankie/issues/337#issuecomment-6629246987)
 covered 61 paths at `512eeb9a7`. The catalogue below preserves that baseline's
 markers and release notes; it is not evidence that any install has completed
@@ -131,8 +134,8 @@ made obsolete by clean server files. Older-server fallbacks (W6/W12/W16/W19)
 likewise need a supported host-version floor, not a local marker scan.
 
 Remove one area per commit only after its evidence is attached. Preserve the
-strict-schema drop lists (S1/S7/S12): deleting a drop entry can make an otherwise
-readable old file fail validation. Retain migrations introduced after v0.4.11:
+strict-schema drop lists (S1/S7) and the retained policy fields (S12): deleting
+these readers can make an otherwise readable old file fail validation. Retain migrations introduced after v0.4.11:
 that release's files can be the very inputs they upgrade. Hosted-client mode
 and managed-model cleanup remain separately tracked in #150.
 
