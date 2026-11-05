@@ -11,7 +11,7 @@ import { SettingsStore } from "@clankie/settings";
 import { afterEach, expect, it } from "vitest";
 import { createClankieApp, type TrustedOperatorIdentity } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import type { ExecutionConnections } from "../src/herdr-session.ts";
+import { ExecutionConnections } from "../src/herdr-session.ts";
 
 // ADR 0320: setup's one read-only agent looks around, proposes, and only the
 // lines the owner approves run. Watch steps aside for it and comes back.
@@ -133,40 +133,48 @@ async function fixture(options: { spawn?: "spawned" | "failed" } = {}) {
       throw new Error(`unexpected ${request.op}`);
     },
   });
-  // Only the machine boundary is faked: adding a real machine would SSH out.
-  const runtimes = {
-    list: async () => [],
-    connect: async (input: unknown) => {
-      commands.push({ action: "connect_runtime", ...(input as { id: string; session: string }) });
-      return {};
+  // Keep the runtime and machine contracts real, including desktop-access setup.
+  // Only external discovery/probing is stood in; no machine is contacted.
+  const runtimes = new ExecutionConnections({
+    settings,
+    primary: { binding: () => undefined, status: () => "disabled" },
+    run: async () => {
+      throw new Error("Unexpected external machine probe");
     },
-    disconnect: async () => ({}),
-    machines: {
-      list: async () => ({
-        observedAt: new Date().toISOString(),
-        machines: [
-          {
-            id: "desktop",
-            name: "desktop",
-            platform: "linux",
-            transport: "ssh",
-            ssh: "james@desktop",
-            configured: false,
-            state: "available",
-            workerCount: null,
-            sessions: [{ name: "default", state: "available", workerCount: null }],
-          },
-        ],
-      }),
-      add: async (input: { id: string; ssh: string; shell: "posix" | "powershell" }) => {
-        commands.push({ action: "add_machine", ...input });
+    env: { PATH: "/not-installed" },
+  });
+  runtimes.machines.list = async () => ({
+    observedAt: new Date().toISOString(),
+    machines: [
+      {
+        id: "desktop",
+        name: "desktop",
+        platform: "linux",
+        transport: "ssh",
+        ssh: "james@desktop",
+        configured: false,
+        state: "available",
+        workerCount: null,
+        sessions: [{ name: "default", state: "available", workerCount: null }],
       },
-      setAccess: async (id: string, input: { accessLevel: "workers" }) => {
-        commands.push({ action: "set_machine_access", id, accessLevel: input.accessLevel });
-      },
-      remove: async () => undefined,
-    },
-  } as unknown as ExecutionConnections;
+    ],
+  });
+  const addMachine = runtimes.machines.add.bind(runtimes.machines);
+  runtimes.machines.add = async (input) => {
+    const added = await addMachine(input);
+    commands.push({ action: "add_machine", id: added.id, ssh: added.ssh, shell: added.shell });
+    return added;
+  };
+  const setAccess = runtimes.machines.setAccess.bind(runtimes.machines);
+  runtimes.machines.setAccess = async (id, input) => {
+    commands.push({ action: "set_machine_access", id, accessLevel: input.accessLevel });
+    return setAccess(id, input);
+  };
+  const connect = runtimes.connect.bind(runtimes);
+  runtimes.connect = async (input) => {
+    commands.push({ action: "connect_runtime", ...(input as { id: string; session: string }) });
+    return connect(input);
+  };
   const { app } = await createClankieApp({
     captain,
     authenticateOperator: operator,
@@ -262,6 +270,8 @@ it("hires one read-only Claude agent, applies only the approved lines, and goes 
   });
   // The declined machine was never added.
   expect(f.commands).toEqual([{ action: "set_machine_access", id: "local", accessLevel: "workers" }]);
+  expect((await f.settings.load()).machineAccess.local).toBe("workers");
+  expect((await f.settings.load()).machines).toEqual([]);
   expect(f.requests.filter((request) => request.op === "close_seat")).toEqual([
     {
       op: "close_seat",
