@@ -896,7 +896,7 @@ class ClaudeWorkerSeatControl implements SeatControl {
 
   public async answerQuestion(
     answer: import("@clankie/agent-hosts").SeatQuestionAnswer,
-    beforeDispatch?: () => Promise<void>,
+    beforeDispatch?: (() => Promise<void>) & { readonly assertCurrent?: () => void },
     decider?: import("@clankie/agent-hosts").SeatQuestionDecider,
   ): Promise<import("@clankie/agent-hosts").SeatQuestionResult> {
     const agent = await this.deps.agent(this.ref.paneId).catch(() => undefined);

@@ -38,15 +38,21 @@ export function guardedCodexQuestions(
       if (pending?.delivery !== "async") return control.answerQuestion!(answer, guard);
       let receiptId: string | undefined;
       try {
-        const result = await control.answerQuestion!(answer, async () => {
-          await guard?.();
-          // Native validation runs before this guard. Claim once, before any answer input.
-          receiptId ??= fence.begin(key, {
-            fingerprint: deliveryFingerprint(JSON.stringify(answer)),
-            sessionId: control.ref.sessionId,
-            paneId: control.ref.paneId,
-          }).messageId;
-        });
+        const result = await control.answerQuestion!(
+          answer,
+          Object.assign(
+            async () => {
+              await guard?.();
+              // Native validation runs before this guard. Claim once, before any answer input.
+              receiptId ??= fence.begin(key, {
+                fingerprint: deliveryFingerprint(JSON.stringify(answer)),
+                sessionId: control.ref.sessionId,
+                paneId: control.ref.paneId,
+              }).messageId;
+            },
+            { assertCurrent: () => guard?.assertCurrent?.() },
+          ),
+        );
         if (receiptId && result.outcome === "answered")
           fence.complete(key, receiptId, { deliveryStage: "responded" });
         else if (receiptId && (result.outcome === "refused" || result.outcome === "offline"))
@@ -167,6 +173,7 @@ export function externalCodexQuestions(
               throw new Error("Original native turn identity is unavailable; nothing was sent");
             await guard?.();
             await assertCurrent();
+            guard?.assertCurrent?.();
             const text = codexAsyncQuestionAnswer(question, answer);
             const receipt = fence.begin(key, {
               fingerprint: deliveryFingerprint(text),

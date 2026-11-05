@@ -3,6 +3,7 @@
 // into a herdr pane reports each settled turn through `clankie seat-hook`; on
 // a machine linked to his fleet (VUH-1527) it reports over that link instead.
 // A session outside a pane has nothing to report here.
+import { readHookResponse } from "./read-hook-response.mjs";
 import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 import { spawn } from "node:child_process";
@@ -117,7 +118,11 @@ async function reportOverLink(link, pane) {
     const sendHook = (value) =>
       fetch(seatRoute(link, pane, "hook"), {
         method: "POST",
-        headers: { ...authorization(link), "content-type": "application/json" },
+        headers: {
+          ...authorization(link),
+          "content-type": "application/json",
+          accept: "application/x-ndjson",
+        },
         body: JSON.stringify(value),
         signal: AbortSignal.timeout(question ? 570_000 : ordinaryTool ? 2_000 : 20_000),
       });
@@ -158,7 +163,9 @@ async function reportOverLink(link, pane) {
       response = await sendHook(body);
     }
     if (response.ok && (event === "PermissionRequest" || event === "PreToolUse")) {
-      const result = await response.json();
+      const result = await readHookResponse(response, (message) =>
+        process.stderr.write(`clankie-worker: ${message}\n`),
+      );
       if (result.hookOutput) {
         await new Promise((resolve, reject) =>
           process.stdout.write(

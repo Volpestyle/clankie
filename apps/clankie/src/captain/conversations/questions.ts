@@ -13,6 +13,7 @@ import { isDeepStrictEqual } from "node:util";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  WorkerAnswerRefused,
   answerMessage,
   authorizeQuestion,
   QuestionDraftSchema,
@@ -166,6 +167,10 @@ export async function requestQuestion(
           (record.question.status === "pending" || record.workerDelivery)
         );
       });
+      if (existingWorker && existingWorker.watchRouting !== undefined) {
+        existingWorker.watchRouting = context.workerQuestionWatch ? "owner" : undefined;
+        ctx["saveQuestionMeta"](source);
+      }
       if (existingWorker)
         return ctx["questionResult"](
           source,
@@ -196,6 +201,7 @@ export async function requestQuestion(
         }
       : undefined;
   const record: QuestionRecord = {
+    ...(context.workerQuestionWatch && workerQuestion ? { watchRouting: "owner" as const } : {}),
     ...(decisionPolicy ? { decisionPolicy } : {}),
     ...(context.ownerAuthority ? { issuer: { ...context.ownerAuthority.principal } } : {}),
     ...(context.questionBinding?.workspace ? { workspace: { ...context.questionBinding.workspace } } : {}),
@@ -764,6 +770,7 @@ export async function questionOperation(
   authority: QuestionAuthority | undefined,
 ): Promise<ConversationQuestionResult> {
   await authorizeQuestion(authority);
+  await ctx.reconcileWatchQuestions?.();
   expireDecisionQuestions(ctx, request.conversationId);
   let meta = ctx["metas"].get(request.conversationId);
   if (!meta)
@@ -827,6 +834,8 @@ export async function questionOperation(
     return ctx["questionResult"](meta, record, "ready", record ? undefined : "unknown_request");
   if (!record || request.incarnationId !== meta.questions?.incarnationId)
     return ctx["questionResult"](meta, undefined, "refused", "stale_request");
+  if (record.watchRouting === "lead")
+    return ctx["questionResult"](meta, record, "refused", "worker_question_returned_to_lead");
   if (record.projectCreation?.claim)
     return ctx["questionResult"](meta, record, "refused", "project_confirmation_consumed");
   // Authenticated duplicate reconciliation precedes revision checks, never enqueue.
@@ -932,9 +941,30 @@ export async function questionOperation(
       }
       try {
         await authorizeQuestion(authority);
-        await ctx["deliverWorkerAnswer"](record.question, answer, authority!);
+        const target = record;
+        const source = meta;
+        const assertOpen = () => {
+          if (!authority?.assertCurrent) throw new Error("question_owner_unavailable");
+          authority.assertCurrent();
+          if (
+            !authority.current() ||
+            ctx["metas"].get(source.conversationId) !== source ||
+            !source.questions?.records.includes(target) ||
+            target.watchRouting === "lead" ||
+            target.question.status !== "pending" ||
+            target.workerDelivery?.state !== "attempting"
+          )
+            throw new Error("worker_question_not_open_for_owner");
+        };
+        await ctx["deliverWorkerAnswer"](record.question, answer, authority!, assertOpen);
         record.workerDelivery.state = "delivered";
       } catch (error) {
+        if (error instanceof WorkerAnswerRefused) {
+          delete record.workerDelivery;
+          ctx["workerAnswerInFlight"].delete(record.question.requestId);
+          ctx["saveQuestionMeta"](meta);
+          return ctx["questionResult"](meta, record, "refused", "worker_answer_refused");
+        }
         record.workerDelivery.state = "uncertain";
         record.workerDelivery.detail = (error instanceof Error ? error.message : String(error)).slice(
           0,
@@ -950,6 +980,20 @@ export async function questionOperation(
   } else if (answer.kind === "worker")
     return ctx["questionResult"](meta, record, "refused", "invalid_answer");
   if (record.workerDelivery?.state === "uncertain") record.question.reason = "worker_answer_uncertain";
+  if (record.question.workerQuestion && (await ctx.watching?.())) {
+    record.question = {
+      ...record.question,
+      status: "submitted",
+      answer,
+      resolvedAt: new Date().toISOString(),
+      resolvedBy: { ...authority!.principal },
+    };
+    record.responder = { ...authority!.principal };
+    record.message = answerMessage(record.question, answer);
+    ctx["saveQuestionMeta"](meta);
+    ctx["publishQuestionResolution"](meta, record);
+    return ctx["questionResult"](meta, record, "resolved");
+  }
   const message =
     paneMessage ??
     answerMessage(record.question, answer) +

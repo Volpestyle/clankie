@@ -443,7 +443,7 @@ export class ClaudeHookQuestions {
   async answer(
     ref: SeatRef,
     answer: SeatQuestionAnswer,
-    beforeDispatch?: () => Promise<void>,
+    beforeDispatch?: (() => Promise<void>) & { readonly assertCurrent?: () => void },
     decider?: SeatQuestionDecider,
   ): Promise<SeatQuestionResult> {
     const parsed = SeatQuestionAnswerSchema.safeParse(answer);
@@ -488,6 +488,7 @@ export class ClaudeHookQuestions {
     pending.answering = true;
     try {
       await beforeDispatch?.();
+      beforeDispatch?.assertCurrent?.();
       if (this.requests.get(String(answer.requestId)) !== pending)
         return { outcome: "refused", detail: "native_question_already_resolved_or_unknown" };
       if (

@@ -1,3 +1,4 @@
+import { readHookResponse } from "../../../../integrations/claude-plugin/worker/bin/read-hook-response.mjs";
 import { randomUUID } from "node:crypto";
 import { seatIdentity } from "./seat-identity.ts";
 import { isAbsolute } from "node:path";
@@ -120,7 +121,11 @@ export async function runSeatHookCommand(
   const sendHook = (value: FleetSeatHook) =>
     (options.fetchImpl ?? fetch)(new URL(fleetSeatHookPath(paneId), commandHost({ ...options, env })), {
       method: "POST",
-      headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+      headers: {
+        authorization: `Bearer ${credential.token}`,
+        "content-type": "application/json",
+        accept: "application/x-ndjson",
+      },
       body: JSON.stringify(value),
       signal: AbortSignal.timeout(question ? 570_000 : ordinaryTool ? 2_000 : 10_000),
     });
@@ -147,9 +152,9 @@ export async function runSeatHookCommand(
   if (response.status === 404) return 0;
   if (!response.ok) throw new Error(`Seat hook was refused (${response.status})`);
   if (event === "PermissionRequest" || event === "PreToolUse") {
-    const result = (await response.json()) as {
-      hookOutput?: { hookSpecificOutput: unknown; requestId?: string };
-    };
+    const result = await readHookResponse(response, (message) =>
+      process.stderr.write(`clankie: ${message}\n`),
+    );
     if (result.hookOutput) {
       const output = JSON.stringify({ hookSpecificOutput: result.hookOutput.hookSpecificOutput }) + "\n";
       if (options.stdout) options.stdout.write(output);

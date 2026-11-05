@@ -7,7 +7,7 @@ export async function escalateWorkerQuestion(
   conversationId: string,
   seatId: string,
   question: SeatQuestion,
-  admission: { current: () => boolean; authorize: () => Promise<boolean> },
+  admission: { current: () => boolean; authorize: () => Promise<boolean>; workerQuestionWatch?: boolean },
 ): Promise<void> {
   const result = await store.requestSurfaceQuestion(
     conversationId,

@@ -267,6 +267,15 @@ On each watch wake and periodic round, check **every seat you own**
 `working` pane can be working on the wrong thing.
 
 - **On task**: work matches the accepted assignment and owned paths.
+- **Watch questions**: while `autonomy.watch` is on, open native worker questions
+  go to the owner's feed, including one you were answering when Watch started.
+  Do not deliver into a lead seat or answer as the lead. The authenticated owner
+  answers that exact still-open question through `input_list` / `input_answer`
+  (`clankie input list` / `clankie input answer`) while Watch stays on. Existing
+  machine ceilings and native first-answer checks remain. When Watch ends,
+  questions the current policy lets the lead answer return to that conversation;
+  the old owner card refuses, and no second native ask is created. The held
+  Claude hook tells the worker its route. An uncertain answer is never resent.
 - **Reporting**: a result left only in the pane is a delivery fault to repair,
   not to resend elsewhere. Answer a worker's question with `message_seat`; an
   answer in the owner's chat never reaches it.
