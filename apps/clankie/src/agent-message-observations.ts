@@ -20,8 +20,8 @@ export class AgentMessageObservations {
     this.receipts = receipts;
   }
 
-  public start(input: Observation): void {
-    if (this.closed || this.active.has(input.receiptId) || !input.current()) return;
+  public start(input: Observation): Promise<void> | undefined {
+    if (this.closed || this.active.has(input.receiptId)) return;
     const abort = new AbortController();
     const current = () => {
       try {
@@ -30,6 +30,7 @@ export class AgentMessageObservations {
         return false;
       }
     };
+    if (!current()) return;
     // A withdrawn registration or expired original session ends the wait, without
     // stopping the recipient's work or transferring observation to a new sender.
     const timer = setInterval(() => {
@@ -59,6 +60,7 @@ export class AgentMessageObservations {
       this.active.delete(input.receiptId);
     });
     this.active.set(input.receiptId, { abort, done });
+    return done;
   }
 
   public async close(): Promise<void> {

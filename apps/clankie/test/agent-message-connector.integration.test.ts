@@ -1,3 +1,5 @@
+import { installedPiReceiptFixture } from "./fixtures/installed-pi-message-receipts.ts";
+import { supportedPiUnavailable } from "./fixtures/supported-pi.ts";
 import { grokReceiptFixture } from "./fixtures/grok-message-receipts.ts";
 import {
   primeReceiptFixture,
@@ -37,6 +39,7 @@ import { createCaptain } from "../src/captain/captain.ts";
 import type { CaptainDeps } from "../src/captain/deps.ts";
 import type { HerdrAgentSnapshot, HerdrWatchRunner } from "../src/captain/herdr-watch.ts";
 import { AgentMessageReceipts } from "../src/agent-message-receipts.ts";
+import { AgentMessageObservations } from "../src/agent-message-observations.ts";
 import { ConnectorDetection } from "../src/app/connector-detection.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
@@ -50,7 +53,8 @@ import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../.
 import { ClankieGuide } from "../../relay/src/connector-guide.ts";
 
 // Real HTTP service, signed device authorizer, relay, MCP SDK and CLI process.
-// Only the native harness controller/Herdr census are fixtures; no model can initialize.
+// Protocol cases record native harness/census facts; the installed-Pi case launches
+// a real owned TUI with recorded loopback responses. No lead model can initialize.
 vi.mock("../src/captain/model.ts", () => ({
   createCaptainModelRuntime: async () => {
     throw new Error("No model call is permitted in this native receipt proof");
@@ -110,11 +114,14 @@ async function fixture(pi?: { control: SeatControl; file?: string }) {
     status: async () => "idle",
     interrupt: async () => false,
     close: async () => {},
-    settled: async () => ({
-      type: "settlement_unconfirmed",
-      at: new Date().toISOString(),
-      reason: "message_correlation_unavailable",
-    }),
+    settled: async (...args) =>
+      pi
+        ? pi.control.settled(...args)
+        : {
+            type: "settlement_unconfirmed",
+            at: new Date().toISOString(),
+            reason: "message_correlation_unavailable",
+          },
     send: async (message, options) => {
       await beforeNative?.();
       if (pi) return pi.control.send(message, options);
@@ -379,6 +386,7 @@ async function fixture(pi?: { control: SeatControl; file?: string }) {
     },
     replace: () => {
       nativeId = randomUUID();
+      if (pi?.control.ref.harness === "pi") pi.file = join(root, `replacement_${nativeId}.jsonl`);
     },
     beforeNative: (hook: () => Promise<void>) => {
       beforeNative = hook;
@@ -950,4 +958,248 @@ it.each([
     expect(native.admitted()).toBe(revoke ? 0 : 1);
     if (!revoke) expect(result.isError).not.toBe(true);
   }
+});
+
+it("retains exact-input native Pi receipt progress through API, MCP, CLI and restart", async ({ skip }) => {
+  const unavailable = await supportedPiUnavailable();
+  skip(unavailable !== undefined, unavailable);
+  const native = await installedPiReceiptFixture((close) => {
+    closes.push(close);
+  });
+  const f = await fixture(native);
+  let client = await f.client();
+  const sent = decoded(
+    await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Return the fixed loopback receipt answer.",
+        receipt: true,
+        requestId: randomUUID(),
+      },
+    }),
+  );
+  expect(sent.receiptId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(sent.status).toBe("delivered");
+  const lookup = async () =>
+    decoded(
+      await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+    );
+  native.releaseAnswer();
+
+  await expect
+    .poll(async () => (await lookup()).receipt.progress.map((p: any) => p.stage), { timeout: 30000 })
+    .toContain("answered");
+  const final = await lookup();
+  expect(final.receipt.progress.map((p: any) => p.stage)).toEqual(
+    expect.arrayContaining(["delivered", "acted_on", "answered"]),
+  );
+  expect(
+    final.receipt.progress.every((p: any) => p.observedAt !== undefined || p.occurredAt !== undefined),
+  ).toBe(true);
+  expect(native.requests()).toBe(2);
+  const cli = await exec(
+    process.execPath,
+    [
+      resolve(import.meta.dirname, "../../tui/bin/clankie.ts"),
+      "connector",
+      "message-status",
+      sent.receiptId,
+      "--json",
+    ],
+    {
+      env: { ...process.env, CLANKIE_CONTROL_PLANE_URL: f.primaryUrl, CLANKIE_OPERATOR_TOKEN: f.ownerToken },
+      timeout: 10000,
+    },
+  );
+  expect(JSON.parse(cli.stdout).receipt.receiptId).toBe(sent.receiptId);
+  const old = await lookup();
+  await f.restart();
+  client = await f.client();
+  expect((await lookup()).receipt.receiptId).toBe(old.receipt.receiptId);
+  expect(native.requests()).toBe(2);
+}, 120000);
+
+it.each(["stable", "revoked", "expired", "replaced", "wrong-input", "fresh-session", "shutdown"] as const)(
+  "retains only the original native receipt observation (%s)",
+  async (mode) => {
+    const observation = vi.spyOn(AgentMessageObservations.prototype, "start");
+    try {
+      const native = await piFixture();
+      const { prepared } = await native.prepare();
+      const started = await prepared.start(native.view);
+      if (started.outcome !== "started") throw new Error("Native Pi fixture failed");
+      native.finish();
+      const before = native.sendCommands();
+      let enteredRead = () => {};
+      const entered = new Promise<void>((resolve) => {
+        enteredRead = resolve;
+      });
+      let reads = 0;
+      const original = started.control;
+      const control: SeatControl = {
+        ...original,
+        settled: async (...args) => {
+          reads++;
+          enteredRead();
+          const event = await original.settled(...args);
+          return mode === "wrong-input" && event.type === "turn_completed"
+            ? { ...event, messageId: randomUUID() }
+            : event;
+        },
+      };
+      const f = await fixture({ control, file: native.file });
+      let client = await f.client();
+      const sent = decoded(
+        await client.callTool({
+          name: "message_agent",
+          arguments: { agent: "herdr:" + f.seat.seatId, message: "Original native progress", receipt: true },
+        }),
+      );
+      expect(sent.status).toBe("delivered");
+      const done = observation.mock.results[0]?.value;
+      expect(done).toBeInstanceOf(Promise);
+      await entered;
+      if (mode === "revoked") expect((await f.revoke()).status).toBe(200);
+      if (mode === "replaced") f.replace();
+      if (mode === "expired") f.advanceClock(61 * 60_000);
+      if (mode === "fresh-session") f.freshSession();
+      if (mode === "shutdown") {
+        await f.restart();
+        client = await f.client();
+      }
+      const canary = "PRIVATE_NATIVE_ANSWER_CANARY sk-proj-" + "z".repeat(90);
+      native.finish(canary);
+      await done;
+      const response = await f.post(
+        { op: "agent_message_status", schemaVersion: 1, receiptId: sent.receiptId },
+        "owner",
+      );
+      const result = OperatorConversationServiceResultSchema.parse(await response.json());
+      if (result.op !== "agent_message_status" || result.result.outcome !== "found")
+        throw new Error("Original owner receipt unavailable");
+      const expected =
+        mode === "stable" || mode === "fresh-session" ? ["delivered", "acted_on", "answered"] : ["delivered"];
+      expect(result.result.receipt.progress.map((entry) => entry.stage)).toEqual(expected);
+      expect(JSON.stringify(await f.receiptSnapshot())).not.toContain("PRIVATE_NATIVE_ANSWER_CANARY");
+      expect(JSON.stringify(await f.receiptSnapshot())).not.toContain("sk-proj-" + "z".repeat(90));
+      if (mode === "fresh-session") {
+        const fresh = await f.client();
+        expect(
+          decoded(
+            await fresh.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+          ).outcome,
+        ).toBe("unknown");
+        expect(
+          decoded(
+            await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+          ).outcome,
+        ).toBe("found");
+      }
+      if (mode === "revoked")
+        expect(
+          (await f.post({ op: "agent_message_status", schemaVersion: 1, receiptId: sent.receiptId })).status,
+        ).toBe(401);
+      if (mode === "shutdown") {
+        for (let index = 0; index < 3; index++)
+          expect(
+            decoded(
+              await client.callTool({
+                name: "message_agent_status",
+                arguments: { receiptId: sent.receiptId },
+              }),
+            ).outcome,
+          ).toBe("found");
+        expect(reads).toBe(1);
+        expect(observation).toHaveBeenCalledTimes(1);
+      }
+      expect(native.sendCommands()).toBe(before + 1);
+    } finally {
+      observation.mockRestore();
+    }
+  },
+);
+
+it("keeps two identical Grok messages attached to their own native completions", async () => {
+  const observation = vi.spyOn(AgentMessageObservations.prototype, "start");
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  try {
+    const native = await grokReceiptFixture();
+    const original = native.control;
+    let enteredRead = () => {};
+    const entered = new Promise<void>((resolve) => {
+      enteredRead = resolve;
+    });
+    let reads = 0;
+    const control: SeatControl = {
+      ...original,
+      settled: async (...args) => {
+        if (++reads === 1) {
+          enteredRead();
+          await gate;
+        }
+        return original.settled(...args);
+      },
+    };
+    const f = await fixture({ control });
+    const client = await f.client();
+    const send = async () =>
+      decoded(
+        await client.callTool({
+          name: "message_agent",
+          arguments: { agent: "herdr:" + f.seat.seatId, message: "Same visible text", receipt: true },
+        }),
+      );
+    const first = await send();
+    await entered;
+    const second = await send();
+    expect(second.receiptId).not.toBe(first.receiptId);
+    const secondDone = observation.mock.results[1]?.value;
+    expect(secondDone).toBeInstanceOf(Promise);
+    await secondDone;
+    release();
+    await observation.mock.results[0]!.value;
+    for (const receiptId of [first.receiptId, second.receiptId]) {
+      const result = decoded(
+        await client.callTool({ name: "message_agent_status", arguments: { receiptId } }),
+      );
+      expect(result.outcome).toBe("found");
+      expect(result.receipt.progress.map((entry: { stage: string }) => entry.stage)).toEqual([
+        "delivered",
+        "acted_on",
+      ]);
+    }
+    expect(native.admitted()).toBe(2);
+  } finally {
+    release();
+    observation.mockRestore();
+  }
+});
+
+it("does not retarget a Pi settlement to the next native input", async () => {
+  const native = await piFixture();
+  const { prepared } = await native.prepare();
+  const started = await prepared.start(native.view);
+  if (started.outcome !== "started") throw new Error("Native Pi fixture failed");
+  native.finish("Bootstrap");
+  const first = await started.control.send("Same visible text");
+  expect(first.outcome).toBe("accepted");
+  if (first.outcome !== "accepted") throw new Error("First native input was refused");
+  native.finish("First answer");
+  const second = await started.control.send("Same visible text");
+  expect(second.outcome).toBe("accepted");
+  if (second.outcome !== "accepted") throw new Error("Second native input was refused");
+  native.finish("Second answer");
+  expect(await started.control.settled(AbortSignal.timeout(2000), first.messageId)).toMatchObject({
+    type: "settlement_unconfirmed",
+    reason: "message_correlation_unavailable",
+  });
+  expect(await started.control.settled(AbortSignal.timeout(2000), second.messageId)).toMatchObject({
+    type: "turn_completed",
+    messageId: second.messageId,
+    text: "Second answer",
+  });
 });

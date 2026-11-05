@@ -174,10 +174,10 @@ export async function piFixture(enabled?: () => Promise<boolean>) {
     cleanup.push(() => prepared.dispose());
     return { prepared, connection: connect(prepared) };
   };
-  const finish = () => {
+  const finish = (text = "native final") => {
     entries.push({
       type: "message",
-      message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "native final" }] },
+      message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text }] },
     });
     idle = true;
     handlers.get("agent_settled")?.({}, context);

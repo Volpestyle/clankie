@@ -321,6 +321,12 @@ flowchart LR
   Cursor --> Views["TUI dock · app · Discord"]
 ```
 
+Connected-app message receipts capture a read capability for the accepted native
+input on its original control. A host-owned observer checks the original caller
+and recipient before retaining correlated progress; it does not create a lead
+wake or another turn. Lookup reads the retained receipt. Recorded progress keeps
+its original signed-session binding across restart. See [agent message receipts](agent-message-receipts.md).
+
 ### Native operator seats
 
 A fresh Claude, Codex, OpenCode or Grok launch without a selection takes the shared

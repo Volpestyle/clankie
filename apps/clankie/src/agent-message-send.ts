@@ -138,7 +138,7 @@ export async function sendAgentMessageWithReceipt(input: {
         originalNative &&
         originalNative.messageId === delivery.messageId
       )
-        input.observations?.start({
+        void input.observations?.start({
           receiptId,
           binding,
           native: originalNative,
