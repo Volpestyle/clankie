@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { codexAccounts } from "@clankie/settings";
 import { redactSensitiveText } from "@clankie/observability";
-import { OperatorGoalSchema, type OperatorGoal } from "@clankie/protocol";
+import { OperatorGoalSchema, type OperatorGoal } from "@clankie/protocol/agent-work";
 import type { HerdrAgentSession } from "./index.ts";
 
 /**

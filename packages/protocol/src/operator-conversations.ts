@@ -1,3 +1,17 @@
+import {
+  OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
+  OPERATOR_CONVERSATION_CODE_MAX,
+  OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
+} from "./transcript-limits.ts";
+export {
+  OPERATOR_CONVERSATION_TEXT_MAX,
+  OPERATOR_CONVERSATION_TOOL_DETAIL_MAX,
+  OPERATOR_CONVERSATION_CODE_MAX,
+  OPERATOR_CONVERSATION_REF_MAX,
+  OPERATOR_SEAT_SUBAGENTS_RECENT_MAX,
+} from "./transcript-limits.ts";
 import { WorkHandoffIntentSchema } from "./work-handoff.ts";
 import { TurnModelUsageSchema } from "./model-keys.ts";
 import { FreeAgentIntentSchema } from "./free-agent.ts";
@@ -31,13 +45,9 @@ import { OperatorTurnSurfaceSchema, SettingChangeProposalSchema } from "./settin
 
 /** Bounds shared by the operator conversation boundary (documented, not magic). */
 export const OPERATOR_CONVERSATION_TITLE_MAX = 256;
-export const OPERATOR_CONVERSATION_TEXT_MAX = 16_384;
 export const OPERATOR_CONVERSATION_SUMMARY_MAX = 512;
-export const OPERATOR_CONVERSATION_TOOL_DETAIL_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
 /** A submitted message is durably logged as a `message` event, so it shares that bound. */
 export const OPERATOR_CONVERSATION_MESSAGE_MAX = OPERATOR_CONVERSATION_TEXT_MAX;
-export const OPERATOR_CONVERSATION_CODE_MAX = 128;
-export const OPERATOR_CONVERSATION_REF_MAX = 512;
 export const OPERATOR_DELIVERED_FILE_BYTES_MAX = 15 * 1024 * 1024;
 export const OPERATOR_DELIVERED_FILE_DOWNLOAD_PATH = "/operator/v1/artifacts/download";
 /** A filesystem path, bounded well under PATH_MAX so it never truncates a real one. */
@@ -746,7 +756,6 @@ export const OperatorCodexAccountSchema = z
   .object({ label: z.string().min(1).max(64), home: z.string().min(1).max(4096) })
   .strict();
 
-export const OPERATOR_SEAT_SUBAGENTS_RECENT_MAX = 8;
 export const OperatorSeatSubagentsSchema = z
   .object({
     running: z.number().int().min(0),
