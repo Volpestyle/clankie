@@ -44,15 +44,18 @@ export function registerFleetDigestRoutes(
           ...(work ? { work } : {}),
           signal: context.req.raw.signal,
         }),
-        captain.serveOperatorConversation({
-          op: "fleet_capacity",
-          schemaVersion: 1,
-          includeMachineResources: true,
-        }),
+        // Capacity also refreshes native seats, so discovery-off must skip this source.
+        herdr
+          ? captain.serveOperatorConversation({
+              op: "fleet_capacity",
+              schemaVersion: 1,
+              includeMachineResources: true,
+            })
+          : Promise.resolve(undefined),
         fleet,
       ]);
       const reading =
-        capacity.status === "fulfilled" && capacity.value.op === "fleet_capacity"
+        capacity.status === "fulfilled" && capacity.value?.op === "fleet_capacity"
           ? FleetCapacitySchema.safeParse(capacity.value.result)
           : undefined;
       const result = projectFleetDigest({

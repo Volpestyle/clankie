@@ -37,8 +37,10 @@ authority to send or act on a question.
   meaning.
 
 These are retained observations, not a complete daily audit log. An unavailable
-or disabled source yields `unknown`, never an empty-success claim. The JSON
-includes source availability; incomplete sources appear in the attention list.
+or disabled source yields `unknown`, never an empty-success claim. When Herdr
+discovery is disabled, capacity and burn are also unknown because the capacity
+reader refreshes native seats. The JSON includes source availability; incomplete
+sources appear in the attention list.
 The server rechecks operator credentials, repository/provider visibility and
 discovery before publishing. Responses are `no-store`; a lost or changed
 authorization refuses the read.

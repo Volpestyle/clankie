@@ -22,7 +22,8 @@ import { leadChangeSources } from "../src/captain/lead-change-sources.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { createWorkItemsService } from "../src/work-items.ts";
 import { githubConnection, githubConnectionFenced } from "../src/accounts.ts";
-import { projectFleetCapacity } from "../src/app/fleet-capacity.ts";
+import { createFleetCapacityReader, projectFleetCapacity } from "../src/app/fleet-capacity.ts";
+import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { ConnectorDetection } from "../src/app/connector-detection.ts";
 import { runFleetDigestCommand, formatFleetDigest } from "../../tui/src/command/fleet-digest.ts";
 
@@ -296,6 +297,7 @@ async function fixture() {
     read,
     retained,
     operations,
+    captain,
     providerCalls,
     operatorStore,
     provider,
@@ -376,8 +378,47 @@ it("unavailable observations remain unknown and discovery-off never reads a flee
   expect(body.resources.heavy).toBe("unknown");
   expect(body.activity.confirmedClosesToday).toBe("unknown");
   expect(body.attention[0]).toEqual({ kind: "owner_questions", count: 1 });
-  expect(f.operations).toEqual(["fleet_capacity"]);
+  expect(f.operations).toEqual([]);
   expect(JSON.stringify(body)).not.toContain("PRIVATE");
+});
+
+it("discovery off avoids native inventory through the real capacity reader", async () => {
+  const f = await fixture();
+  const native = await isolatedHerdr(join(f.root, "native"));
+  cleanups.push(() => native.close());
+  let inventories = 0;
+  const capacity = createFleetCapacityReader({
+    settings: async () => ({ execution: { connections: [] } }),
+    accounts: async () => ({ machine: "local", accounts: [] }),
+    seats: async () => {
+      inventories++;
+      await native.cli("pane", "list");
+      return [];
+    },
+    leadSeatId: () => undefined,
+    heavy: () => undefined,
+    tracker: () => undefined,
+    sessionBurn: async () => ({ sessions: [], truncated: false }),
+  });
+  const original = f.captain.serveOperatorConversation.bind(f.captain);
+  f.captain.serveOperatorConversation = async (request) =>
+    request.op === "fleet_capacity"
+      ? { op: "fleet_capacity", schemaVersion: 1, result: await capacity(request.includeMachineResources) }
+      : original(request);
+
+  // Confirm the real reader reaches the isolated native inventory when enabled.
+  expect((await f.read()).status).toBe(200);
+  expect(inventories).toBe(1);
+  inventories = 0;
+  f.detection.setMultiplexer("herdr", false);
+  const response = await f.read();
+  expect(response.status).toBe(200);
+  const body = FleetDigestSnapshotSchema.parse(await response.json());
+  expect(inventories).toBe(0);
+  expect(body.workers.hired).toBe("unknown");
+  expect(body.sources.capacity).toBe("unavailable");
+  expect(body.burn.accountsObserved).toBe("unknown");
+  expect(body.resources).toEqual({ heavy: "unknown", machines: "unknown" });
 });
 
 it.each(["operator", "provider", "origin", "discovery"])(
