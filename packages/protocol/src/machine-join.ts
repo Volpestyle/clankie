@@ -284,3 +284,12 @@ export const JoinedWorkerLaunchSchema = z.strictObject({
   model: z.string().min(1).max(128).optional(),
   effort: z.enum(["low", "medium", "high", "max"]).optional(),
 });
+
+/** Read-only native proof; never interpreted as a launch by the joined adapter. */
+export const JoinedWorkerProofSchema = z.strictObject({
+  kind: z.literal("proof"),
+  nonce: z.uuid(),
+  paneId: z.string().min(1).max(256),
+  harness: z.enum(["claude", "codex"]),
+  nativeSessionId: z.string().min(1).max(256),
+});

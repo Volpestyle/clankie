@@ -285,7 +285,8 @@ export type WorkerReportLead = z.infer<typeof WorkerReportLeadSchema>;
 export const FLEET_REPORT_LEADS_PATH = "/v1/fleet/report-leads";
 export const ManageWorkerReportLeadsSchema = z
   .object({
-    paneId: z.string().min(1).max(512),
+    paneId: z.string().min(1).max(512).optional(),
+    joinedHireId: z.uuid().optional(),
     change: z.discriminatedUnion("op", [
       z.object({ op: z.literal("list") }).strict(),
       z
@@ -304,6 +305,8 @@ export const ManageWorkerReportLeadsSchema = z
   })
   .strict()
   .superRefine((input, ctx) => {
+    if ((input.paneId === undefined) === (input.joinedHireId === undefined))
+      ctx.addIssue({ code: "custom", message: "Choose exactly one paneId or joinedHireId" });
     if (input.change.op === "grant" && input.change.ref !== undefined && input.change.deviceId === undefined)
       ctx.addIssue({
         code: "custom",
