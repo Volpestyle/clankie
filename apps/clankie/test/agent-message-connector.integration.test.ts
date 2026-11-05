@@ -257,9 +257,10 @@ async function fixture(pi?: { control: SeatControl; file?: string }) {
         identity: { operatorId: "owner" },
       }),
       authenticateCaptain: async (request) => {
-        const result = request.headers.get("authorization") === "Bearer fixture-relay-credential-176"
-          ? { captainId: "relay", steerSourceLane: "api" as const }
-          : undefined;
+        const result =
+          request.headers.get("authorization") === "Bearer fixture-relay-credential-176"
+            ? { captainId: "relay", steerSourceLane: "api" as const }
+            : undefined;
         await afterAuthentication?.();
         return result;
       },
@@ -392,7 +393,9 @@ async function fixture(pi?: { control: SeatControl; file?: string }) {
       nativeId = randomUUID();
       if (pi?.control.ref.harness === "pi") pi.file = join(root, `replacement_${nativeId}.jsonl`);
     },
-    afterAuthentication: (hook: () => Promise<void>) => { afterAuthentication = hook; },
+    afterAuthentication: (hook: () => Promise<void>) => {
+      afterAuthentication = hook;
+    },
     beforeNative: (hook: () => Promise<void>) => {
       beforeNative = hook;
     },
@@ -1209,46 +1212,70 @@ it("does not retarget a Pi settlement to the next native input", async () => {
   });
 });
 
-
-it.each([1, 2, 3])("withholds receipt progress when the recipient changes during final authorization read %s", async (nth) => {
-  const observation = vi.spyOn(AgentMessageObservations.prototype, "start");
-  try {
-    const native = await piFixture();
-    const { prepared } = await native.prepare();
-    const started = await prepared.start(native.view);
-    if (started.outcome !== "started") throw new Error("Native Pi fixture failed");
-    native.finish();
-    const before = native.sendCommands();
-    let finished = false;
-    let enteredRead = () => {};
-    const reading = new Promise<void>((resolve) => { enteredRead = resolve; });
-    const original = started.control;
-    const control: SeatControl = { ...original, settled: async (...args) => {
-      enteredRead();
-      const event = await original.settled(...args);
-      if (event.type === "turn_completed") finished = true;
-      return event;
-    } };
-    const f = await fixture({ control, file: native.file });
-    const client = await f.client();
-    let reads = 0, replaced = false;
-    f.afterAuthentication(async () => {
-      if (finished && ++reads === nth) { f.replace(); replaced = true; }
-    });
-    const sent = decoded(await client.callTool({ name: "message_agent", arguments: {
-      agent: "herdr:" + f.seat.seatId, message: "Original late-fence proof", receipt: true,
-    } }));
-    expect(sent.status).toBe("delivered");
-    const done = observation.mock.results[0]?.value;
-    expect(done).toBeInstanceOf(Promise);
-    await reading;
-    native.finish("Original response");
-    await done;
-    expect(replaced).toBe(true);
-    expect(native.sendCommands()).toBe(before + 1);
-    const response = await f.post({ op: "agent_message_status", schemaVersion: 1, receiptId: sent.receiptId }, "owner");
-    const result = OperatorConversationServiceResultSchema.parse(await response.json());
-    if (result.op !== "agent_message_status" || result.result.outcome !== "found") throw new Error("Original receipt unavailable");
-    expect(result.result.receipt.progress.map((entry) => entry.stage)).toEqual(["delivered"]);
-  } finally { observation.mockRestore(); }
-});
+it.each([1, 2, 3])(
+  "withholds receipt progress when the recipient changes during final authorization read %s",
+  async (nth) => {
+    const observation = vi.spyOn(AgentMessageObservations.prototype, "start");
+    try {
+      const native = await piFixture();
+      const { prepared } = await native.prepare();
+      const started = await prepared.start(native.view);
+      if (started.outcome !== "started") throw new Error("Native Pi fixture failed");
+      native.finish();
+      const before = native.sendCommands();
+      let finished = false;
+      let enteredRead = () => {};
+      const reading = new Promise<void>((resolve) => {
+        enteredRead = resolve;
+      });
+      const original = started.control;
+      const control: SeatControl = {
+        ...original,
+        settled: async (...args) => {
+          enteredRead();
+          const event = await original.settled(...args);
+          if (event.type === "turn_completed") finished = true;
+          return event;
+        },
+      };
+      const f = await fixture({ control, file: native.file });
+      const client = await f.client();
+      let reads = 0,
+        replaced = false;
+      f.afterAuthentication(async () => {
+        if (finished && ++reads === nth) {
+          f.replace();
+          replaced = true;
+        }
+      });
+      const sent = decoded(
+        await client.callTool({
+          name: "message_agent",
+          arguments: {
+            agent: "herdr:" + f.seat.seatId,
+            message: "Original late-fence proof",
+            receipt: true,
+          },
+        }),
+      );
+      expect(sent.status).toBe("delivered");
+      const done = observation.mock.results[0]?.value;
+      expect(done).toBeInstanceOf(Promise);
+      await reading;
+      native.finish("Original response");
+      await done;
+      expect(replaced).toBe(true);
+      expect(native.sendCommands()).toBe(before + 1);
+      const response = await f.post(
+        { op: "agent_message_status", schemaVersion: 1, receiptId: sent.receiptId },
+        "owner",
+      );
+      const result = OperatorConversationServiceResultSchema.parse(await response.json());
+      if (result.op !== "agent_message_status" || result.result.outcome !== "found")
+        throw new Error("Original receipt unavailable");
+      expect(result.result.receipt.progress.map((entry) => entry.stage)).toEqual(["delivered"]);
+    } finally {
+      observation.mockRestore();
+    }
+  },
+);
