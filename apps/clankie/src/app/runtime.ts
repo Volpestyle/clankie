@@ -1,3 +1,4 @@
+import { workerReportDevice } from "../devices.ts";
 import { createPiSettingsRoutes } from "../pi-settings-routes.ts";
 import { createWorkTrackerSettingsRoutes } from "../work-tracker-settings.ts";
 import { createMachineFleetResources } from "../machine-fleet-resources.ts";
@@ -1542,6 +1543,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   const joinedSeats = dependencies.machineJoins
     ? createJoinedSeats({
         joins: dependencies.machineJoins,
+        reportDeviceAvailable: (id) => workerReportDevice(devices.get(id), clock()),
         captain: dependencies.captain,
         ...(dependencies.settings === undefined ? {} : { settings: dependencies.settings }),
         ...(dependencies.seatCallReceiptPath === undefined

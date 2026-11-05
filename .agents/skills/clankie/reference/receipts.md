@@ -41,6 +41,22 @@ your lead has reached you after the report. Otherwise it says no reply has
 reached you, and any question or blocker in that report is still open. Transport acknowledgment of an
 event does not mark your report read by the lead.
 
+## Joined-machine report destinations
+
+A joined worker can call `list_report_leads` and select one returned opaque `id`
+as `message_clankie`'s `target`. Omitting it reports to the hiring conversation.
+Choose one UUID `deliveryId` per report, retain the original text and target,
+and use `message_clankie_status` after uncertainty. An explicit refused target
+never falls back to the hiring chat. A report grants no adoption, control or
+private-work read access.
+
+Only the owner adds or revokes destinations, through
+`clankie fleet report-leads --joined-hire ID list|grant|revoke` (the hire returns
+`joinedHireId`; see [CLI reference](../../../../docs/cli.md)). The current joined
+adapter must support native proof. Its original registration, approved folder,
+workers ceiling and exact native session remain required after restart; a saved
+grant alone cannot restore authority. Keep `join` or `join resume` running.
+
 ## Connected-call failures and receipts
 
 Worker connected-tool reads return or explain failure within thirty seconds,

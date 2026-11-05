@@ -73,6 +73,20 @@ export class MachineJoins {
     this.seatHandler = handler;
   }
   private workerHire?: JoinedWorkerHire;
+  private workerReportLeads?: (
+    input: import("@clankie/protocol").ManageWorkerReportLeads,
+    authorize: () => Promise<boolean>,
+  ) => Promise<import("@clankie/protocol").WorkerReportLead[]>;
+  setWorkerReportLeads(handler: NonNullable<MachineJoins["workerReportLeads"]>): void {
+    this.workerReportLeads = handler;
+  }
+  manageWorkerReportLeads(
+    input: import("@clankie/protocol").ManageWorkerReportLeads,
+    authorize: () => Promise<boolean>,
+  ) {
+    if (!this.workerReportLeads) return Promise.reject(Error("joined_worker_reports_unavailable"));
+    return this.workerReportLeads(input, authorize);
+  }
   /** Registered by the joined seats module, which owns joined workers (VUH-2607). */
   setWorkerHire(handler: JoinedWorkerHire): void {
     this.workerHire = handler;

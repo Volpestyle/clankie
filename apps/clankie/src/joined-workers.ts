@@ -5,8 +5,14 @@ import type { MachineJoins, JoinedSeatMachine, JoinedWorkerHireRequest } from ".
 import { posix, win32 } from "node:path";
 import type { RemoteSeatAuthority } from "./remote-lead-bridge.ts";
 import { SeatOutbox } from "./captain/seat-outbox.ts";
-import { WatchingMachineRefused } from "@clankie/protocol";
-import { JoinedWorkerLaunchSchema } from "@clankie/protocol/machine-join";
+import {
+  WatchingMachineRefused,
+  WorkerReportTargetIdSchema,
+  type ManageWorkerReportLeads,
+} from "@clankie/protocol";
+import { JoinedWorkerLaunchSchema, JoinedWorkerProofSchema } from "@clankie/protocol/machine-join";
+
+import { JoinedWorkerRecords, type JoinedWorkerRecord } from "./joined-worker-records.ts";
 
 const Hire = z.strictObject({
   title: z.string().min(1).max(128),
@@ -24,6 +30,7 @@ const Hire = z.strictObject({
   effort: z.enum(["low", "medium", "high", "max"]).optional(),
 });
 const Message = z.strictObject({
+  target: WorkerReportTargetIdSchema.optional(),
   text: z.string().min(1).max(16_384),
   deliveryId: z.uuid(),
   urgent: z
@@ -54,6 +61,8 @@ interface Worker extends RemoteSeatAuthority {
   sessionId: string;
   harness: "claude" | "codex";
   token: string;
+  record: () => JoinedWorkerRecord;
+  prove: () => Promise<void>;
   paneId?: string;
   /** The native session admitted in that pane: Claude's from launch, Codex's as first observed. */
   nativeSessionId?: string;
@@ -69,15 +78,46 @@ interface Worker extends RemoteSeatAuthority {
 const LAUNCH_MS = 90_000;
 
 /** A lead grants one native worker on its joined machine; no fleet bearer or SSH identity. */
-export function createJoinedWorkers(input: { captain: CaptainPort; joins: MachineJoins }) {
+export function createJoinedWorkers(input: {
+  captain: CaptainPort;
+  joins: MachineJoins;
+  workerRecordDirectory?: string;
+  reportDeviceAvailable?: (id: string) => boolean;
+}) {
+  const journal = new JoinedWorkerRecords(input.workerRecordDirectory);
+  const hash = (token: string) => createHash("sha256").update(token).digest("hex");
   const workers = new Map<string, Worker>();
-  const close = (worker: Worker) => {
+  const close = (worker: Worker, revoke = false) => {
+    const held = journal.records.get(worker.token);
+    if (revoke && held) journal.remove(held);
     workers.delete(worker.token);
     worker.abort.abort();
     worker.outbox.close();
   };
   const authority = async (token: string, machine?: JoinedSeatMachine) => {
-    const worker = workers.get(token);
+    const key = hash(token);
+    let worker = workers.get(key);
+    if (!worker) {
+      const held = journal.records.get(key);
+      if (held && machine && held.machineId !== machine.machineId) return undefined;
+      const source = held && input.joins.seatMachine(held.machineId);
+      if (
+        held &&
+        source &&
+        held.paneId &&
+        held.nativeSessionId &&
+        Date.now() - held.touchedAt < 60 * 60_000
+      ) {
+        worker = createWorker(held, source);
+        // A persisted identity is inert until the approved adapter proves its current native occupant.
+        try {
+          await worker.prove();
+        } catch {
+          close(worker);
+          return undefined;
+        }
+      }
+    }
     if (
       !worker ||
       (machine !== undefined && worker.machineId !== machine.machineId) ||
@@ -85,6 +125,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     )
       return undefined;
     worker.touchedAt = Date.now();
+    journal.save({ ...worker.record(), touchedAt: worker.touchedAt });
     return worker;
   };
   const admit = async (worker: Worker, raw: unknown) => {
@@ -108,62 +149,82 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     // Only the approved machine's native adapter observes and admits this launch, once.
     worker.paneId = value.paneId;
     worker.nativeSessionId = native;
+    journal.save({ ...worker.record(), paneId: value.paneId, nativeSessionId: native });
     worker.markAdmitted();
     return { admitted: true };
   };
-  /**
-   * Launch one native worker on a joined machine, bound to a lead conversation.
-   * `led` says whether that conversation still leads it; the lead tool and a
-   * hire Clankie starts himself (VUH-2607) differ only there.
-   */
-  const launch = async (args: {
-    machine: JoinedSeatMachine;
-    directory: string;
-    conversationId: string;
-    title: string;
-    brief: string;
-    harness?: "claude" | "codex";
-    model?: string;
-    effort?: "low" | "medium" | "high" | "max";
-    maximumTrust: boolean;
-    led: () => boolean;
-  }) => {
-    const { machine, directory } = args;
-    await input.joins.refuseWatching(machine.machineId);
-    for (const worker of workers.values()) if (!worker.current()) close(worker);
-    if (workers.size >= 128) throw Error("joined_worker_capacity");
-    const token = randomBytes(32).toString("base64url"),
-      sessionId = randomUUID();
+  const createWorker = (record: JoinedWorkerRecord, machine: JoinedSeatMachine): Worker => {
+    const token = record.tokenHash,
+      sessionId = record.sessionId;
     const abort = new AbortController(),
       outbox = new SeatOutbox({ explicitAcknowledgments: true });
     let markAdmitted = () => {};
     const admitted = new Promise<void>((resolve) => (markAdmitted = resolve));
     const binding = createHash("sha256")
-      .update(JSON.stringify([machine.machineId, sessionId, args.conversationId]))
+      .update(JSON.stringify([machine.machineId, sessionId, record.conversationId]))
       .digest("hex");
     const worker: Worker = {
-      id: randomUUID(),
+      id: record.id,
       token,
+      record: () => journal.records.get(token)!,
+      prove: async () => {
+        if (!worker.paneId || !worker.nativeSessionId) throw Error("joined_worker_not_admitted");
+        if (!(await worker.authorize())) throw Error("joined_worker_revoked");
+        await input.joins.refuseWatching(machine.machineId);
+        const proof = JoinedWorkerProofSchema.parse({
+          kind: "proof",
+          nonce: randomUUID(),
+          paneId: worker.paneId,
+          harness: worker.harness,
+          nativeSessionId: worker.nativeSessionId,
+        });
+        const response = await input.joins.request(
+          machine.machineId,
+          { kind: "workers", directory: worker.directory, request: JSON.stringify(proof) },
+          10_000,
+        );
+        if (
+          !response.ok ||
+          JSON.stringify(JoinedWorkerProofSchema.parse(JSON.parse(response.output ?? "null"))) !==
+            JSON.stringify(proof) ||
+          !(await worker.authorize())
+        )
+          throw Error("joined_worker_native_proof_refused");
+      },
+      ...(record.paneId === undefined ? {} : { paneId: record.paneId }),
+      ...(record.nativeSessionId === undefined ? {} : { nativeSessionId: record.nativeSessionId }),
       sessionId,
-      harness: args.harness ?? "claude",
+      harness: record.harness,
       machineId: machine.machineId,
-      directory,
+      directory: record.directory,
       abort,
       outbox,
       admitted,
       markAdmitted,
       worker: true,
-      binding: { conversationId: args.conversationId, nativeOccupantId: binding },
+      binding: { conversationId: record.conversationId, nativeOccupantId: binding },
       signal: abort.signal,
-      touchedAt: Date.now(),
+      touchedAt: record.touchedAt,
       current: () =>
-        workers.get(token) === worker && !abort.signal.aborted && Date.now() - worker.touchedAt < 60 * 60_000,
+        workers.get(token) === worker &&
+        input.joins.has(machine.machineId) &&
+        input.captain.joinedWorkerReportDestination(record.conversationId) &&
+        !abort.signal.aborted &&
+        Date.now() - worker.touchedAt < 60 * 60_000,
       authorize: async () => {
         try {
           await machine.authorize();
-          return worker.current() && args.led();
+          if (!worker.current()) return false;
+          if (
+            record.requiresLead &&
+            input.captain.seatContext(record.conversationId)?.machineId !== machine.machineId
+          ) {
+            close(worker, true);
+            return false;
+          }
+          return true;
         } catch {
-          close(worker);
+          close(worker, true);
           return false;
         }
       },
@@ -178,8 +239,25 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
         lane: "operator",
         tools: [
           tool(
+            "list_report_leads",
+            "List the report destinations admitted for this joined hire. This grants no control or private-work reads.",
+            z.strictObject({}),
+            async () => {
+              await worker.prove();
+              const original = JSON.stringify(worker.record().reportLeads);
+              const leads = await input.captain.joinedWorkerReportLeads(
+                worker.record().reportLeads,
+                input.reportDeviceAvailable,
+              );
+              await worker.prove();
+              if (!(await worker.authorize()) || original !== JSON.stringify(worker.record().reportLeads))
+                throw Error("joined_worker_grants_changed");
+              return reply({ schemaVersion: 1, leads });
+            },
+          ),
+          tool(
             "message_clankie",
-            "Send agent output to your hiring lead chat. Choose a deliveryId once and retain it; after uncertainty read message_clankie_status, never resend with a new ID.",
+            "Send agent output to your hiring lead chat or an explicit target from list_report_leads. Choose a deliveryId once and retain it; after uncertainty read message_clankie_status, never resend with a new ID.",
             Message,
             async (input_) => {
               const message = Message.parse(input_);
@@ -195,12 +273,18 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                 ]);
               if (!worker.paneId) throw Error("joined_worker_not_admitted");
               if (!input.captain.receiveJoinedWorkerReport) throw Error("joined_worker_reports_unavailable");
+              await worker.prove();
               const result = await input.captain.receiveJoinedWorkerReport(
                 {
                   paneId: `${machine.machineId}/${worker.paneId}`,
                   binding,
                   conversationId: worker.binding.conversationId,
                   text: message.text,
+                  ...(message.target === undefined ? {} : { target: message.target }),
+                  reportLeads: () => worker.record().reportLeads,
+                  ...(input.reportDeviceAvailable
+                    ? { reportDeviceAvailable: input.reportDeviceAvailable }
+                    : {}),
                   deliveryId: message.deliveryId,
                   ...(message.urgent === true ? { urgent: true } : {}),
                   ...(message.kind === undefined ? {} : { kind: message.kind }),
@@ -208,7 +292,10 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                 {
                   owner: { conversationId: worker.binding.conversationId },
                   current: worker.current,
-                  authorize: worker.authorize,
+                  authorize: async () => {
+                    await worker.prove();
+                    return worker.authorize();
+                  },
                 },
               );
               return reply(result);
@@ -220,6 +307,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
             Status,
             async (input_) => {
               const { deliveryId } = Status.parse(input_);
+              await worker.prove();
               return reply(
                 worker.paneId
                   ? ((await input.captain.joinedWorkerReportStatus?.(
@@ -235,6 +323,50 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       }),
     };
     workers.set(token, worker);
+    if (record.paneId) markAdmitted();
+    return worker;
+  };
+
+  /** Launch once; uncertainty never authorizes another native hire. */
+  const launch = async (args: {
+    machine: JoinedSeatMachine;
+    directory: string;
+    conversationId: string;
+    title: string;
+    brief: string;
+    harness?: "claude" | "codex";
+    model?: string;
+    effort?: "low" | "medium" | "high" | "max";
+    maximumTrust: boolean;
+    requiresLead: boolean;
+  }) => {
+    const { machine, directory } = args;
+    await input.joins.refuseWatching(machine.machineId);
+    for (const held of journal.records.values())
+      if (Date.now() - held.touchedAt >= 60 * 60_000) {
+        const worker = workers.get(held.tokenHash);
+        if (worker) close(worker);
+        journal.remove(held);
+      }
+    if (journal.records.size >= 128) throw Error("joined_worker_capacity");
+    const token = randomBytes(32).toString("base64url"),
+      sessionId = randomUUID();
+    const record: JoinedWorkerRecord = {
+      id: randomUUID(),
+      tokenHash: hash(token),
+      sessionId,
+      harness: args.harness ?? "claude",
+      machineId: machine.machineId,
+      directory,
+      conversationId: args.conversationId,
+      requiresLead: args.requiresLead,
+      touchedAt: Date.now(),
+      reportLeads: [
+        { id: `conversation:${args.conversationId}`, owner: { conversationId: args.conversationId } },
+      ],
+    };
+    journal.save(record);
+    const worker = createWorker(record, machine);
     const request = JoinedWorkerLaunchSchema.parse({
       token,
       sessionId,
@@ -256,12 +388,14 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       if (!result.ok)
         return {
           outcome: "unconfirmed",
+          joinedHireId: record.id,
           sessionId,
           detail: result.error,
           advice: "Inspect the joined machine; do not repeat this hire.",
         };
       return {
         outcome: worker.paneId ? "started" : "unconfirmed",
+        joinedHireId: record.id,
         seatId: worker.paneId ? `${machine.machineId}/${worker.paneId}` : undefined,
         sessionId,
         conversationId: args.conversationId,
@@ -270,6 +404,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
     } catch (error) {
       return {
         outcome: "unconfirmed",
+        joinedHireId: record.id,
         sessionId,
         detail: error instanceof Error ? error.message : String(error),
         advice: "Inspect the joined machine; do not repeat this hire.",
@@ -296,6 +431,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
         `${worker.machineId}/${worker.paneId}` === seat && worker.binding.conversationId === conversationId,
     );
     if (!worker || !(await worker.authorize())) throw Error("joined_worker_unknown");
+    await worker.prove();
     // Its bridge delivers messages as Claude channel events; a Codex worker launched
     // without an app-server has no such channel, and is never typed into (VUH-2609).
     if (worker.harness === "codex") throw Error("joined_codex_worker_takes_no_messages");
@@ -345,8 +481,7 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
                 ...(hire.model ? { model: hire.model } : {}),
                 ...(hire.effort ? { effort: hire.effort } : {}),
                 maximumTrust,
-                led: () =>
-                  input.captain.seatContext(lead.binding.conversationId)?.machineId === machine.machineId,
+                requiresLead: true,
               }),
             );
           },
@@ -395,17 +530,65 @@ export function createJoinedWorkers(input: { captain: CaptainPort; joins: Machin
       ...(request.model ? { model: request.model } : {}),
       ...(request.effort ? { effort: request.effort } : {}),
       maximumTrust,
-      led: () => true,
+      requiresLead: false,
     });
   };
   return {
     authority,
+    manageReportLeads: async (request: ManageWorkerReportLeads, authorize: () => Promise<boolean>) => {
+      if (!request.joinedHireId || !(await authorize())) throw Error("joined_worker_grant_refused");
+      const held = [...journal.records.values()].find((record) => record.id === request.joinedHireId);
+      const machine = held && input.joins.seatMachine(held.machineId);
+      if (!held || !machine) throw Error("joined_worker_unknown");
+      const worker = workers.get(held.tokenHash) ?? createWorker(held, machine);
+      await worker.prove();
+      const snapshot = worker.record();
+      const change = request.change;
+      if (change.op === "grant" && !input.captain.joinedWorkerReportDestination(change.conversationId))
+        throw Error("Report destination conversation is unavailable");
+      await worker.prove();
+      if (
+        !(await worker.authorize()) ||
+        !(await authorize()) ||
+        !worker.current() ||
+        (change.op === "grant" && !input.captain.joinedWorkerReportDestination(change.conversationId)) ||
+        JSON.stringify(snapshot.reportLeads) !== JSON.stringify(worker.record().reportLeads)
+      )
+        throw Error("joined_worker_grant_authority_changed");
+      const leads = snapshot.reportLeads;
+      if (change.op === "grant")
+        journal.save({
+          ...worker.record(),
+          reportLeads: [
+            ...leads,
+            {
+              id: `grant:${randomUUID()}`,
+              owner: { conversationId: change.conversationId },
+              ...(change.deviceId === undefined
+                ? {}
+                : { connector: { deviceId: change.deviceId, ...(change.ref ? { ref: change.ref } : {}) } }),
+            },
+          ],
+        });
+      if (change.op === "revoke")
+        journal.save({ ...worker.record(), reportLeads: leads.filter((entry) => entry.id !== change.id) });
+      return worker.record().reportLeads.map((entry) => ({
+        id: entry.id,
+        conversationId: entry.owner.conversationId,
+        ...entry.connector,
+      }));
+    },
     admit,
     tools,
     hire,
     deliver,
     revokeConversation: (id: string) => {
-      for (const worker of workers.values()) if (worker.binding.conversationId === id) close(worker);
+      for (const held of journal.records.values())
+        if (held.conversationId === id) {
+          const worker = workers.get(held.tokenHash);
+          if (worker) close(worker);
+          journal.remove(held);
+        }
     },
     close: () => {
       for (const worker of workers.values()) close(worker);

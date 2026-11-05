@@ -26,6 +26,9 @@ export async function runFleetReportLeadsCommand(
     throw new Error(
       "Usage: clankie fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
     );
-  const input = ManageWorkerReportLeadsSchema.parse({ ...(joined ? { joinedHireId: id } : { paneId: id }), change });
+  const input = ManageWorkerReportLeadsSchema.parse({
+    ...(joined ? { joinedHireId: id } : { paneId: id }),
+    change,
+  });
   return (await ownerSettingsApi(options)).write(FLEET_REPORT_LEADS_PATH, input, WorkerReportLeadsSchema);
 }

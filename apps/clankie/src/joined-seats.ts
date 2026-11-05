@@ -31,10 +31,17 @@ export function createJoinedSeats(input: {
   captain: CaptainPort;
   settings?: Pick<SettingsStore, "load">;
   receiptPath?: string;
+  reportDeviceAvailable?: (id: string) => boolean;
 }) {
   const seats = new Map<string, Seat>();
   const launches = new Map<string, string[]>();
-  const workers = createJoinedWorkers(input);
+  const workers = createJoinedWorkers({
+    ...input,
+    ...(input.receiptPath === undefined
+      ? {}
+      : { workerRecordDirectory: `${input.receiptPath}.joined-workers` }),
+  });
+  input.joins.setWorkerReportLeads(workers.manageReportLeads);
   const bridge = createRemoteLeadBridge({
     captain: input.captain,
     ...(input.receiptPath === undefined ? {} : { receiptPath: input.receiptPath }),

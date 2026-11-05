@@ -15,6 +15,7 @@ import {
   MachineJoinStatusSchema,
   machineJoinLeaseAad,
   JoinedWorkerLaunchSchema,
+  JoinedWorkerProofSchema,
 } from "@clankie/protocol/machine-join";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { createMachineJoinRoutes } from "../src/machine-join-routes.ts";
@@ -107,7 +108,17 @@ test("joined Claude uses a home workspace chat, plugin, lead bank and transcript
     intervalMs: 10,
     ports: {
       workers: async (request) => {
-        const launch = JoinedWorkerLaunchSchema.parse(JSON.parse(request));
+        const raw: unknown = JSON.parse(request);
+        const proof = JoinedWorkerProofSchema.safeParse(raw);
+        if (proof.success) {
+          expect(proof.data).toMatchObject({
+            paneId: "worker-proof",
+            harness: "claude",
+            nativeSessionId: workerSession,
+          });
+          return JSON.stringify(proof.data);
+        }
+        const launch = JoinedWorkerLaunchSchema.parse(raw);
         workerToken = launch.token;
         workerSession = launch.sessionId;
         const admitted = await wire.rpc({
