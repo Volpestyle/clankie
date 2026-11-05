@@ -150,6 +150,14 @@ someone's draft, an input line Clankie can't read yet); nothing was typed, so
 send again once it clears. Peer messages and chosen steer or queue modes never
 type, and neither do the Herdr desktop app's terminals.
 
+The styled input reader recognizes captured Claude, Codex, OpenCode 1.x, Pi and
+Grok layouts. It defaults to unknown: plain text, unfamiliar frames, clipped
+editors and ambiguous styling never prove empty. OpenCode leader-key dimming
+is not an empty placeholder. Desktop terminals remain unknown until our
+[Herdr app fork adds styled visible reads](https://github.com/Volpestyle/herdr-app/issues/9).
+Observation needs no keys, focus or scrolling; see the
+[input-line reader limits](../../../../docs/pane-input-lines.md).
+
 A shared daemon still may lack a valid Herdr pane/session report. Do not guess a
 thread from recent history, globally enable the daemon, or forge membership to
 repair it. Outbound owner-authorized control does not authorize inbound fleet

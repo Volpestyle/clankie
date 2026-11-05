@@ -38,10 +38,11 @@ typing:
   delivery mode (steer or queue), a reconcile-only retry and a stable-receipt
   delivery never take it.
 - Herdr reports the agent `idle` or `done`, not `working` or `blocked`.
-- The agent's input line reads empty from the pane's styled screen. Only Claude
-  and Codex input lines can be read so far; a dim suggestion or placeholder
-  counts as empty, typed words never do, and a harness whose line can't be read
-  is refused.
+- The agent's input line reads empty from the pane's styled screen. The reader recognizes captured
+  Claude, Codex, OpenCode, Pi and Grok composer layouts. A verified native
+  suggestion or placeholder counts as empty; typed words never do. Missing
+  styling, incomplete frames and unfamiliar layouts remain unknown and refuse
+  the fallback ([input-line readers](../pane-input-lines.md)).
 - The same session still holds the same pane, and the sender's authority still
   stands.
 - The message is at most 8,000 characters, a hire brief's own cap, and does not
@@ -60,7 +61,9 @@ clears the receipt; any other failure of the command still reads the session.
 The Herdr desktop app's terminals are not covered. Its core reads a terminal only
 as plain text, which cannot tell a placeholder or suggestion from someone's
 draft, so a message to an owner's desktop agent is still refused, and Clankie's
-desktop hires keep their worker channel.
+desktop hires keep their worker channel. Styled visible reads are tracked only
+in our [Herdr app fork](https://github.com/Volpestyle/herdr-app/issues/9); this
+change does not enable desktop direct prompting.
 
 Everything else in ADR 0207 stands: questions and approvals stay with the owner,
 and an uncertain delivery is never permission to type the same message again.
