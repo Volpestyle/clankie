@@ -353,7 +353,7 @@ export function createFleetCapacityReader(input: {
     homes: readonly string[],
     now: number,
   ) => Promise<{ sessions: SessionBurn[]; truncated: boolean }>;
-}): (includeMachineResources?: boolean) => Promise<FleetCapacity> {
+}): (includeMachineResources?: boolean, includePressure?: boolean) => Promise<FleetCapacity> {
   const now = input.now ?? Date.now;
   const history = input.history ?? new UsageHistory();
   const sessionBurn = input.sessionBurn ?? readClaudeSessionBurn;
@@ -371,7 +371,7 @@ export function createFleetCapacityReader(input: {
       return { machine, unread: true as const };
     }
   };
-  return async (includeMachineResources = false) => {
+  return async (includeMachineResources = false, includePressure = false) => {
     const settings = await input.settings();
     const remotes = settings.execution.connections.filter(
       (connection) =>
@@ -458,6 +458,19 @@ export function createFleetCapacityReader(input: {
             {
               ...observation,
               status: "available" as const,
+              ...(includePressure && snapshot.pressure
+                ? {
+                    pressure: {
+                      loadRatio: snapshot.pressure.loadRatio,
+                      ...(snapshot.pressure.freeDiskGb === undefined
+                        ? {}
+                        : { freeDiskGb: snapshot.pressure.freeDiskGb }),
+                      ...(snapshot.pressure.diskWarning === undefined
+                        ? {}
+                        : { diskWarning: snapshot.pressure.diskWarning }),
+                    },
+                  }
+                : {}),
               full: lane(
                 snapshot.capacity.heavySlots,
                 snapshot.capacity.used,

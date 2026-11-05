@@ -226,6 +226,14 @@ export const FleetCapacitySchema = z
             full: resourceLane(),
             light: resourceLane(),
             server: resourceLane(),
+            /** Internal recommendation opt-in; absent for existing capacity clients. */
+            pressure: z
+              .strictObject({
+                loadRatio: z.number().finite().nonnegative(),
+                freeDiskGb: z.number().finite().nonnegative().optional(),
+                diskWarning: z.boolean().optional(),
+              })
+              .optional(),
           }),
         ]),
       )

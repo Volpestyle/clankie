@@ -890,3 +890,5 @@ export * from "./setup-survey.ts";
 export * from "./fleet-leads.ts";
 
 export * from "./desktop-access.ts";
+
+export { HireRecommendationSchema, type HireRecommendation } from "./hire-recommendation.ts";
