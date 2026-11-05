@@ -1464,8 +1464,10 @@ working directory, an unresolved native hire receipt in the same fleet/directory
 changed allocation evidence or unavailable inventory. Settle the original native
 receipt first; retain a present worker's handoff and retire it explicitly.
 The command preserves launch history and records the release time and inventory
-digest. It closes no pane, replays no receipt and starts no replacement. Repeating
-it reads the retained disposition. Definite failures before native dispatch now
+digest. Authority must remain current through the final ledger write; an
+authentication source without a synchronous publication witness cannot release
+an allocation. It closes no pane, replays no receipt and starts no replacement.
+Repeating it reads the retained disposition. Definite failures before native dispatch now
 release their project allocation automatically; uncertain launches stay held.
 The operator's `settle_hire_receipt` tool also accepts `release-allocation`.
 A project allocation UUID supplied with `abandoned-unknown` is refused with this

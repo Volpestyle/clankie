@@ -712,6 +712,7 @@ export class ProjectHires {
     candidate: Allocation,
     inventory: unknown,
     expectedReceipt?: { id: string; key: string },
+    assertCurrent?: () => void,
   ): void {
     this.change((state) => {
       if (
@@ -725,6 +726,7 @@ export class ProjectHires {
       const entry = state.allocations.find((a) => a.id === candidate.id);
       if (!entry || !isDeepStrictEqual(entry, candidate))
         throw new Error("Original project hire allocation changed; nothing released.");
+      assertCurrent?.();
       entry.gone = true;
       entry.operatorRelease = {
         at: new Date().toISOString(),

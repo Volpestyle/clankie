@@ -106,7 +106,7 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
     const { isolatedHerdr } = await import("./fixtures/local-fleet-proof/herdr-fixture.ts");
     const { createHerdrWatchRunner } = await import("../src/captain/herdr-watch.ts");
     const { createCaptain } = await import("../src/captain/captain.ts");
-    const { createClankieApp } = await import("../src/app.ts");
+    const { createClankieApp, createBearerAuthenticator } = await import("../src/app.ts");
     const { SettingsStore } = await import("@clankie/settings");
     const { runHireReceiptCommand } = await import("../../tui/src/command/hire-receipt.ts");
     const root = await realpath(await mkdtemp(join(tmpdir(), "hire-allocation-api-")));
@@ -138,10 +138,7 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
       );
       service = await createClankieApp({
         captain,
-        authenticateOperator: async (req) =>
-          req.headers.get("authorization") === "Bearer fixture-owner"
-            ? { operatorId: "fixture-owner" }
-            : undefined,
+        authenticateOperator: createBearerAuthenticator("fixture-owner", { operatorId: "fixture-owner" }),
       });
       const ledgerPath = join(stateDir, "herdr-watches.json.project-hires.json"),
         ledger = new ProjectHires(ledgerPath);
@@ -191,10 +188,26 @@ it.skipIf(process.env.NATIVE_HIRE_ALLOCATION_FIXTURES !== "1")(
       expect(await readFile(ledgerPath, "utf8")).toBe(history);
       const present = allocate("Pell", join(root, "pane-worktree"));
       ledger.pane(present.id, herdr.pane);
+      const originalPane = (await herdr.cli("pane", "list")).result.panes.find(
+        (pane: { pane_id: string }) => pane.pane_id === herdr.pane,
+      );
+      // This allocation retains a previously observed native occupant, even if
+      // the current pane now shows only its shell. Its handoff must stay held.
+      ledger.observe(present.id, originalPane.terminal_id, "recorded-native-occupant");
       expect(await cli(present.id)).toMatchObject({
         exit: 1,
         result: { state: "refused", detail: expect.stringContaining("still present") },
       });
+      expect(ledger.recoveryCandidate(present.id)?.gone).toBe(false);
+      // Separate shell-only case: no recorded occupant, two observations of
+      // the same real shell, so releasing the allocation remains intentional.
+      const shellOnly = allocate("Shell only", join(root, "shell-only-worktree"));
+      ledger.pane(shellOnly.id, herdr.foreignPane);
+      expect(await cli(shellOnly.id)).toMatchObject({
+        exit: 0,
+        result: { state: "allocation-released", receiptId: shellOnly.id },
+      });
+      expect(ledger.recoveryCandidate(shellOnly.id)?.gone).toBe(true);
       const confirmed = allocate("Confirmed", join(root, "confirmed-worktree"));
       ledger.confirmed(confirmed.id);
       expect(await cli(confirmed.id)).toMatchObject({ exit: 1, result: { state: "refused" } });

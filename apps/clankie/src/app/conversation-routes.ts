@@ -498,6 +498,13 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
   const ownerAppFor = (principal: { readonly kind: string; readonly id: string }) =>
     principal.kind === "device" && ownerAppDevice(principal.id) ? { deviceId: principal.id } : undefined;
   const questionOwnerAuthority = async (request: Request): Promise<QuestionAuthority | undefined> => {
+    const header = request.headers.get("authorization");
+    let operatorFence: { assertCurrent(): void } | undefined;
+    try {
+      operatorFence = ctx.dependencies.authenticateOperator?.readFence?.(request);
+    } catch {
+      /* A device owner has its own registry/session witness below. */
+    }
     if ((await ctx.authorizeOwner(request)) !== true) return undefined;
     const deviceRequest = request;
     const device = await ctx.authenticateDevice(deviceRequest);
@@ -508,7 +515,11 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const record = ctx.devices.get(device.deviceId);
         const now = ctx.clock();
         return (
+          !request.signal.aborted &&
+          request.headers.get("authorization") === header &&
           record?.status === "active" &&
+          record.scope !== "connector" &&
+          record.supportGrantId === undefined &&
           record.grants.terminalControl &&
           ownerPairedDeviceRecord(record, ctx.devices) &&
           now.getTime() < sessionExpiresAt &&
@@ -519,6 +530,9 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       return {
         principal: { kind: "device", id: device.deviceId },
         current: eligible,
+        assertCurrent: () => {
+          if (!eligible()) throw new Error("question_owner_unavailable");
+        },
         authorize: async () => {
           const fresh = await ctx.authenticateDevice(deviceRequest);
           return (
@@ -533,14 +547,35 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     }
     const operator = await authenticateOperator(request, ctx.dependencies);
     if (!operator || operator === "unavailable") return undefined;
-    let current = true;
+    const operatorId = operator.operatorId;
+    let authorized = true;
+    const current = () => {
+      try {
+        operatorFence?.assertCurrent();
+        return (
+          authorized &&
+          !request.signal.aborted &&
+          request.headers.get("authorization") === header &&
+          operator.operatorId === operatorId
+        );
+      } catch {
+        return false;
+      }
+    };
     return {
-      principal: { kind: "operator", id: operator.operatorId },
-      current: () => current,
+      principal: { kind: "operator", id: operatorId },
+      current,
+      ...(operatorFence
+        ? {
+            assertCurrent: () => {
+              if (!current()) throw new Error("question_owner_unavailable");
+            },
+          }
+        : {}),
       authorize: async () => {
         const fresh = await authenticateOperator(request, ctx.dependencies);
-        current = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === operator.operatorId);
-        return current;
+        authorized = Boolean(fresh && fresh !== "unavailable" && fresh.operatorId === operatorId);
+        return current();
       },
     };
   };

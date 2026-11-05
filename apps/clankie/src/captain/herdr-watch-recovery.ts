@@ -1,3 +1,4 @@
+import type { AuthorityGuard } from "./conversation-owner.ts";
 import { ProjectHires } from "./project-hires.ts";
 import { type ConversationOwner } from "./conversation-owner.ts";
 import { type UncertainReceipt } from "./delivery-fence.ts";
@@ -57,7 +58,7 @@ export function createHerdrWatchRecovery(ctx: Context) {
   async function retireCompletedHires(
     fleet: string,
     scope: { baseKey?: string; paneId?: string },
-    guard?: () => Promise<void>,
+    guard?: AuthorityGuard,
   ): Promise<void> {
     const candidates = ctx.hireReceipts
       .all()
@@ -106,7 +107,7 @@ export function createHerdrWatchRecovery(ctx: Context) {
   /** Resolve a fresh intent to its native fence; only its live owner or the operator may settle. */
   async function settleHireReceipt(
     receiptId: string,
-    guard?: () => Promise<void>,
+    guard?: AuthorityGuard,
     disposition:
       | "not-launched"
       | "delivered"
@@ -182,7 +183,7 @@ export function createHerdrWatchRecovery(ctx: Context) {
   /** Operator recovery only. Takes identity, never caller-supplied evidence or a launch request. */
   async function settleNativeHireReceipt(
     receiptId: string,
-    guard?: () => Promise<void>,
+    guard?: AuthorityGuard,
     disposition:
       | "not-launched"
       | "delivered"
@@ -255,7 +256,6 @@ export function createHerdrWatchRecovery(ctx: Context) {
         const before = await census();
         await guard();
         const { inventory, held, shellOnly } = await census();
-        if (expectedAllocation) await guard();
         if (ctx.closed || ctx.activeProjectHires.has(receiptId) || unresolved())
           return refused(
             "Original allocation became active or acquired an unresolved native receipt; nothing released.",
@@ -264,7 +264,12 @@ export function createHerdrWatchRecovery(ctx: Context) {
           return refused(
             "The original pane or a worker in its directory is still present. Retain its handoff and retire it explicitly before releasing the allocation.",
           );
-        ctx.projectHires.release(candidate, inventory, expectedAllocation?.nativeReceipt);
+        ctx.projectHires.release(candidate, inventory, expectedAllocation?.nativeReceipt, () => {
+          if (ctx.closed || ctx.activeProjectHires.has(receiptId) || unresolved())
+            throw new Error("Allocation settlement inputs changed");
+          if (!guard.assertCurrent) throw new Error("Allocation settlement authority cannot be fenced");
+          guard.assertCurrent();
+        });
         return released();
       } catch (error) {
         return refused(`Allocation recovery unavailable: ${reasonDetail(error)}. Nothing released.`);

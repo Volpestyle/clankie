@@ -6,6 +6,7 @@ import { realpath } from "node:fs/promises";
 import { projectHireProfile } from "./project-hires.ts";
 import {
   captureConversationAuthority,
+  conversationAuthorityGuard,
   assertConversationAuthority,
   type ConversationAuthority,
 } from "./conversation-owner.ts";
@@ -199,22 +200,14 @@ export function createHerdrWatchHiring(ctx: Context) {
           return { outcome: "failed", reason: "unknown_directory", detail: input.workingDirectory };
         input = { ...input, workingDirectory: canonicalDirectory };
         if (resume === undefined && input.freshIntent === undefined)
-          await ctx.retireGoneProjectHires(input.workingDirectory, async () => {
-            if (authority !== undefined) await assertConversationAuthority(authority);
-          });
+          await ctx.retireGoneProjectHires(input.workingDirectory, conversationAuthorityGuard(authority));
       }
       const settings = await ctx.projectPolicy.settings();
       const projectId = await ctx.projectPolicy.project(input, settings, authority);
       if (input.projectId !== undefined && input.projectId !== projectId)
         throw new Error("The selected project does not match this hiring conversation or workspace.");
       if (input.fleet !== undefined && resume === undefined) {
-        await ctx.retireUnsentRemoteAt(
-          input,
-          async () => {
-            if (authority !== undefined) await assertConversationAuthority(authority);
-          },
-          projectId,
-        );
+        await ctx.retireUnsentRemoteAt(input, conversationAuthorityGuard(authority), projectId);
         if (authority !== undefined) await assertConversationAuthority(authority);
       }
       if (projectId === undefined) {

@@ -45,7 +45,11 @@ import {
   captureConversationAuthority,
   type ConversationOwner,
 } from "./conversation-owner.ts";
-import { authorizeQuestion, type QuestionAuthority } from "./conversation-questions.ts";
+import {
+  authorizeQuestion,
+  questionAuthorityGuard,
+  type QuestionAuthority,
+} from "./conversation-questions.ts";
 import type { LeadOwnerProof } from "./conversations/types.ts";
 import { ConversationRefusedError, ConversationResetError, ConversationStore } from "./conversations.ts";
 import type { CaptainDeps } from "./deps.ts";
@@ -1366,7 +1370,7 @@ export function createOperatorService(
         schemaVersion: 1,
         result: await ctx.herdrWatches.settleHireReceipt(
           request.receiptId,
-          () => authorizeQuestion(authority),
+          questionAuthorityGuard(authority),
           request.disposition,
         ),
       };
