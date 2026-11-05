@@ -46,6 +46,8 @@ const ERROR_STATUS: Readonly<Record<ClankieAccountAuthErrorCode, 400 | 403 | 409
   unexpected_response: 502,
 };
 
+class OwnerAuthorityChanged extends Error {}
+
 interface PendingSignIn {
   readonly challenge: ClankieAccountLoginChallenge;
   readonly gatewayUrl: string;
@@ -58,7 +60,7 @@ interface PendingSignIn {
 /**
  * The owner's app signs this Mac in to clankie.bot (ADR 0153, #722). Local only:
  * the caller must be on this Mac's own loopback, whoever it is, and then be the
- * operator or a device with Take Control (ADR 0314). None of these paths are on
+ * operator or an owner-paired device with Take Control (ADR 0314). None of these paths are on
  * the public gateway's or the hosted operator's allowlists. The Cognito session
  * and tokens stay in this process and the broker; no response or log carries them.
  */
@@ -76,6 +78,7 @@ export function registerMacAccountRoutes(ctx: {
     request: Request,
   ) => Promise<TrustedDeviceIdentity | "unavailable" | DeviceAuthDenial>;
   readonly locks: Map<string, Promise<unknown>>;
+  readonly authorizeOwner: (request: Request) => Promise<true | "authentication_required" | "forbidden">;
 }): () => void {
   let pending: PendingSignIn | undefined;
   let restartTimer: NodeJS.Timeout | undefined;
@@ -113,7 +116,8 @@ export function registerMacAccountRoutes(ctx: {
       const device = await ctx.authenticateDevice(context.req.raw);
       if (device === "unavailable") return context.json({ error: "device_authentication_unavailable" }, 503);
       if ("denied" in device) return context.json({ error: "operator_authentication_required" }, 401);
-      if (!device.grants.terminalControl) return context.json({ error: "forbidden" }, 403);
+      if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+        return context.json({ error: "forbidden" }, 403);
       callers.set(context, `device:${device.deviceId}`);
       return await next();
     });
@@ -121,7 +125,22 @@ export function registerMacAccountRoutes(ctx: {
   for (const path of [MAC_ACCOUNT_START_PATH, MAC_ACCOUNT_COMPLETE_PATH])
     ctx.app.use(path, bodyLimit({ maxSize: 1024 }));
 
+  // Network preparation does not hold the caller lock: revocation must remain possible.
+  // Serialize only the final effect with revocation, then use the same owner decision.
+  const ownerCommit = async (context: Context, operation: () => Promise<Response>): Promise<Response> => {
+    const commit = async () => {
+      if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+        return context.json({ error: "forbidden" }, 403);
+      return await operation();
+    };
+    const caller = callers.get(context)!;
+    return caller.startsWith("device:")
+      ? await withSerializedLock(ctx.locks, caller.slice("device:".length), commit)
+      : await commit();
+  };
+
   const refusal = (context: Context, error: unknown) => {
+    if (error instanceof OwnerAuthorityChanged) return context.json({ error: "forbidden" }, 403);
     // The message can repeat what Cognito said; the code is all a caller needs.
     const code = error instanceof ClankieAccountAuthError ? error.code : "service_unavailable";
     logger.warn({ event: "mac_account.refused", code }, "Clankie account sign-in refused");
@@ -148,6 +167,8 @@ export function registerMacAccountRoutes(ctx: {
       publicGateway,
       credentials: ready.macAccount.credentials,
     });
+    if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+      return context.json({ error: "forbidden" }, 403);
     const doorway = ctx.dependencies.publicGatewayDoorway?.() ?? { state: "disabled" as const };
     // A credential the account rejected is still in the broker; the doorway knows better.
     const rejected = stored.state === "signed_in" && doorway.state === "sign_in_required";
@@ -171,16 +192,20 @@ export function registerMacAccountRoutes(ctx: {
         // Settings name the gateway, never the caller: the email goes nowhere else.
         const { publicGateway } = await ready.settings.load();
         const gatewayUrl = gatewayOrigin(publicGateway.url ?? DEFAULT_PUBLIC_GATEWAY_URL);
+        if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+          return context.json({ error: "forbidden" }, 403);
         const challenge = await beginClankieAccountLogin({ gatewayUrl, email: parsed.data.email });
-        const expiresAtMs = ctx.clock().getTime() + PENDING_SIGN_IN_MS;
-        // A new code replaces the last; Cognito has already spent that session.
-        pending = { challenge, gatewayUrl, startedBy, expiresAtMs, attempts: 0 };
-        return context.json(
-          MacAccountStartResponseSchema.parse({
-            email: challenge.email,
-            expiresAt: new Date(expiresAtMs).toISOString(),
-          }),
-        );
+        return await ownerCommit(context, async () => {
+          const expiresAtMs = ctx.clock().getTime() + PENDING_SIGN_IN_MS;
+          // A new code replaces the last; Cognito has already spent that session.
+          pending = { challenge, gatewayUrl, startedBy, expiresAtMs, attempts: 0 };
+          return context.json(
+            MacAccountStartResponseSchema.parse({
+              email: challenge.email,
+              expiresAt: new Date(expiresAtMs).toISOString(),
+            }),
+          );
+        });
       } catch (error) {
         return refusal(context, error);
       }
@@ -193,6 +218,8 @@ export function registerMacAccountRoutes(ctx: {
     const ready = account()!;
     const caller = callers.get(context)!;
     return await withSerializedLock(ctx.locks, LOCK, async () => {
+      if ((await ctx.authorizeOwner(context.req.raw)) !== true)
+        return context.json({ error: "forbidden" }, 403);
       const signIn = livePending();
       if (signIn === undefined || signIn.startedBy !== caller)
         return context.json({ error: "no_sign_in_pending" }, 409);
@@ -204,23 +231,28 @@ export function registerMacAccountRoutes(ctx: {
           code: parsed.data.code,
         });
         pending = undefined;
-        await storeClankieAccountSignIn({
-          gatewayUrl: signIn.gatewayUrl,
-          credential,
-          email: signIn.challenge.email,
-          credentials: ready.macAccount.credentials,
-          settings: ready.settings,
-        });
-        ctx.recordEvent("mac_account.signed_in", "mac-account", ctx.clock().toISOString(), {
-          signedInBy: caller,
-        });
-        return context.json(
-          MacAccountCompleteResponseSchema.parse({
-            state: "signed_in",
+        return await ownerCommit(context, async () => {
+          await storeClankieAccountSignIn({
+            gatewayUrl: signIn.gatewayUrl,
+            credential,
             email: signIn.challenge.email,
-            restart: restart(ready.macAccount.restartWhenIdle),
-          }),
-        );
+            credentials: ready.macAccount.credentials,
+            settings: ready.settings,
+            authorized: async () => {
+              if ((await ctx.authorizeOwner(context.req.raw)) !== true) throw new OwnerAuthorityChanged();
+            },
+          });
+          ctx.recordEvent("mac_account.signed_in", "mac-account", ctx.clock().toISOString(), {
+            signedInBy: caller,
+          });
+          return context.json(
+            MacAccountCompleteResponseSchema.parse({
+              state: "signed_in",
+              email: signIn.challenge.email,
+              restart: restart(ready.macAccount.restartWhenIdle),
+            }),
+          );
+        });
       } catch (error) {
         if (error instanceof ClankieAccountAuthError && error.code === "code_expired") pending = undefined;
         return refusal(context, error);

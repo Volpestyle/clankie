@@ -640,7 +640,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
         const operator = await authenticateOperator(request, dependencies);
         if (operator && operator !== "unavailable") return `operator:${operator.operatorId}`;
         const device = await authenticateDevice(request);
-        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+        if (device === "unavailable" || "denied" in device || (await authorizeOwnerSecrets(request)) !== true)
           return undefined;
         return `device:${device.deviceId}`;
       },
@@ -689,7 +689,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
             },
           };
         const device = await authenticateDevice(request);
-        if (device === "unavailable" || "denied" in device || !device.grants.terminalControl)
+        if (device === "unavailable" || "denied" in device || (await authorizeOwnerSecrets(request)) !== true)
           return undefined;
         return {
           principal: `device:${device.deviceId}`,
@@ -2595,6 +2595,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     );
   });
   const { runRevocationTimer } = registerPairingRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     get supportGrants() {
       return supportGrants;
     },
@@ -2643,6 +2644,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
   // After pairing: its middleware expires automation credentials before any route reads them.
   const closeMacAccountRoutes = registerMacAccountRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     app,
     dependencies,
     clock,
@@ -2666,6 +2668,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     detection,
   });
   const { questionOwnerAuthority, workOwnerAuthority, serveWorkWrite } = registerConversationRoutes({
+    authorizeOwner: authorizeOwnerSecrets,
     get app() {
       return app;
     },

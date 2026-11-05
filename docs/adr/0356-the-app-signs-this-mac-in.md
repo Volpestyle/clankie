@@ -14,7 +14,7 @@ and those routes handle the credential that opens this Mac to the internet.
 /v1/mac-account/start` and `POST /v1/mac-account/complete`. Admission checks
   the socket first: a request that is not this Mac's own loopback is refused
   whatever its credential, the operator bearer included. Then the caller must be
-  the operator or a device with Take Control, as for the pairing offer
+  the operator or an owner-paired device with Take Control, as for the pairing offer
   ([ADR 0314](0314-setup-adds-the-phone-and-the-tailnet.md)). The paths are on
   neither the gateway's nor the hosted operator's allowlist.
 - **Nothing secret crosses them.** The app sends an email and a code. The Cognito

@@ -7434,7 +7434,7 @@ never run it twice; a run a restart cut short is logged `interrupted`, not
 replayed. A run never overlaps the same routine's previous run. `--paused` adds
 a routine disabled. Output is text; `--json` prints the `RoutinesStatus`.
 
-The local operator credential, or a paired device with Take Control through the
+The local operator credential, or an owner-paired device with Take Control through the
 relay, authorizes `GET /v1/captain/routines` (list) and
 `POST /v1/captain/routines` with one `RoutineCommand`: `list`, `add`, `edit`,
 `pause`, `resume`, `run_now`, `remove`, `history` (schemas in
@@ -10634,7 +10634,7 @@ Clankie runs on the owner's own machine and changes nothing.
 `signed_in`, `signed_out` or `never_set_up`, with `email` once known. The Mac
 app does the same sign-in through `GET /v1/mac-account`, `POST
 /v1/mac-account/start` and `POST /v1/mac-account/complete`. Those routes admit
-only this Mac's own loopback, as the operator or a device with Take Control, and
+only this Mac's own loopback, as the operator or an owner-paired device with Take Control, and
 restart the service themselves once he is idle
 ([ADR 0356](adr/0356-the-app-signs-this-mac-in.md)).
 

@@ -168,13 +168,19 @@ export class RoutineStore {
     };
   }
 
-  public async command(input: RoutineCommand, actor: RoutineActor): Promise<RoutinesStatus> {
+  public async command(
+    input: RoutineCommand,
+    actor: RoutineActor,
+    authorized?: () => Promise<void>,
+  ): Promise<RoutinesStatus> {
     const command = RoutineCommandSchema.parse(input);
     if (this.unreadable && command.action !== "list" && command.action !== "history")
       throw new RoutineError(
         "busy",
         `The routines file ${this.statePath} is unreadable; fix or move it, then restart.`,
       );
+    // Resolve the HTTP caller again after request/body awaits, before any read or synchronous effect.
+    await authorized?.();
     switch (command.action) {
       case "list":
         return this.status(actor);

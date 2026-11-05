@@ -134,23 +134,31 @@ export async function storeClankieAccountSignIn<
   readonly credentials: CredentialStore;
   readonly settings: {
     load(): Promise<Settings>;
-    update(mutate: (current: Settings) => Settings): Promise<unknown>;
+    update(mutate: (current: Settings) => Settings, authorized?: () => Promise<void>): Promise<unknown>;
   };
+  readonly authorized?: () => Promise<void>;
 }): Promise<void> {
-  const { credential, credentials, email, gatewayUrl, settings } = input;
+  const { credential, credentials, email, gatewayUrl, settings, authorized } = input;
   const current = (await settings.load()).publicGateway;
   const installationId = current.installationId ?? generatePublicGatewayInstallationId();
   // The emailed code is spent by now, so outwait any live holder of the lock
   // rather than send the owner back for another code (#791).
   const deadline = Date.now() + SIGN_IN_STORE_PATIENCE_MS;
-  await pastLiveLock(deadline, () =>
-    credentials.set(
+  await pastLiveLock(deadline, async () => {
+    await authorized?.();
+    return credentials.set(
       CLANKIE_ACCOUNT_PROVIDER_ID,
       email === undefined ? credential : { ...credential, metadata: { ...credential.metadata, email } },
-    ),
+    );
+  });
+  await pastLiveLock(deadline, async () => {
+    await authorized?.();
+    return credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID);
+  });
+  await settings.update(
+    (next) => ({ ...next, publicGateway: { url: gatewayUrl, installationId } }),
+    authorized,
   );
-  await pastLiveLock(deadline, () => credentials.delete(PUBLIC_GATEWAY_CREDENTIAL_PROVIDER_ID));
-  await settings.update((next) => ({ ...next, publicGateway: { url: gatewayUrl, installationId } }));
 }
 
 /**

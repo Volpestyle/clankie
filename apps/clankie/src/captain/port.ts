@@ -346,6 +346,7 @@ export interface CaptainPort {
   /** The owner's routines (ADR 0265): list, change and read run history. */
   routineCommand(
     command: import("@clankie/protocol").RoutineCommand,
+    authorized?: () => Promise<void>,
   ): Promise<import("@clankie/protocol").RoutinesStatus>;
   /**
    * One Discord text/voice message becomes one captain turn, unless a text

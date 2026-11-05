@@ -14,8 +14,9 @@ connect` says so and changes nothing.
 
 `clankie remote-access status` shows `account.state` (`signed_in`, `signed_out`,
 `never_set_up`). The Mac app signs in through `/v1/mac-account`, `/start` and
-`/complete`; they admit this Mac's loopback only, and `complete` restarts the
-service when he is idle. A phone or the gateway cannot reach them.
+`/complete`; they admit this Mac's loopback only, with the operator credential
+or an owner-paired Take Control device. The shared owner decision is rechecked
+before account writes; `complete` restarts the service when he is idle. A phone or the gateway cannot reach them.
 
 ## Model keys and connected accounts
 

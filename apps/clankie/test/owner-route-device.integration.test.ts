@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -11,6 +12,9 @@ import { TAKE_CONTROL_GRANTS, SUPERVISE_GRANTS } from "@clankie/protocol";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
 import { DeviceSessionSigner, mintDeviceSessionClaims } from "../src/device-session.ts";
+import { createLocalTracker } from "@clankie/work-items";
+import { RoutineStore } from "../src/captain/routines.ts";
+import { LocalCompanionBoundary } from "../src/local-companion-boundary.ts";
 import { MachineJoins } from "../src/machine-joins.ts";
 import { ReviewGate } from "../src/captain/review-gate.ts";
 import type { ModelKeysPort } from "../src/model-keys.ts";
@@ -21,7 +25,14 @@ afterEach(async () => {
 });
 
 // Owner-route declarations share a decision, while each handler keeps its own validation.
-const ownerRoutes: Array<{ method: string; path: string; body?: object }> = [
+const ownerRoutes: Array<{
+  method: string;
+  path: string;
+  body?: object;
+  refusal?: number;
+  allowed?: number[];
+  operatorOnly?: boolean;
+}> = [
   {
     method: "GET",
     path: "/v1/harness-logins",
@@ -188,7 +199,43 @@ const ownerRoutes: Array<{ method: string; path: string; body?: object }> = [
   },
 ];
 
-async function fixture(withModels = false) {
+const disabledRoutine = {
+  action: "add",
+  name: "Owner HTTP proof",
+  enabled: false,
+  schedule: { when: "0 9 * * *", timeZone: "UTC" },
+  target: { kind: "turn", conversationId: "fixture-owner-conversation", prompt: "Fixture only" },
+};
+ownerRoutes.push(
+  { method: "GET", path: "/v1/captain/routines" },
+  { method: "POST", path: "/v1/captain/routines", body: disabledRoutine },
+  { method: "POST", path: "/v1/devices/missing/revoke", body: {}, allowed: [404] },
+  { method: "GET", path: "/v1/mac-account" },
+  { method: "POST", path: "/v1/mac-account/start", body: {} },
+  { method: "POST", path: "/v1/mac-account/complete", body: {} },
+  // Report-destination administration stays operator-only, even for owner-paired devices.
+  { method: "POST", path: "/v1/fleet/report-leads", body: {}, allowed: [403], operatorOnly: true },
+  { method: "GET", path: "/v1/fleet/leads" },
+  { method: "GET", path: "/v1/fleet/roster" },
+  { method: "POST", path: "/v1/fleet/roster/retire", body: {} },
+  { method: "POST", path: "/v1/fleet/roster/undo", body: {} },
+  { method: "POST", path: "/v1/pairing/offer", body: {} },
+  { method: "GET", path: "/v1/support/grants" },
+  {
+    method: "POST",
+    path: "/v1/support/grants",
+    body: { scope: "read-state", durationSeconds: 60, supportRef: "fixture" },
+  },
+  { method: "POST", path: "/v1/tracker/call", body: { name: "list_teams", arguments: {} }, refusal: 401 },
+  {
+    method: "POST",
+    path: "/v1/tracker/owner/call",
+    body: { name: "list_teams", arguments: {} },
+    refusal: 401,
+  },
+);
+
+async function fixture(withModels = false, gatewayUrl?: string) {
   const root = await mkdtemp(join(tmpdir(), "owner-route-device-"));
   cleanup.push(() => rm(root, { recursive: true, force: true }));
   const now = Date.now(),
@@ -233,11 +280,40 @@ async function fixture(withModels = false) {
     ];
   });
   await writeFile(events, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  const boundary = new LocalCompanionBoundary();
+  if (gatewayUrl !== undefined)
+    await settings.update((current) => ({
+      ...current,
+      publicGateway: { url: gatewayUrl, installationId: "aaaaaaaaaaaaaaaaaaaaaa" },
+    }));
+  const routines = new RoutineStore({
+    stateDir: root,
+    execute: async () => {
+      throw Error("Disabled routines must not execute");
+    },
+    validateTarget: () => {},
+    defaultConversationId: () => "fixture-owner-conversation",
+  });
+  cleanup.push(async () => routines.close());
+  const credentials = new FileCredentialStore(join(root, "credentials.json"));
+  const restarts: string[] = [];
+  let skewMs = 0;
+  let beforeRoutine: (() => Promise<void>) | undefined;
+  let onAuthentication: ((request: Request) => Promise<void>) | undefined;
   const signer = new DeviceSessionSigner(key);
   const token = (deviceId: string) =>
     signer.issue(
       mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
     );
+  let beforeSettingsLoad: (() => Promise<void>) | undefined;
+  const load = settings.load.bind(settings);
+  settings.load = async () => {
+    const result = await load();
+    const action = beforeSettingsLoad;
+    beforeSettingsLoad = undefined;
+    await action?.();
+    return result;
+  };
   let beforePersist: (() => Promise<void>) | undefined;
   const update = settings.update.bind(settings);
   settings.update = (mutate, guard) =>
@@ -290,28 +366,53 @@ async function fixture(withModels = false) {
   } as ModelKeysPort;
   const joins = new MachineJoins({
     settings,
-    secrets: new FileCredentialStore(join(root, "credentials.json")),
+    secrets: credentials,
     directory: join(root, "joins"),
   });
   const service = await createClankieApp({
-    captain: { ...createStubCaptain(), reviews },
+    captain: {
+      ...createStubCaptain(),
+      reviews,
+      routineCommand: async (command, authorized) => {
+        const action = beforeRoutine;
+        beforeRoutine = undefined;
+        await action?.();
+        return routines.command(command, { kind: "owner" }, authorized);
+      },
+    },
+    modelDeviceSetup: { platform: "darwin", hosted: false },
+    macAccount: {
+      credentials,
+      restartWhenIdle: () => {
+        restarts.push("requested");
+        return true;
+      },
+    },
+    builtInTracker: createLocalTracker({ directory: join(root, "tracker") }),
     settings,
     machineJoins: joins,
     ...(withModels ? { modelKeys: models } : {}),
     eventLogPath: events,
+    clock: () => new Date(Date.now() + skewMs),
     deviceSessionKey: key,
-    isSameMacRequest: (request) => new URL(request.url).hostname === "127.0.0.1",
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer fixture-owner"
+    isSameMacRequest: (request) => boundary.isSameMac(request),
+    authenticateOperator: async (request) => {
+      await onAuthentication?.(request);
+      return request.headers.get("authorization") === "Bearer fixture-owner"
         ? { operatorId: "fixture-owner" }
-        : undefined,
+        : undefined;
+    },
     authenticateCaptain: async (request) =>
       request.headers.get("authorization") === "Bearer fixture-captain"
         ? { captainId: "fixture-captain" }
         : undefined,
   });
   cleanup.push(async () => service.close());
-  const server = serve({ hostname: "127.0.0.1", port: 0, fetch: service.app.fetch });
+  const server = serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: boundary.fetch((request) => service.app.fetch(request)),
+  });
   if (!server.listening) await new Promise<void>((resolve) => server.once("listening", resolve));
   cleanup.push(async () => {
     if ("closeAllConnections" in server) server.closeAllConnections();
@@ -351,6 +452,18 @@ async function fixture(withModels = false) {
     ownerChild = await pair(owner.token);
   return {
     settings,
+    root,
+    credentials,
+    restarts,
+    advance: (ms: number) => {
+      skewMs += ms;
+    },
+    beforeRoutine: (action: () => Promise<void>) => {
+      beforeRoutine = action;
+    },
+    onAuthentication: (action: (request: Request) => Promise<void>) => {
+      onAuthentication = action;
+    },
     request,
     token,
     owner,
@@ -359,6 +472,9 @@ async function fixture(withModels = false) {
     events,
     revoke: async (id: string) => {
       expect((await request(`/v1/devices/${id}/revoke`, "fixture-owner", {})).status).toBe(200);
+    },
+    beforeSettingsLoad: (action: () => Promise<void>) => {
+      beforeSettingsLoad = action;
     },
     beforePersist: (action: () => Promise<void>) => {
       beforePersist = action;
@@ -373,17 +489,29 @@ async function fixture(withModels = false) {
   };
 }
 
-it.each(["account", "account-child"])(
+it.each(["account", "account-child", "account-grandchild"])(
   "owner routes share the device decision across the HTTP matrix (%s)",
   async (principal) => {
     const f = await fixture();
-    expect(ownerRoutes).toHaveLength(40);
+    expect(ownerRoutes).toHaveLength(56);
     for (const route of ownerRoutes) {
       const denied = await f.request(route.path, f.token(principal), route.body, route.method);
-      expect(denied.status, `${principal}: ${route.method} ${route.path}`).toBe(403);
+      expect(denied.status, `${principal}: ${route.method} ${route.path}`).toBe(route.refusal ?? 403);
+      if (route.operatorOnly) {
+        // Include the fixture's read-only pairing as well as every Take Control provenance.
+        expect((await f.request(route.path, f.token("supervise"), route.body, route.method)).status).toBe(
+          403,
+        );
+        const operator = await f.request(route.path, "fixture-owner", route.body, route.method);
+        expect(operator.status).toBe(400);
+        expect(operator.data.error).toBe("invalid_request");
+      }
       for (const owner of [f.owner, f.ownerChild]) {
         const allowed = await f.request(route.path, owner.token, route.body, route.method);
-        expect([200, 400, 503], `${route.method} ${route.path}`).toContain(allowed.status);
+        expect(
+          route.allowed ?? [200, 400, 503],
+          `${route.method} ${route.path}: ${JSON.stringify(allowed.data)}`,
+        ).toContain(allowed.status);
       }
     }
   },
@@ -488,4 +616,175 @@ it("uses the shared owner decision for views and subscription commits", async ()
   const revoked = await f.request("/v1/model-keys/subscriptions/start", f.owner.token, input);
   expect(revoked.data).toMatchObject({ ok: false, error: "forbidden" });
   expect(f.subscriptionWrites()).toBe(1);
+});
+
+it.each(["account", "account-child", "account-grandchild"])(
+  "owner routines and device revocation keep the common authority boundary (%s)",
+  async (principal) => {
+    const f = await fixture();
+    expect((await f.request("/v1/captain/routines", f.token(principal), disabledRoutine)).status).toBe(403);
+    expect((await f.request("/v1/captain/routines", f.owner.token)).data.routines).toEqual([]);
+    expect((await f.request(`/v1/devices/${f.owner.id}/revoke`, f.token(principal), {})).status).toBe(403);
+    expect((await f.request("/v1/operator/maximum-trust-mode", f.owner.token)).status).toBe(200);
+    const journal = await readFile(f.events, "utf8");
+    expect(journal).not.toContain('"type":"device.revoked"');
+    for (const owner of [f.owner, f.ownerChild]) {
+      const added = await f.request("/v1/captain/routines", owner.token, disabledRoutine);
+      expect(added.status).toBe(200);
+      expect(added.data.routines.at(-1)).toMatchObject({ createdBy: "owner", enabled: false });
+    }
+    // The actual persisted file, not only the response, records the owner's disabled routines.
+    const state = JSON.parse(await readFile(join(f.root, "routines", "routines.json"), "utf8"));
+    expect(state.routines).toHaveLength(2);
+    for (const owner of [f.owner, f.ownerChild]) {
+      expect((await f.request(`/v1/devices/${owner.id}/revoke`, owner.token, {})).status).toBe(200);
+      expect((await f.request("/v1/operator/maximum-trust-mode", owner.token)).status).toBe(401);
+    }
+  },
+);
+
+it("routine persistence rechecks the owner after awaited dispatch preparation", async () => {
+  const f = await fixture();
+  f.beforeRoutine(() => f.revoke(f.owner.id));
+  expect((await f.request("/v1/captain/routines", f.owner.token, disabledRoutine)).status).toBe(403);
+  expect((await f.request("/v1/captain/routines", f.ownerChild.token)).data.routines).toEqual([]);
+});
+
+it("device revocation rechecks its caller under the target lock", async () => {
+  const f = await fixture();
+  let checks = 0;
+  f.onAuthentication(async (request) => {
+    if (
+      new URL(request.url).pathname !== `/v1/devices/${f.ownerChild.id}/revoke` ||
+      request.headers.get("authorization") !== `Bearer ${f.owner.token}`
+    )
+      return;
+    // Initial operator lookup and common admission precede the common check under the lock.
+    if (++checks === 3) await f.revoke(f.owner.id);
+  });
+  expect((await f.request(`/v1/devices/${f.ownerChild.id}/revoke`, f.owner.token, {})).status).toBe(403);
+  expect((await f.request("/v1/operator/maximum-trust-mode", f.ownerChild.token)).status).toBe(200);
+});
+
+/** Isolated discovery and email-code service; no external account or restart is involved. */
+async function accountServer() {
+  const calls: string[] = [];
+  const control: { beforeReply?: () => Promise<void> } = {};
+  const clientId = "ownerroutefixture";
+  const server = createServer(async (request, response) => {
+    response.setHeader("content-type", "application/json");
+    const address = server.address();
+    if (!address || typeof address === "string") throw Error("Missing account listener");
+    if (request.url === "/gateway/v1/config") {
+      response.end(
+        JSON.stringify({
+          schemaVersion: 1,
+          account: {
+            provider: "cognito_email_otp",
+            endpoint: `http://127.0.0.1:${address.port}`,
+            issuer: "https://cognito-idp.us-east-1.amazonaws.com/fixture",
+            clientId,
+            selfSignUpEnabled: false,
+          },
+        }),
+      );
+      return;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const target = String(request.headers["x-amz-target"]).split(".").at(-1)!;
+    calls.push(target);
+    await control.beforeReply?.();
+    if (target === "InitiateAuth") {
+      expect(body.AuthParameters.USERNAME).toBe("owner@example.com");
+      response.end(JSON.stringify({ ChallengeName: "EMAIL_OTP", Session: "fixture-session" }));
+    } else {
+      expect(target).toBe("RespondToAuthChallenge");
+      expect(body.ChallengeResponses.EMAIL_OTP_CODE).toBe("123456");
+      response.end(
+        JSON.stringify({
+          AuthenticationResult: {
+            AccessToken: `h.${Buffer.from(JSON.stringify({ sub: "fixture-account", client_id: clientId, token_use: "access" })).toString("base64url")}.s`,
+            RefreshToken: "fixture-refresh",
+            ExpiresIn: 3600,
+          },
+        }),
+      );
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  cleanup.push(async () => {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw Error("Missing account listener");
+  return { calls, control, url: `http://127.0.0.1:${address.port}` };
+}
+
+it("Mac account refuses non-owner sessions before discovery and preserves owner sign-in", async () => {
+  const account = await accountServer(),
+    f = await fixture(false, account.url);
+  for (const principal of ["account", "account-child", "account-grandchild"]) {
+    for (const [path, body] of [
+      ["/v1/mac-account", undefined],
+      ["/v1/mac-account/start", { email: "owner@example.com" }],
+      ["/v1/mac-account/complete", { code: "123456" }],
+    ] as const) {
+      expect((await f.request(path, f.token(principal), body)).status).toBe(403);
+    }
+  }
+  expect(account.calls).toEqual([]);
+  expect(await f.credentials.list()).toEqual({});
+  for (const owner of [f.owner, f.ownerChild]) {
+    expect(
+      (await f.request("/v1/mac-account/start", owner.token, { email: "owner@example.com" })).status,
+    ).toBe(200);
+    expect((await f.request("/v1/mac-account/complete", owner.token, { code: "123456" })).status).toBe(200);
+    expect((await f.request("/v1/mac-account", owner.token)).data).toMatchObject({
+      state: "signed_in",
+      email: "owner@example.com",
+    });
+  }
+  expect(account.calls).toEqual([
+    "InitiateAuth",
+    "RespondToAuthChallenge",
+    "InitiateAuth",
+    "RespondToAuthChallenge",
+  ]);
+  expect(f.restarts).toEqual(["requested", "requested"]);
+});
+
+it.each(["expire", "revoke"])(
+  "Mac account does not persist credentials when owner authority changes across the code response (%s)",
+  async (change) => {
+    const account = await accountServer(),
+      f = await fixture(false, account.url);
+    expect(
+      (await f.request("/v1/mac-account/start", f.owner.token, { email: "owner@example.com" })).status,
+    ).toBe(200);
+    account.control.beforeReply = async () => {
+      if (change === "revoke") await f.revoke(f.owner.id);
+      else f.advance(8 * 24 * 60 * 60 * 1000);
+    };
+    expect((await f.request("/v1/mac-account/complete", f.owner.token, { code: "123456" })).status).toBe(403);
+    expect(await f.credentials.list()).toEqual({});
+    expect(f.restarts).toEqual([]);
+    expect(await readFile(f.events, "utf8")).not.toContain('"type":"mac_account.signed_in"');
+  },
+);
+
+it("Mac account storage rechecks after loading settings before the broker write", async () => {
+  const account = await accountServer(),
+    f = await fixture(false, account.url);
+  expect(
+    (await f.request("/v1/mac-account/start", f.owner.token, { email: "owner@example.com" })).status,
+  ).toBe(200);
+  account.control.beforeReply = async () => {
+    f.beforeSettingsLoad(async () => f.advance(8 * 24 * 60 * 60 * 1000));
+  };
+  expect((await f.request("/v1/mac-account/complete", f.owner.token, { code: "123456" })).status).toBe(403);
+  expect(await f.credentials.list()).toEqual({});
+  expect(f.restarts).toEqual([]);
 });
