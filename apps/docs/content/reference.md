@@ -5,6 +5,15 @@ Choose the reference for the job. [Get started](/get-started/) covers setup;
 [Customize Clankie](/diy/) introduces the optional technical depth;
 [questions](/faq/) answers what people ask first.
 
+## Guides by task
+
+- [Run a self-hosted AI assistant on your Mac](/self-hosted-ai-assistant/).
+- [Lead Claude Code and Codex agents](/claude-code-and-codex/).
+- [Add a machine](/add-a-machine/).
+- [Run a Discord bot with voice](/discord-ai-bot/).
+- [Watch Clankie play Pokémon](/pokemon-on-stream/).
+- [Read the changelog](/changelog/).
+
 ## Operate Clankie
 
 | I want to…                                            | Read                                                                                                                            |
