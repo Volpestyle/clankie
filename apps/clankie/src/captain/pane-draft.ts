@@ -1,12 +1,16 @@
+import { additionalPaneInputLine } from "./pane-input-composers.ts";
+
 /** Cell styling is required: identical placeholder words can be an owner's draft. */
 export type PaneDraftState = "empty" | "draft" | "unknown";
-type Cell = { text: string; faint: boolean; italic: boolean };
+export type PaneInputCell = { text: string; faint: boolean; italic: boolean; foreground: string | undefined };
+type Cell = PaneInputCell;
 
 function styledLines(ansi: string): Cell[][] | undefined {
   // oxlint-disable-next-line no-control-regex -- native SGR styling is the input evidence
   if (!/\x1b\[[0-9;]*m/u.test(ansi)) return undefined;
   let faint = false,
     italic = false;
+  let foreground: string | undefined;
   const rows: Cell[][] = [[]];
   // oxlint-disable-next-line no-control-regex -- tokenize native ANSI cell attributes
   const tokens = ansi.match(/\x1b\[[0-9;]*m|[^\x1b]/gu);
@@ -15,20 +19,26 @@ function styledLines(ansi: string): Cell[][] | undefined {
     if (token.startsWith("\x1b")) {
       const values = token.slice(2, -1).split(";").map(Number);
       for (let i = 0; i < values.length; i++) {
-        const value = values[i];
+        const value = values[i]!;
         // Colour payloads contain numbers such as 2 and 3; these are not attributes.
         if (value === 38 || value === 48 || value === 58) {
-          i += values[i + 1] === 2 ? 4 : values[i + 1] === 5 ? 2 : 0;
+          const size = values[i + 1] === 2 ? 4 : values[i + 1] === 5 ? 2 : 0;
+          if (size === 0 || values.slice(i, i + size + 1).length !== size + 1) return undefined;
+          if (value === 38) foreground = values.slice(i, i + size + 1).join(":");
+          i += size;
         } else if (value === 0) {
           faint = false;
           italic = false;
+          foreground = undefined;
         } else if (value === 2) faint = true;
         else if (value === 3) italic = true;
         else if (value === 22) faint = false;
         else if (value === 23) italic = false;
+        else if ((value >= 30 && value <= 37) || (value >= 90 && value <= 97)) foreground = String(value);
+        else if (value === 39) foreground = undefined;
       }
     } else if (token === "\n") rows.push([]);
-    else if (token !== "\r") rows.at(-1)!.push({ text: token, faint, italic });
+    else if (token !== "\r") rows.at(-1)!.push({ text: token, faint, italic, foreground });
   }
   return rows;
 }
@@ -56,7 +66,8 @@ export function paneInputLine(harness: string, ansi: string): PaneInputLine {
   // oxlint-disable-next-line no-control-regex -- reject non-SGR terminal controls
   if (/\x1b(?!\[[0-9;]*m)/u.test(ansi)) return { state: "unknown" };
   const rows = styledLines(ansi);
-  if (!rows || !["codex", "claude"].includes(harness)) return { state: "unknown" };
+  if (!rows) return { state: "unknown" };
+  if (!["codex", "claude"].includes(harness)) return additionalPaneInputLine(harness, rows);
   const marker = harness === "codex" ? "›" : "❯";
   const start = rows.findLastIndex((row) =>
     row
