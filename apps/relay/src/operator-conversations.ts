@@ -5,6 +5,9 @@ import {
 } from "../../../packages/protocol/src/project-ci-starter.ts";
 import {
   DESKTOP_ACCESS_PATH,
+  REFRESH_DESKTOP_PERMISSIONS_PATH,
+  RefreshDesktopPermissionsSchema,
+  DesktopPermissionCheckSchema,
   DesktopAccessSnapshotSchema,
   UpdateDesktopModeSchema,
 } from "../../../packages/protocol/src/desktop-access.ts";
@@ -270,6 +273,7 @@ export const OPERATOR_RELAY_DEVICE_ROUTES = [
   { method: "POST", path: EVIDENCE_STORAGE_SETTINGS_PATH },
   { method: "GET", path: DESKTOP_ACCESS_PATH },
   { method: "POST", path: DESKTOP_ACCESS_PATH },
+  { method: "POST", path: REFRESH_DESKTOP_PERMISSIONS_PATH },
   { method: "GET", path: HOST_SETTINGS_PATH },
   { method: "GET", path: HTTP_SETTINGS_PATH },
   { method: "POST", path: HTTP_SETTINGS_PATH },
@@ -306,6 +310,11 @@ const OWNER_SETTINGS_ROUTES: Readonly<
     methods: ["GET", "POST"],
     update: UpdateEvidenceStorageSchema,
     snapshot: EvidenceStorageSnapshotSchema,
+  },
+  [REFRESH_DESKTOP_PERMISSIONS_PATH]: {
+    methods: ["POST"],
+    update: RefreshDesktopPermissionsSchema,
+    snapshot: DesktopPermissionCheckSchema,
   },
   [DESKTOP_ACCESS_PATH]: {
     methods: ["GET", "POST"],

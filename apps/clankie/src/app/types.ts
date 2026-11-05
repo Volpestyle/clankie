@@ -239,6 +239,9 @@ export interface ClankieAppDependencies {
   };
   /** Only a currently available connection has an active binding. */
   herdrBinding?: () => HerdrBinding | undefined;
+  desktopPermissionCheck?: (
+    guard: () => Promise<void>,
+  ) => Promise<import("@clankie/protocol/desktop-access").DesktopPermissionCheck>;
   /** What the public doorway is doing, so `/health` can say the phone cannot reach him. */
   publicGatewayDoorway?: () => PublicGatewayDoorwayState;
   /** Whether this host may sleep, and when it last did, so the app can say why he went quiet. */

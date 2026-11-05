@@ -648,6 +648,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
       read: authorizeOwnerSecrets,
       write: authorizeOwnerSecrets,
       publish: desktopOperator,
+      ...(dependencies.desktopPermissionCheck === undefined
+        ? {}
+        : { check: dependencies.desktopPermissionCheck }),
       known: (id) => desktopMachines?.hasDesktopMachine(id) ?? Promise.resolve(id === "local"),
     }),
   );

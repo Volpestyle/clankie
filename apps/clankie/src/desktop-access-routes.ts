@@ -3,6 +3,10 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import {
   DESKTOP_ACCESS_PATH,
+  REFRESH_DESKTOP_PERMISSIONS_PATH,
+  RefreshDesktopPermissionsSchema,
+  DesktopPermissionCheckSchema,
+  type DesktopPermissionCheck,
   isDesktopAccessRoute,
   DesktopMachineIdSchema,
   DesktopLeadIdSchema,
@@ -20,6 +24,7 @@ export function createDesktopAccessRoutes(options: {
   write: Authorize;
   /** Publishing a probe is local operator-only, never a phone/app assertion. */
   publish: Authorize;
+  check?: (guard: () => Promise<void>) => Promise<DesktopPermissionCheck>;
   known: (id: string) => Promise<boolean>;
 }): Hono {
   const app = new Hono();
@@ -39,6 +44,7 @@ export function createDesktopAccessRoutes(options: {
   };
   app.use(DESKTOP_ACCESS_PATH, authorizeRoute);
   app.use(`${DESKTOP_ACCESS_PATH}/permissions`, authorizeRoute);
+  app.use(REFRESH_DESKTOP_PERMISSIONS_PATH, authorizeRoute);
   const machine = async (raw: string) =>
     DesktopMachineIdSchema.safeParse(raw).success && (await options.known(raw));
   app.get(DESKTOP_ACCESS_PATH, async (context) => {
@@ -82,6 +88,28 @@ export function createDesktopAccessRoutes(options: {
         },
         code === "desktop_mode_above_ceiling" || code === "desktop_owner_revoked" ? 403 : 409,
       );
+    }
+  });
+  app.post(REFRESH_DESKTOP_PERMISSIONS_PATH, bodyLimit({ maxSize: 2048 }), async (context) => {
+    if (!RefreshDesktopPermissionsSchema.safeParse(await readJson(context.req.raw)).success)
+      return context.json({ error: "malformed" }, 400);
+    const guard = async () => {
+      context.req.raw.signal.throwIfAborted();
+      if ((await options.write(context.req.raw)) !== true) throw Error("desktop_owner_revoked");
+    };
+    try {
+      const result = DesktopPermissionCheckSchema.parse(
+        options.check ? await options.check(guard) : { state: "unavailable", reason: "terminal_unavailable" },
+      );
+      // Native cleanup and all asynchronous preparation complete before the final
+      // shared owner decision. No await between that decision and publication.
+      await guard();
+      if (result.state === "observed") options.desktop.publish("local", result.observation);
+      return context.json(result);
+    } catch (error) {
+      if (error instanceof Error && error.message === "desktop_owner_revoked")
+        return context.json({ error: "desktop_owner_revoked" }, 403);
+      return context.json({ state: "unavailable", reason: "invalid_observation" });
     }
   });
   app.post(`${DESKTOP_ACCESS_PATH}/permissions`, bodyLimit({ maxSize: 2048 }), async (context) => {

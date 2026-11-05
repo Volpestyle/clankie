@@ -220,3 +220,10 @@ use the API revision and never raise a machine's existing access ceiling.
 `--refresh` is explicit, local, and must run inside the actual acting terminal
 app. A service/app TCC check cannot substitute for that app. Unavailable stays
 unknown. [API, authority and unimplemented routing/VM limits](../../../docs/desktop-control.md#desktop-choice-and-permission-status).
+
+`clankie computer permissions --request --json` asks the configured local
+terminal for a fresh, non-prompting check through the owner API. It starts only
+a fixed background diagnostic, never inputs to an existing pane.
+Missing context or a timeout is typed unavailable; it does not reuse an old
+report as fresh. `--refresh` retains the explicit check in this local terminal.
+Neither command grants permission or changes a desktop choice.

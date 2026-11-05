@@ -366,6 +366,14 @@ function buildNetworkRows() {
       },
     ],
     [
+      "POST /v1/operator/computer/permissions/refresh",
+      {
+        access: "Encrypted active owner device with Take Control, including owner-minted descendants",
+        purpose:
+          "Ask the configured local terminal for a bounded non-prompting permission check. Returns a named actor and original observation time or typed unavailable; never grants permission or substitutes an old report.",
+      },
+    ],
+    [
       "GET /v1/operator/host-settings",
       {
         access: "Encrypted active device bearer with terminalControl (Take Control)",

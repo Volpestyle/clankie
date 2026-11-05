@@ -228,7 +228,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   update --override-holds --reason TEXT  Owner-only update with one audited override per hold
   update canary [--window-seconds N] [--sample-seconds N] [--cpu-percent N] [--health-ms N]  Read or configure post-update health budgets (CPU is advisory)
   computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json  Read or change the owner’s desktop choice
-  computer permissions [--machine ID] [--refresh] --json  Read permission status; refresh only in the acting terminal on its Mac
+  computer permissions [--machine ID] [--refresh|--request] --json  Read last check; request a fresh terminal check; refresh checks this local terminal
   computer request JSON [--image-path NEW_PNG_PATH]  Drive the conversation-leased computer body (JSON)
   body status | request JSON  Inspect or explicitly request conversation body leases (JSON)
   login [--email EMAIL] [--url ORIGIN] [--code-stdin] [--machine ID]

@@ -81,3 +81,24 @@ export function isDesktopAccessRoute(path: string): boolean {
     (params.get("lead") === null || DesktopLeadIdSchema.safeParse(params.get("lead")).success)
   );
 }
+
+/** A fresh check has its own response; old strict snapshot clients are unchanged. */
+export const REFRESH_DESKTOP_PERMISSIONS_PATH = `${DESKTOP_ACCESS_PATH}/permissions/refresh`;
+export const RefreshDesktopPermissionsSchema = z.strictObject({ schemaVersion: z.literal(1) });
+export const DesktopPermissionCheckSchema = z.discriminatedUnion("state", [
+  z.strictObject({ state: z.literal("observed"), observation: DesktopActorPermissionsSchema }),
+  z.strictObject({
+    state: z.literal("unavailable"),
+    reason: z.enum([
+      "unsupported",
+      "terminal_unavailable",
+      "terminal_context_unavailable",
+      "terminal_changed",
+      "check_in_progress",
+      "timed_out",
+      "invalid_observation",
+      "launch_unconfirmed",
+    ]),
+  }),
+]);
+export type DesktopPermissionCheck = z.infer<typeof DesktopPermissionCheckSchema>;

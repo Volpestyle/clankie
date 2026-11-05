@@ -1,5 +1,7 @@
 import {
   DESKTOP_ACCESS_PATH,
+  REFRESH_DESKTOP_PERMISSIONS_PATH,
+  DesktopPermissionCheckSchema,
   DesktopAccessSnapshotSchema,
   DesktopMachineIdSchema,
   DesktopLeadIdSchema,
@@ -10,7 +12,7 @@ import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings
 import { probeDesktopActorPermissions } from "./desktop-permissions.ts";
 
 const USAGE =
-  "Usage: clankie computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json | computer permissions [--machine ID] [--refresh] --json";
+  "Usage: clankie computer mode [none|host|screen|vm] [--machine ID] [--lead NAME] [--expected-revision SHA256] --json | computer permissions [--machine ID] [--refresh|--request] --json";
 
 export async function runComputerSettingsCommand(
   args: readonly string[],
@@ -20,10 +22,12 @@ export async function runComputerSettingsCommand(
   const values = new Map<string, string>();
   let mode: string | undefined;
   let refresh = false;
+  let request = false;
   let json = false;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i]!;
     if (arg === "--json" && !json) json = true;
+    else if (arg === "--request" && !request) request = true;
     else if (arg === "--refresh" && !refresh) refresh = true;
     else if (
       ["--machine", "--lead", "--expected-revision"].includes(arg) &&
@@ -43,7 +47,8 @@ export async function runComputerSettingsCommand(
     (lead !== undefined && !DesktopLeadIdSchema.safeParse(lead).success) ||
     (revision !== undefined && (!/^[a-f0-9]{64}$/u.test(revision) || mode === undefined)) ||
     (verb !== "mode" && verb !== "permissions") ||
-    (verb === "mode" && refresh) ||
+    (verb === "mode" && (refresh || request)) ||
+    (request && (refresh || machineId !== "local")) ||
     (verb === "permissions" && (lead !== undefined || revision !== undefined))
   )
     throw Error(USAGE);
@@ -55,6 +60,8 @@ export async function runComputerSettingsCommand(
   )
     throw Error("Run the permission check in the acting terminal on that Mac, against its local service.");
   const api = await ownerSettingsApi(options);
+  if (request)
+    return api.write(REFRESH_DESKTOP_PERMISSIONS_PATH, { schemaVersion: 1 }, DesktopPermissionCheckSchema);
   const query = new URLSearchParams({ machine: machineId, ...(lead === undefined ? {} : { lead }) });
   const path = `${DESKTOP_ACCESS_PATH}?${query}`;
   const initial = await api.get(path, DesktopAccessSnapshotSchema);

@@ -256,6 +256,8 @@ async function copyRuntimeAssets(targetRoot) {
     ["packages/fleet-resources/src/native.py", "packages/fleet-resources/src/native.py"],
     ["packages/fleet-resources/src/linux-namespace.py", "packages/fleet-resources/src/linux-namespace.py"],
     ["packages/fleet-resources/src/server-cpu.py", "packages/fleet-resources/src/server-cpu.py"],
+    ["apps/tui/native/desktop-permission-probe.mjs", "apps/tui/native/desktop-permission-probe.mjs"],
+    ["apps/tui/native/desktop-permissions.mjs", "apps/tui/native/desktop-permissions.mjs"],
     ["apps/tui/native/LentScreen.cs", "apps/tui/native/LentScreen.cs"],
     ["apps/tui/native/lent-screen.ps1", "apps/tui/native/lent-screen.ps1"],
     ["apps/clankie/src/captain/instructions.md", "apps/clankie/src/instructions.md"],
