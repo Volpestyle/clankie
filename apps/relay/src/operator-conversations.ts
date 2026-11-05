@@ -829,7 +829,9 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         ((serviceRequest.op === "lead_changes" ||
           serviceRequest.op === "agent_message_status" ||
           serviceRequest.op === "send") &&
-          serviceRequest.appSessionExpiresAt !== undefined))
+          (serviceRequest.appSessionExpiresAt !== undefined ||
+            ((serviceRequest.op === "send" || serviceRequest.op === "agent_message_status") &&
+              serviceRequest.appSessionId !== undefined))))
     ) {
       writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
       return true;
@@ -989,6 +991,14 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       serviceRequest = {
         ...serviceRequest,
         appSessionExpiresAt: currentAuthorization.device.sessionExpiresAt,
+        ...(serviceRequest.op === "send" || serviceRequest.op === "agent_message_status"
+          ? {
+              appSessionId: createHash("sha256")
+                .update("agent-message-session:v1:")
+                .update(token)
+                .digest("hex"),
+            }
+          : {}),
       };
     // A connector's thread must be an agent's own persona thread, never Clankie's
     // lead or a channel. The scope of a thread never changes, so one look holds.

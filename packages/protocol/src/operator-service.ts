@@ -356,6 +356,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     receiptId: z.string().uuid(),
     appDeviceId: z.string().min(1).max(256).optional(),
     appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+    appSessionId: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
   }),
   LeadChangesReadSchema.extend({
     op: z.literal("lead_changes"),
@@ -512,6 +516,10 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       turn: SubmitOperatorConversationTurnSchema,
       receiptRequestId: z.string().uuid().optional(),
       appSessionExpiresAt: z.string().datetime({ offset: true }).optional(),
+      appSessionId: z
+        .string()
+        .regex(/^[a-f0-9]{64}$/u)
+        .optional(),
     })
     .strict(),
   // Read the relay's retained result for the exact original send. Never dispatches it.

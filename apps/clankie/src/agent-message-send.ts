@@ -25,13 +25,15 @@ export async function sendAgentMessageWithReceipt(input: {
   )
     throw new Error("agent_message_mode_unsupported");
   const authority = await input.authorize();
-  if (!authority || authority.ownerInspection) throw new Error("agent_message_forbidden");
-  const { deviceId, authorizationRevision } = authority;
+  if (!authority || !authority.sessionId || authority.ownerInspection)
+    throw new Error("agent_message_forbidden");
+  const { deviceId, sessionId, authorizationRevision } = authority;
   const authorize = async () => {
     const fresh = await input.authorize();
     if (
       !fresh ||
       fresh.deviceId !== deviceId ||
+      fresh.sessionId !== sessionId ||
       fresh.authorizationRevision !== authorizationRevision ||
       !input.current()
     )
@@ -45,13 +47,14 @@ export async function sendAgentMessageWithReceipt(input: {
   } = request.turn;
   const recovered = receipts.recover({
     senderDeviceId: deviceId,
+    senderSessionId: sessionId,
     requestKey: request.receiptRequestId,
     targetKey: request.turn.conversationId,
     message: JSON.stringify(original),
   });
   if (recovered.outcome === "conflict") throw new Error("agent_message_request_conflict");
   if (recovered.outcome === "existing") {
-    const result = receipts.sendResult(recovered.receiptId, deviceId) ?? {
+    const result = receipts.sendResult(recovered.receiptId, deviceId, sessionId) ?? {
       schemaVersion: 1 as const,
       status: "seat_delivery_unconfirmed" as const,
       conversationId: request.turn.conversationId,
@@ -78,6 +81,7 @@ export async function sendAgentMessageWithReceipt(input: {
   const binding = { machineId: seat.fleet ?? "local", seatId: seat.seatId, instanceId: seat.occupantId };
   const begun = receipts.begin({
     senderDeviceId: deviceId,
+    senderSessionId: sessionId,
     requestKey: request.receiptRequestId,
     agent: "herdr:" + seat.seatId,
     binding,
@@ -87,7 +91,7 @@ export async function sendAgentMessageWithReceipt(input: {
   if (begun.outcome === "conflict") throw new Error("agent_message_request_conflict");
   const receiptId = begun.receiptId;
   if (begun.outcome === "existing") {
-    const result = receipts.sendResult(receiptId, deviceId) ?? {
+    const result = receipts.sendResult(receiptId, deviceId, sessionId) ?? {
       schemaVersion: 1 as const,
       status: "seat_delivery_unconfirmed" as const,
       conversationId: request.turn.conversationId,

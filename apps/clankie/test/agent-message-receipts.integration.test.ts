@@ -1,4 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { z } from "zod";
+import { DurableReceiptStore } from "../src/durable-receipt-store.ts";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -12,6 +14,7 @@ afterEach(async () => {
 const binding = { machineId: "home", seatId: "herdr:t1", instanceId: "native-session-1" };
 const input = {
   senderDeviceId: "app-a",
+  senderSessionId: "original-session-a",
   requestKey: "original-request",
   agent: "herdr:t1",
   binding,
@@ -27,7 +30,11 @@ async function fixture() {
   if (begun.outcome !== "new") throw new Error("Fixture must reserve its original input");
   return { path, receipts, receiptId: begun.receiptId };
 }
-const authorized = async () => ({ deviceId: "app-a", authorizationRevision: "registration-1" });
+const authorized = async () => ({
+  deviceId: "app-a",
+  sessionId: "original-session-a",
+  authorizationRevision: "registration-1",
+});
 
 it("persists admission before handoff and recovers the original key after restart without replay", async () => {
   const { path, receiptId } = await fixture();
@@ -118,7 +125,7 @@ it("never infers progress from an unbound run, a different message, matching tex
       observedStop: { at, ok: true, text: input.message },
     }),
   ).toBe(false);
-  expect(receipts.lookup(receiptId, "app-a")).toMatchObject({
+  expect(receipts.lookup(receiptId, "app-a", "original-session-a")).toMatchObject({
     outcome: "found",
     receipt: { delivery: "pending", progress: [] },
   });
@@ -140,7 +147,9 @@ it("refuses replacement occupants and re-binding even when a pane and message ID
       text: "answer",
     }),
   ).toBe(false);
-  expect(receipts.lookup(receiptId, "app-a")).toMatchObject({ receipt: { progress: [] } });
+  expect(receipts.lookup(receiptId, "app-a", "original-session-a")).toMatchObject({
+    receipt: { progress: [] },
+  });
 });
 
 it("does not invent a read timestamp or an answer from a successful completion with no text", async () => {
@@ -149,7 +158,7 @@ it("does not invent a read timestamp or an answer from a successful completion w
   expect(
     receipts.observe(receiptId, binding, { type: "turn_completed", messageId: "input-1", at, ok: true }),
   ).toBe(true);
-  expect(receipts.lookup(receiptId, "app-a")).toMatchObject({
+  expect(receipts.lookup(receiptId, "app-a", "original-session-a")).toMatchObject({
     receipt: { progress: [{ stage: "acted_on", occurredAt: at }] },
   });
   expect(receipts.delivery(receiptId, binding, "uncertain")).toBe(false);
@@ -176,7 +185,7 @@ it("rechecks authorization after reading and refuses revoked, downgraded or repl
   const { receipts, receiptId } = await fixture();
   for (const changed of [
     undefined,
-    { deviceId: "app-a", authorizationRevision: "downgraded" },
+    { deviceId: "app-a", sessionId: "original-session-a", authorizationRevision: "downgraded" },
     { deviceId: "app-b", authorizationRevision: "registration-1" },
   ]) {
     let reads = 0;
@@ -203,7 +212,11 @@ it("lookup neither writes nor changes revisions and journal damage fails closed"
 
 it("captures the original authorization even when the registry updates its object in place", async () => {
   const { receipts, receiptId } = await fixture();
-  const registration = { deviceId: "app-a", authorizationRevision: "registration-1" };
+  const registration = {
+    deviceId: "app-a",
+    sessionId: "original-session-a",
+    authorizationRevision: "registration-1",
+  };
   let reads = 0;
   expect(
     await lookupAgentMessageReceipt(receipts, { receiptId }, async () => {
@@ -211,4 +224,46 @@ it("captures the original authorization even when the registry updates its objec
       return registration;
     }),
   ).toEqual({ outcome: "unknown" });
+});
+
+it("scrubs legacy raw replay generations without assigning their receipts to a new session", async () => {
+  const { path, receiptId } = await fixture();
+  const old = new DurableReceiptStore({
+    path,
+    sharded: true,
+    unreadableMessage: "Fixture ledger unreadable",
+    schema: z
+      .object({
+        id: z.string(),
+        createdAt: z.number(),
+        state: z.enum(["uncertain", "settled"]),
+        result: z.unknown().optional(),
+      })
+      .passthrough(),
+  });
+  const record = old.load().get(receiptId)!;
+  delete record.storageVersion;
+  delete record.senderSessionId;
+  const canary = "PRIVATE_NATIVE_DETAIL_CANARY sk-proj-" + "x".repeat(100);
+  record.sendResult = {
+    schemaVersion: 1,
+    status: "accepted",
+    conversationId: "conversation-fixture",
+    runId: "run-fixture",
+    revision: 1,
+    safeCursor: "0000000000000000",
+    seatDelivery: { state: "queued", detail: canary },
+  };
+  old.save();
+  const orphan = "ab-" + "c".repeat(64) + ".json";
+  await writeFile(join(path + ".d", orphan), canary);
+  const restarted = new AgentMessageReceipts(path);
+  expect(restarted.lookup(receiptId, "app-a", "original-session-a")).toEqual({ outcome: "unknown" });
+  expect(restarted.begin(input)).toEqual({ outcome: "conflict" });
+  expect(restarted.inspectAsOwner(receiptId).outcome).toBe("found");
+  const files = [path, ...(await readdir(path + ".d")).map((name) => join(path + ".d", name))];
+  expect((await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n")).not.toContain(
+    "PRIVATE_NATIVE_DETAIL_CANARY",
+  );
+  expect(new AgentMessageReceipts(path).begin(input)).toEqual({ outcome: "conflict" });
 });

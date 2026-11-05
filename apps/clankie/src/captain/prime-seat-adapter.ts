@@ -332,7 +332,10 @@ export function createPrimeSeatAdapter(options: {
                     deliveryStage: "unavailable",
                   };
                 }
-                if (input?.beforeDispatch && !(await input.beforeDispatch()))
+                if (
+                  input?.beforeDispatch &&
+                  (!(await input.beforeDispatch()) || input.beforeDispatch.current?.() === false)
+                )
                   return {
                     outcome: "offline",
                     detail: "Prime Agent dispatch authority changed",

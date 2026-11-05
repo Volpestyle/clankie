@@ -1,3 +1,4 @@
+import { piFixture } from "./fixtures/pi-message-receipts.ts";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -68,31 +69,34 @@ const decoded = (value: Awaited<ReturnType<Client["callTool"]>>) => {
   if (value.isError) throw new Error(text);
   return JSON.parse(text);
 };
-async function fixture() {
+async function fixture(pi?: { control: SeatControl; file: string }) {
   const root = await mkdtemp(join(tmpdir(), "agent-message-connector-"));
   closes.push(() => rm(root, { recursive: true, force: true }));
   vi.stubEnv("HC_SOCKET", join(root, "no-owner-desktop.sock"));
   const state = join(root, "captain");
   await mkdir(state);
   const settings = new SettingsStore(join(root, "settings.json"));
-  let nativeId = randomUUID(),
+  let nativeId = pi?.control.ref.sessionId ?? randomUUID(),
     sends = 0,
     queued = true,
     queueDetail = true;
+  let nativeDetail = "The native queue is waiting for its turn.";
   let beforeNative: undefined | (() => Promise<void>);
   const originalMessages: string[] = [];
   const live = (): HerdrAgentSnapshot => ({
     paneId: "fixture-pane",
     terminalId: "fixture-seat",
     name: "fixture-worker",
-    agent: "claude",
+    agent: pi ? "pi" : "claude",
     status: "idle",
     title: "Receipt fixture",
     workingDirectory: root,
-    session: { source: "herdr:claude", kind: "id", value: nativeId },
+    session: pi
+      ? { source: "herdr:pi", kind: "path", value: pi.file }
+      : { source: "herdr:claude", kind: "id", value: nativeId },
   });
   const controller: SeatControl = {
-    ref: { harness: "claude", sessionId: nativeId, paneId: "fixture-pane" },
+    ref: { harness: pi ? "pi" : "claude", sessionId: nativeId, paneId: "fixture-pane" },
     status: async () => "idle",
     interrupt: async () => false,
     close: async () => {},
@@ -103,6 +107,7 @@ async function fixture() {
     }),
     send: async (message, options) => {
       await beforeNative?.();
+      if (pi) return pi.control.send(message, options);
       if (options?.beforeDispatch && !(await options.beforeDispatch()))
         return { outcome: "offline", detail: "Original authority or occupant changed" };
       sends += 1;
@@ -111,12 +116,12 @@ async function fixture() {
         outcome: "accepted",
         state: queued ? "queued" : "started",
         messageId: "fixture-input-" + sends,
-        ...(queued && queueDetail ? { detail: "The native queue is waiting for its turn." } : {}),
+        ...(queued && queueDetail ? { detail: nativeDetail } : {}),
       };
     },
   };
   const adapter: HarnessSeatAdapter = {
-    harness: "claude",
+    harness: pi ? "pi" : "claude",
     start: async () => {
       throw new Error("No hire or model start is permitted");
     },
@@ -212,6 +217,7 @@ async function fixture() {
     signer.issue(
       mintDeviceSessionClaims({ deviceId, nowEpochSeconds: Math.floor(now / 1000), ttlSeconds: 3600 }),
     );
+  const tokens = new Map(["app-a", "app-b"].map((id) => [id, token(id)]));
   const receiptsPath = join(state, "agent-message-receipts.json"),
     nativeEvidencePath = join(state, "herdr-watches.json");
   const makeService = () =>
@@ -297,7 +303,11 @@ async function fixture() {
       headers: {
         authorization:
           "Bearer " +
-          (who === "owner" ? ownerToken : who === "relay" ? "fixture-relay-credential-176" : token(who)),
+          (who === "owner"
+            ? ownerToken
+            : who === "relay"
+              ? "fixture-relay-credential-176"
+              : tokens.get(who)!),
         "content-type": "application/json",
       },
       body: JSON.stringify(body),
@@ -306,7 +316,7 @@ async function fixture() {
     const value = new Client({ name: "receipt-proof", version: "1" });
     await value.connect(
       new StreamableHTTPClientTransport(new URL(relayUrl + "/mcp"), {
-        requestInit: { headers: { authorization: "Bearer " + token(who) } },
+        requestInit: { headers: { authorization: "Bearer " + tokens.get(who)! } },
       }) as unknown as Transport,
     );
     closes.push(() => value.close());
@@ -343,6 +353,13 @@ async function fixture() {
         scope: { kind: "persona", personaId: seat.personaId },
         title: "Fixture",
       }),
+    freshSession: () => {
+      tokens.set("app-a", token("app-a"));
+    },
+    queueCanary: () => {
+      nativeDetail = "PRIVATE_NATIVE_DETAIL_CANARY sk-proj-" + "x".repeat(100);
+      return nativeDetail;
+    },
     sends: () => sends,
     consumedQueue: () => {
       queueDetail = false;
@@ -720,4 +737,108 @@ it("refuses unsupported queued receipt modes before creating a native delivery",
   });
   expect(refused.status, await refused.clone().text()).toBe(400);
   expect(f.sends()).toBe(0);
+});
+
+it.each(["beforeSendPreparation", "beforeNativeClaim"] as const)(
+  "refuses a revoked app through the production Pi adapter at %s",
+  async (boundary) => {
+    const p = await piFixture();
+    const { prepared } = await p.prepare();
+    const started = await prepared.start(p.view);
+    if (started.outcome !== "started") throw new Error("Pi fixture failed");
+    p.finish();
+    const before = p.sendMessage.mock.calls.length;
+    const commands = p.sendCommands();
+    const f = await fixture({ control: started.control, file: p.file }),
+      client = await f.client();
+    p[boundary](async () => {
+      expect((await f.revoke()).status).toBe(200);
+    });
+    const result = await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Revoked original must not be admitted",
+        receipt: true,
+      },
+    });
+    expect(p.sendMessage.mock.calls.length - before).toBe(0);
+    expect(p.sendCommands() - commands).toBe(boundary === "beforeSendPreparation" ? 0 : 1);
+    expect(result.isError || JSON.stringify(result).includes("offline")).toBe(true);
+  },
+);
+
+it("keeps receipt lookup and original recovery bound to the same signed session across restart", async () => {
+  const f = await fixture(),
+    client = await f.client();
+  const requestId = randomUUID();
+  const sent = decoded(
+    await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Original session only",
+        receipt: true,
+        requestId,
+      },
+    }),
+  );
+  await f.restart();
+  const same = decoded(
+    await (
+      await f.client()
+    ).callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+  );
+  expect(same.outcome).toBe("found");
+  f.freshSession();
+  const fresh = await f.client();
+  expect(
+    decoded(await fresh.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } })),
+  ).toEqual({ outcome: "unknown" });
+  const replay = await fresh.callTool({
+    name: "message_agent",
+    arguments: {
+      agent: "herdr:" + f.seat.seatId,
+      message: "Original session only",
+      receipt: true,
+      requestId,
+    },
+  });
+  expect(replay.isError).toBe(true);
+  expect(f.sends()).toBe(1);
+  const forged = await f.post({
+    op: "agent_message_status",
+    schemaVersion: 1,
+    receiptId: sent.receiptId,
+    appSessionId: "a".repeat(64),
+  });
+  expect(forged.status).toBe(400);
+});
+
+it("never persists synthetic native detail or credential canaries, including replay after restart", async () => {
+  const f = await fixture(),
+    client = await f.client(),
+    canary = f.queueCanary();
+  const sent = decoded(
+    await client.callTool({
+      name: "message_agent",
+      arguments: {
+        agent: "herdr:" + f.seat.seatId,
+        message: "Metadata only",
+        receipt: true,
+      },
+    }),
+  );
+  expect(sent.status).toBe("queued");
+  expect(JSON.stringify(await f.receiptSnapshot())).not.toContain(canary);
+  expect(JSON.stringify(await f.receiptSnapshot())).not.toContain("PRIVATE_NATIVE_DETAIL_CANARY");
+  await f.restart();
+  expect(
+    decoded(
+      await (
+        await f.client()
+      ).callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+    ).outcome,
+  ).toBe("found");
+  expect(JSON.stringify(await f.receiptSnapshot())).not.toContain("PRIVATE_NATIVE_DETAIL_CANARY");
 });

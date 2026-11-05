@@ -1,3 +1,4 @@
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 import { createServer } from "node:http";
 import type { Socket } from "node:net";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -46,7 +47,7 @@ export interface OpenCodeController {
       | "exit",
     input?: unknown,
     timeoutMs?: number,
-    beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void },
+    beforeDispatch?: (() => Promise<boolean>) & CurrentCheck & { readonly assertCurrent?: () => void },
   ): Promise<unknown>;
   select(sessionId: string): void;
   pending(): { readonly messageId: string } | undefined;
@@ -88,10 +89,10 @@ export async function createOpenCodeController(input: {
   let lastAcknowledgment: string | undefined;
   let activeSend: { messageId: string; text: string; delivery?: "steer" | "queue" | undefined } | undefined;
   let activeExit:
-    | { beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void } }
+    | { beforeDispatch?: (() => Promise<boolean>) & CurrentCheck & { readonly assertCurrent?: () => void } }
     | undefined;
   let activeRefresh:
-    | { beforeDispatch?: (() => Promise<boolean>) & { readonly assertCurrent?: () => void } }
+    | { beforeDispatch?: (() => Promise<boolean>) & CurrentCheck & { readonly assertCurrent?: () => void } }
     | undefined;
   const pending = new Map<
     string,
@@ -313,7 +314,10 @@ export async function createOpenCodeController(input: {
       if (method === "send" && (!sessionId || fence.pending(sessionId)))
         throw new Error("An earlier native delivery is uncertain; no resend");
       if (method === "send") {
-        if (beforeDispatch && !(await beforeDispatch().catch(() => false)))
+        if (
+          beforeDispatch &&
+          (!(await beforeDispatch().catch(() => false)) || beforeDispatch.current?.() === false)
+        )
           return {
             outcome: "unavailable",
             detail: "Peer authority changed before native dispatch; nothing was sent.",

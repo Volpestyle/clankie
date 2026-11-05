@@ -100,7 +100,8 @@ export function codexSocketControl(
       }
       if (beforeDispatch) {
         try {
-          if (!(await beforeDispatch())) throw new Error("Peer authority changed; nothing was sent.");
+          if (!(await beforeDispatch()) || beforeDispatch.current?.() === false)
+            throw new Error("Peer authority changed; nothing was sent.");
         } catch (error) {
           denied = true;
           throw error;

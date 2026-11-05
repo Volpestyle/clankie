@@ -672,6 +672,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
       if (request.op === "send") delete request.turn.herdrPaneId;
       const deviceId = request.appDeviceId;
       const deadline = Date.parse(request.appSessionExpiresAt ?? "");
+      const sessionId = request.appSessionId;
       const kind = deviceId === undefined ? owner?.principal.kind : "relay";
       if (!kind || (request.op === "send" && deviceId === undefined))
         return context.json({ error: "agent_message_forbidden" }, 403);
@@ -703,6 +704,7 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         if (deviceId === undefined) return owner?.current() === true;
         return (
           workerReportDevice(ctx.devices.get(deviceId), ctx.clock()) &&
+          typeof sessionId === "string" &&
           ctx.clock().getTime() < deadline &&
           stamp() === originalRecord &&
           ctx.detection.served(deviceId) &&
@@ -723,7 +725,8 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         const relay = await authenticateCaptain(context.req.raw, ctx.dependencies);
         if (!relay || relay === "unavailable" || relay.steerSourceLane !== "api" || !current())
           return undefined;
-        return { deviceId, authorizationRevision: originalRecord! };
+        if (!sessionId) return undefined;
+        return { deviceId, sessionId, authorizationRevision: originalRecord! };
       };
       try {
         if (!(await authorize())) return context.json({ error: "agent_message_forbidden" }, 403);

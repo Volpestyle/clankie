@@ -26,6 +26,8 @@ const RecordSchema = z
     createdAt: z.number().finite().nonnegative(),
     state: z.enum(["uncertain", "settled"]),
     senderDeviceId: Identity,
+    senderSessionId: Identity.optional(),
+    storageVersion: z.literal(2).optional(),
     requestKey: Identity,
     fingerprint: Digest,
     commandFingerprint: Digest,
@@ -40,6 +42,17 @@ type ReceiptRecord = z.infer<typeof RecordSchema>;
 const sameBinding = (a: AgentMessageBinding, b: AgentMessageBinding) =>
   a.machineId === b.machineId && a.seatId === b.seatId && a.instanceId === b.instanceId;
 const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+/** Persist handoff metadata only; native free text is not part of idempotent recovery. */
+function replayResult(value: SubmitOperatorConversationTurnResult): SubmitOperatorConversationTurnResult {
+  const result = SubmitOperatorConversationTurnResultSchema.parse(value);
+  if (result.status === "accepted" && result.seatDelivery?.detail !== undefined)
+    result.seatDelivery.detail = "Native queue handoff recorded; inspect the receipt for progress.";
+  if (result.status === "seat_undelivered" || result.status === "seat_delivery_unconfirmed") {
+    result.detail = "Native delivery result recorded; inspect the original receipt. Nothing was resent.";
+    delete result.messageId;
+  }
+  return result;
+}
 
 /** A host-owned journal. None of these methods dispatches, retries or reads a session. */
 export class AgentMessageReceipts {
@@ -59,11 +72,24 @@ export class AgentMessageReceipts {
       },
       unreadableMessage: "Agent message receipts are unreadable; no message was dispatched",
     });
+    // Upgrade before serving any request. Keep old admission tombstones, but an
+    // unbound legacy record never acquires the session of its next reader.
+    const records = this.store.load();
+    let migrated = false;
+    for (const record of records.values()) {
+      if (record.storageVersion === 2) continue;
+      if (record.sendResult) record.sendResult = replayResult(record.sendResult);
+      record.storageVersion = 2;
+      migrated = true;
+    }
+    if (migrated) this.store.checkpoint();
+    this.store.pruneObsolete();
   }
 
   /** Persist before handoff. A repeated key can only recover its original receipt. */
   public begin(input: {
     senderDeviceId: string;
+    senderSessionId: string;
     requestKey: string;
     agent: string;
     binding: AgentMessageBinding;
@@ -72,6 +98,7 @@ export class AgentMessageReceipts {
     attachments?: readonly { filename: string; mediaType: string; sha256: string }[];
   }): { outcome: "new" | "existing"; receiptId: string } | { outcome: "conflict" } {
     const senderDeviceId = Identity.parse(input.senderDeviceId);
+    const senderSessionId = Identity.parse(input.senderSessionId);
     const requestKey = Identity.parse(input.requestKey);
     const binding = Binding.parse(input.binding);
     const agent = Identity.parse(input.agent);
@@ -89,7 +116,7 @@ export class AgentMessageReceipts {
       (record) => record.senderDeviceId === senderDeviceId && record.requestKey === requestKey,
     );
     if (original !== undefined)
-      return original.fingerprint === fingerprint
+      return original.senderSessionId === senderSessionId && original.fingerprint === fingerprint
         ? { outcome: "existing", receiptId: original.id }
         : { outcome: "conflict" };
     const id = randomUUID();
@@ -98,6 +125,8 @@ export class AgentMessageReceipts {
       id,
       createdAt,
       senderDeviceId,
+      senderSessionId,
+      storageVersion: 2,
       requestKey,
       fingerprint,
       commandFingerprint,
@@ -120,6 +149,7 @@ export class AgentMessageReceipts {
   /** Reconcile the immutable original command before doing any new recipient discovery. */
   public recover(input: {
     senderDeviceId: string;
+    senderSessionId: string;
     requestKey: string;
     targetKey: string;
     message: string;
@@ -131,7 +161,7 @@ export class AgentMessageReceipts {
     const fingerprint = digest(
       JSON.stringify({ targetKey: input.targetKey, message: input.message, attachments: [] }),
     );
-    return record.commandFingerprint === fingerprint
+    return record.senderSessionId === input.senderSessionId && record.commandFingerprint === fingerprint
       ? { outcome: "existing", receiptId: record.id }
       : { outcome: "conflict" };
   }
@@ -199,9 +229,19 @@ export class AgentMessageReceipts {
   }
 
   /** The service must supply the authenticated device, never a request's sender field. */
-  public lookup(id: string, senderDeviceId: string): AgentMessageReceiptLookup {
+  public lookup(
+    id: string,
+    senderDeviceId: string,
+    senderSessionId: string | undefined,
+  ): AgentMessageReceiptLookup {
     const record = this.store.read(id);
-    if (record === undefined || record.senderDeviceId !== senderDeviceId) return { outcome: "unknown" };
+    if (
+      record === undefined ||
+      !senderSessionId ||
+      record.senderSessionId !== senderSessionId ||
+      record.senderDeviceId !== senderDeviceId
+    )
+      return { outcome: "unknown" };
     return record.result === undefined
       ? { outcome: "expired" }
       : { outcome: "found", receipt: this.projectNative(record) };
@@ -269,9 +309,15 @@ export class AgentMessageReceipts {
     return result;
   }
 
-  public sendResult(id: string, senderDeviceId: string): SubmitOperatorConversationTurnResult | undefined {
+  public sendResult(
+    id: string,
+    senderDeviceId: string,
+    senderSessionId: string,
+  ): SubmitOperatorConversationTurnResult | undefined {
     const record = this.store.read(id);
-    return record?.senderDeviceId === senderDeviceId ? record.sendResult : undefined;
+    return record?.senderDeviceId === senderDeviceId && record.senderSessionId === senderSessionId
+      ? record.sendResult
+      : undefined;
   }
 
   public settleSend(
@@ -281,7 +327,7 @@ export class AgentMessageReceipts {
   ): void {
     const record = this.store.load().get(id);
     if (!record || !sameBinding(record.binding, binding) || record.sendResult !== undefined) return;
-    record.sendResult = SubmitOperatorConversationTurnResultSchema.parse(result);
+    record.sendResult = replayResult(result);
     this.store.save();
   }
 

@@ -190,8 +190,8 @@ Use `message_agent({agent, message, receipt: true})` to receive a durable `recei
 alongside the existing send status. Keep it. Supplying `requestId` (a UUID) with
 `receipt: true` lets an uncertain original recover its retained result; never
 change the message, attachments or target under that key. A receipt lookup never
-resends. Read it with `message_agent_status({receiptId})`; another connected app
-cannot read your receipts. The owner's local inspection command is
+resends. Read it with `message_agent_status({receiptId})`; a different signed session of the same app
+cannot read your receipts. The original signed session keeps access over a host restart. The owner's local inspection command is
 `clankie connector message-status RECEIPT_ID --json`.
 
 `queued` and `delivered` describe native handoff. `read`, `acted_on` and `answered`

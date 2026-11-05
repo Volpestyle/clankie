@@ -2,6 +2,7 @@ import { createServer, type Socket } from "node:net";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import { z } from "zod";
+import type { CurrentCheck } from "./peer-seat-messages.ts";
 import { DeliveryFence, deliveryFingerprint } from "./delivery-fence.ts";
 
 const Id = z.string().uuid();
@@ -28,6 +29,7 @@ export interface PiWorkerController {
     method: "initialize" | "status" | "send" | "settlement" | "interrupt",
     input?: unknown,
     timeoutMs?: number,
+    beforeDispatch?: (() => Promise<boolean>) & CurrentCheck,
   ): Promise<unknown>;
   pending(): { readonly messageId: string } | undefined;
   acknowledge(messageId: string): Promise<void>;
@@ -50,6 +52,11 @@ export async function createPiWorkerController(input: {
   let sessionId: string | undefined;
   let activeSend: z.infer<typeof Send> | undefined;
   let receipt: string | undefined;
+  let activeDispatch: ((() => Promise<boolean>) & CurrentCheck) | undefined;
+  const admitSend = async () => {
+    if (activeDispatch && !(await activeDispatch())) throw unavailable();
+    if (activeDispatch?.current?.() === false) throw unavailable();
+  };
   const sockets = new Set<Socket>();
   const waiters = new Set<() => void>();
   const pending = new Map<
@@ -133,6 +140,13 @@ export async function createPiWorkerController(input: {
         else receipt = claim.messageId;
       } else throw unavailable();
       await current();
+      if (
+        frame.method === "claim" ||
+        (frame.method === "authorize" &&
+          z.object({ action: z.string() }).parse(frame.input).action === "send")
+      )
+        await admitSend();
+      if (activeDispatch?.current?.() === false) throw unavailable();
       socket.write(`${JSON.stringify({ id: frame.id, result: true })}\n`);
     } catch {
       if (!socket.destroyed)
@@ -230,7 +244,7 @@ export async function createPiWorkerController(input: {
       sessionId = id;
     },
     pending: () => (sessionId ? input.fence.pending(sessionId) : undefined),
-    async request(method, value, timeoutMs = 15_000) {
+    async request(method, value, timeoutMs = 15_000, beforeDispatch) {
       const deadline = Date.now() + timeoutMs;
       if (!accepted && !retired)
         await new Promise<void>((resolve) => {
@@ -247,7 +261,14 @@ export async function createPiWorkerController(input: {
       await current();
       if (method === "send") {
         if (!sessionId || input.fence.pending(sessionId) || activeSend) throw unavailable();
-        activeSend = Send.parse(value);
+        const send = Send.parse(value);
+        if (beforeDispatch && !(await beforeDispatch()))
+          return { outcome: "unavailable", detail: "Pi dispatch authority changed" };
+        if (beforeDispatch?.current?.() === false)
+          return { outcome: "unavailable", detail: "Pi dispatch authority changed" };
+        if (!peer || peer.destroyed || activeSend || input.fence.pending(sessionId)) throw unavailable();
+        activeSend = send;
+        activeDispatch = beforeDispatch;
       }
       const id = randomUUID();
       try {
@@ -266,7 +287,10 @@ export async function createPiWorkerController(input: {
         await current();
         return result;
       } finally {
-        if (method === "send") activeSend = undefined;
+        if (method === "send") {
+          activeSend = undefined;
+          activeDispatch = undefined;
+        }
       }
     },
     async acknowledge(id) {
