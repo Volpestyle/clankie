@@ -331,7 +331,10 @@ it("streams a 32 KB finite POSIX command without expanding the SSH control reque
 it("does not discover a closed link from buffered SSH output", async () => {
   const f = await fixture();
   let child: ChildProcess | undefined;
-  const notice = Promise.withResolvers<void>();
+  let receivedNotice = () => {};
+  const notice = new Promise<void>((resolve) => {
+    receivedNotice = resolve;
+  });
   const buffered: unknown[][] = [];
   let release = () => {};
   const pending: Promise<string>[] = [];
@@ -345,7 +348,7 @@ it("does not discover a closed link from buffered SSH output", async () => {
       output.emit = ((event: string | symbol, ...values: unknown[]) => {
         if (event === "data" && holding) {
           buffered.push(values);
-          notice.resolve();
+          receivedNotice();
           return true;
         }
         return emit(event, ...values);
@@ -369,7 +372,7 @@ it("does not discover a closed link from buffered SSH output", async () => {
   const forward = child!;
   // Keep the real fixture SSH process's allocation notice buffered until the
   // link is closed, then deliver it as an already-queued native stream event.
-  await notice.promise;
+  await notice;
   const closed = once(forward, "close");
   links.close();
   // The following fixture has its own PATH and journal. A stale discovery
