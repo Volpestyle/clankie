@@ -35,6 +35,8 @@ export interface HerdrSessionSourceOptions {
   readonly surfaceClientId: string;
   /** What a session on the local fleet reads as its machine. */
   readonly localMachine?: string;
+  /** Preserve internal attribution for receipt-aware callers; legacy send results stay unchanged. */
+  readonly includeSendIdentity?: boolean;
 }
 
 /** One line for a lead choosing who takes related work (#425): newest three, compactly. */
@@ -255,6 +257,21 @@ export function createHerdrSessionSource(
           revision = result.currentRevision;
           continue;
         }
+        const identity =
+          options.includeSendIdentity === true
+            ? {
+                identity: {
+                  seatId: seat.seatId,
+                  occupantId: seat.occupantId,
+                  ...(seat.fleet === undefined ? {} : { fleet: seat.fleet }),
+                  conversationId: created.conversation.conversationId,
+                  ...(result.status === "accepted" ? { runId: result.runId } : {}),
+                  ...(result.status === "seat_delivery_unconfirmed" && result.messageId !== undefined
+                    ? { messageId: result.messageId }
+                    : {}),
+                },
+              }
+            : {};
         // The agent's own session already holds it: it has the message, busy or not.
         if (
           result.status === "accepted" &&
@@ -264,19 +281,26 @@ export function createHerdrSessionSource(
         )
           return {
             id,
+            ...identity,
             status: "delivered",
             detail: `${name} has the message in its session. Read the agent to see it respond.`,
           };
         if (result.status === "accepted" && result.seatDelivery?.state === "queued")
           return {
             id,
+            ...identity,
             status: "queued",
             detail:
               result.seatDelivery.detail ??
               `${name} has the message waiting in its native queue. Read the agent to see it respond.`,
           };
         if (result.status === "accepted")
-          return { id, status: "delivered", detail: `Sent to ${name}. Read the agent to see it respond.` };
+          return {
+            id,
+            ...identity,
+            status: "delivered",
+            detail: `Sent to ${name}. Read the agent to see it respond.`,
+          };
         if (result.status === "seat_offline")
           return {
             id,
@@ -286,9 +310,10 @@ export function createHerdrSessionSource(
         if (result.status === "seat_undelivered")
           return { id, status: "not_delivered", detail: `Nothing was sent: ${result.detail}` };
         if (result.status === "seat_delivery_unconfirmed")
-          return { id, status: "unconfirmed", detail: result.detail };
+          return { id, ...identity, status: "unconfirmed", detail: result.detail };
         return {
           id,
+          ...identity,
           status: "unconfirmed",
           detail: `The message may have reached ${name} but wasn't confirmed. Read the agent before sending it again.`,
         };

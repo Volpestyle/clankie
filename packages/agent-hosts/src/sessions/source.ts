@@ -48,6 +48,16 @@ export interface SessionText {
   readonly note?: string;
 }
 
+/** Transport attribution only: a service run ID does not prove native completion. */
+export interface SessionSendIdentity {
+  readonly seatId: string;
+  readonly occupantId: string;
+  readonly fleet?: string;
+  readonly conversationId: string;
+  readonly runId?: string;
+  readonly messageId?: string;
+}
+
 export interface SessionSendResult {
   readonly id: string;
   /**
@@ -57,6 +67,8 @@ export interface SessionSendResult {
    */
   readonly status: "delivered" | "queued" | "offline" | "not_delivered" | "unconfirmed";
   readonly detail: string;
+  /** Opt-in adapter attribution, not a claim that the model read or acted on the input. */
+  readonly identity?: SessionSendIdentity;
 }
 
 /** An image sent with a message, as the agent's own workspace file (ADR 0315). */
