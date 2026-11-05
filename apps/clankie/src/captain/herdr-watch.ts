@@ -617,6 +617,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
     );
   }
 
+  public forgetNativeQuestion(ref: SeatRef, requestId: string | number): void {
+    this.questions.forgetNativeQuestion(ref, requestId);
+  }
+
   public reconcileWatchQuestions(): Promise<void> {
     return this.questions.reconcileWatchQuestions();
   }

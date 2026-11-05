@@ -3,8 +3,10 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { Readable, Writable } from "node:stream";
+import { runConversationsCommand } from "../../tui/src/command/conversations.ts";
 import { serve } from "@hono/node-server";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import {
   FileCredentialStore,
   ensureOperatorCredential,
@@ -24,6 +26,7 @@ import { fleetSettingsClient } from "../../tui/test/fixtures/fleet-settings-clie
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
+  vi.restoreAllMocks();
 });
 
 /** Actual captain, native Claude adapter/claims, disk settings/asks, HTTP route and installed hook child.
@@ -80,7 +83,10 @@ async function fixture(watch = true) {
           else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
       if (args[0] === "agent" && args[1] === "list") return JSON.stringify({ result: { agents: [row] } });
-      if (args[0] === "pane" && args[1] === "list") return JSON.stringify({ result: { panes: [row] } });
+      if (args[0] === "pane" && args[1] === "list") {
+        await holdRead?.();
+        return JSON.stringify({ result: { panes: [row] } });
+      }
       if (args[0] === "workspace" && args[1] === "list")
         return JSON.stringify({ result: { workspaces: [] } });
       throw new Error(`Unrequested native operation: ${args.join(" ")}`);
@@ -224,7 +230,28 @@ async function fixture(watch = true) {
     expectedRevision: ask.revision,
     answer: { kind: "worker", answers: { q0: { answers: ["React"] } } },
   });
+  const command = async (args: readonly string[], input = "") => {
+    let output = "";
+    const code = await runConversationsCommand(args, {
+      host: url,
+      env: {},
+      operatorCredentialStore: credentials,
+      stdin: Readable.from([input]),
+      stdout: new Writable({
+        write(chunk, _encoding, done) {
+          output += String(chunk);
+          done();
+        },
+      }),
+    });
+    return { code, result: JSON.parse(output) };
+  };
   return {
+    command,
+    stopWorker: async () => {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await exited;
+    },
     root,
     captain,
     settings,
@@ -260,6 +287,12 @@ it("Watch routes an everyday native question once; the authenticated owner answe
     hookSpecificOutput: { updatedInput: { answers: { "Which framework?": "React" } } },
   });
   expect(await f.call(request)).toEqual(answered);
+  expect(
+    await f.call({ ...request, answer: { kind: "worker", answers: { q0: { answers: ["Vue"] } } } }),
+  ).toMatchObject({
+    status: 200,
+    body: { result: { status: "refused", reason: "conflicting_answer" } },
+  });
   expect(await f.list()).toEqual([]);
   expect((await f.settings.load()).autonomy.watch).toBe(true);
   expect((await f.meta()).questions.records[0].question.continuation).toBeUndefined();
@@ -330,4 +363,139 @@ it("rotating the real owner credential during native preparation refuses before 
   expect(await answer).toMatchObject({ status: 403 });
   expect(f.stdout()).toBe("");
   expect((await f.meta()).questions.records[0].question.status).toBe("pending");
+});
+
+it("an authenticated lead-seat turn is still refused on Watch, with no native mailbox delivery", async () => {
+  const f = await fixture();
+  await f.ask();
+  const { ConversationStore } = await import("../src/captain/conversations.ts");
+  const { SeatOutbox } = await import("../src/captain/seat-outbox.ts");
+  const { createConversationRunner } = await import("../src/captain/captain-conversation-runner.ts");
+  const { WatchingError } = await import("../src/watch.ts");
+  const conversations = new ConversationStore(join(f.root, "lead-conversation"), async () => {});
+  cleanup.push(() => conversations.close());
+  const outbox = new SeatOutbox({ uncertaintyPath: join(f.root, "lead-receipts.json") });
+  cleanup.push(async () => outbox.close());
+  const poll = outbox.poll(100);
+  const runner = createConversationRunner({
+    conversations,
+    shutdown: new AbortController(),
+    settings: () => f.settings.load(),
+    options: { repoRoot: f.root, stateDir: f.root },
+    workingDirectory: f.root,
+    seatEventKind: () => "turn",
+    seatOutbox: () => outbox,
+  } as unknown as Parameters<typeof createConversationRunner>[0]);
+  await expect(
+    runner("global-default", "Owner lead-seat message", () => {}, {
+      runId: "watch-lead-turn",
+      signal: new AbortController().signal,
+      acceptedAt: new Date().toISOString(),
+      origin: "input",
+      draft: () => {},
+      ownerAuthority: {
+        principal: { kind: "operator", id: "owner" },
+        current: () => true,
+        authorize: async () => true,
+        assertCurrent: () => {},
+      },
+    }),
+  ).rejects.toBeInstanceOf(WatchingError);
+  expect(await poll).toEqual([]);
+  expect(await outbox.poll(0)).toEqual([]);
+});
+
+it("the owner-question exception retains the configured Portal ceiling", async () => {
+  const f = await fixture();
+  const ask = await f.ask();
+  await f.settings.update((settings) => ({ ...settings, machineAccess: { local: "portal" } }));
+  expect(await f.call(f.answerRequest(ask))).toMatchObject({
+    status: 200,
+    body: { result: { status: "refused", reason: "worker_answer_refused" } },
+  });
+  expect(f.stdout()).toBe("");
+  const record = (await f.meta()).questions.records[0];
+  expect(record.question.status).toBe("pending");
+  expect(record.workerDelivery).toBeUndefined();
+});
+
+it("the owner CLI reads and answers the same native Watch ask", async () => {
+  const f = await fixture();
+  const ask = await f.ask();
+  const page = await f.command(["questions"]);
+  expect(page.code).toBe(0);
+  expect(page.result.questions).toHaveLength(1);
+  expect(page.result.questions[0].question.requestId).toBe(ask.question!.requestId);
+  const answer = await f.command(
+    [
+      "answer",
+      ask.conversationId,
+      ask.question!.requestId,
+      "--incarnation",
+      ask.incarnationId!,
+      "--revision",
+      String(ask.revision),
+      "--worker-stdin",
+    ],
+    JSON.stringify({ q0: { answers: ["React"] } }),
+  );
+  expect(answer).toMatchObject({
+    code: 0,
+    result: { status: "resolved", question: { status: "submitted" } },
+  });
+  expect(await f.exited).toBe(0);
+  expect(JSON.parse(f.stdout()).hookSpecificOutput.updatedInput.answers).toEqual({
+    "Which framework?": "React",
+  });
+  expect((await f.settings.load()).autonomy.watch).toBe(true);
+});
+
+it("a Watch exit interrupted by entering Watch again restores the original owner card", async () => {
+  const f = await fixture();
+  const ask = await f.ask();
+  const { ConversationStore } = await import("../src/captain/conversations.ts");
+  const withdraw = ConversationStore.prototype.returnWatchQuestionToLead;
+  let entered: ReturnType<typeof f.dial> | undefined;
+  vi.spyOn(ConversationStore.prototype, "returnWatchQuestionToLead").mockImplementation(function (
+    this: InstanceType<typeof ConversationStore>,
+    ...args
+  ) {
+    withdraw.apply(this, args);
+    entered = f.dial("watch");
+    f.holdRead(async () => {
+      await entered;
+    });
+  });
+  await f.dial("low");
+  // A racing read either refuses the old witness or observes the restored card.
+  // The background observer may already have completed the forced transition.
+  const first = await f.list().then(
+    (questions) => ({ questions }),
+    (error: unknown) => ({ error }),
+  );
+  if ("questions" in first) {
+    expect(first.questions).toHaveLength(1);
+    expect(first.questions[0]!.question!.requestId).toBe(ask.question!.requestId);
+  }
+  expect(entered).toBeDefined();
+  await entered;
+  f.holdRead(undefined);
+  const restored = await f.ask();
+  expect(restored.question!.requestId).toBe(ask.question!.requestId);
+  expect((await f.meta()).questions.records).toHaveLength(1);
+  expect(f.stdout()).toBe("");
+});
+
+it("disconnecting the held native hook retires its owner card without an answer write", async () => {
+  const f = await fixture();
+  const ask = await f.ask();
+  await expect.poll(f.stderr).toContain("owner's feed");
+  await f.stopWorker();
+  await expect.poll(async () => (await f.list()).length).toBe(0);
+  expect(f.stdout()).toBe("");
+  const record = (await f.meta()).questions.records.find(
+    (record: { question: { requestId: string } }) => record.question.requestId === ask.question!.requestId,
+  );
+  expect(record.question.status).toBe("cancelled");
+  expect(record.workerDelivery).toBeUndefined();
 });

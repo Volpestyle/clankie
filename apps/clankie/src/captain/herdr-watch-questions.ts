@@ -67,9 +67,15 @@ export function createHerdrWatchQuestions(ctx: Context) {
     routeTimer.unref();
     ctx.retryTimers.add(routeTimer);
   }
+  function forgetNativeQuestion(ref: SeatRef, requestId: string | number): void {
+    routes.delete(JSON.stringify([ref.harness, ref.paneId, ref.sessionId, typeof requestId, requestId]));
+  }
   async function reconcileWatchQuestions(): Promise<void> {
+    const watching = (await ctx.watching?.()) === true;
     for (const [key, record] of routes) {
+      if (record.watching === watching) continue;
       const next = record.chain
+        // allow-swallowed-rejection -- A previous failed route may retry after fresh native/policy checks.
         .catch(() => {})
         .then(async () => {
           const agent = await ctx.runner.get(record.ref.paneId);
@@ -94,10 +100,15 @@ export function createHerdrWatchQuestions(ctx: Context) {
               routes.delete(key);
             return;
           }
-          const watching = (await ctx.watching?.()) === true;
-          if (record.watching === watching) return;
-          await routeNativeQuestion(record.ref, pending, record.progress);
-          record.watching = watching;
+          if (((await ctx.watching?.()) === true) !== watching) return;
+          try {
+            await routeNativeQuestion(record.ref, pending, record.progress);
+            record.watching = watching;
+          } catch (error) {
+            // A partial transition must reconcile again even if Watch flipped back.
+            delete record.watching;
+            throw error;
+          }
         });
       record.chain = next;
       await next;
@@ -127,13 +138,23 @@ export function createHerdrWatchQuestions(ctx: Context) {
     }
     const target = record;
     const next = target.chain
+      // allow-swallowed-rejection -- A failed publication may retry after fresh source checks.
       .catch(() => {})
       .then(async () => {
         if (target.route) return;
-        const watching = (await ctx.watching?.()) === true;
-        await routeNativeQuestion(ref, question, target.progress);
-        target.route = watching ? "owner" : "lead";
-        target.watching = watching;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const watching = (await ctx.watching?.()) === true;
+          try {
+            await routeNativeQuestion(ref, question, target.progress);
+            target.route = watching ? "owner" : "lead";
+            target.watching = watching;
+            return;
+          } catch (error) {
+            // Watch can change during initial publication. Retry only that transition,
+            // with fresh native ownership and policy guards; other refusals stay refused.
+            if (((await ctx.watching?.()) === true) === watching || attempt === 2) throw error;
+          }
+        }
       });
     target.chain = next;
     try {
@@ -305,6 +326,15 @@ export function createHerdrWatchQuestions(ctx: Context) {
           ? { kind: "owner", principal: ownerPrincipal }
           : undefined,
     );
+    if (result.outcome === "answered" || result.outcome === "unconfirmed")
+      for (const route of routes.values())
+        if (
+          route.ref.paneId === agent.paneId &&
+          route.ref.harness === agent.agent &&
+          route.ref.sessionId === nativeSessionId(agent) &&
+          route.question.requestId === answer.requestId
+        )
+          forgetNativeQuestion(route.ref, answer.requestId);
     if (result.outcome === "answered") {
       ctx.watchHiredSeat(seatId, occupantIdForHerdrSession(agent.session), owner!);
       return {
@@ -359,6 +389,8 @@ export function createHerdrWatchQuestions(ctx: Context) {
       return;
     }
     // Withdraw only asks created by Watch. Owner-gated asks retain their own route.
+    await guard();
+    guard.assertCurrent();
     ctx.returnQuestionToLead?.(agent.terminalId, ref.sessionId, question.requestId);
     const data = redactSensitiveText(JSON.stringify(question, null, 2));
     const text = [
@@ -483,9 +515,20 @@ export function createHerdrWatchQuestions(ctx: Context) {
       // Reminding stops only once the owner's ask exists; a round that fails
       // before that is tried again.
       if (await ctx.ownerMustAnswer(owner, current, pending)) {
-        await ctx.escalateToOwner(owner, current, pending, guard, () => {
-          escalated = true;
-        });
+        // Reminders share the transition serializer with feed reads and the Watch
+        // observer. They cannot publish a stale owner card outside that fence.
+        const tracked = [...routes.values()].find(
+          (route) =>
+            route.ref.paneId === current.paneId &&
+            route.ref.harness === current.agent &&
+            route.ref.sessionId === nativeSessionId(current) &&
+            route.question.requestId === requestId,
+        );
+        if (!tracked) return;
+        delete tracked.watching;
+        await reconcileWatchQuestions();
+        escalated = await ctx.ownerMustAnswer(owner, current, pending);
+        if (!escalated) schedule(remindMs);
         return;
       }
       await guard();
@@ -503,6 +546,7 @@ export function createHerdrWatchQuestions(ctx: Context) {
     schedule(deferred ? retryMs : remindMs);
   }
   return {
+    forgetNativeQuestion,
     reconcileWatchQuestions,
     observedSeatQuestion,
     workerQuestionStatus,

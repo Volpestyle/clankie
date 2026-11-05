@@ -15,7 +15,7 @@ export async function readHookResponse(response, notice) {
         notice(
           event.route === "owner_feed"
             ? "Your question is in the owner's feed. The owner can answer while Watch stays on."
-            : "Your still-open question returned to the leading conversation; no second question was sent.",
+            : "Your question is with the leading conversation; no second question was sent.",
         );
       previous = event.route;
     } else if (event.type === "result") {

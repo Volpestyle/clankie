@@ -976,9 +976,14 @@ export function registerSeatRoutes(ctx: RegisterSeatRoutesContext) {
         const signal = AbortSignal.any([context.req.raw.signal, stopped.signal]);
         let writes = Promise.resolve();
         const send = (value: unknown) => {
-          writes = writes.then(async () => {
-            await output.write(JSON.stringify(value) + "\n");
-          });
+          writes = writes
+            .then(async () => {
+              await output.write(JSON.stringify(value) + "\n");
+            })
+            .catch(() => {
+              // allow-swallowed-rejection -- A broken response pipe cancels this exact native hook; it cannot publish or replay an answer.
+              stopped.abort();
+            });
         };
         try {
           const result = await record(signal, (route) => send({ type: "question_route", route }));

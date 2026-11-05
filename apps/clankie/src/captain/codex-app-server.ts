@@ -1414,19 +1414,27 @@ export async function startCodexAppServerSeat(options: {
             const clientUserMessageId = randomUUID();
             const sent = await sendNative(
               text,
-              async () => {
-                await guard?.();
-                const current = client!.pendingQuestion(threadId!, answer.requestId);
-                if (
-                  !current ||
-                  !isDeepStrictEqual(
-                    current.questions.map((question) => question.id),
-                    question.questions.map((question) => question.id),
+              Object.assign(
+                async () => {
+                  await guard?.();
+                  const current = client!.pendingQuestion(threadId!, answer.requestId);
+                  if (
+                    !current ||
+                    !isDeepStrictEqual(
+                      current.questions.map((question) => question.id),
+                      question.questions.map((question) => question.id),
+                    )
                   )
-                )
-                  throw new Error("native_async_question_already_answered: no replacement input was sent");
-                guard?.assertCurrent?.();
-              },
+                    throw new Error("native_async_question_already_answered: no replacement input was sent");
+                  guard?.assertCurrent?.();
+                },
+                {
+                  current: () => {
+                    guard?.assertCurrent?.();
+                    return true;
+                  },
+                },
+              ),
               { requestId: answer.requestId, clientUserMessageId },
             );
             return { text, clientUserMessageId, turnId: sent.turnId };

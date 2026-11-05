@@ -5898,9 +5898,9 @@ close), no wake or health alert reaches a lead seat, Auto rounds and auto-tidy
 stop, and no tracker write by Clankie, a lead
 or a worker goes through him. Stop, every read, settings and the owner's own
 tracker writes still work. Open native worker questions go once to the owner's
-feed (`clankie input list`, API `input_list`), including a question Clankie was
+feed (`clankie conversations questions`, API `input_list`), including a question Clankie was
 already answering when Watch began. The authenticated owner can use
-`clankie input answer` / `input_answer` while Watch stays on: only that worker's
+`clankie conversations answer` / `input_answer` while Watch stays on: only that worker's
 still-open native question is answered, through its original harness channel.
 The configured machine ceiling still applies. No answer continuation enters the
 lead's seat. A question returned to the lead when Watch ends refuses its stale

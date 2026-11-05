@@ -271,7 +271,7 @@ On each watch wake and periodic round, check **every seat you own**
   go to the owner's feed, including one you were answering when Watch started.
   Do not deliver into a lead seat or answer as the lead. The authenticated owner
   answers that exact still-open question through `input_list` / `input_answer`
-  (`clankie input list` / `clankie input answer`) while Watch stays on. Existing
+  (`clankie conversations questions` / `clankie conversations answer`) while Watch stays on. Existing
   machine ceilings and native first-answer checks remain. When Watch ends,
   questions the current policy lets the lead answer return to that conversation;
   the old owner card refuses, and no second native ask is created. The held

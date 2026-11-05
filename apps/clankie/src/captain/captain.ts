@@ -6534,15 +6534,23 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
         hook.event === "PermissionRequest" ||
         (hook.event === "PreToolUse" && hook.toolName === "AskUserQuestion")
       ) {
-        const hookOutput = await hookQuestions.open(
-          ref,
-          hook,
-          (question) => herdrWatches.forwardNativeQuestion(ref, question, questionProgress),
-          signal,
-          splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
-          personas.boundPersona(liveSeats, agent.terminalId, occupantIdForHerdrSession(session))?.name,
-        );
-        return { recorded: true as const, hookOutput: { ...hookOutput } };
+        let requestId: string | number | undefined;
+        try {
+          const hookOutput = await hookQuestions.open(
+            ref,
+            hook,
+            (question) => {
+              requestId = question.requestId;
+              return herdrWatches.forwardNativeQuestion(ref, question, questionProgress);
+            },
+            signal,
+            splitFleetQualified(paneId) === undefined ? agent.workingDirectory : undefined,
+            personas.boundPersona(liveSeats, agent.terminalId, occupantIdForHerdrSession(session))?.name,
+          );
+          return { recorded: true as const, hookOutput: { ...hookOutput } };
+        } finally {
+          if (requestId !== undefined) herdrWatches.forgetNativeQuestion(ref, requestId);
+        }
       }
       if (["SessionEnd", "Stop", "StopFailure", "UserPromptSubmit"].includes(hook.event))
         hookQuestions.cancel(ref, "Native question is no longer pending");
