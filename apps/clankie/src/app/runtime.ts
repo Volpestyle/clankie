@@ -2798,7 +2798,7 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {
-      const closing = [remoteLeads.close(), joinedSeats?.close()];
+      const closing = [remoteLeads.close(), joinedSeats?.close(), dependencies.projectTracking?.close()];
       dependencies.modelKeys?.close?.();
       stopBodyRequests();
       clearInterval(supportTimer);

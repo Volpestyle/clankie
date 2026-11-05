@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 export const PROJECT_TRACKING_PATH = "/v1/operator/project-tracking";
-const Repository = z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u);
+const Repository = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]+$/u).refine((value) => ![".", ".."].includes(value.split("/")[1]!));
 const Text = z
   .string()
   .trim()
   .min(1)
   .max(256)
-  .refine((s) => !/[\r\n\u0000]/u.test(s));
+  .refine((s) => !/[\r\n\u0000`<>]/u.test(s));
 const GithubBoard = z
   .string()
   .regex(
