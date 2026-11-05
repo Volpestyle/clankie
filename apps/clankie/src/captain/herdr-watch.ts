@@ -1,3 +1,4 @@
+import { readGithubOriginSlug } from "./seat-telemetry.ts";
 import { pointedBrief } from "./brief-file.ts";
 import {
   HiredSeatRestarts,
@@ -3028,7 +3029,12 @@ export class HerdrWatchStore implements HerdrWatchPort {
               seat: live.terminalId,
               occupantId: occupantIdForHerdrSession(live.session),
             });
-      const reserved = reused ?? this.projectHires.reserve(settings, projectId, hireRequest, defaults);
+      // Pin the repository before this native launch can edit its checkout. Retried/legacy
+      // allocations retain their original evidence; never backfill them from current Git config.
+      const repository =
+        input.fleet === undefined ? await readGithubOriginSlug(input.workingDirectory) : undefined;
+      const reserved =
+        reused ?? this.projectHires.reserve(settings, projectId, hireRequest, defaults, { repository });
       if (resume !== undefined && reserved.request.harness !== savedSessionHarness(resume)) {
         this.projectHires.failed(reserved.id);
         throw new Error(

@@ -49,6 +49,11 @@ const AllocationSchema = z
     id: z.string(),
     key: z.string(),
     projectId: z.string(),
+    /** Service-captured before dispatch; never accepted from the worker request. */
+    repository: z
+      .string()
+      .regex(/^[\w.-]+\/[\w.-]+$/u)
+      .optional(),
     role: z.string().optional(),
     policy: z.string(),
     request: SpawnOperatorSeatSchema,
@@ -248,6 +253,7 @@ export class ProjectHires {
     projectId: string,
     input: SpawnOperatorSeat,
     defaults: HireProfile = {},
+    controller?: { readonly repository?: string | undefined },
   ): Allocation & { reused: boolean } {
     // Policy changes must not produce a different retry key and a second native job.
     const key = JSON.stringify([input.fleet ?? "default", input.workingDirectory]);
@@ -279,6 +285,7 @@ export class ProjectHires {
         id: randomUUID(),
         key,
         projectId,
+        ...(controller?.repository === undefined ? {} : { repository: controller.repository }),
         ...(request.role === undefined ? {} : { role: request.role }),
         request,
         policy: launchPolicy(settings, projectId, request.role),
@@ -785,6 +792,7 @@ export class ProjectHires {
     if (
       all.length !== 1 ||
       !entry?.started ||
+      !entry.repository ||
       entry.operatorRelease ||
       !entry.proof ||
       entry.seat !== seat ||
@@ -809,6 +817,7 @@ export class ProjectHires {
     const saved = structuredClone(entry);
     return {
       allocation: entry.id,
+      repository: entry.repository,
       occupantId,
       projectId: entry.projectId,
       workingDirectory: entry.request.workingDirectory,

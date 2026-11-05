@@ -1,10 +1,12 @@
+import { FileCredentialStore } from "@clankie/credential-broker";
+import { githubConnection, githubConnectionFenced } from "../src/accounts.ts";
 import { createServer, type Server } from "node:http";
 import { realpath, readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { SettingsStore } from "@clankie/settings";
 import { ProjectsSettingsSchema } from "@clankie/protocol/projects";
-import { OperatorConversationServiceResultSchema } from "@clankie/protocol";
+import { SpawnOperatorSeatSchema, OperatorConversationServiceResultSchema } from "@clankie/protocol";
 import { MainCheckpointRefused } from "@clankie/work-items";
 import { checkpointFixture } from "../../../packages/work-items/test/fixtures/main-checkpoint.ts";
 import { createHerdrSessionSource } from "../../../packages/agent-hosts/src/sessions/herdr.ts";
@@ -40,7 +42,7 @@ async function listen(server: Server) {
 
 /** Real controller stores, Git DAG, HTTP provider/close boundaries, and production close adapter.
  * Only provider responses and the native close effect are disposable fixtures. */
-async function fixture(enableRecovery = true) {
+async function fixture(enableRecovery = true, fenced = true) {
   const git = await checkpointFixture();
   cleanups.push(git.close);
   git.mode("green");
@@ -77,8 +79,9 @@ async function fixture(enableRecovery = true) {
   const hiredAt = "2026-01-01T00:00:10.000Z";
   const entry = {
     id: "allocation",
-    key: "controller-key",
+    key: JSON.stringify(["default", path]),
     projectId: "project",
+    repository: "fixture/repo" as string | undefined,
     policy: "fixture",
     request: { schemaVersion: 1, harness: "claude", title: "Fixture", workingDirectory: path },
     started: true,
@@ -122,15 +125,19 @@ async function fixture(enableRecovery = true) {
     accountId = 1,
     token = "fixture-token",
     authority = true;
+  const credentials = new FileCredentialStore(join(root, "github-credentials.json"));
+  const credentialWriter = new FileCredentialStore(join(root, "github-credentials.json"));
+  await credentials.set("github", { type: "api", key: token });
   let mode = "valid";
   let authorityHook: () => Promise<void> = async () => {};
   let providerHook = async (_path: string) => {};
   let nativeHook = async () => {};
   const calls: string[] = [];
   const repo = { id: 1, full_name: "fixture/repo" };
+  let forged = false;
   const pull = () => ({
     number: 885,
-    html_url: "https://github.com/fixture/repo/pull/885",
+    html_url: `https://github.com/${repo.full_name}/pull/885`,
     state: "closed",
     merged: mode !== "unmerged",
     merged_at: mode === "old" ? "2025-01-01T00:00:00.000Z" : "2026-01-01T00:01:00.000Z",
@@ -146,6 +153,11 @@ async function fixture(enableRecovery = true) {
     void (async () => {
       const url = new URL(request.url!, "http://fixture");
       calls.push(url.pathname);
+      if (forged && url.pathname.startsWith("/repos/fixture/repo")) {
+        response.writeHead(404).end();
+        return;
+      }
+      url.pathname = url.pathname.replace("/repos/forged/repo", "/repos/fixture/repo");
       let data: unknown;
       if (mode === "unavailable") {
         response.writeHead(503).end();
@@ -167,9 +179,12 @@ async function fixture(enableRecovery = true) {
       )
         data = { status: "diverged", merge_base_commit: { sha: git.start } };
       else {
-        const result = await fetch(git.baseUrl + request.url, {
-          headers: { authorization: request.headers.authorization ?? "" },
-        });
+        const result = await fetch(
+          git.baseUrl + request.url!.replace("/repos/forged/repo", "/repos/fixture/repo"),
+          {
+            headers: { authorization: request.headers.authorization ?? "" },
+          },
+        );
         data = await result.json();
         response.statusCode = result.status;
       }
@@ -184,7 +199,8 @@ async function fixture(enableRecovery = true) {
   const baseUrl = await listen(provider);
   const work = createWorkItemsService({
     stateDirectory: join(root, "work"),
-    githubToken: async () => token,
+    githubConnection: () => githubConnection(credentials),
+    ...(fenced ? { githubConnectionFence: () => githubConnectionFenced(credentials) } : {}),
     githubApiBase: baseUrl,
     clock: git.clock,
   });
@@ -242,6 +258,7 @@ async function fixture(enableRecovery = true) {
       tidy,
       closeSeat: async (_id: string, guard: () => Promise<void>) => {
         try {
+          await guard();
           await nativeHook();
           await guard();
         } catch {
@@ -297,6 +314,12 @@ async function fixture(enableRecovery = true) {
     { surfaceClientId: "885-proof" },
   );
   return {
+    forgeRepo: async () => {
+      forged = true;
+      repo.id = 2;
+      repo.full_name = "forged/repo";
+      await git.git("remote", "set-url", "origin", "git@github.com:forged/repo.git");
+    },
     git,
     root,
     path,
@@ -308,6 +331,14 @@ async function fixture(enableRecovery = true) {
     tidy,
     recover,
     saveAllocation,
+    retry: async () =>
+      hires.reserve(
+        (await settings.load()).projects,
+        "project",
+        SpawnOperatorSeatSchema.parse(entry.request),
+        {},
+        { repository: "forged/repo" },
+      ),
     close: (reason: string | undefined = "worker claims its PR merged") =>
       source.close!(agent.terminalId, reason),
     closeWithoutWaiver: () => source.close!(agent.terminalId),
@@ -322,9 +353,12 @@ async function fixture(enableRecovery = true) {
     account: () => {
       accountId++;
     },
-    token: () => {
+    token: async () => {
       token += "-changed";
+      await credentialWriter.set("github", { type: "api", key: token });
     },
+    disconnect: () => credentialWriter.delete("github"),
+    restoreToken: () => credentialWriter.set("github", { type: "api", key: "fixture-token" }),
     revoke: () => {
       authority = false;
     },
@@ -417,7 +451,7 @@ it.each([
     if (kind === "project")
       await f.settings.update((s) => ({ ...s, projects: ProjectsSettingsSchema.parse({}) }));
     if (kind === "account") f.account();
-    if (kind === "connection") f.token();
+    if (kind === "connection") await f.token();
     if (kind === "worktree") {
       await mkdir(f.path);
       await writeFile(join(f.path, "unsaved"), "draft");
@@ -543,3 +577,47 @@ it.each(["local", "origin", "project", "allocation", "worktree"])(
     expect(f.exits()).toBe(0);
   },
 );
+
+it("uses only the controller-recorded repository when the checkout origin differs", async () => {
+  const f = await fixture();
+  f.mode("unmerged");
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+  expect(f.exits()).toBe(0);
+  await f.forgeRepo();
+  f.mode("valid");
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+  expect(f.exits()).toBe(0);
+  expect(f.calls.some((p) => p.startsWith("/repos/forged/repo"))).toBe(false);
+});
+it("retains legacy allocations without a controller-recorded repository as unknown", async () => {
+  const f = await fixture();
+  f.entry.repository = undefined;
+  await f.saveAllocation();
+  expect(await f.retry()).toMatchObject({ id: f.entry.id, reused: true });
+  expect((await f.retry()).repository).toBeUndefined();
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+  expect(f.exits()).toBe(0);
+  expect(f.calls).toEqual([]);
+});
+it.each(["replace", "disconnect", "aba"])(
+  "checks the broker witness after the last authority await (%s)",
+  async (kind) => {
+    const f = await fixture();
+    f.onNative(async () => {
+      f.onAuthority(async () => {
+        if (kind === "disconnect") await f.disconnect();
+        else await f.token();
+        f.account();
+        if (kind === "aba") await f.restoreToken();
+      });
+    });
+    expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+    expect(f.exits()).toBe(0);
+  },
+);
+it("refuses recovery without a synchronous broker witness", async () => {
+  const f = await fixture(true, false);
+  expect(await f.closeWithoutWaiver()).toMatchObject({ status: "refused" });
+  expect(f.exits()).toBe(0);
+  expect(f.calls).toEqual([]);
+});

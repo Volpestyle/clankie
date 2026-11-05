@@ -133,10 +133,16 @@ Revisit when new process/cwd behavior or actual cleanup evidence exposes false b
 
 A deleted checkout without a commit baseline may use a separate landed-work
 proof. The controller's original allocation and relocation must bind the exact
-native occupant, project, source repository and allocated branch. GitHub must
-prove that the live branch tip is the exact head of a PR merged into main after
+native occupant, project, source repository and allocated branch. The repository
+must have been captured in the controller allocation before native dispatch;
+legacy allocations without it remain unknown and are never backfilled from
+current Git configuration. GitHub must prove that the live branch tip is the exact head of a PR merged into main after
 the hire, descended from its recorded start, with the merge still on main. Any
 surviving local branch must agree. Existing main checkpoints still apply.
+
+The broker must provide a durable connection witness, captured before its
+credential read and checked synchronously after final authority preparation.
+A connection without that witness cannot authorize recovery.
 
 The proof covers only that missing checkout. Dirty, unlanded, ambiguous and
 unavailable work evidence elsewhere still refuses. Branch, account, project

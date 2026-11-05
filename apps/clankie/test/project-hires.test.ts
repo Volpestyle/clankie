@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
 import type { SavedAgentSession } from "../src/agent-sessions.ts";
 import { occupantIdForHerdrSession } from "../src/captain/herdr-census.ts";
@@ -987,4 +989,37 @@ describe("project hiring", () => {
     expect(() => selectHireProject("game", undefined, "other")).toThrow("does not match");
     expect(selectHireProject("game", undefined)).toBe("game");
   });
+});
+
+it("pins the controller repository before native dispatch can edit Git configuration", async () => {
+  const f = await fixture("codex");
+  const git = async (...args: string[]) => promisify(execFile)("git", ["-C", f.root, ...args]);
+  await git("init", "-b", "main");
+  await git("remote", "add", "origin", "git@github.com:fixture/repo.git");
+  f.runner.runInPane = vi.fn(async () => {});
+  const start: HarnessSeatAdapter["start"] = async (_launch, view) => {
+    await view.start?.("codex", []);
+    // The native occupant has begun; its Git edits must never rewrite the controller claim.
+    await git("remote", "set-url", "origin", "git@github.com:forged/repo.git");
+    const ref = { harness: "codex" as const, paneId: "p1", sessionId: "s1" };
+    await view.bound?.(ref);
+    await view.guard?.();
+    return { outcome: "started", control: { ref } as SeatControl };
+  };
+  const store = new HerdrWatchStore(f.path, {
+    ...f.options,
+    seatAdapters: [{ harness: "codex", attach: async () => undefined, start }],
+  });
+  try {
+    expect(await store.spawnSeat(request(f.root), undefined, "Implement X")).toMatchObject({
+      outcome: "spawned",
+    });
+    const journal = JSON.parse(await readFile(`${f.path}.project-hires.json`, "utf8"));
+    expect(journal.allocations).toHaveLength(1);
+    expect(journal.allocations[0]).toMatchObject({ repository: "fixture/repo", started: true });
+    expect((await git("remote", "get-url", "origin")).stdout.trim()).toBe("git@github.com:forged/repo.git");
+  } finally {
+    store.close();
+    f.store.close();
+  }
 });

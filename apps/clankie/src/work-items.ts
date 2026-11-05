@@ -2018,16 +2018,25 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       repository: string,
       launch: { branchRef: string; startHead: string; hiredAt: string },
     ) => {
-      const snapshot = await githubSnapshot();
-      const binding = deliveryFingerprint(JSON.stringify(snapshot ?? null));
-      const access = checkpointAccess(snapshot?.token);
+      if (!options.githubConnectionFence)
+        throw new MainCheckpointRefused(
+          checkpointUnknown("GitHub connection cannot be fenced for close proof"),
+        );
+      // The broker captures its durable revision before reading the credential.
+      const fence = await options.githubConnectionFence();
+      if (!fence.connection)
+        throw new MainCheckpointRefused(checkpointUnknown("GitHub connection unavailable for close proof"));
+      const access = checkpointAccess(fence.connection.token);
       const observation = await observeLandedBranch(access.api, repository, launch, access.cache);
-      const revalidate = async () => {
-        await observation.revalidate();
-        if (deliveryFingerprint(JSON.stringify((await githubSnapshot()) ?? null)) !== binding)
-          throw new MainCheckpointRefused(checkpointUnknown("GitHub connection changed during close proof"));
+      const assertCurrent = () => {
+        fence.assertCurrent();
       };
-      return { proof: observation.proof, revalidate };
+      const revalidate = async () => {
+        assertCurrent();
+        await observation.revalidate();
+        assertCurrent();
+      };
+      return { proof: observation.proof, revalidate, assertCurrent };
     },
     checkIssueCheckpoint,
     handleOwnerWrite,

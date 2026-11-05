@@ -49,13 +49,15 @@ its old pane id.
 
 A missing local checkout can be proved landed without fabricating a launch
 baseline. The service binds the original native allocation to its controller
-relocation, then checks the allocated branch against canonical GitHub PR and
-main state. A surviving local ref must agree. This covers only that missing
+relocation and its repository captured before dispatch, then checks the allocated
+branch against canonical GitHub PR and main state. A surviving local ref must agree. This covers only that missing
 checkout; other work, unknown provenance, changed refs, provider failures and
 main checkpoints still hold. Worker text and `leave_unlanded` cannot supply
 this proof. Verified evidence is retained in private close history and
 `captain/landed-close-proofs.jsonl`; it never confirms a failed hire or repairs
-native admission.
+native admission. Legacy allocations without a recorded repository stay unknown;
+current Git configuration cannot fill that gap. A broker connection without a
+synchronous publication witness also holds close-out.
 
 For a GitHub job with its own landed commits, close-out also needs main's post-merge checkpoint:
 `landing`, `checkpoint` and `mac` must all complete green, or a repository

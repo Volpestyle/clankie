@@ -96,14 +96,7 @@ export function createMissingWorktreeClose(options: {
     const parts = branchRef.split("/");
     for (let i = 1; i <= parts.length; i++) paths.push(join(common, ...parts.slice(0, i)));
     const assertGit = fence(paths);
-    const remote = (
-      await checkoutGit(entry.start, ["config", "--local", "--no-includes", "--get", "remote.origin.url"])
-    ).trim();
-    const repo =
-      /^(?:git@github\.com:|(?:https?|ssh):\/\/(?:git@)?github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/u.exec(
-        remote,
-      )?.[1];
-    if (!repo) throw unavailable();
+    const repo = claim.repository;
     let localHead: string | undefined;
     try {
       localHead = (
@@ -133,6 +126,7 @@ export function createMissingWorktreeClose(options: {
       relocation.validate();
       claim.validate();
       if (!positivelyMissing(path)) throw unavailable();
+      observation.assertCurrent();
     };
     assertCurrent();
     const proof = MissingWorktreeProofSchema.parse({
