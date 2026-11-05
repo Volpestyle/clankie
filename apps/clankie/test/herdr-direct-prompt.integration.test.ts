@@ -31,7 +31,14 @@ afterEach(() => {
 const screen = (name: string) =>
   readFileSync(new URL(`./fixtures/pane-draft/${name}.ansi`, import.meta.url), "utf8");
 
-function fixture(options: { status?: string; absorbs?: boolean; failure?: "refused" | "ambiguous" } = {}) {
+function fixture(
+  options: {
+    harness?: "claude" | "pi";
+    status?: string;
+    absorbs?: boolean;
+    failure?: "refused" | "ambiguous";
+  } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "direct-prompt-"));
   roots.push(root);
   const path = join(root, `${SESSION}.jsonl`);
@@ -51,14 +58,14 @@ function fixture(options: { status?: string; absorbs?: boolean; failure?: "refus
   const agent: HerdrAgentSnapshot = {
     paneId: "w1:p1",
     terminalId: "seat",
-    agent: "claude",
+    agent: options.harness ?? "claude",
     status: options.status ?? "idle",
     title: "worker",
-    session: { source: "herdr:claude", kind: "path", value: path },
+    session: { source: `herdr:${options.harness ?? "claude"}`, kind: "path", value: path },
     workingDirectory: root,
   };
   const typed: string[] = [];
-  let ansi = screen("claude-empty");
+  let ansi = screen(`${options.harness ?? "claude"}-empty`);
   const runner: HerdrWatchRunner = {
     get: async () => agent,
     resolveTerminal: async () => agent,
@@ -322,4 +329,14 @@ test("a message that is mostly credential is never confirmed by its scrubbed for
   const original = labelled.send("password: hunter2 rotated now");
   labelled.user("api_key: hunter2 rotated now");
   expect(await original).toMatchObject({ outcome: "unconfirmed" });
+});
+
+test("a refused Pi attachment never falls back to the owner-cleared terminal prompt", async () => {
+  const f = fixture({ harness: "pi" });
+  expect(await f.send("Do not bypass native Pi admission.")).toMatchObject({
+    outcome: "undelivered",
+    deliveryStage: "unavailable",
+    detail: expect.stringContaining("Native Pi attachment could not be proved"),
+  });
+  expect(f.typed).toEqual([]);
 });
