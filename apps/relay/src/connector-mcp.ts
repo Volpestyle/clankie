@@ -39,6 +39,7 @@ import {
   SessionRefusal,
   SessionSources,
   createHerdrCoreSessionSource,
+  createRexSessionSource,
   createHerdrSessionSource,
 } from "@clankie/agent-hosts/sessions";
 import type { ClankieGuide } from "./connector-guide.ts";
@@ -1521,7 +1522,10 @@ function connectorSessions(
           request.op === "send" ||
           request.op === "prompt_answer" ||
           request.op === "key_press" ||
-          request.op === "close_seat")
+          request.op === "close_seat" ||
+          request.op === "rex_send" ||
+          request.op === "rex_keys" ||
+          request.op === "rex_close")
         ? { ...request, channel }
         : request,
       bearer,
@@ -1537,6 +1541,9 @@ function connectorSessions(
     ),
     // The Herdr desktop app's agents: listed and read beside Herdr's, never messaged.
     createHerdrCoreSessionSource({ dispatch }),
+    // Agents in Rex on the Mac (ADR 0363): listed and read; messaged and keyed once the owner
+    // turned prompts and keys on for this app.
+    createRexSessionSource({ dispatch }),
   ]);
 }
 

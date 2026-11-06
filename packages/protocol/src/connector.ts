@@ -500,6 +500,13 @@ export function connectorOperationAllowed(request: OperatorConversationServiceRe
     case "key_press":
     case "herdr_core_list":
     case "herdr_core_read":
+    // Rex's agents (ADR 0363): listed and read like the desktop app's; a message or a key
+    // goes in only once the owner turned prompts and keys on for the app, which the service checks.
+    case "rex_list":
+    case "rex_read":
+    case "rex_send":
+    case "rex_keys":
+    case "rex_close":
     case "get":
     case "send":
     case "send_receipt":

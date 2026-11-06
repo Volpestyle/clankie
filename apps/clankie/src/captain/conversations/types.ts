@@ -87,6 +87,11 @@ export type ConversationServiceRequest = Exclude<
   | { op: "herdr_core_list" }
   | { op: "herdr_core_read" }
   | { op: "herdr_core_focus" }
+  | { op: "rex_list" }
+  | { op: "rex_read" }
+  | { op: "rex_send" }
+  | { op: "rex_keys" }
+  | { op: "rex_close" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }
@@ -148,6 +153,11 @@ export type ConversationServiceResult = Exclude<
   | { op: "herdr_core_list" }
   | { op: "herdr_core_read" }
   | { op: "herdr_core_focus" }
+  | { op: "rex_list" }
+  | { op: "rex_read" }
+  | { op: "rex_send" }
+  | { op: "rex_keys" }
+  | { op: "rex_close" }
   | { op: "close_seat" }
   | { op: "settle_hire_receipt" }
   | { op: "seat_bridges" }

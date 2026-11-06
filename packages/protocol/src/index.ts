@@ -420,6 +420,8 @@ export {
   HerdrCoreAgentSchema,
   HerdrCoreTerminalSchema,
   type HerdrCoreAgent,
+  RexBlockSchema,
+  type RexAgent,
 } from "./operator-service.ts";
 export {
   OPERATOR_HEAD_AGENT_NAME,

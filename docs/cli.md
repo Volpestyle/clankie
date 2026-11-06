@@ -2406,6 +2406,15 @@ hires in the Herdr desktop app, never types text, and never touches a screen
 whose question Clankie sent to you. Each press leaves a note in that app's name
 on the board.
 
+Agents you run in Rex on this Mac are listed as `rex:<session>/<block>`
+([ADR 0363](adr/0363-agents-in-rex-take-a-paste-under-the-owners-switch.md)).
+An app reads them as any agent you started. The same `clankie connector prompts`
+switch lets it press keys there and send a `message_agent`, which goes in as one
+paste and Enter, never while the agent waits on a prompt, and is never retried
+as typing. Clankie only talks to Rex's local server: he never starts it, never
+brings Rex to the front, and lists nothing when Rex is missing, stopped, on an
+API revision he wasn't built for, or pointed at another machine.
+
 `close_agent` closes a finished agent's pane
 ([ADR 0339](adr/0339-connected-apps-close-finished-hires.md)). It closes only an
 agent Clankie or a connected app hired, only while it is idle or done, and only

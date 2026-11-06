@@ -131,6 +131,13 @@ it; none takes precedence over another.
   command whole, and any other agent (one the owner started, or a hire run under
   a shell, the usual Herdr hire) comes back empty with a note until it prints
   again.
+- **Agents the owner runs in Rex** read `rex:<session>/<block>` in `list_agents`
+  (ADR 0363). Read them as any owner-started agent. `message_agent` hands one a
+  message as a single paste and Enter, and `press_keys` presses named keys; both
+  need the owner to have turned prompts and keys on for your app, and a message is
+  refused while the agent waits on a prompt (answer it with keys). `queued` means
+  it went in mid-turn; `unconfirmed` means read it before sending again. You can't
+  close or hire into Rex, and Clankie never brings Rex to the front.
 - **One worker per task, in a fresh worktree, ending at a PR.** Brief it to work
   in a new worktree or clone of its own, never in the owner's main checkout, and
   to stop at the pull request (or the landing the repo uses).

@@ -63,6 +63,7 @@ import {
 import { occupantIdForHerdrSession } from "./herdr-census.ts";
 import { FleetChangeClock } from "./herdr-fleet-changes.ts";
 import { createHerdrCore, type HerdrCore, type HerdrCoreLeftover } from "./herdr-core.ts";
+import { createRex, type Rex } from "./rex.ts";
 import { HERDR_CORE_FLEET } from "./herdr-core-runner.ts";
 import { HerdrWatchStore, type HerdrAgentSnapshot, type HerdrWatchRunner } from "./herdr-watch.ts";
 import { connectedHireName } from "./hire-name.ts";
@@ -155,6 +156,8 @@ export interface CreateOperatorServiceContext {
   readonly herdrRunner: HerdrWatchRunner;
   /** The Herdr desktop app's terminal server on this Mac; the default finds it as `hc` does. */
   readonly herdrCore?: HerdrCore;
+  /** Rex's local server on this Mac (ADR 0363); the default runs `rex` on PATH. */
+  readonly rex?: Rex;
   readonly withDriver: (conversation: OperatorConversation) => OperatorConversation;
   readonly conversationGoal: (conversationId: string) =>
     | {
@@ -222,6 +225,8 @@ export function createOperatorService(
   let recentReport: { deliveryId: string; acceptedAt: string } | undefined;
   let defaultHerdrCore: HerdrCore | undefined;
   const herdrCore = () => ctx.herdrCore ?? (defaultHerdrCore ??= createHerdrCore());
+  let defaultRex: Rex | undefined;
+  const rex = () => ctx.rex ?? (defaultRex ??= createRex());
   async function serve(
     request: OperatorConversationServiceRequest,
     authority?: QuestionAuthority,
@@ -1262,6 +1267,44 @@ export function createOperatorService(
         ...focused,
       };
     }
+    // Rex's agents on this Mac (ADR 0363). Who may send or press keys is settled before this:
+    // the relay stamps an app, and the conversation routes check the owner's switch for it.
+    if (request.op === "rex_list") {
+      const listed = await rex().list();
+      return listed.status === "listed"
+        ? { op: "rex_list", schemaVersion: 1, status: "listed", agents: [...listed.agents] }
+        : {
+            op: "rex_list",
+            schemaVersion: 1,
+            status: "unavailable",
+            reason: listed.reason,
+            agents: [],
+            detail: listed.detail,
+          };
+    }
+    if (request.op === "rex_read")
+      return { op: "rex_read", schemaVersion: 1, block: request.block, ...(await rex().read(request.block)) };
+    if (request.op === "rex_send")
+      return {
+        op: "rex_send",
+        schemaVersion: 1,
+        block: request.block,
+        ...(await rex().send(request.block, request.text)),
+      };
+    if (request.op === "rex_keys")
+      return {
+        op: "rex_keys",
+        schemaVersion: 1,
+        block: request.block,
+        result: await rex().keys(request.block, request.keys),
+      };
+    if (request.op === "rex_close")
+      return {
+        op: "rex_close",
+        schemaVersion: 1,
+        block: request.block,
+        ...(await rex().close(request.block)),
+      };
     if (request.op === "seat_bridges") {
       return {
         op: "seat_bridges",
