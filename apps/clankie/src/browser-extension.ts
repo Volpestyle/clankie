@@ -1,5 +1,6 @@
 import type { ClankieExtension } from "@clankie/extension";
-import { createBrowserHost, type BrowserHost, type CredentialBrowser } from "./browser-host.ts";
+import { createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import type { CredentialBrowser } from "./credential-requests.ts";
 import type { CorePorts, CoreProjection } from "./extension-host.ts";
 
 /**

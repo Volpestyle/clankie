@@ -4,7 +4,7 @@ import type { PublicGatewayDoorwayState } from "@clankie/protocol/public-gateway
 import type { SettingsStore } from "@clankie/settings";
 import type { BrowserToolPort, ClankieAppDependencies } from "./app/types.ts";
 import type { BodyLeaseStore } from "./body-leases.ts";
-import type { CredentialBrowser } from "./browser-host.ts";
+import type { CredentialBrowser } from "./credential-requests.ts";
 import type { MachineJoins } from "./machine-joins.ts";
 import type { DeliveredFileStore } from "./delivered-files.ts";
 import type { AppearancePort } from "./ports/appearance.ts";

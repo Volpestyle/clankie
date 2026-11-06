@@ -14,9 +14,13 @@ import {
 import type { CallBrowserToolResult } from "@clankie/protocol";
 import { runCredentialsCommand } from "../../tui/src/command/credentials.ts";
 import { createClankieApp } from "../src/app.ts";
-import { createBrowserHost, type BrowserHost, type CredentialBrowser } from "../src/browser-host.ts";
+import { createBrowserHost, type BrowserHost } from "../src/browser-host.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { createCredentialRequests, type CredentialRequests } from "../src/credential-requests.ts";
+import {
+  createCredentialRequests,
+  type CredentialBrowser,
+  type CredentialRequests,
+} from "../src/credential-requests.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
 import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
@@ -95,6 +99,19 @@ document.addEventListener("resume", () => navigator.sendBeacon("/resumed?" + new
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+// A fixture HOME has no login keychain, so on macOS Chrome uses its mock one (as
+// browser-public-web); elsewhere the host finds the installed Chrome itself.
+async function chromeEnvironment(): Promise<NodeJS.ProcessEnv> {
+  if (process.platform !== "darwin") return process.env;
+  const chrome = join(root, "chrome");
+  await writeFile(
+    chrome,
+    `#!/bin/sh\nexec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --use-mock-keychain "$@"\n`,
+  );
+  await chmod(chrome, 0o755);
+  return { ...process.env, CLANKIE_BROWSER_EXECUTABLE: chrome };
 }
 
 beforeAll(async () => {
@@ -188,18 +205,11 @@ beforeAll(async () => {
   });
   a = await listen(siteA);
 
-  // A fixture HOME has no login keychain; Chrome uses its mock one (as browser-public-web).
-  const chrome = join(root, "chrome");
-  await writeFile(
-    chrome,
-    `#!/bin/sh\nexec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --use-mock-keychain "$@"\n`,
-  );
-  await chmod(chrome, 0o755);
   host = await createBrowserHost({
     stateRoot: join(root, "state"),
     attachmentRoot: join(root, "attachments"),
     logger,
-    environment: { ...process.env, CLANKIE_BROWSER_EXECUTABLE: chrome },
+    environment: await chromeEnvironment(),
   });
   credentialRequests = createCredentialRequests({ browser: host, logger });
   WebSocket.prototype.send = function (this: WebSocket, ...args: Parameters<WebSocket["send"]>) {
