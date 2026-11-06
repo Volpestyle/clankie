@@ -118,7 +118,10 @@ export function registerFleetDigestRoutes(
             const [observed, github] = await Promise.all([
               observe(options.herdr()),
               (dependencies.workItems?.fleetGithubActivity(since, now) ?? Promise.resolve(undefined)).catch(
-                () => undefined,
+                (error: unknown) => {
+                  logger.warn({ error: String(error) }, "Daily fleet digest could not read GitHub");
+                  return undefined;
+                },
               ),
             ]);
             return projectDailyFleetDigest({

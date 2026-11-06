@@ -167,6 +167,7 @@ export function startDailyFleetDigests(options: {
     latest,
     close: async () => {
       clearInterval(timer);
+      // allow-swallowed-rejection -- the interval's own handler already logged this generation's failure.
       await running?.catch(() => undefined);
     },
   };
