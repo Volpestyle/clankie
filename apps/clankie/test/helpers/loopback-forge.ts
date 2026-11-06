@@ -51,7 +51,10 @@ export interface FixtureFile {
  * It keeps GitHub's rules a client can break: the repo's own default branch, a 403 on any write
  * to an archived repo, a 422 on a non-fast-forward ref update without `force` and on a pull to a
  * missing base, the new `full_name` after a rename, pulls sorted by when they were last updated
- * and paged with a `Link` header, and a deleted head closing its open pull.
+ * and paged with a `Link` header, and a deleted head closing its open pull. GraphQL's `updateRefs`
+ * keeps its `beforeOid`: a ref that no longer points there is refused, with a 200 and `errors`.
+ * It is recorded as `POST /graphql:updateRefs:<repo>:<ref>:<update|delete>`, so a filter on the
+ * repo still sees it.
  */
 export async function startLoopbackForge() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "loopback-forge-")));
@@ -61,9 +64,14 @@ export async function startLoopbackForge() {
   const archived = new Set<string>();
   const undeletable = new Set<string>();
   const fullNames = new Map<string, string>();
+  /** Repos whose root trees GitHub lists only in part, leaving out every guide. */
+  const truncated = new Set<string>();
+  const NO_REF = "0000000000000000000000000000000000000000";
   let clock = Date.parse("2026-11-05T00:00:00Z");
   const tick = () => new Date((clock += 1000)).toISOString();
-  const requests: { readonly method: string; readonly path: string }[] = [];
+  const requests: { method: string; path: string }[] = [];
+  /** A hook run as each request arrives, before it is answered: someone acting mid-pass. */
+  let onRequest: ((method: string, path: string) => Promise<void> | void) | undefined;
   const bare = (slug: string) => join(root, `${slug}.git`);
   const git = async (slug: string, ...args: string[]) =>
     (
@@ -91,7 +99,56 @@ export async function startLoopbackForge() {
   const refOf = (slug: string, branch: string) =>
     git(slug, "rev-parse", "--verify", `refs/heads/${branch}^{commit}`);
 
+  const closeOpenPulls = (slug: string, ref: string) => {
+    for (const pull of pulls.get(slug)!)
+      if (
+        pull.state === "open" &&
+        `heads/${pull.head.ref}` === ref &&
+        pull.head.repo?.full_name === (fullNames.get(slug) ?? slug)
+      )
+        pull.state = "closed";
+  };
+  const graphql = async (body: Record<string, unknown>) => {
+    const variables = body.variables as {
+      repositoryId: string;
+      refUpdates: { name: string; beforeOid?: string; afterOid: string; force?: boolean }[];
+    };
+    if (!/^\s*mutation\b[^{]*\{\s*updateRefs\(/u.test(body.query as string))
+      return { status: 200, value: { errors: [{ message: "Fixture serves only updateRefs" }] } };
+    const slug = variables.repositoryId.replace(/^R_/u, "");
+    const refused = (message: string) => ({ status: 200, value: { data: null, errors: [{ message }] } });
+    if (!pulls.has(slug)) return refused("Could not resolve to a node");
+    if (archived.has(slug)) return refused("Repository was archived so is read-only.");
+    const [update] = variables.refUpdates;
+    const ref = update!.name.replace(/^refs\//u, "");
+    const now = await git(slug, "rev-parse", "--verify", `refs/${ref}`).catch(() => NO_REF);
+    if (update!.beforeOid !== undefined && update!.beforeOid !== now)
+      return refused(`A ref was updated by someone else: ${update!.name}`);
+    if (update!.afterOid === NO_REF) {
+      if (undeletable.has(`${slug}:${ref}`)) return refused("Cannot delete this protected branch");
+      if (now === NO_REF) return refused("Reference does not exist");
+      await git(slug, "update-ref", "-d", `refs/${ref}`);
+      closeOpenPulls(slug, ref);
+    } else {
+      const fastForward =
+        now === NO_REF ||
+        (await git(slug, "merge-base", "--is-ancestor", now, update!.afterOid).then(
+          () => true,
+          () => false,
+        ));
+      if (!fastForward && update!.force !== true) return refused("Update is not a fast forward");
+      await git(slug, "update-ref", `refs/${ref}`, update!.afterOid);
+      for (const pull of pulls.get(slug)!)
+        if (pull.state === "open" && `heads/${pull.head.ref}` === ref) {
+          pull.head.sha = update!.afterOid;
+          pull.updated_at = tick();
+        }
+    }
+    return { status: 200, value: { data: { updateRefs: { clientMutationId: null } } } };
+  };
+
   const handle = async (method: string, url: URL, body: Record<string, unknown>) => {
+    if (method === "POST" && url.pathname === "/graphql") return graphql(body);
     const parts = /^\/repos\/([^/]+\/[^/]+)(?:\/(.*))?$/u.exec(url.pathname);
     if (!parts) return { status: 404, value: { message: "Not Found" } };
     const slug = parts[1]!;
@@ -104,6 +161,7 @@ export async function startLoopbackForge() {
       return {
         status: 200,
         value: {
+          node_id: `R_${slug}`,
           full_name: fullNames.get(slug) ?? slug,
           default_branch: defaultBranches.get(slug),
           archived: archived.has(slug),
@@ -122,7 +180,15 @@ export async function startLoopbackForge() {
       const tree = await git(slug, "rev-parse", `${sha}^{tree}`);
       return {
         status: 200,
-        value: { sha, message: await git(slug, "log", "-1", "--format=%B", sha), tree: { sha: tree } },
+        value: {
+          sha,
+          message: await git(slug, "log", "-1", "--format=%B", sha),
+          tree: { sha: tree },
+          parents: (await git(slug, "log", "-1", "--format=%P", sha))
+            .split(" ")
+            .filter(Boolean)
+            .map((parent) => ({ sha: parent })),
+        },
       };
     }
     if (method === "GET" && (match = /^git\/trees\/([a-f0-9]+)$/u.exec(rest))) {
@@ -134,7 +200,42 @@ export async function startLoopbackForge() {
           const [mode, type, sha] = meta!.split(" ");
           return { path, mode, type, sha };
         });
-      return { status: 200, value: { tree } };
+      if (!truncated.has(slug)) return { status: 200, value: { tree, truncated: false } };
+      const shown = tree.filter((entry) => !["CLAUDE.md", "AGENTS.md"].includes(entry.path!));
+      return { status: 200, value: { tree: shown, truncated: true } };
+    }
+    if (method === "GET" && (match = /^contents\/([^/]+)$/u.exec(rest))) {
+      const path = decodeURIComponent(match[1]!);
+      const line = await git(slug, "ls-tree", url.searchParams.get("ref") ?? "HEAD", "--", path);
+      if (!line) return { status: 404, value: { message: "Not Found" } };
+      const [mode, type, sha] = line.split("\t")[0]!.split(" ");
+      if (type === "tree") return { status: 200, value: [] };
+      const kind = mode === "120000" ? "symlink" : type === "commit" ? "submodule" : "file";
+      return { status: 200, value: { type: kind, sha, path } };
+    }
+    if (method === "GET" && (match = /^compare\/(.+)\.\.\.([a-f0-9]+)$/u.exec(rest))) {
+      const base = await git(
+        slug,
+        "rev-parse",
+        "--verify",
+        `${decodeURIComponent(match[1]!)}^{commit}`,
+      ).catch(() => undefined);
+      const head = match[2]!;
+      if (!base) return { status: 404, value: { message: "Not Found" } };
+      const ancestor = (a: string, b: string) =>
+        git(slug, "merge-base", "--is-ancestor", a, b).then(
+          () => true,
+          () => false,
+        );
+      const status =
+        base === head
+          ? "identical"
+          : (await ancestor(head, base))
+            ? "behind"
+            : (await ancestor(base, head))
+              ? "ahead"
+              : "diverged";
+      return { status: 200, value: { status } };
     }
     if (method === "GET" && (match = /^git\/blobs\/([a-f0-9]+)$/u.exec(rest))) {
       const bytes = (
@@ -194,13 +295,7 @@ export async function startLoopbackForge() {
       if ((await git(slug, "rev-parse", "--verify", `refs/${match[1]!}`).catch(() => "")) === "")
         return { status: 422, value: { message: "Reference does not exist" } };
       await git(slug, "update-ref", "-d", `refs/${match[1]!}`);
-      for (const pull of pulls.get(slug)!)
-        if (
-          pull.state === "open" &&
-          `heads/${pull.head.ref}` === match[1] &&
-          pull.head.repo?.full_name === (fullNames.get(slug) ?? slug)
-        )
-          pull.state = "closed";
+      closeOpenPulls(slug, match[1]!);
       return { status: 204, value: undefined };
     }
     if (route === "GET pulls") {
@@ -258,9 +353,17 @@ export async function startLoopbackForge() {
     request.on("end", () => {
       const url = new URL(request.url ?? "/", `http://127.0.0.1:${String(port)}`);
       const method = request.method ?? "GET";
-      requests.push({ method, path: url.pathname });
       const text = Buffer.concat(chunks).toString("utf8");
-      void handle(method, url, text ? (JSON.parse(text) as Record<string, unknown>) : {})
+      const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      const update = (body.variables as { refUpdates?: { name: string; afterOid: string }[] } | undefined)
+        ?.refUpdates?.[0];
+      const path =
+        url.pathname === "/graphql" && update
+          ? `/graphql:updateRefs:${String((body.variables as { repositoryId: string }).repositoryId).replace(/^R_/u, "")}:${update.name}:${update.afterOid === NO_REF ? "delete" : "update"}`
+          : url.pathname;
+      requests.push({ method, path });
+      void Promise.resolve(onRequest?.(method, path))
+        .then(() => handle(method, url, body))
         .catch((error: unknown) => ({ status: 500, value: { message: String(error) } }))
         .then((reply: { status: number; value: unknown; link?: string }) => {
           response.writeHead(reply.status, {
@@ -277,6 +380,33 @@ export async function startLoopbackForge() {
   return {
     baseUrl: `http://127.0.0.1:${String(port)}`,
     requests,
+    /** Run `hook` as each later request arrives, before it is answered. */
+    onRequest(hook: typeof onRequest) {
+      onRequest = hook;
+    },
+    /** GitHub listing this repo's root trees only in part, as it does past its size limit. */
+    truncateTrees: (slug: string) => truncated.add(slug),
+    /**
+     * A commit on `branch` with `message` and `parent` (the tip by default), as someone amending
+     * or stacking on a proposal would push it.
+     */
+    async commitAs(
+      slug: string,
+      branch: string,
+      files: Record<string, FixtureFile>,
+      message: string,
+      parent?: string,
+    ) {
+      const base = parent ?? (await refOf(slug, branch));
+      const sha = await commitFiles(slug, base, files);
+      const tree = await git(slug, "rev-parse", `${sha}^{tree}`);
+      const commit = await git(slug, "commit-tree", tree, "-p", base, "-m", message);
+      await git(slug, "update-ref", `refs/heads/${branch}`, commit);
+      for (const pull of pulls.get(slug)!)
+        if (pull.state === "open" && pull.head.ref === branch) pull.head.sha = commit;
+      return commit;
+    },
+    message: (slug: string, sha: string) => git(slug, "log", "-1", "--format=%B", sha),
     /** Every request since `mark` that was not a read. */
     writesSince: (mark: number) => requests.slice(mark).filter((request) => request.method !== "GET"),
     pulls: (slug: string) => pulls.get(slug) ?? [],

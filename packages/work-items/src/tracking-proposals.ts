@@ -23,6 +23,12 @@ const TRAILER = "Clankie-Tracking-Block";
 const TITLE = "Update the Clankie tracking block";
 const MAX_GUIDE_BYTES = 1024 * 1024;
 const SYMLINK_MODE = "120000";
+/** A guide found by path in a truncated tree: GitHub's path lookup doesn't say a file's exec bit. */
+const UNKNOWN_MODE = "unknown";
+const NO_REF = "0000000000000000000000000000000000000000";
+const UPDATE_REFS = `mutation ($repositoryId: ID!, $refUpdates: [RefUpdate!]!) {
+  updateRefs(input: { repositoryId: $repositoryId, refUpdates: $refUpdates }) { clientMutationId }
+}`;
 const PRIVATE_BOARD_EXPOSED = "private_board_exposed";
 const PRIVATE_BOARD_PUBLISHED = "private_board_published";
 
@@ -76,6 +82,129 @@ const commitHash = async (api: GithubApi, slug: string, sha: string): Promise<st
   return trailerHash(commit.message);
 };
 
+interface CommitRead {
+  readonly message: string;
+  readonly tree: { readonly sha: string };
+  readonly parents?: readonly { readonly sha: string }[];
+}
+const readCommit = async (api: GithubApi, slug: string, sha: string) =>
+  (await api.request("GET", `repos/${slug}/git/commits/${sha}`)) as CommitRead;
+
+interface RootTree {
+  readonly tree: readonly TreeEntry[];
+  readonly truncated?: boolean;
+}
+const readTree = async (api: GithubApi, slug: string, sha: string) =>
+  (await api.request("GET", `repos/${slug}/git/trees/${sha}`)) as RootTree;
+
+/**
+ * The root's guide entries. A tree too large for GitHub to list in full comes back `truncated`,
+ * so a guide it left out is looked up by path in that commit rather than taken as missing.
+ */
+async function guideEntries(api: GithubApi, slug: string, commitSha: string, tree: RootTree) {
+  const entries = new Map(
+    tree.tree
+      .filter((entry) => (GUIDE_FILES as readonly string[]).includes(entry.path))
+      .map((entry) => [entry.path, entry]),
+  );
+  if (tree.truncated !== true) return entries;
+  for (const file of GUIDE_FILES) {
+    if (entries.has(file)) continue;
+    const found = (await api
+      .request("GET", `repos/${slug}/contents/${encodeURIComponent(file)}?ref=${commitSha}`)
+      .catch((error: unknown) => {
+        if (notFound(error)) return undefined;
+        throw error;
+      })) as { readonly type?: string; readonly sha?: string } | readonly unknown[] | undefined;
+    if (found === undefined) continue;
+    const kind = Array.isArray(found) ? "dir" : (found as { readonly type?: string }).type;
+    const sha = Array.isArray(found) ? "" : ((found as { readonly sha?: string }).sha ?? "");
+    entries.set(file, {
+      path: file,
+      mode: kind === "symlink" ? SYMLINK_MODE : kind === "file" ? UNKNOWN_MODE : "040000",
+      type: kind === "symlink" || kind === "file" ? "blob" : kind === "submodule" ? "commit" : "tree",
+      sha,
+    });
+  }
+  return entries;
+}
+
+/** Whether `ancestor` is in `base`'s history, so building on `base` drops nothing above it. */
+async function inHistoryOf(api: GithubApi, slug: string, base: string, ancestor: string) {
+  const compared = (await api
+    .request("GET", `repos/${slug}/compare/${refPath(base)}...${ancestor}`)
+    .catch((error: unknown) => {
+      // No common history: nothing of it is in base's.
+      if (notFound(error)) return undefined;
+      throw error;
+    })) as { readonly status?: string } | undefined;
+  return compared?.status === "identical" || compared?.status === "behind";
+}
+
+/**
+ * The block hash when `tip` is exactly a commit Clankie writes: one parent already in `base`'s
+ * history, and a tree that differs from that parent's only in the one guide it rewrote, holding
+ * the block its trailer names, every byte outside the markers as the parent had it. Undefined
+ * for anything else, so a commit someone amended keeping the message, or one stacked on someone
+ * else's, is never his to replace. A root tree GitHub won't list in full can't be compared.
+ */
+async function ownedProposal(
+  api: GithubApi,
+  slug: string,
+  tip: string,
+  base: string,
+): Promise<string | undefined> {
+  const commit = await readCommit(api, slug, tip);
+  const hash = trailerHash(commit.message);
+  const parent = commit.parents?.length === 1 ? commit.parents[0]!.sha : undefined;
+  if (hash === undefined || parent === undefined) return undefined;
+  const [mine, before] = await Promise.all([
+    readTree(api, slug, commit.tree.sha),
+    readCommit(api, slug, parent).then((read) => readTree(api, slug, read.tree.sha)),
+  ]);
+  if (mine.truncated === true || before.truncated === true) return undefined;
+  const key = (entry: TreeEntry | undefined) =>
+    entry === undefined ? "" : `${entry.mode} ${entry.type} ${entry.sha}`;
+  const now = new Map(mine.tree.map((entry) => [entry.path, entry]));
+  const was = new Map(before.tree.map((entry) => [entry.path, entry]));
+  const changed = [...new Set([...now.keys(), ...was.keys()])].filter(
+    (path) => key(now.get(path)) !== key(was.get(path)),
+  );
+  const [file] = changed;
+  if (changed.length !== 1 || !(GUIDE_FILES as readonly string[]).includes(file!)) return undefined;
+  const written = now.get(file!);
+  const prior = was.get(file!);
+  if (
+    written?.type !== "blob" ||
+    written.mode !== (prior?.mode ?? "100644") ||
+    written.mode === SYMLINK_MODE ||
+    (prior !== undefined && prior.type !== "blob")
+  )
+    return undefined;
+  const text = (await blobBytes(api, slug, written.sha)).toString("utf8");
+  const block = readTrackingBlock(text);
+  if (block === undefined || trackingBlockHash(block) !== hash) return undefined;
+  const priorText = prior === undefined ? "" : (await blobBytes(api, slug, prior.sha)).toString("utf8");
+  if (writeTrackingBlock(priorText, block) !== text) return undefined;
+  return (await inHistoryOf(api, slug, base, parent)) ? hash : undefined;
+}
+
+/**
+ * Moves the proposal branch from `from` to `to` only if it still points at `from`, so a commit
+ * pushed since Clankie looked is refused rather than replaced. `to` of NO_REF deletes it.
+ */
+async function moveBranch(api: GithubApi, repositoryId: string, from: string, to: string) {
+  const reply = (await api.request("POST", "graphql", {
+    query: UPDATE_REFS,
+    variables: {
+      repositoryId,
+      refUpdates: [{ name: `refs/heads/${TRACKING_BRANCH}`, beforeOid: from, afterOid: to, force: true }],
+    },
+  })) as { readonly errors?: readonly { readonly message?: string }[] } | undefined;
+  const [error] = reply?.errors ?? [];
+  if (error) throw new Error(`branch_moved: ${error.message ?? "GitHub refused the ref update"}`);
+}
+
 interface GuideRead {
   readonly guides: Partial<Record<GuideFile, string>>;
   readonly entries: Map<string, TreeEntry>;
@@ -87,15 +216,13 @@ interface GuideRead {
 }
 
 /** Root entries only, by tree mode, because a symlinked guide must never be replaced by a copy. */
-async function readGuides(api: GithubApi, slug: string, treeSha: string): Promise<GuideRead> {
-  const tree = (await api.request("GET", `repos/${slug}/git/trees/${treeSha}`)) as {
-    readonly tree: readonly TreeEntry[];
-  };
-  const entries = new Map(
-    tree.tree
-      .filter((entry) => (GUIDE_FILES as readonly string[]).includes(entry.path))
-      .map((entry) => [entry.path, entry]),
-  );
+async function readGuides(
+  api: GithubApi,
+  slug: string,
+  commitSha: string,
+  treeSha: string,
+): Promise<GuideRead> {
+  const entries = await guideEntries(api, slug, commitSha, await readTree(api, slug, treeSha));
   const guides: Partial<Record<GuideFile, string>> = {};
   const texts: (readonly [GuideFile, string])[] = [];
   let refused: string | undefined;
@@ -142,15 +269,14 @@ async function readDefaultBranch(api: GithubApi, slug: string, defaultBranch: st
     readonly object: { readonly sha: string };
   };
   const head = ref.object.sha;
-  const commit = (await api.request("GET", `repos/${slug}/git/commits/${head}`)) as {
-    readonly tree: { readonly sha: string };
-  };
-  const baseTree = commit.tree.sha;
-  return { head, baseTree, read: await readGuides(api, slug, baseTree) };
+  const baseTree = (await readCommit(api, slug, head)).tree.sha;
+  return { head, baseTree, read: await readGuides(api, slug, head, baseTree) };
 }
 
 interface Plan {
   readonly slug: string;
+  /** The repository's node id, which the conditional ref update names. */
+  readonly repositoryId: string;
   readonly defaultBranch: string;
   readonly head: string;
   readonly baseTree: string;
@@ -160,13 +286,20 @@ interface Plan {
   readonly created: boolean;
   readonly hash: string;
   readonly openPull: Pull | undefined;
+  /** The open proposal's tip, checked as Clankie's own: the only commit it may replace. */
+  readonly ownedTip: string | undefined;
   readonly published: boolean;
 }
 
 type Reading =
   | { readonly status: TrackingRepoStatus }
   | { readonly status: TrackingRepoStatus; readonly plan: Plan }
-  | { readonly status: TrackingRepoStatus; readonly exposedPulls: readonly Pull[] };
+  | {
+      readonly status: TrackingRepoStatus;
+      readonly exposedPulls: readonly Pull[];
+      readonly exposedTip: string;
+      readonly repositoryId: string;
+    };
 
 const pullRef = (pull: Pull) => ({ number: pull.number, url: pull.html_url });
 
@@ -224,9 +357,11 @@ async function listProposals(api: GithubApi, slug: string, fullName: string): Pr
 }
 
 interface BranchExposure {
+  /** The branch's tip as read: a withdrawal deletes only this. */
+  readonly tip: string;
   /** The open pulls riding on the branch. */
   readonly pulls: readonly Pull[];
-  /** The tip's trailer: the block Clankie wrote there, or undefined when the tip isn't his. */
+  /** The tip's trailer, whoever wrote it. Only ownedProposal says the commit is Clankie's. */
   readonly hash: string | undefined;
   /** It says the configured board, not only some other private board. */
   readonly mentions: boolean;
@@ -249,18 +384,13 @@ async function exposedProposals(
 ): Promise<BranchExposure | undefined> {
   const tip = await branchTip(api, slug);
   if (tip === undefined) return undefined;
-  const commit = (await api.request("GET", `repos/${slug}/git/commits/${tip}`)) as {
-    readonly message: string;
-    readonly tree: { readonly sha: string };
-  };
-  const tree = (await api.request("GET", `repos/${slug}/git/trees/${commit.tree.sha}`)) as {
-    readonly tree: readonly TreeEntry[];
-  };
+  const commit = await readCommit(api, slug, tip);
+  const entries = await guideEntries(api, slug, tip, await readTree(api, slug, commit.tree.sha));
   let names = false;
   let mentions = false;
   const unread: unknown[] = [];
-  for (const entry of tree.tree) {
-    if (!(GUIDE_FILES as readonly string[]).includes(entry.path) || entry.type !== "blob") continue;
+  for (const entry of entries.values()) {
+    if (entry.type !== "blob") continue;
     const bytes = await blobBytes(api, slug, entry.sha).catch((error: unknown) => {
       unread.push(error);
       return undefined;
@@ -277,8 +407,8 @@ async function exposedProposals(
   }
   const hash = trailerHash(commit.message);
   return listProposals(api, slug, fullName).then(
-    (pulls) => ({ pulls: pulls.filter((pull) => pull.state === "open"), hash, mentions }),
-    (error: unknown) => ({ pulls: [], hash, mentions, failed: errorText(error) }),
+    (pulls) => ({ tip, pulls: pulls.filter((pull) => pull.state === "open"), hash, mentions }),
+    (error: unknown) => ({ tip, pulls: [], hash, mentions, failed: errorText(error) }),
   );
 }
 
@@ -286,6 +416,7 @@ const exposedReason = (failed?: string) =>
   failed === undefined ? PRIVATE_BOARD_EXPOSED : `${PRIVATE_BOARD_EXPOSED}: ${failed}`.slice(0, 400);
 
 interface RepositoryRead {
+  readonly node_id: string;
   readonly default_branch: string;
   readonly full_name: string;
   readonly archived?: boolean;
@@ -362,7 +493,14 @@ async function assessRepo(
       reason: exposedReason(exposure.failed),
       ...(pull ? { pull: pullRef(pull) } : {}),
     });
-    return exposure.failed === undefined ? { status, exposedPulls: exposure.pulls } : { status };
+    return exposure.failed === undefined
+      ? {
+          status,
+          exposedPulls: exposure.pulls,
+          exposedTip: exposure.tip,
+          repositoryId: repository.node_id,
+        }
+      : { status };
   }
   if (options.sharedWith !== undefined) return refused(`repo_in_two_projects: also in ${options.sharedWith}`);
   if (repository.full_name.toLowerCase() !== slug.toLowerCase())
@@ -397,13 +535,17 @@ async function assessRepo(
       }),
     };
   }
-  const plan: Plan = {
+  const mode = read.entries.get(file)?.mode ?? "100644";
+  // Rewriting a guide whose mode can't be read could flip its exec bit, which is outside the markers.
+  if (mode === UNKNOWN_MODE) return refused(`guide_mode_unknown: ${file}`, file);
+  const plan: Omit<Plan, "ownedTip"> = {
     slug,
+    repositoryId: repository.node_id,
     defaultBranch,
     head,
     baseTree,
     file,
-    mode: read.entries.get(file)?.mode ?? "100644",
+    mode,
     content,
     created: choice.created === true,
     hash,
@@ -411,11 +553,11 @@ async function assessRepo(
     published,
   };
   if (openPull) {
-    const openHash = await commitHash(api, slug, openPull.head.sha);
+    const openHash = await ownedProposal(api, slug, openPull.head.sha, head);
     if (openHash === undefined)
-      return refused("proposal_branch_edited: someone else's commit tops the proposal", file);
+      return refused("proposal_branch_edited: a commit on the proposal isn't Clankie's", file);
     return {
-      plan,
+      plan: { ...plan, ownedTip: openPull.head.sha },
       status: carry({
         repo: slug,
         state: openHash === hash ? "proposed" : "drifted",
@@ -438,7 +580,7 @@ async function assessRepo(
     }
   }
   return {
-    plan,
+    plan: { ...plan, ownedTip: undefined },
     status: {
       repo: slug,
       state: declined ? "declined" : "drifted",
@@ -467,21 +609,19 @@ function pullBody(plan: Plan): string {
 /** Nothing here merges, and nothing here touches issues: one branch, one commit, one pull request. */
 async function writeProposal(api: GithubApi, plan: Plan): Promise<TrackingRepoStatus> {
   const { slug } = plan;
-  // A tip without the trailer is someone's work; this branch is only replaced when it is ours.
-  let branchExists = plan.openPull !== undefined;
-  if (!plan.openPull) {
-    const tip = await branchTip(api, slug);
-    if (tip !== undefined) {
-      if ((await commitHash(api, slug, tip)) === undefined)
-        return {
-          repo: slug,
-          state: "refused",
-          guide: plan.file,
-          reason: "proposal_branch_edited: delete or merge the existing branch first",
-        };
-      branchExists = true;
-    }
-  }
+  // Anything but Clankie's own single commit is someone's work, and the branch is theirs.
+  const tip = plan.ownedTip ?? (await branchTip(api, slug));
+  if (
+    tip !== undefined &&
+    plan.ownedTip === undefined &&
+    (await ownedProposal(api, slug, tip, plan.head)) === undefined
+  )
+    return {
+      repo: slug,
+      state: "refused",
+      guide: plan.file,
+      reason: "proposal_branch_edited: delete or merge the existing branch first",
+    };
   const tree = (await api.request("POST", `repos/${slug}/git/trees`, {
     base_tree: plan.baseTree,
     tree: [{ path: plan.file, mode: plan.mode, type: "blob", content: plan.content }],
@@ -491,11 +631,8 @@ async function writeProposal(api: GithubApi, plan: Plan): Promise<TrackingRepoSt
     tree: tree.sha,
     parents: [plan.head],
   })) as { readonly sha: string };
-  if (branchExists)
-    await api.request("PATCH", `repos/${slug}/git/refs/heads/${refPath(TRACKING_BRANCH)}`, {
-      sha: commit.sha,
-      force: true,
-    });
+  // Conditional on the tip just checked, and a create fails on a branch that appeared since.
+  if (tip !== undefined) await moveBranch(api, plan.repositoryId, tip, commit.sha);
   else
     await api.request("POST", `repos/${slug}/git/refs`, {
       ref: `refs/heads/${TRACKING_BRANCH}`,
@@ -528,11 +665,19 @@ async function settle(
   );
 }
 
-/** Close every proposal on the branch, then delete it. A failed delete is found again next pass. */
-async function withdrawProposals(api: GithubApi, slug: string, pulls: readonly Pull[]): Promise<void> {
+/**
+ * Close every proposal on the branch, then delete it, only while it still points at the tip that
+ * was read. A failed delete, or a branch someone moved since, is found again next pass.
+ */
+async function withdrawProposals(
+  api: GithubApi,
+  slug: string,
+  pulls: readonly Pull[],
+  branch: { readonly repositoryId: string; readonly tip: string },
+): Promise<void> {
   for (const pull of pulls)
     await api.request("PATCH", `repos/${slug}/pulls/${String(pull.number)}`, { state: "closed" });
-  await api.request("DELETE", `repos/${slug}/git/refs/heads/${refPath(TRACKING_BRANCH)}`);
+  await moveBranch(api, branch.repositoryId, branch.tip, NO_REF);
 }
 
 /** Read-only: what the default branch says against the setting. Reading back after a merge is this. */
@@ -564,7 +709,10 @@ export async function proposeTrackingRepo(
     if (!("exposedPulls" in reading)) return await settle(api, reading, options);
     const withdrawn = reading.exposedPulls[0];
     try {
-      await withdrawProposals(api, repo, reading.exposedPulls);
+      await withdrawProposals(api, repo, reading.exposedPulls, {
+        repositoryId: reading.repositoryId,
+        tip: reading.exposedTip,
+      });
     } catch (error) {
       // Still exposed, so the state stays the one the owner gets alerted on.
       return { ...reading.status, reason: `${reading.status.reason}: ${errorText(error)}`.slice(0, 400) };
@@ -619,10 +767,16 @@ export async function withdrawDepartedRepo(
         ...(pull ? { pull: pullRef(pull) } : {}),
       });
     if (exposure.failed !== undefined) return exposed(exposure.failed);
-    const ours = exposure.hash === trackingBlockHash(renderTrackingBlock(tracker, "private"));
+    // The trailer alone isn't his: an amended commit keeps it, and so can one stacked on another's.
+    const ours =
+      exposure.hash === trackingBlockHash(renderTrackingBlock(tracker, "private")) &&
+      (await ownedProposal(api, repo, exposure.tip, seen.repository.default_branch)) !== undefined;
     if (!options.withdraw || !ours) return exposed();
     try {
-      await withdrawProposals(api, repo, exposure.pulls);
+      await withdrawProposals(api, repo, exposure.pulls, {
+        repositoryId: seen.repository.node_id,
+        tip: exposure.tip,
+      });
     } catch (error) {
       return exposed(errorText(error));
     }

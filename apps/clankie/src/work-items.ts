@@ -1248,7 +1248,7 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       );
     return matched.size === 1 ? cutover.get([...matched][0]!) : undefined;
   };
-  const authorizeWrite = async (authority: WorkWriteAuthority) => {
+  const authorizeWrite = async (authority: Pick<WorkWriteAuthority, "authorize" | "current">) => {
     if (!authority.current() || !(await authority.authorize()) || !authority.current())
       throw new Error("Owner authority expired or was revoked. Read the work again.");
   };
@@ -2010,9 +2010,29 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       const snapshot = await leadRepoSnapshot(true);
       return { stamp: snapshot.stamp, assertCurrent: snapshot.assertCurrent };
     },
-    /** The connected account's GitHub, else the owner's own `gh` login, as every other write. */
-    async githubForge(): Promise<GithubApi> {
-      return checkpointAccess((await githubSnapshot())?.token).api;
+    /**
+     * The connected account's GitHub, else the owner's own `gh` login, pinned to that account for
+     * the whole pass. Reads go straight through. Every other call first passes the checks every
+     * tracker write passes: the authority is renewed, and the account is still the pinned one.
+     */
+    async githubForge(authority: Pick<WorkWriteAuthority, "authorize" | "current">): Promise<GithubApi> {
+      const connection = await githubSnapshot();
+      const account = connection ? githubBindingOf(connection) : await accountBinding("github");
+      const { api } = checkpointAccess(connection?.token);
+      if (connection) githubApiBindings.set(api, account);
+      return {
+        list: (path) => api.list(path),
+        async request(method, path, body) {
+          if (method !== "GET") {
+            await authorizeWrite(authority);
+            if ((await accountBinding("github")) !== account)
+              throw new Error("Connected GitHub account changed.");
+            // No await from here to dispatch: a reconnect during the reads above is seen.
+            assertGithubApiIs(connection ? api : undefined, account);
+          }
+          return api.request(method, path, body);
+        },
+      };
     },
     async leadChangePulls(signal?: AbortSignal) {
       const snapshot = await leadRepoSnapshot();

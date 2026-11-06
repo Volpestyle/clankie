@@ -1073,7 +1073,7 @@ const remoteGitWorktree = createRemoteGitWorktreeObserver(remoteProofOptions);
 const remoteWorktreeRoot = createRemoteWorktreeRootObserver(remoteProofOptions);
 const projectTracking = createProjectTrackingService({
   settings: settingsStore,
-  forge: () => workItems.githubForge(),
+  forge: (authority) => workItems.githubForge(authority),
   suggest: suggestProjectTracking,
   logger,
   alert: (text) => captain.notifyRuntimeHealthAlert(text),

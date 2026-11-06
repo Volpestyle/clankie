@@ -11987,12 +11987,21 @@ as separate work. See
 `refused` reasons: `malformed_markers`, `unclosed_code_fence`, `duplicate_blocks`,
 `unsupported_guide`, `guide_too_large`, `guide_not_utf8`, `repository_archived`,
 `repository_moved`, `repo_in_two_projects`, `public_board_not_public`,
-`private_board_exposed` and `proposal_branch_edited`. `public_board_not_public` means
+`private_board_exposed`, `proposal_branch_edited` and `guide_mode_unknown`.
+`public_board_not_public` means
 the public board looks like GitHub but isn't a repo GitHub shows as public: pick a
 public repo, in any spelling. A GitHub Project URL counts, because nothing says who can
 see it, as does any other GitHub-hosted address and a bare `owner/name` under Linear. `repo_in_two_projects` means another project claims the repo: remove it from
-one. `proposal_branch_edited` means someone else's commit is on the proposal branch:
-merge or delete it.
+one. `proposal_branch_edited` means the proposal branch holds anything but Clankie's own
+single commit on the default branch's history, including his commit amended with its
+message kept: merge or delete it. `guide_mode_unknown` means GitHub listed the repo's root
+only in part, so the guide was found by path, which doesn't say whether it is executable;
+Clankie reads it but won't rewrite it. A branch update or delete applies only while the
+branch still points where Clankie last read it; one that moved in between reports
+`unavailable` with `branch_moved`, and the next pass reads it again. Every proposal write
+first renews the authority it rests on, the owner's apply at the revision they applied or
+the sweep's unchanged setting under `push: lead`, and checks that the connected GitHub
+account is the one the pass began with.
 
 When a repo is no longer confirmed private and `clankie/tracking-block` names a private
 board, `apply` and the sweep close its open pull requests and delete the branch, even
