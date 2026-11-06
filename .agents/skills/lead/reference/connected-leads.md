@@ -203,6 +203,13 @@ an answer without supplying a separate read timestamp. An expired or unknown
 receipt never proves non-delivery and never authorizes a retry. Older hosts may
 refuse receipt opt-in; do not resend an uncertain original without it.
 
+How far a receipt goes depends on the route. Hired Codex, Pi, Grok and Prime seats
+reach `acted_on` or `answered`; Claude and OpenCode seats stop at `queued` or `delivered`. A
+Codex session Clankie didn't start stops at `delivered` through its app server and
+at `queued` through `codex queue`. No route reports `read` yet. This holds on
+linked machines too, so a receipt that stops early means unknown, not unread: read
+the agent instead of resending.
+
 Progress is observed on the original native connection and input ID while the
 original caller and recipient bindings remain valid. Revocation, expiry, native
 replacement or host shutdown ends that observation. Recorded progress survives

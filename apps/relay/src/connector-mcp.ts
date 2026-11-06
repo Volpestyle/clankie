@@ -325,7 +325,7 @@ function connectorServer(
         name: "message_agent_status",
         title: "Read an agent message receipt",
         description:
-          "Read your app's original message receipt without resending, waking or acknowledging it. Native progress requires exact input correlation; missing progress stays unknown. A busy or idle pane and matching text prove nothing.",
+          "Read your app's original message receipt without resending, waking or acknowledging it. Native progress requires exact input correlation; missing progress stays unknown. A busy or idle pane and matching text prove nothing. No route reports read yet. Claude and OpenCode seats, and Codex sessions Clankie didn't start, stop at queued or delivered, on the Mac or a linked machine. Stopping there means unknown, not unread; read the agent instead of resending.",
         inputSchema: {
           type: "object" as const,
           properties: { receiptId: { type: "string", format: "uuid" } },

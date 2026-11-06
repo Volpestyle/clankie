@@ -33,6 +33,33 @@ they do not establish that the requested work achieved its goal. An answer may
 be proven without a separately observed read timestamp. Pane activity, matching
 text and service bookkeeping do not supply missing evidence.
 
+## How far each route reports
+
+The stages above are the most a receipt can say. What it says for one message
+depends on the route that carried it, on the Mac and on linked machines alike:
+
+| Route                                                        | Last stage reported      |
+| ------------------------------------------------------------ | ------------------------ |
+| A hired Codex seat; a Pi, Grok or Prime seat                 | `acted_on` or `answered` |
+| A Claude or OpenCode seat                                    | `queued` or `delivered`  |
+| A Codex session Clankie didn't start, through its app server | `delivered`              |
+| A Codex session Clankie didn't start, through `codex queue`  | `queued`                 |
+
+No route reports `read` yet: no harness connection surfaces a turn start tied to
+one input, so a turn can be proven finished without ever showing as started.
+
+A Claude or OpenCode completion carries no input ID, so it can't be tied to one
+message. `codex queue` answers with acceptance alone and gives no input ID to
+follow. A Codex session reached through its app server does return an ID, and on
+the Mac a watch that records that exact turn can still add `acted_on` and
+`answered`. Nothing follows it on a linked machine.
+
+A receipt that stops early means unknown, never unread. Read the agent itself to
+find out what happened, and don't resend.
+
+Fleet seats carry their machine's prefix (`pc/term_…`). The checks above run on
+that exact seat, and a changed occupant refuses the send.
+
 Progress observation stays with the original native connection, occupant and
 input ID while the original caller's authority remains valid. It ends when that
 authority expires or is revoked, the recipient changes, or the host shuts down.
