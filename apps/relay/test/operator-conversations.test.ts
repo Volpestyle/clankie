@@ -1429,6 +1429,107 @@ describe("native terminal NDJSON tail", () => {
     expect(authCalls).toBe(3);
   });
 
+  it("types or presses keys into Rex for an owner's device only under terminalControl (ADR 0363)", async () => {
+    const block = "0a1b2c3d-0000-4000-8000-000000000001/0a1b2c3d-0000-4000-8000-0000000000a1";
+    const bodies = [
+      { op: "rex_send", schemaVersion: 1, block, text: "Fix it" },
+      { op: "rex_keys", schemaVersion: 1, block, keys: ["esc"] },
+    ];
+    // Observing a terminal, chatting and steering are not enough to type into one.
+    const denied = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            grants: { chat: true, steer: true, terminalObserve: true, terminalControl: false },
+          },
+        }),
+      },
+      dispatch: async () => {
+        throw new Error("must not dispatch");
+      },
+    });
+    for (const body of bodies) {
+      const response = await post(denied.url, "/operator/v1/dispatch", body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "terminal_control_grant_required" });
+    }
+
+    const seen: OperatorConversationServiceRequest[] = [];
+    const granted = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            grants: { chat: false, steer: false, terminalObserve: false, terminalControl: true },
+          },
+        }),
+      },
+      dispatch: async (request) => {
+        seen.push(request);
+        return request.op === "rex_send"
+          ? { op: "rex_send", schemaVersion: 1, block, status: "delivered", detail: "Taken." }
+          : {
+              op: "rex_keys",
+              schemaVersion: 1,
+              block,
+              result: { outcome: "pressed", message: "Pressed esc." },
+            };
+      },
+    });
+    for (const body of bodies)
+      expect((await post(granted.url, "/operator/v1/dispatch", body)).status).toBe(200);
+    // The owner's own device acts with its own authority: no app is stamped.
+    expect(seen.map((request) => [request.op, "appDeviceId" in request])).toEqual([
+      ["rex_send", false],
+      ["rex_keys", false],
+    ]);
+  });
+
+  it("closes a Rex block for an owner's device only under the steer grant (ADR 0363)", async () => {
+    const block = "0a1b2c3d-0000-4000-8000-000000000001/0a1b2c3d-0000-4000-8000-0000000000a1";
+    const body = { op: "rex_close", schemaVersion: 1, block };
+    // Chat, and both terminal grants, are not enough to close one.
+    const denied = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            grants: { chat: true, steer: false, terminalObserve: true, terminalControl: true },
+          },
+        }),
+      },
+      dispatch: async () => {
+        throw new Error("must not dispatch");
+      },
+    });
+    const response = await post(denied.url, "/operator/v1/dispatch", body);
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "steer_grant_required" });
+
+    let dispatched = 0;
+    const granted = await startRelay({
+      authorizeDevice: {
+        authorize: async () => ({
+          authorized: true,
+          device: {
+            ...activeDevice,
+            grants: { chat: false, steer: true, terminalObserve: false, terminalControl: false },
+          },
+        }),
+      },
+      dispatch: async () => {
+        dispatched += 1;
+        return { op: "rex_close", schemaVersion: 1, block, status: "refused", detail: "Stays open." };
+      },
+    });
+    expect((await post(granted.url, "/operator/v1/dispatch", body)).status).toBe(200);
+    expect(dispatched).toBe(1);
+  });
+
   it("gates terminal_control and terminal_input on the terminalControl grant (ADR 0144)", async () => {
     const controlRequest = {
       op: "terminal_control",

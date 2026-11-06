@@ -2411,7 +2411,8 @@ Agents you run in Rex on this Mac are listed as `rex:<session>/<block>`
 An app reads them as any agent you started. The same `clankie connector prompts`
 switch lets it press keys there and send a `message_agent`, which goes in as one
 paste and Enter, never while the agent waits on a prompt, and is never retried
-as typing. Clankie only talks to Rex's local server: he never starts it, never
+as typing. Turning the switch off or revoking the app stops a press or a message
+at the next key or before its Enter. Clankie only talks to Rex's local server: he never starts it, never
 brings Rex to the front, and lists nothing when Rex is missing, stopped, on an
 API revision he wasn't built for, or pointed at another machine.
 

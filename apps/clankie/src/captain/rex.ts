@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { OPERATOR_TERMINAL_READ_MAX, type RexAgent } from "@clankie/protocol";
 import type { KeyPressResult } from "@clankie/protocol/connector";
@@ -14,9 +16,10 @@ import {
 
 // Rex (Superlogical, beta, macOS) as a home for agents (#963, ADR 0363): a tmux-style
 // server whose sessions and blocks outlive its app. Clankie drives it only through the
-// `rex` CLI against this Mac's own server, over its Unix socket. He never starts a server
-// (`--autostart=false`), never focuses or raises anything, and never names a remote host;
-// a `REX_SERVER` that isn't a local socket is refused rather than followed. Rex's API is in
+// `rex` CLI against this Mac's own server, over its Unix socket, named on every call (`-S`)
+// so no Rex config or runtime directory in his environment picks another. He never starts a
+// server (`--autostart=false`), never focuses or raises anything, and never names a remote
+// host; a `REX_SERVER` that isn't a local socket is refused rather than followed. Rex's API is in
 // beta, so every call first checks the server's API revision and refuses one this adapter
 // wasn't built for.
 //
@@ -41,8 +44,12 @@ const CONFIRM_MS = 4_000;
 const SESSION_MAX = 32;
 const BLOCK_MAX = 48;
 const TERMINAL_CREATOR = "com.superlogical.terminal";
-/** A block Clankie started for a hire carries this label prefix; nothing else may be closed. */
-const REX_SEAT_LABEL_PREFIX = "clankie.seat/";
+/**
+ * Where Rex's server listens on this Mac by default: its runtime directory's `server.sock`. The
+ * Rex CLI names `RUNTIME-DIR/server.sock`; Rex Beta (server 1829) made it here, seen on disk
+ * 2026-11-06 without running Rex. A real Rex proof is still owed (#963).
+ */
+const REX_DEFAULT_SOCKET = ["Library", "Application Support", "rex", "server.sock"];
 const STATES = new Set(["idle", "working", "done", "blocked", "error"] as const);
 type RexState = RexAgent["status"];
 
@@ -71,10 +78,11 @@ export interface Rex {
   /** What the agent in that block showed since its first read, newest lines last (ADR 0307). */
   read(block: string): Promise<RexRead>;
   /** One paste and Enter into the agent, never typed key by key, and never retried another way. */
-  send(block: string, text: string): Promise<RexSent>;
+  /** `current` is asked before the paste and again before the Enter; false sends nothing more. */
+  send(block: string, text: string, current?: () => boolean): Promise<RexSent>;
   /** Named keys, one at a time; `current` is asked before each, and false presses nothing more. */
   keys(block: string, keys: readonly string[], current?: () => boolean): Promise<KeyPressResult>;
-  /** Close a block Clankie started, once its agent isn't mid-turn. */
+  /** Refused for now: Clankie starts nothing in Rex yet, so every block is the owner's. */
   close(block: string): Promise<RexClosed>;
 }
 
@@ -124,23 +132,35 @@ export function createRex(options: RexOptions = {}): Rex {
   // Anchors per block, kept for this service's life (ADR 0307).
   const scope = new AgentReadScope();
 
-  /** The global options every call carries: never start a server, this Mac's socket only. */
+  /** The global options every call carries: never start a server, this Mac's socket only, by name. */
   function prefix(): string[] {
     const server = env.REX_SERVER?.trim();
-    const local = server === undefined || server.length === 0 ? undefined : localSocket(server);
-    if (server !== undefined && server.length > 0 && local === undefined)
+    const local =
+      server === undefined || server.length === 0
+        ? join(env.HOME?.trim() || homedir(), ...REX_DEFAULT_SOCKET)
+        : localSocket(server);
+    if (local === undefined)
       throw new RexError(
         "Rex here points at a server that isn't this Mac's own (REX_SERVER); Clankie only talks to the local Rex server.",
         "remote",
       );
-    return ["--autostart=false", "--timeout", "5s", ...(local === undefined ? [] : ["-S", local])];
+    return ["--autostart=false", "--timeout", "5s", "-S", local];
   }
 
-  /** The child's environment: none of a calling Rex terminal's own targets. */
+  /** The child's environment: none of a calling Rex terminal's own targets, nor a Rex config or runtime directory. */
   function childEnv(): NodeJS.ProcessEnv {
     return Object.fromEntries(
       Object.entries(env).filter(
-        ([key]) => !["REX_SERVER", "REX_SESSION", "REX_BLOCK", "REX_CLIENT", "REX_HOME"].includes(key),
+        ([key]) =>
+          ![
+            "REX_SERVER",
+            "REX_SESSION",
+            "REX_BLOCK",
+            "REX_CLIENT",
+            "REX_HOME",
+            "REX_CONFIG",
+            "REX_RUNTIME_DIR",
+          ].includes(key),
       ),
     );
   }
@@ -331,7 +351,13 @@ export function createRex(options: RexOptions = {}): Rex {
           const changed = async () => (await occupied(target))?.occupant.key !== occupant.key;
           // Claude Code and Codex are read from their own session transcript, never their screen
           // (ADR 0307, #328): terminal text has no author per line. No certain session is a refusal.
-          const harness = transcriptHarness(live.record.app);
+          // By what the program reports and by the process in front: either naming Claude Code or
+          // Codex keeps the screen unread, and a disagreement between them reads nothing.
+          const reported = transcriptHarness(live.record.app);
+          const running = transcriptHarness(processName(live.foreground));
+          if (reported !== undefined && running !== undefined && reported !== running)
+            return { status: "unavailable", detail: TRANSCRIPT_READ_REFUSED };
+          const harness = reported ?? running;
           if (harness !== undefined) {
             const found = await nativeSessionForProcess(harness, occupant.pid, options.nativeSession);
             let entries: Awaited<ReturnType<typeof readProcessSession>> | undefined;
@@ -381,7 +407,7 @@ export function createRex(options: RexOptions = {}): Rex {
       );
     },
 
-    async send(block, message) {
+    async send(block, message, current = () => true) {
       const target = parse(block);
       return guarded<RexSent>(
         async () => {
@@ -396,6 +422,11 @@ export function createRex(options: RexOptions = {}): Rex {
             return {
               status: "not_delivered",
               detail: "It reported an error and stopped. Read it before sending anything. Nothing was sent.",
+            };
+          if (!current())
+            return {
+              status: "not_delivered",
+              detail: "Typing into agents was turned off for this app. Nothing was sent.",
             };
           const working = watchWorking(target);
           try {
@@ -416,6 +447,13 @@ export function createRex(options: RexOptions = {}): Rex {
                 detail: `Rex didn't take the message: ${detailOf(error)} Nothing was sent.`,
               };
             }
+            // The switch can go off while the paste is in flight; then the text waits unsent.
+            if (!current())
+              return {
+                status: "unconfirmed",
+                detail:
+                  "The text went in, but typing into agents was turned off before Enter, so it wasn't sent. Read the agent first.",
+              };
             try {
               await run(["send-key", "-s", target.session, "-b", target.block, "enter"]);
             } catch (error) {
@@ -481,36 +519,15 @@ export function createRex(options: RexOptions = {}): Rex {
       );
     },
 
-    async close(block) {
-      const target = parse(block);
-      return guarded<RexClosed>(
-        async () => {
-          const answer = await json(["block", "ls", "-s", target.session, "--json"]);
-          const blocks =
-            (Array.isArray(answer) ? answer : (record(answer)?.blocks as unknown[] | undefined)) ?? [];
-          const entry = blocks.map(record).find((candidate) => text(candidate?.block_id) === target.block);
-          if (entry === undefined) return { status: "unavailable", detail: "Rex has no such block now." };
-          // Only a block Clankie started for a hire; whatever the owner runs in Rex is theirs.
-          if (!(text(entry.label) ?? "").startsWith(REX_SEAT_LABEL_PREFIX))
-            return {
-              status: "refused",
-              detail: "The owner started that Rex block, so it stays open. Nothing was closed.",
-            };
-          const live = await occupied(target);
-          if (live?.record.state === "working" || live?.record.state === "blocked")
-            return {
-              status: "refused",
-              detail: `Its agent is ${live.record.state === "working" ? "mid-turn" : "waiting on a prompt"}. Nothing was closed.`,
-            };
-          try {
-            await run(["block", "close", "-s", target.session, target.block]);
-          } catch (error) {
-            return { status: "unavailable", detail: `Rex didn't close it: ${detailOf(error)}` };
-          }
-          return { status: "closed", detail: "Rex closed the block and the program in it." };
-        },
-        (detail) => ({ status: "unavailable", detail }),
-      );
+    async close() {
+      // Clankie hires nothing into Rex yet, so no block is his to close; a block's label is the
+      // owner's to set and proves nothing. Closing returns with a check against his own hire
+      // record once he starts agents there (ADR 0363).
+      return {
+        status: "refused",
+        detail:
+          "Clankie hasn't started any agent in Rex, so every Rex block is the owner's and stays open. Nothing was closed.",
+      };
     },
   };
 
@@ -592,6 +609,16 @@ function parse(block: string): Target {
 
 function transcriptHarness(app: string | undefined): "claude" | "codex" | undefined {
   return app === "claude-code" || app === "claude" ? "claude" : app === "codex" ? "codex" : undefined;
+}
+
+/** A process's executable name, without directory, a login shell's `-` or `.exe`, lowercased. */
+function processName(name: string): string {
+  return name
+    .split(/[\\/]/u)
+    .pop()!
+    .replace(/^-/u, "")
+    .replace(/\.exe$/iu, "")
+    .toLowerCase();
 }
 
 function revisionOf(value: unknown): number {

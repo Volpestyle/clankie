@@ -121,6 +121,16 @@ export interface RegisterConversationRoutesContext {
 }
 
 export function registerConversationRoutes(ctx: RegisterConversationRoutesContext) {
+  /** An app may still type or press keys into Rex: signed in now, and the owner's switch on (ADR 0363). */
+  const rexAppCurrent = (deviceId: string) => {
+    const record = ctx.devices.get(deviceId);
+    return (
+      record?.status === "active" &&
+      record.scope === "connector" &&
+      !isDeviceRunExpired(record, ctx.clock()) &&
+      ctx.promptAnswers?.allowed(deviceId) === true
+    );
+  };
   const receiptObservations = ctx.dependencies.agentMessageReceipts
     ? new AgentMessageObservations(ctx.dependencies.agentMessageReceipts)
     : undefined;
@@ -1139,9 +1149,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     ) {
       // Text or keys into an agent in Rex (ADR 0363) from a connected app: only once the owner
       // turned prompts and keys on for that app, as for key_press, since either can answer a
-      // prompt. The app's record was checked just above.
+      // prompt. The app's record was checked just above, and both are checked again before
+      // every key and before the Enter that follows a paste (see rexAppCurrent below).
       const named = ctx.devices.get(parsed.data.appDeviceId);
-      if (named === undefined || ctx.promptAnswers?.allowed(named.deviceId) !== true) {
+      if (named === undefined || !rexAppCurrent(parsed.data.appDeviceId)) {
         const message = `The owner hasn't turned on prompts and keys for ${named?.name ?? "this app"}. The owner turns it on at the Mac with: clankie connector prompts on "${named?.name ?? "APP"}"`;
         return context.json(
           parsed.data.op === "rex_send"
@@ -1866,6 +1877,16 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
     }
     try {
       let roleAuthority: QuestionAuthority | undefined;
+      if ((parsed.data.op === "rex_send" || parsed.data.op === "rex_keys") && parsed.data.appDeviceId) {
+        // Asked again before every key and before Enter: a revoked app or a switch turned off
+        // presses nothing more, as with key_press.
+        const deviceId = parsed.data.appDeviceId;
+        roleAuthority = {
+          principal: { kind: "device", id: deviceId },
+          current: () => rexAppCurrent(deviceId),
+          authorize: async () => rexAppCurrent(deviceId),
+        };
+      }
       if (parsed.data.op === "set_persona_role" || workerOwnerOp) {
         let current = true;
         const original = structuredClone(captain);

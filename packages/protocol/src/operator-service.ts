@@ -1028,7 +1028,7 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
     .strict(),
   z
     .object({
-      /** Close a finished Rex block that Clankie started; one the owner started stays open (ADR 0363). */
+      /** Close a Rex block Clankie started; refused for every block until he hires into Rex (ADR 0363). */
       op: z.literal("rex_close"),
       schemaVersion: z.literal(1),
       channel: z.string().trim().min(1).max(64).optional(),

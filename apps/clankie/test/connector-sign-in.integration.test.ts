@@ -1284,7 +1284,8 @@ it("an app reads an agent in Rex, and types or presses keys there only once the 
   const host = await createQaService({
     captainToken,
     captain: {
-      serveOperatorConversation: ((request: Parameters<typeof serve>[0]) => serve(request)) as never,
+      // Every argument passes through, as the captain wires it: the route's per-key check rides on the second.
+      serveOperatorConversation: serve,
     },
   });
   const authorizeDevice = new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl });
@@ -1375,11 +1376,45 @@ it("an app reads an agent in Rex, and types or presses keys there only once the 
     });
     expect(forged.status).toBe(400);
 
-    // Turned off again, nothing more goes in.
+    // Turned off mid-press: the key Rex already has goes in, and no key after it does, since
+    // the switch is asked again before every key.
+    await rex.update((state) => {
+      state.hold = "send-key";
+    });
+    const pressing = client.callTool({
+      name: "press_keys",
+      arguments: { agent, keys: ["down", "esc", "enter"] },
+    });
+    await rex.held();
     expect(await owner.run(["prompts", "off", "Claude"])).toBe(0);
+    await rex.release();
+    expect(textOf(await pressing)).toContain("Stopped after 1 of 3 keys");
+    expect((await keyed()).keys).toEqual(["enter", "down"]);
+
+    // Off, nothing more goes in.
     const again = await client.callTool({ name: "press_keys", arguments: { agent, keys: ["enter"] } });
     expect(textOf(again)).toContain("hasn't turned on");
-    expect((await keyed()).keys).toEqual(["enter"]);
+    expect((await keyed()).keys).toEqual(["enter", "down"]);
+
+    // The app revoked while its paste is in flight: the text sits there, and no Enter follows,
+    // since the app's own record is asked again before Enter.
+    const self = (await (
+      await fetch(`${host.baseUrl}/v1/devices/self`, { headers: { authorization: `Bearer ${accessToken}` } })
+    ).json()) as { deviceId: string };
+    expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
+    await rex.update((state) => {
+      state.hold = "paste";
+    });
+    const sending = client
+      .callTool({ name: "message_agent", arguments: { agent, message: "And the tests" } })
+      // allow-swallowed-rejection -- the revoked app may get no answer; what Rex received is checked below.
+      .catch(() => undefined);
+    await rex.held();
+    expect((await host.operator(`/v1/devices/${self.deviceId}/revoke`)).status).toBe(200);
+    await rex.release();
+    await sending;
+    expect((await keyed()).pasted).toEqual(["Fix it", "And the tests"]);
+    expect((await keyed()).keys).toEqual(["enter", "down"]);
   } finally {
     await client?.close();
     relay.closeAllConnections();

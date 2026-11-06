@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -20,6 +20,8 @@ interface FakeRexBlock {
 export interface FakeRexState {
   down?: boolean;
   failPaste?: boolean;
+  /** Holds the next paste or key press open after it took effect, until `release()`. */
+  hold?: "paste" | "send-key";
   version: Record<string, unknown>;
   sessions: { session_id: string; label?: string; blocks: FakeRexBlock[] }[];
   events?: unknown[];
@@ -60,6 +62,18 @@ export async function fakeRex(state: FakeRexState) {
       change(next);
       await writeFile(statePath, JSON.stringify(next));
     },
+    /** Resolves once a held call has taken effect and is waiting. */
+    async held(): Promise<void> {
+      for (;;) {
+        try {
+          await access(`${statePath}.held`);
+          return await rm(`${statePath}.held`, { force: true });
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }
+    },
+    release: () => writeFile(`${statePath}.release`, ""),
     close: () => rm(dir, { recursive: true, force: true }),
   };
 }

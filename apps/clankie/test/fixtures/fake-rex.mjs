@@ -3,8 +3,10 @@
 // shapes Rex documents where it documents them (`rex ls --json`, `server.version`, the
 // `rex events --json` envelope, exit 4 for an unreachable server) and the adapter's
 // guessed shapes otherwise (`block ls`, the `program_status` and `process` block methods).
-// Every call is appended to `FAKE_REX_LOG` as `{ argv, stdin }`.
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+// Every call is appended to `FAKE_REX_LOG` as `{ argv, stdin }`. With `hold` set to "paste" or
+// "send-key", the next such call takes effect, writes `<state>.held`, and waits for
+// `<state>.release` before it answers, so a test can change things mid-call.
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const statePath = process.env.FAKE_REX_STATE;
 const logPath = process.env.FAKE_REX_LOG;
@@ -26,6 +28,16 @@ const fail = (code, message) => {
   process.exit(code);
 };
 const out = (value) => process.stdout.write(`${typeof value === "string" ? value : JSON.stringify(value)}\n`);
+/** Holds this call open after it took effect, once, if the test asked for that. */
+const holdIf = async (kind) => {
+  const current = load();
+  if (current.hold !== kind) return;
+  delete current.hold;
+  save(current);
+  writeFileSync(`${statePath}.held`, "");
+  while (!existsSync(`${statePath}.release`)) await new Promise((resolve) => setTimeout(resolve, 20));
+  rmSync(`${statePath}.release`, { force: true });
+};
 
 // Global options may come first; the adapter passes these.
 const args = [];
@@ -61,6 +73,7 @@ if (command === "api" && sub === "call") {
     if (request.event?.type !== "paste") fail(1, "unsupported event");
     target.pasted = [...(target.pasted ?? []), request.event.payload.text];
     save(state);
+    await holdIf("paste");
     out({});
   } else fail(1, `method ${method} not found (status=404 code=method_not_found)`);
 } else if (command === "ls") {
@@ -110,6 +123,7 @@ if (command === "api" && sub === "call") {
     ];
   }
   save(state);
+  await holdIf("send-key");
 } else if (command === "block" && sub === "close") {
   const s = session(flag("-s"));
   const id = args[args.length - 1];

@@ -30,7 +30,10 @@ unless told not to.
   relay's grants and stamps apply as they do to Herdr's ops, and
   `createRexSessionSource` puts them behind the session seam.
 - **Local only, nothing started, nothing raised.** Every call passes
-  `--autostart=false` and names no host, so it reaches this Mac's own socket. A
+  `--autostart=false` and names this Mac's own socket with `-S`: Rex's runtime
+  directory's `server.sock` (`~/Library/Application Support/rex/server.sock`),
+  or a `REX_SERVER` that is a Unix socket. A Rex config or runtime directory in
+  Clankie's environment is not passed to `rex`, so neither picks another server. A
   `REX_SERVER` that is not a Unix socket is refused before Rex runs, whatever
   else it names: a Tailscale host, a host label or plain HTTP. Clankie never
   runs, splits, focuses or zooms a Rex block; `open` answers `unavailable`.
@@ -40,7 +43,9 @@ unless told not to.
 - **Reads follow ADR 0307.** Only a block whose program reports a status, with a
   process in front that isn't a shell. Claude Code and Codex are read from their
   own transcript, never the screen; other agents are read only for what they
-  showed since their first read.
+  showed since their first read. Either the program's reported `app` or the name
+  of the process in front naming Claude Code or Codex is enough to keep the screen
+  unread, and the two naming different harnesses reads nothing.
 - **A message is one paste and Enter, never typing.** `rex_send` delivers the
   whole message as one `block.event` paste, so line breaks don't become Enters,
   then presses Enter. It refuses an agent that waits on a prompt (text would
@@ -52,13 +57,18 @@ unless told not to.
   is how Rex's agents take a message. It is not typing into the owner's window.
 - **A connected app needs the owner's prompts-and-keys switch.** A message or a
   key can answer a prompt, so `rex_send` and `rex_keys` from a connector device
-  pass the same per-app switch as `key_press` ([ADR 0323](0323-connected-apps-press-keys-in-agents-terminals.md)). The relay stamps the
-  device, refuses a caller-named one, and admits these ops under
-  `terminalObserve`, as it does `key_press`. The owner's own devices need
-  `terminalControl`.
-- **Close only what Clankie started.** `rex_close` closes only a block labelled
-  `clankie.seat/…` whose agent isn't mid-turn or at a prompt. Clankie hires
-  nothing into Rex yet, so today every owner block is refused.
+  pass the same per-app switch as `key_press` ([ADR 0323](0323-connected-apps-press-keys-in-agents-terminals.md)). The service
+  checks the app's connector record and the switch before the call, again before
+  every key, and again before the paste and before the Enter that follows it; the
+  first failure presses nothing more. The relay stamps the device, refuses a
+  caller-named one, and admits these ops under `terminalObserve`, as it does
+  `key_press`. The owner's own devices need `terminalControl`, and `rex_close`
+  needs the steer grant.
+- **Close refuses every block for now.** Clankie hires nothing into Rex yet, so
+  every block is the owner's, and a block's label is the owner's to set, so it
+  proves nothing. `rex_close` refuses each one without asking Rex. A later slice,
+  hiring into Rex, closes only a block it finds in Clankie's own hire record, and
+  only once its agent isn't mid-turn or at a prompt.
 
 ## Consequences
 
@@ -68,6 +78,4 @@ unless told not to.
   block methods are not in Rex's public docs. Each field name appears in the Rex
   CLI's JSON tags, but the nesting is a guess. A real Rex install must confirm
   them, the paste semantics and the event stream before this is accepted.
-- Per-key rechecks of the switch, which `key_press` does, are not repeated inside
-  one `rex_keys` call; the switch is checked once per call.
 - Hiring into Rex, and closing those hires, is a later change.

@@ -1269,6 +1269,7 @@ export function createOperatorService(
     }
     // Rex's agents on this Mac (ADR 0363). Who may send or press keys is settled before this:
     // the relay stamps an app, and the conversation routes check the owner's switch for it.
+    // The caller's `current` is asked again before every key and before the Enter after a paste.
     if (request.op === "rex_list") {
       const listed = await rex().list();
       return listed.status === "listed"
@@ -1289,14 +1290,14 @@ export function createOperatorService(
         op: "rex_send",
         schemaVersion: 1,
         block: request.block,
-        ...(await rex().send(request.block, request.text)),
+        ...(await rex().send(request.block, request.text, authority?.current)),
       };
     if (request.op === "rex_keys")
       return {
         op: "rex_keys",
         schemaVersion: 1,
         block: request.block,
-        result: await rex().keys(request.block, request.keys),
+        result: await rex().keys(request.block, request.keys, authority?.current),
       };
     if (request.op === "rex_close")
       return {

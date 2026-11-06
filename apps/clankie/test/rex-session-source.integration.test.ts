@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import {
   SessionRefusal,
@@ -177,14 +179,19 @@ it("lists only Rex blocks with a live agent in them, in Clankie's states, and ne
     expect.objectContaining({ id: id(HIRE), status: "done" }),
   ]);
   const calls = await rex.calls();
-  // Every call refuses to start a server and names no server, so it reaches only this Mac's socket.
-  for (const { argv } of calls) {
-    expect(argv.slice(0, 3)).toEqual(["--autostart=false", "--timeout", "5s"]);
-    expect(argv).not.toContain("-S");
-  }
+  // Every call refuses to start a server and names this Mac's own socket, so no Rex config or
+  // runtime directory in the environment can pick another.
+  for (const { argv } of calls)
+    expect(argv.slice(0, 5)).toEqual([
+      "--autostart=false",
+      "--timeout",
+      "5s",
+      "-S",
+      join(homedir(), "Library", "Application Support", "rex", "server.sock"),
+    ]);
   // The API revision is checked before anything else; nothing ever runs, splits, focuses or opens.
-  expect(calls[0]!.argv.slice(3)).toEqual(["api", "call", "server.version"]);
-  const verbs = new Set(calls.map(({ argv }) => argv[3]));
+  expect(calls[0]!.argv.slice(5)).toEqual(["api", "call", "server.version"]);
+  const verbs = new Set(calls.map(({ argv }) => argv[5]));
   for (const forbidden of ["run", "split", "new", "focus", "do", "window", "zoom"])
     expect(verbs).not.toContain(forbidden);
 
@@ -218,8 +225,19 @@ it("reads only what a live agent showed, never a Claude Code screen, and never a
     "No coding agent is running in that Rex block now.",
   );
   await expect(layer.read(id(QUIET), 50)).rejects.toThrow(SessionRefusal);
-  const captured = (await rex.calls()).filter(({ argv }) => argv[3] === "capture").map(({ argv }) => argv[7]);
+  const captured = (await rex.calls()).filter(({ argv }) => argv[5] === "capture").map(({ argv }) => argv[9]);
   expect(captured).toEqual([AGENT, AGENT]);
+  // The process in front is enough: a Claude Code or Codex that reports another app, or none, is
+  // still never read from its screen, and neither is one whose report and process disagree.
+  await rex.update((state) => {
+    const blocks = state.sessions[0]!.blocks;
+    blocks.find((block) => block.block_id === AGENT)!.foreground = { pid: 4101, name: "/opt/bin/Claude" };
+    blocks.find((block) => block.block_id === BUSY)!.foreground = { pid: 4104, name: "codex" };
+    blocks.find((block) => block.block_id === BUSY)!.records = [{ state: "working" }];
+    blocks.find((block) => block.block_id === WAITING)!.foreground = { pid: 4103, name: "claude" };
+  });
+  for (const block of [AGENT, BUSY, WAITING])
+    await expect(layer.read(id(block), 50)).rejects.toThrow(TRANSCRIPT_READ_REFUSED);
   // Anything that isn't a block id from the list is refused before Rex is asked.
   await expect(layer.read("rex:x/../../etc", 50)).rejects.toThrow("isn't a session id from the list");
 });
@@ -240,7 +258,7 @@ it("sends one paste and Enter, says whether the agent took it, and never types a
   expect(agent.keys).toEqual(["enter"]);
   const calls = await rex.calls();
   const paste = calls.find(({ argv }) => argv.includes("block.event"))!;
-  expect(paste.argv.slice(3)).toEqual(["api", "call", "block.event", "-"]);
+  expect(paste.argv.slice(5)).toEqual(["api", "call", "block.event", "-"]);
   // The text goes on stdin, never on a command line another process could read.
   expect(paste.argv.join(" ")).not.toContain("Fix the second bug");
   expect(JSON.parse(paste.stdin)).toEqual({
@@ -248,11 +266,11 @@ it("sends one paste and Enter, says whether the agent took it, and never types a
     block_id: AGENT,
     event: { type: "paste", payload: { text: message } },
   });
-  expect(calls.some(({ argv }) => argv[3] === "events" && argv.includes(S) && argv.includes("--json"))).toBe(
+  expect(calls.some(({ argv }) => argv[5] === "events" && argv.includes(S) && argv.includes("--json"))).toBe(
     true,
   );
   // `rex send` (raw typing) is never used.
-  expect(calls.some(({ argv }) => argv[3] === "send")).toBe(false);
+  expect(calls.some(({ argv }) => argv[5] === "send")).toBe(false);
 
   // A working agent holds it until its turn ends.
   expect(await layer.send(id(BUSY), "Also check y.rs")).toMatchObject({ status: "queued" });
@@ -281,7 +299,7 @@ it("sends one paste and Enter, says whether the agent took it, and never types a
   });
   const after = await rex.state();
   expect(after.sessions[0]!.blocks.find((block) => block.block_id === AGENT)!.keys).toEqual(keysBefore);
-  expect((await rex.calls()).some(({ argv }) => argv[3] === "send")).toBe(false);
+  expect((await rex.calls()).some(({ argv }) => argv[5] === "send")).toBe(false);
 
   // An agent that stays quiet after the message is unconfirmed, not delivered.
   await rex.update((next) => {
@@ -291,7 +309,7 @@ it("sends one paste and Enter, says whether the agent took it, and never types a
   expect(await layer.send(id(CLAUDE), "Hello")).toMatchObject({ status: "unconfirmed" });
 }, 20_000);
 
-it("presses named keys in Rex's syntax and closes only a finished block Clankie started", async () => {
+it("presses named keys in Rex's syntax, stops when asked to, and closes nothing", async () => {
   const { rex, layer } = await setUp();
   expect(await layer.press(id(WAITING), ["down", "esc", "ctrl+c", "enter"])).toMatchObject({
     status: "pressed",
@@ -301,20 +319,47 @@ it("presses named keys in Rex's syntax and closes only a finished block Clankie 
   // Not into a shell.
   expect(await layer.press(id(SHELL), ["enter"])).toMatchObject({ status: "unavailable" });
 
-  // What the owner started in Rex stays open, idle or not.
-  expect(await layer.close(id(AGENT))).toMatchObject({
-    status: "refused",
-    detail: expect.stringContaining("owner started"),
+  // Clankie hires nothing into Rex yet, so every block is the owner's and stays open, a block
+  // labelled as a Clankie seat included: the label is the owner's to set and proves nothing.
+  const before = (await rex.calls()).length;
+  for (const block of [AGENT, HIRE])
+    expect(await layer.close(id(block))).toMatchObject({
+      status: "refused",
+      detail: expect.stringContaining("Nothing was closed."),
+    });
+  expect(await rex.calls()).toHaveLength(before);
+  expect((await layer.list()).sessions.map((session) => session.id)).toContain(id(HIRE));
+});
+
+it("asks before every key and before the Enter after a paste, and stops at the first no", async () => {
+  const { rex } = await setUp();
+  const agent = createRex({ env: rex.env, confirmMs: 500, nativeSession: { birth: async () => undefined } });
+  const block = (target: string) => id(target).slice("rex:".length);
+  const stateOf = async (target: string) =>
+    (await rex.state()).sessions[0]!.blocks.find((entry) => entry.block_id === target)!;
+
+  // Turned off after the second key: the third is never pressed.
+  let asked = 0;
+  expect(await agent.keys(block(WAITING), ["down", "down", "enter"], () => ++asked <= 2)).toEqual({
+    outcome: "uncertain",
+    message: "Stopped after 2 of 3 keys: pressing keys was turned off. Read the agent first.",
   });
-  expect((await rex.calls()).some(({ argv }) => argv[3] === "block" && argv[4] === "close")).toBe(false);
-  expect(await layer.close(id(HIRE))).toEqual({
-    id: id(HIRE),
-    status: "closed",
-    detail: "Rex closed the block and the program in it.",
+  expect((await stateOf(WAITING)).keys).toEqual(["down", "down"]);
+  // Off from the start: nothing is pressed.
+  expect(await agent.keys(block(WAITING), ["enter"], () => false)).toMatchObject({ outcome: "refused" });
+  expect((await stateOf(WAITING)).keys).toEqual(["down", "down"]);
+
+  // Off from the start: nothing is pasted.
+  expect(await agent.send(block(AGENT), "Fix it", () => false)).toMatchObject({ status: "not_delivered" });
+  expect(await stateOf(AGENT)).not.toHaveProperty("pasted");
+  // Turned off after the paste: the text waits there, unsent, with no Enter after it.
+  let checks = 0;
+  expect(await agent.send(block(AGENT), "Fix it", () => ++checks <= 1)).toMatchObject({
+    status: "unconfirmed",
+    detail: expect.stringContaining("turned off before Enter"),
   });
-  const close = (await rex.calls()).find(({ argv }) => argv[3] === "block" && argv[4] === "close")!;
-  expect(close.argv.slice(3)).toEqual(["block", "close", "-s", S, HIRE]);
-  expect((await layer.list()).sessions.map((session) => session.id)).not.toContain(id(HIRE));
+  expect(await stateOf(AGENT)).toMatchObject({ pasted: ["Fix it"] });
+  expect(await stateOf(AGENT)).not.toHaveProperty("keys");
 });
 
 it("leaves a missing, stopped, unsupported or remote Rex out of the list without failing the rest", async () => {
@@ -341,7 +386,7 @@ it("leaves a missing, stopped, unsupported or remote Rex out of the list without
     expect(listed.sessions.map((s) => s.id)).toEqual(["other:a"]);
     expect(listed.notices).toEqual([expect.stringContaining("built for revision 7")]);
     // Nothing past the version check is asked, and nothing else goes in.
-    expect((await old.rex.calls()).map(({ argv }) => argv.slice(3, 6).join(" "))).toEqual([
+    expect((await old.rex.calls()).map(({ argv }) => argv.slice(5, 8).join(" "))).toEqual([
       "api call server.version",
     ]);
     expect(await old.layer.send(id(AGENT), "hi")).toMatchObject({ status: "not_delivered" });
