@@ -33,7 +33,10 @@ import {
   createDeviceConversationDispatch,
 } from "../../../relay/src/conversation-upstream.ts";
 import { createOperatorConversationRelayHandler } from "../../../relay/src/operator-conversations.ts";
-import { createConnectorMcpHandler, createLoopbackConnectorOperator } from "../../../relay/src/connector-mcp.ts";
+import {
+  createConnectorMcpHandler,
+  createLoopbackConnectorOperator,
+} from "../../../relay/src/connector-mcp.ts";
 import { ClankieGuide } from "../../../relay/src/connector-guide.ts";
 
 /** Each test's teardown, run in reverse by its test file's afterEach. */
@@ -56,10 +59,7 @@ export const decoded = (value: Awaited<ReturnType<Client["callTool"]>>) => {
   return JSON.parse(text);
 };
 
-export async function fixture(
-  pi?: { control: SeatControl; file?: string },
-  linked?: LinkedMachine,
-) {
+export async function fixture(pi?: { control: SeatControl; file?: string }, linked?: LinkedMachine) {
   const root = await mkdtemp(join(tmpdir(), "agent-message-connector-"));
   closes.push(() => rm(root, { recursive: true, force: true }));
   vi.stubEnv("HC_SOCKET", join(root, "no-owner-desktop.sock"));
@@ -69,7 +69,9 @@ export async function fixture(
   if (linked)
     await settings.update((current) => ({
       ...current,
-      machines: [{ id: "linked-box", ssh: linked.fleet.ssh.host, shell: linked.fleet.ssh.shell, aliases: [] }],
+      machines: [
+        { id: "linked-box", ssh: linked.fleet.ssh.host, shell: linked.fleet.ssh.shell, aliases: [] },
+      ],
       machineAccess: { "linked-box": "workers" },
       execution: {
         ...current.execution,
@@ -193,25 +195,25 @@ export async function fixture(
         }),
       } as CaptainDeps,
       {
-      repoRoot: root,
-      stateDir: state,
-      workingDirectory: root,
-      settings,
-      seatAdapters: linked ? [] : [adapter],
-      // The one per-fleet adapter a captain takes from outside; the rest need a real hire.
-      ...(linked && pi
-        ? {
-            remoteOpenCode: {
-              forFleet: () => ({ adapter }),
-              close: async () => {},
-            } as unknown as RemoteOpenCodeWorkers,
-          }
-        : {}),
-      nativeHerdrRunner: runner,
-      nativeCensusRunner: census,
-      nativeSummariesPath: join(root, "summaries.json"),
-      discordEnvironment: {},
-      fleetRoundIntervalMs: 3600_000,
+        repoRoot: root,
+        stateDir: state,
+        workingDirectory: root,
+        settings,
+        seatAdapters: linked ? [] : [adapter],
+        // The one per-fleet adapter a captain takes from outside; the rest need a real hire.
+        ...(linked && pi
+          ? {
+              remoteOpenCode: {
+                forFleet: () => ({ adapter }),
+                close: async () => {},
+              } as unknown as RemoteOpenCodeWorkers,
+            }
+          : {}),
+        nativeHerdrRunner: runner,
+        nativeCensusRunner: census,
+        nativeSummariesPath: join(root, "summaries.json"),
+        discordEnvironment: {},
+        fleetRoundIntervalMs: 3600_000,
       },
     );
   let captain = makeCaptain();

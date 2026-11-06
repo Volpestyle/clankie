@@ -92,7 +92,9 @@ nativeIt("reads every stage back from an attached seat on a linked machine", asy
   expect(sent.status).toBe("delivered");
   expect(native.admitted).toHaveLength(1);
   const status = async () =>
-    decoded(await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }));
+    decoded(
+      await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+    );
   await expect.poll(async () => stages(await status()), { timeout: 10_000 }).toEqual(["delivered", "read"]);
   native.release();
   await expect
@@ -111,9 +113,12 @@ nativeIt("refuses a linked seat whose occupant changed before native admission",
   f.beforeNative(async () => {
     await machine.switchSession(replacement);
     await expect
-      .poll(async () => JSON.parse(await machine.run(["pane", "get", pane])).result.pane.agent_session?.value, {
-        timeout: 10_000,
-      })
+      .poll(
+        async () => JSON.parse(await machine.run(["pane", "get", pane])).result.pane.agent_session?.value,
+        {
+          timeout: 10_000,
+        },
+      )
       .toBe(replacement);
   });
   const result = await client.callTool({
@@ -144,12 +149,16 @@ nativeIt("reads a Codex CLI queue on a linked machine back as queued and no furt
     ["queue", "--thread", session, "--message", expect.stringContaining("Linked queue")],
   ]);
   const status = async () =>
-    decoded(await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }));
+    decoded(
+      await client.callTool({ name: "message_agent_status", arguments: { receiptId: sent.receiptId } }),
+    );
   expect(await status()).toMatchObject({ receipt: { agent: "herdr:" + f.seat.seatId, delivery: "queued" } });
   // The CLI answers with acceptance alone, so there is no input ID to follow.
   await new Promise((resolve) => setTimeout(resolve, 2_500));
   expect(stages(await status())).toEqual(["queued"]);
-  const other = await (await f.client("app-b")).callTool({
+  const other = await (
+    await f.client("app-b")
+  ).callTool({
     name: "message_agent_status",
     arguments: { receiptId: sent.receiptId },
   });

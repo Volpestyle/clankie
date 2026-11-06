@@ -12,12 +12,20 @@ import {
   machineJoinLeaseAad,
 } from "@clankie/protocol/machine-join";
 import { SettingsStore } from "@clankie/settings";
-import { runJoinedMachineChannel, saveJoinedMachineCredential } from "../../../tui/bin/joined-machine-client.ts";
+import {
+  runJoinedMachineChannel,
+  saveJoinedMachineCredential,
+} from "../../../tui/bin/joined-machine-client.ts";
 import { openGatewayValue } from "../../src/gateway-encryption.ts";
 import { machineJoinHash, machineJoinKey } from "../../src/machine-join-crypto.ts";
 import { createMachineJoinRoutes } from "../../src/machine-join-routes.ts";
 import { MachineJoins } from "../../src/machine-joins.ts";
-import { remoteHerdrCommand, type FleetShellRun, type HerdrFleet, type HerdrFleetRun } from "../../src/herdr-fleet.ts";
+import {
+  remoteHerdrCommand,
+  type FleetShellRun,
+  type HerdrFleet,
+  type HerdrFleetRun,
+} from "../../src/herdr-fleet.ts";
 import { isolatedHerdr } from "./local-fleet-proof/herdr-fixture.ts";
 
 const exec = promisify(execFile);

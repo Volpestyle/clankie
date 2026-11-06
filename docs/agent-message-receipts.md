@@ -38,12 +38,12 @@ text and service bookkeeping do not supply missing evidence.
 The stages above are the most a receipt can say. What it says for one message
 depends on the route that carried it, on the Mac and on linked machines alike:
 
-| Route                                                        | Last stage reported                 |
-| ------------------------------------------------------------ | ----------------------------------- |
-| A hired Codex seat; a Pi, Grok or Prime seat                 | `acted_on` or `answered`            |
-| A Claude or OpenCode seat                                    | `delivered`                         |
-| A Codex session Clankie didn't start, through its app server | `delivered`                         |
-| A Codex session Clankie didn't start, through `codex queue`  | `queued`                            |
+| Route                                                        | Last stage reported      |
+| ------------------------------------------------------------ | ------------------------ |
+| A hired Codex seat; a Pi, Grok or Prime seat                 | `acted_on` or `answered` |
+| A Claude or OpenCode seat                                    | `queued` or `delivered`  |
+| A Codex session Clankie didn't start, through its app server | `delivered`              |
+| A Codex session Clankie didn't start, through `codex queue`  | `queued`                 |
 
 No route reports `read` yet: no harness connection surfaces a turn start tied to
 one input, so a turn can be proven finished without ever showing as started.
