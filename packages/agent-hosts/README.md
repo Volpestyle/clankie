@@ -81,6 +81,33 @@ the owner's own `terminal_catalog`, but the relay leaves them out of a
 connector's catalog and refuses a connector's tail of one (ADR 0319), so this
 source stays a connector's only way to them.
 
+`createRexSessionSource` is the third: agents in Rex (Superlogical, beta, macOS),
+a terminal server whose sessions and blocks outlive its app (#963, ADR 0363). It
+speaks the `rex_list`, `rex_read`, `rex_send`, `rex_keys` and `rex_close`
+operator ops, which the service answers by running the `rex` CLI against this
+Mac's own server (`apps/clankie/src/captain/rex.ts`). Ids read
+`rex:<session>/<block>`. Every call passes `--autostart=false`, so nothing starts
+a server, and checks the server's API revision first (built for revision 7); a
+`REX_SERVER` that isn't a local Unix socket is refused rather than followed.
+List is the blocks whose program reports a status with a process in front that
+isn't a shell; Rex's idle, working, done and blocked map to Clankie's own words,
+and error reads as blocked with `doing` saying it errored. A missing or stopped
+Rex lists nothing; an unsupported or remote one lists nothing with a notice, and
+other sources list as before. Read is bound as Herdr's is (ADR 0307): Claude Code
+and Codex from their own transcript, other agents only what they showed since
+their first read. Send is one `block.event` paste and Enter, so line breaks
+arrive inside the message; it is refused while the agent waits on a prompt or
+reported an error, answers `queued` while the agent works, `delivered` once the
+`rex events` stream (or a last status check) shows it working, else
+`unconfirmed`, and a failed paste is never retried as typing. Press maps
+Clankie's key names to Rex's (`esc` is `escape`). Close refuses any block the
+owner started; only a block labelled `clankie.seat/…` closes, and Clankie starts
+none yet. Open answers `unavailable`: Clankie never brings Rex to the front. A
+connected app needs the owner's prompts-and-keys switch to send or press keys.
+The adapter's tests run against a fake `rex` (`apps/clankie/test/fixtures/fake-rex.mjs`);
+which JSON shapes come from Rex's docs and which are guesses is listed at the top
+of `rex.ts`, and a real-Rex proof is still owed.
+
 ## Seat adapters
 
 `seat.ts` is the harness-adapter seam (ADR 0187 amendment, VUH-1458). A

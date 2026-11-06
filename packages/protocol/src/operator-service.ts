@@ -319,6 +319,32 @@ export const HerdrCoreAgentSchema = z
   .strict();
 export type HerdrCoreAgent = z.infer<typeof HerdrCoreAgentSchema>;
 
+/**
+ * A Rex terminal block (#963) as `<session>/<block>`: Rex's own ids (`session:<uuid>`,
+ * `block:<uuid>`) without their prefixes, which the relay's secret redaction would take for a
+ * session token. Rex needs the session to reach a block.
+ */
+export const RexBlockSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,63}\/[A-Za-z0-9][A-Za-z0-9-]{0,63}$/u);
+
+/** One agent in the local Rex server: a terminal block whose program reports its status (OSC 7501). */
+const RexAgentSchema = z
+  .object({
+    block: RexBlockSchema,
+    /** The program's own name for itself (`claude-code`, `codex`), or its foreground program. */
+    harness: z.string().max(OPERATOR_CONVERSATION_CODE_MAX).optional(),
+    /** The Rex session's label, or the block's. */
+    title: z.string().max(OPERATOR_CONVERSATION_TITLE_MAX).optional(),
+    workingDirectory: z.string().max(4096).optional(),
+    /** The program's own word: idle, working, done, blocked or error. */
+    status: z.enum(["idle", "working", "done", "blocked", "error"]),
+    /** What it last said it's doing, from its status message. */
+    doing: z.string().max(512).optional(),
+  })
+  .strict();
+export type RexAgent = z.infer<typeof RexAgentSchema>;
+
 const CloseSeatRefusalSchema = z.discriminatedUnion("reason", [
   z
     .object({
@@ -956,6 +982,59 @@ export const OperatorConversationServiceRequestSchema = z.discriminatedUnion("op
       op: z.literal("herdr_core_focus"),
       schemaVersion: z.literal(1),
       terminal: HerdrCoreTerminalSchema,
+    })
+    .strict(),
+  z
+    .object({
+      /** The agents in the Rex server on this Mac (#963); nothing if Rex is missing or unsupported. */
+      op: z.literal("rex_list"),
+      schemaVersion: z.literal(1),
+    })
+    .strict(),
+  z
+    .object({
+      /** What the live agent in one Rex block showed, under the same scope as `terminal_read` (ADR 0307). */
+      op: z.literal("rex_read"),
+      schemaVersion: z.literal(1),
+      block: RexBlockSchema,
+    })
+    .strict(),
+  z
+    .object({
+      /**
+       * Hand an agent in Rex a message as one paste and Enter, never typed key by key (ADR 0363).
+       * An app needs the owner's prompts-and-keys switch for it, as for `key_press`.
+       */
+      op: z.literal("rex_send"),
+      schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
+      block: RexBlockSchema,
+      text: z.string().trim().min(1).max(8_000),
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /** Press keys in an agent's Rex block, under the same per-app switch as `key_press` (ADR 0323). */
+      op: z.literal("rex_keys"),
+      schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
+      block: RexBlockSchema,
+      keys: z.array(KeyPressSchema).min(1).max(KEY_PRESS_MAX),
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      /** Close a finished Rex block that Clankie started; one the owner started stays open (ADR 0363). */
+      op: z.literal("rex_close"),
+      schemaVersion: z.literal(1),
+      channel: z.string().trim().min(1).max(64).optional(),
+      block: RexBlockSchema,
+      /** Stamped by the relay from the device it authenticated; a caller that sends it is refused. */
+      appDeviceId: z.string().min(1).max(256).optional(),
     })
     .strict(),
   z
@@ -1740,6 +1819,63 @@ export const OperatorConversationServiceResultSchema = z.discriminatedUnion("op"
       terminal: HerdrCoreTerminalSchema,
       status: z.enum(["focused", "unavailable"]),
       detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("rex_list"),
+      schemaVersion: z.literal(1),
+      /** `unavailable` when no supported local Rex answers; `agents` is then empty. */
+      status: z.enum(["listed", "unavailable"]),
+      /**
+       * Why it is unavailable: `missing` (no `rex` here), `not_running` (no server; Clankie never
+       * starts one), `unsupported` (a Rex API revision this adapter wasn't built for), `remote`
+       * (Rex points at a server that isn't this Mac's), `failed` (anything else).
+       */
+      reason: z.enum(["missing", "not_running", "unsupported", "remote", "failed"]).optional(),
+      agents: z.array(RexAgentSchema).max(OPERATOR_TERMINAL_CATALOG_MAX),
+      detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("rex_read"),
+      schemaVersion: z.literal(1),
+      block: RexBlockSchema,
+      status: z.enum(["read", "unavailable"]),
+      text: z.string().max(OPERATOR_TERMINAL_READ_MAX).optional(),
+      detail: z.string().max(1024).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("rex_send"),
+      schemaVersion: z.literal(1),
+      block: RexBlockSchema,
+      /**
+       * `delivered`: it went in and the agent started working. `queued`: it went in while the
+       * agent was working, which holds it until its turn ends. `not_delivered`: nothing went in.
+       * `unconfirmed`: some or all went in, but the agent wasn't seen taking it; read it first.
+       */
+      status: z.enum(["delivered", "queued", "not_delivered", "unconfirmed"]),
+      detail: z.string().min(1).max(1024),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("rex_keys"),
+      schemaVersion: z.literal(1),
+      block: RexBlockSchema,
+      result: KeyPressResultSchema,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal("rex_close"),
+      schemaVersion: z.literal(1),
+      block: RexBlockSchema,
+      status: z.enum(["closed", "refused", "unavailable"]),
+      detail: z.string().min(1).max(1024),
     })
     .strict(),
   z

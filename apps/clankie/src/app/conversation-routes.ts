@@ -1110,7 +1110,10 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         parsed.data.op === "start_agent" ||
         parsed.data.op === "close_seat" ||
         parsed.data.op === "prompt_answer" ||
-        parsed.data.op === "key_press") &&
+        parsed.data.op === "key_press" ||
+        parsed.data.op === "rex_send" ||
+        parsed.data.op === "rex_keys" ||
+        parsed.data.op === "rex_close") &&
       parsed.data.appDeviceId !== undefined
     ) {
       const record = ctx.devices.get(parsed.data.appDeviceId);
@@ -1128,6 +1131,35 @@ export function registerConversationRoutes(ctx: RegisterConversationRoutesContex
         channel: parsed.data.channel,
         at: ctx.clock().toISOString(),
       });
+    }
+    if (
+      parsed.success &&
+      (parsed.data.op === "rex_send" || parsed.data.op === "rex_keys") &&
+      parsed.data.appDeviceId !== undefined
+    ) {
+      // Text or keys into an agent in Rex (ADR 0363) from a connected app: only once the owner
+      // turned prompts and keys on for that app, as for key_press, since either can answer a
+      // prompt. The app's record was checked just above.
+      const named = ctx.devices.get(parsed.data.appDeviceId);
+      if (named === undefined || ctx.promptAnswers?.allowed(named.deviceId) !== true) {
+        const message = `The owner hasn't turned on prompts and keys for ${named?.name ?? "this app"}. The owner turns it on at the Mac with: clankie connector prompts on "${named?.name ?? "APP"}"`;
+        return context.json(
+          parsed.data.op === "rex_send"
+            ? {
+                op: "rex_send",
+                schemaVersion: 1,
+                block: parsed.data.block,
+                status: "not_delivered",
+                detail: `${message}. Nothing was sent.`,
+              }
+            : {
+                op: "rex_keys",
+                schemaVersion: 1,
+                block: parsed.data.block,
+                result: { outcome: "refused", message },
+              },
+        );
+      }
     }
     if (parsed.success && parsed.data.op === "prompt_answer") {
       // Answering a prompt in an agent's pane (ADR 0303). Like a note, it reaches the

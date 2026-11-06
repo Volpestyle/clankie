@@ -5270,6 +5270,24 @@ paths:
         back. List and read need `terminalObserve`, focus `terminalControl`. They
         never send to a terminal or start a core; with no core running, list answers
         `unavailable` with no agents.
+        `rex_list`, `rex_read` (block), `rex_send` (block, text), `rex_keys`
+        (block, keys) and `rex_close` (block) reach Rex's local server on this Mac
+        through the `rex` CLI (ADR 0363). A block is `<session>/<block>`, Rex's ids
+        without their `session:` and `block:` prefixes. List is the blocks whose
+        program reports a status (idle, working, done, blocked, error) with a process
+        in front that isn't a shell; it answers `unavailable` with a `reason`
+        (`missing`, `not_running`, `unsupported`, `remote`, `failed`) and no agents
+        when Rex is absent, stopped, on an API revision the adapter wasn't built for,
+        or pointed at a server that isn't this Mac's. Read is bound as `terminal_read`
+        is (ADR 0307). Send is one paste and Enter, refused while the agent waits on a
+        prompt or reported an error; it answers `delivered`, `queued`,
+        `not_delivered` or `unconfirmed` and is never retried as typing. Keys answer
+        `result` as `key_press` does. Close refuses a block the owner started. A
+        connected app's `rex_send`, `rex_keys` and `rex_close` carry the
+        `appDeviceId` the relay stamps, and send and keys need the owner's prompts
+        and keys switch for that app; list and read need `terminalObserve`, the
+        owner's own send and keys `terminalControl`, and close `steer`. Nothing
+        starts a Rex server or brings Rex to the front.
         `connections` reads bounded runtime and account metadata or manages
         named runtime connections. Commands are `list`, `connect_runtime` (id,
         session), `reconnect_runtime`, `disconnect_runtime`

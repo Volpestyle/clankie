@@ -252,8 +252,12 @@ devices carry for that op alone. The tools go through the session-source layer o
 are read-only: `message_agent` refuses them, because herdr-core can only type
 into their terminal (ADR 0207). A Clankie hire's terminal there is a fleet seat
 under `herdr:`; once its program ends it is listed under `herdr-core:` with
-status `finished` and who started it, until auto-tidy removes it (#584). Their
-reads pass through the same
+status `finished` and who started it, until auto-tidy removes it (#584). Agents
+in Rex on this Mac read `rex:<session>/<block>` (ADR 0363): listed and read
+like the desktop app's, and messaged with one paste and Enter or pressed keys
+only once the owner turned prompts and keys on for the app, which the service
+checks against the device the relay stamps on `rex_send`, `rex_keys` and
+`rex_close`. Their reads pass through the same
 agent-only scope as Herdr's (ADR 0307). `read_agent` asks the service's `terminal_read` op first:
 Herdr on the pane's own machine reads its recent text, over ssh for a linked PC.
 It answers only for a pane with a live coding agent, and only with what that

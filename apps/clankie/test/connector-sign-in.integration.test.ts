@@ -27,6 +27,12 @@ import { inspectConnectorRefreshRevocations } from "../../tui/src/command/doctor
 import { runConnectorCommand } from "../../tui/src/command/connector.ts";
 import { requestPairingOffer } from "../../tui/bin/pairing-offer.ts";
 import { createQaService } from "./fixtures/qa-service.ts";
+import { fakeRex } from "./fixtures/fake-rex.ts";
+import { createRex } from "../src/captain/rex.ts";
+import {
+  createOperatorService,
+  type CreateOperatorServiceContext,
+} from "../src/captain/captain-operator-service.ts";
 
 // The Claude connector's sign-in (ADR 0301) over real HTTP and durable device
 // state: Claude registers, the owner approves the code with `clankie connector`,
@@ -1239,6 +1245,147 @@ it("an app presses keys in an agent's terminal only once the owner turns it on, 
     relay.close();
     await host.close();
     await rm(boardRoot, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("an app reads an agent in Rex, and types or presses keys there only once the owner turns it on (#963)", async () => {
+  // Rex itself is never run: a fake `rex` on the service's PATH replays its JSON (fixtures/fake-rex.mjs).
+  const session = "session:0a1b2c3d-0000-4000-8000-000000000001";
+  const block = "block:0a1b2c3d-0000-4000-8000-0000000000a1";
+  const agent = `rex:${session.slice("session:".length)}/${block.slice("block:".length)}`;
+  const rex = await fakeRex({
+    version: { rex_version: "0.0.1793299046-g2307b7", api_revision: 7, api_min_revision: 0 },
+    sessions: [
+      {
+        session_id: session,
+        label: "work",
+        blocks: [
+          {
+            block_id: block,
+            creator_name: "com.superlogical.terminal",
+            records: [{ state: "idle", app: "opencode" }],
+            foreground: { pid: 4101, name: "opencode" },
+            capture: "before=secret",
+            screen: "before=secret",
+            takes: true,
+          },
+        ],
+      },
+    ],
+  });
+  const captainToken = randomBytes(24).toString("hex");
+  const serve = createOperatorService({
+    shutdown: new AbortController(),
+    deps: {},
+    personas: { ready: async () => {} },
+    settingsStore: {},
+    rex: createRex({ env: rex.env, confirmMs: 2_000 }),
+  } as unknown as CreateOperatorServiceContext);
+  const host = await createQaService({
+    captainToken,
+    captain: {
+      serveOperatorConversation: ((request: Parameters<typeof serve>[0]) => serve(request)) as never,
+    },
+  });
+  const authorizeDevice = new ControlPlaneDeviceAuthorizer({ baseUrl: host.baseUrl });
+  let relayUrl = "";
+  const operator = createOperatorConversationRelayHandler({
+    authorizeDevice,
+    dispatch: createCaptainConversationDispatch({ baseUrl: host.baseUrl, bearerToken: captainToken }),
+  });
+  const connector = createConnectorMcpHandler({
+    authorizeDevice,
+    operator: createLoopbackConnectorOperator("http://placeholder.invalid", (input, init) =>
+      fetch(new URL(new URL(String(input)).pathname, relayUrl), init),
+    ),
+    localAuthorizationServer: host.baseUrl,
+    version: "test",
+    guide: new ClankieGuide(resolve(import.meta.dirname, "../../..")),
+  });
+  const relay = createServer((request, response) => {
+    void (async () => {
+      if (await connector(request, response)) return;
+      if (await operator(request, response)) return;
+      response.statusCode = 404;
+      response.end();
+    })();
+  });
+  relay.listen(0, "127.0.0.1");
+  await once(relay, "listening");
+  relayUrl = `http://127.0.0.1:${(relay.address() as AddressInfo).port}`;
+  let client: Client | undefined;
+  try {
+    const { client_id: clientId } = (await (await register(host.baseUrl, [CALLBACK], "Claude")).json()) as {
+      client_id: string;
+    };
+    const started = await startSignIn(host.baseUrl, clientId, CALLBACK);
+    expect(await cli(host).run(["approve", started.code!])).toBe(0);
+    const code = new URL((await status(host.baseUrl, started.request!)).redirect!).searchParams.get("code")!;
+    const { access_token: accessToken } = (await (
+      await token(host.baseUrl, {
+        grant_type: "authorization_code",
+        client_id: clientId,
+        redirect_uri: CALLBACK,
+        code,
+        code_verifier: started.verifier,
+      })
+    ).json()) as { access_token: string };
+    client = new Client({ name: "Claude-e2e", version: "1" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL("/mcp", relayUrl), {
+        requestInit: { headers: { authorization: `Bearer ${accessToken}` } },
+      }) as unknown as Transport,
+    );
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) =>
+      (result.content as Array<{ text: string }>)[0]!.text;
+    const keyed = () => rex.state().then((state) => state.sessions[0]!.blocks[0]!);
+
+    // Reading needs no switch, and holds back what the block showed before (ADR 0307).
+    const read = await client.callTool({ name: "read_agent", arguments: { agent } });
+    expect(read.isError, textOf(read)).toBeFalsy();
+    expect(textOf(read)).not.toContain("before=secret");
+
+    // Typing and keys stay off until the owner turns prompts and keys on for this app.
+    const off = await client.callTool({ name: "message_agent", arguments: { agent, message: "Fix it" } });
+    expect(off.isError).toBe(true);
+    expect(textOf(off)).toContain("hasn't turned on prompts and keys for Claude");
+    const keysOff = await client.callTool({ name: "press_keys", arguments: { agent, keys: ["esc"] } });
+    expect(textOf(keysOff)).toContain("hasn't turned on prompts and keys for Claude");
+    expect(await keyed()).not.toHaveProperty("pasted");
+    expect(await keyed()).not.toHaveProperty("keys");
+
+    const owner = cli(host);
+    expect(await owner.run(["prompts", "on", "Claude"])).toBe(0);
+    const sent = await client.callTool({ name: "message_agent", arguments: { agent, message: "Fix it" } });
+    expect(sent.isError).toBeFalsy();
+    expect(JSON.parse(textOf(sent))).toMatchObject({ agent, status: "delivered" });
+    expect((await keyed()).pasted).toEqual(["Fix it"]);
+
+    // The relay stamps the app; one that names itself is refused.
+    const forged = await fetch(new URL("/operator/v1/dispatch", relayUrl), {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        op: "rex_send",
+        schemaVersion: 1,
+        block: agent.slice("rex:".length),
+        text: "hi",
+        appDeviceId: "x",
+      }),
+    });
+    expect(forged.status).toBe(400);
+
+    // Turned off again, nothing more goes in.
+    expect(await owner.run(["prompts", "off", "Claude"])).toBe(0);
+    const again = await client.callTool({ name: "press_keys", arguments: { agent, keys: ["enter"] } });
+    expect(textOf(again)).toContain("hasn't turned on");
+    expect((await keyed()).keys).toEqual(["enter"]);
+  } finally {
+    await client?.close();
+    relay.closeAllConnections();
+    relay.close();
+    await host.close();
+    await rex.close();
   }
 }, 30_000);
 

@@ -803,6 +803,18 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
         return true;
       }
     }
+    // And the app typing into, pressing keys in or closing an agent's Rex block (ADR 0363);
+    // the service checks the owner's prompts-and-keys switch for that app. The owner's own
+    // devices stay unstamped and act with their own authority.
+    if (
+      (serviceRequest.op === "rex_send" ||
+        serviceRequest.op === "rex_keys" ||
+        serviceRequest.op === "rex_close") &&
+      serviceRequest.appDeviceId !== undefined
+    ) {
+      writeJson(response, 400, { error: `${serviceRequest.op}_app_is_stamped` });
+      return true;
+    }
     // And the app writing an issue; the service names it and passes the write through
     // the project's posting setting (ADR 0305).
     // And the app waking a connected lead; the service names it from its device (ADR 0336).
@@ -912,7 +924,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
       // Reading who leads and what is held for the apps (ADR 0304).
       (serviceRequest.op === "lead" && serviceRequest.command.action !== "set") ||
       serviceRequest.op === "herdr_core_list" ||
-      serviceRequest.op === "herdr_core_read"
+      serviceRequest.op === "herdr_core_read" ||
+      serviceRequest.op === "rex_list" ||
+      serviceRequest.op === "rex_read" ||
+      // An app types into Rex only under the owner's per-app switch, as with key_press; the
+      // owner's own devices need the terminal-control grant for it.
+      ((serviceRequest.op === "rex_send" || serviceRequest.op === "rex_keys") &&
+        authorization.device.scope === "connector")
         ? "terminalObserve"
         : nativeMessageOp ||
             (serviceRequest.op === "presence" && serviceRequest.includeCurrentActivity === true) ||
@@ -926,11 +944,14 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
             serviceRequest.op === "terminal_control" ||
             serviceRequest.op === "terminal_input" ||
             serviceRequest.op === "terminal_focus" ||
-            serviceRequest.op === "herdr_core_focus"
+            serviceRequest.op === "herdr_core_focus" ||
+            serviceRequest.op === "rex_send" ||
+            serviceRequest.op === "rex_keys"
           ? "terminalControl"
           : serviceRequest.op === "connections" ||
               serviceRequest.op === "reset" ||
               serviceRequest.op === "close_seat" ||
+              serviceRequest.op === "rex_close" ||
               serviceRequest.op === "readopt_seat" ||
               serviceRequest.op === "worker_reports" ||
               serviceRequest.op === "lead_changes" ||
@@ -971,6 +992,13 @@ export function createOperatorConversationRelayHandler(options: OperatorConversa
     if (serviceRequest.op === "issue_write")
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (serviceRequest.op === "lead_wake")
+      serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
+    if (
+      (serviceRequest.op === "rex_send" ||
+        serviceRequest.op === "rex_keys" ||
+        serviceRequest.op === "rex_close") &&
+      currentAuthorization.device.scope === "connector"
+    )
       serviceRequest = { ...serviceRequest, appDeviceId: currentAuthorization.device.deviceId };
     if (
       (serviceRequest.op === "send" ||
@@ -1962,6 +1990,12 @@ const CONNECTOR_OPS = new Set([
   "close_seat",
   "herdr_core_list",
   "herdr_core_read",
+  // Rex's agents on the Mac (ADR 0363); typing and keys pass the owner's per-app switch.
+  "rex_list",
+  "rex_read",
+  "rex_send",
+  "rex_keys",
+  "rex_close",
   "get",
   "create",
   "send",
