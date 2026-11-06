@@ -173,6 +173,7 @@ jobs:
           --reporter=default --reporter=./scripts/testing/release-test-reporter.mjs
           apps/clankie/test/remote-hire-adopt.integration.test.ts
           apps/clankie/test/remote-hire-receipts.integration.test.ts
+          apps/clankie/test/agent-message-linked-seat.integration.test.ts
           apps/clankie/test/remote-hire-command-unsent.integration.test.ts
           apps/clankie/test/hire-receipt-retirement-native.integration.test.ts
           apps/clankie/test/orphan-hire-native.integration.test.ts
@@ -181,7 +182,7 @@ jobs:
           node -e '
             const r = JSON.parse(require("fs").readFileSync(".local/mac-native-run.json", "utf8"));
             const skipped = r.files.flatMap((f) => f.tests.filter((t) => t.state === "skipped").map((t) => `${f.path}: ${t.name}`));
-            if (r.files.length !== 5) { console.error(`expected 5 native suites, ran ${r.files.length}`); process.exit(1); }
+            if (r.files.length !== 6) { console.error(`expected 6 native suites, ran ${r.files.length}`); process.exit(1); }
             if (skipped.length) { console.error("Skipped native tests:\n" + skipped.join("\n")); process.exit(1); }
             console.log(`${r.files.reduce((n, f) => n + f.tests.length, 0)} native tests ran`);
           '
