@@ -10,7 +10,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CONNECTOR_GRANTS } from "@clankie/protocol";
 import type { HarnessSeatAdapter, SeatControl } from "@clankie/agent-hosts";
-import { SettingsStore } from "@clankie/settings";
+import { ExecutionConnectionSchema, SettingsStore } from "@clankie/settings";
 import {
   FileCredentialStore,
   mintOperatorToken,
@@ -76,12 +76,12 @@ export async function fixture(pi?: { control: SeatControl; file?: string }, link
       execution: {
         ...current.execution,
         connections: [
-          {
+          ExecutionConnectionSchema.parse({
             id: linked.fleet.id,
             machine: "linked-box",
             session: linked.fleet.session,
             ssh: linked.fleet.ssh,
-          },
+          }),
         ],
       },
     }));
@@ -193,7 +193,7 @@ export async function fixture(pi?: { control: SeatControl; file?: string }, link
             remoteWorkspace: async () => true,
           },
         }),
-      } as CaptainDeps,
+      } as unknown as CaptainDeps,
       {
         repoRoot: root,
         stateDir: state,
