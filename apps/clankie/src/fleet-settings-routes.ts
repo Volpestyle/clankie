@@ -178,6 +178,7 @@ export function createFleetSettingsRoutes(
             leadRestarts,
             seatRestarts,
             autoTidy,
+            digestTime,
             hire,
             autonomyLevel,
             autonomyConfirmed,
@@ -229,6 +230,7 @@ export function createFleetSettingsRoutes(
               ...(leadRestarts === undefined ? {} : { leadRestarts }),
               ...(seatRestarts === undefined ? {} : { seatRestarts }),
               ...(autoTidy === undefined ? {} : { autoTidy }),
+              ...(digestTime === undefined ? {} : { digestTime }),
               ...(hire === undefined ? {} : { hire: hire ?? undefined }),
             },
             autonomy: {

@@ -191,6 +191,8 @@ export interface CaptainPort {
     deviceId?: string,
     herdr?: boolean,
   ): Promise<readonly import("../lead-changes.ts").LeadChangeSnapshot[]>;
+  /** Confirmed project hire start times, for the daily digest. */
+  confirmedHireTimes?(): readonly number[];
   /** Retain the full request so a durable turn can resume it (ADR 0284); grants no authority. */
   retainsDiscordTurn?(request: DiscordPresenceChannelTurnRequest): boolean;
   /** A durable turn (or a follow-up it joined) was journaled, settled or not, so it answers from its journal (ADR 0284). */

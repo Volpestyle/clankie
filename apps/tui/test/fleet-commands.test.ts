@@ -82,6 +82,7 @@ describe("clankie fleet", () => {
         leadRestarts: "on",
         seatRestarts: "on",
         autoTidy: "1h",
+        digestTime: "08:00",
       },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];

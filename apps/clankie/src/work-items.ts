@@ -1,4 +1,4 @@
-import { leadChangePulls } from "./lead-change-pulls.ts";
+import { fleetGithubActivity, leadChangePulls } from "./lead-change-pulls.ts";
 import { observeLandedBranch } from "./landed-branch.ts";
 import { WATCH_REFUSAL } from "./watch.ts";
 import { createGuidedReviewSourceAuthorizer } from "./guided-review-source.ts";
@@ -1896,6 +1896,28 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     };
   };
 
+  /** Bounded GitHub reads that stop if the repository scope changes underneath them. */
+  const leadGithubReads = (snapshot: { readonly stamp: unknown }, token: string, signal?: AbortSignal) => {
+    const budget = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]);
+    const api = githubRestApi({
+      token,
+      ...(options.githubApiBase ? { baseUrl: options.githubApiBase } : {}),
+      fetch: (url, init) =>
+        (options.fetch ?? fetch)(url, {
+          ...init,
+          signal: AbortSignal.any([budget, ...(init?.signal ? [init.signal] : [])]),
+        }),
+    });
+    return {
+      get: (path: string) => api.request("GET", path),
+      validate: async () => {
+        budget.throwIfAborted();
+        if ((await leadRepoSnapshot()).stamp !== snapshot.stamp)
+          throw new Error("Project repository scope changed");
+      },
+    };
+  };
+
   const leadRepoSnapshot = async (fenced = false) => {
     if (fenced && options.projects && !options.projectsFence)
       throw new Error("Project visibility cannot be fenced here");
@@ -1992,25 +2014,21 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
       if (snapshot.repos.length === 0) return { source: "pull_request" as const, records: [] };
       if (!snapshot.connection)
         return { source: "pull_request" as const, records: [], unavailable: "github_not_connected" };
-      const budget = AbortSignal.any([AbortSignal.timeout(10_000), ...(signal ? [signal] : [])]);
-      const api = githubRestApi({
-        token: snapshot.connection.token,
-        ...(options.githubApiBase ? { baseUrl: options.githubApiBase } : {}),
-        fetch: (url, init) =>
-          (options.fetch ?? fetch)(url, {
-            ...init,
-            signal: AbortSignal.any([budget, ...(init?.signal ? [init.signal] : [])]),
-          }),
-      });
       return leadChangePulls({
         repos: snapshot.repos,
         ...(options.clock ? { now: options.clock } : {}),
-        get: (path) => api.request("GET", path),
-        validate: async () => {
-          budget.throwIfAborted();
-          if ((await leadRepoSnapshot()).stamp !== snapshot.stamp)
-            throw new Error("Project repository scope changed");
-        },
+        ...leadGithubReads(snapshot, snapshot.connection.token, signal),
+      });
+    },
+    /** Undefined when GitHub isn't connected; a provider failure rejects, so counts stay unknown. */
+    async fleetGithubActivity(since: Date, until: Date, signal?: AbortSignal) {
+      const snapshot = await leadRepoSnapshot();
+      if (!snapshot.connection) return undefined;
+      return fleetGithubActivity({
+        repos: snapshot.repos,
+        since,
+        until,
+        ...leadGithubReads(snapshot, snapshot.connection.token, signal),
       });
     },
     mergedPull,

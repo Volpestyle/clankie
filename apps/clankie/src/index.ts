@@ -2574,6 +2574,7 @@ const clankie = await createClankieApp({
       : { assertCurrent() {} }, // Relay bearer is fixed for this service lifetime; device currentness uses the registry/session fence.
   feedCheckReceiptPath: join(stateRoot, "feed-check-receipts.json"),
   connectorPromptAnswersPath: join(stateRoot, "connector-prompt-answers.json"),
+  fleetDailyDigest: { path: join(stateRoot, "fleet-daily-digest.json") },
   leadWakes,
   setupSurveyPath: join(stateRoot, "setup-survey.json"),
   connectorDetection,

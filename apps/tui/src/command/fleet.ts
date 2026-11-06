@@ -42,7 +42,12 @@ import {
   type OwnerSettingsApi,
   type OwnerSettingsApiOptions,
 } from "./owner-settings-api.ts";
-import { FLEET_AUTO_TIDY, FLEET_SETTINGS_PATH, FleetSettingsSnapshotSchema } from "@clankie/protocol";
+import {
+  FLEET_AUTO_TIDY,
+  FLEET_SETTINGS_PATH,
+  FleetDigestTimeSchema,
+  FleetSettingsSnapshotSchema,
+} from "@clankie/protocol";
 import { FLEET_LEAD_RESTART_PATH, LeadRestartStatusSchema, type LeadRestartStatus } from "@clankie/protocol";
 import { FLEET_SEAT_RESTARTS_PATH, SeatRestartStatusSchema, type SeatRestartStatus } from "@clankie/protocol";
 import { DeployHoldSchema, describeDeployHold, type DeployHold } from "@clankie/protocol/deploy-holds";
@@ -51,11 +56,11 @@ import type { machineSetupContext } from "./machine-setup.ts";
 
 const FLEET_USAGE = [
   "Usage: clankie fleet [status|show [--working-directory PATH] [--json]]",
-  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
+  `       clankie fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--digest-time HH:mm|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--mcp-servers NAME,...|none] [--hire-profile FILE.json]`,
   "       clankie fleet set [--machine ID] [--heavy-slots auto|N] [--simulator-slots auto|N] [--simulator-idle-seconds N] [--warn-free-disk-gb N] [--warn-free-disk-percent N]",
   "       clankie fleet resources [--machine ID]",
   "       clankie fleet room [--older CURSOR] [--limit N] [--follow]",
-  "       clankie fleet digest [--json]",
+  "       clankie fleet digest [--daily] [--json]",
   "       clankie fleet leads [--json]",
   "       clankie fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
   "       clankie fleet roster [retire SEAT OCCUPANT | undo HISTORY_ID]",
@@ -301,6 +306,7 @@ export function formatFleetLines(fleet: FleetSettings & Partial<FleetAutonomy>):
     `seat restarts: ${fleet.seatRestarts ?? "on"} — ${fleet.seatRestarts === "off" ? "hired seats keep their sessions until someone restarts them" : "idle hired seats restart fresh with a handoff brief at 450K context tokens"}`,
     `lead restarts: ${fleet.leadRestarts ?? "on"} — ${fleet.leadRestarts === "off" ? "the lead seat keeps its session until someone restarts it" : "an idle lead seat restarts fresh in its pane with a handoff brief once its session is large or a day old"}`,
     `auto tidy: ${fleet.autoTidy ?? "1h"} — ${fleet.autoTidy === "off" ? "finished panes and landed worktrees wait for the lead to tidy them" : `a hire's pane closes after ${fleet.autoTidy ?? "1h"} idle once its reports are read and its work landed; landed, clean worktrees untouched for a day are removed`}`,
+    `daily digest: ${fleet.digestTime ?? "08:00"} — ${fleet.digestTime === "off" ? "no daily digest is generated" : "generated at this host-local time; quiet hours defer it"}`,
     `worker defaults: ${formatHireDefaults(fleet.hire)}`,
     "routing preferences:",
     ...(notes.length === 0
@@ -635,6 +641,10 @@ async function parseSet(
     } else if (flag === "--lead-restarts" && change.leadRestarts === undefined) {
       if (value !== "on" && value !== "off") throw new Error("--lead-restarts must be on or off.");
       change.leadRestarts = value;
+    } else if (flag === "--digest-time" && change.digestTime === undefined) {
+      const time = FleetDigestTimeSchema.safeParse(value);
+      if (!time.success) throw new Error("--digest-time must be HH:mm or off.");
+      change.digestTime = time.data;
     } else if (flag === "--auto-tidy" && change.autoTidy === undefined) {
       if (!(FLEET_AUTO_TIDY as readonly (string | undefined)[]).includes(value))
         throw new Error(`--auto-tidy must be one of ${FLEET_AUTO_TIDY.join(", ")}.`);

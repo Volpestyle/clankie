@@ -26,6 +26,11 @@ export const FLEET_AUTO_TIDY_MS: Readonly<Record<Exclude<FleetAutoTidy, "off">, 
   "4h": 4 * 60 * 60_000,
   "1d": 24 * 60 * 60_000,
 };
+/** Host-local time the daily fleet digest is generated, or "off". */
+export const FleetDigestTimeSchema = z.union([
+  z.literal("off"),
+  z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u, "Use HH:mm or off"),
+]);
 export const FLEET_SETTINGS_PATH = "/v1/operator/fleet-settings";
 export const FLEET_SETTINGS_CONTEXT_PATH = `${FLEET_SETTINGS_PATH}/context`;
 const FleetPolicySchema = z
@@ -42,6 +47,7 @@ const FleetPolicySchema = z
     leadRestarts: z.enum(["on", "off"]).optional(),
     seatRestarts: z.enum(["on", "off"]).optional(),
     autoTidy: z.enum(FLEET_AUTO_TIDY).optional(),
+    digestTime: FleetDigestTimeSchema.optional(),
     hire: HireProfileSchema.optional(),
     ...FleetAutonomyWireSchema.shape,
   })
