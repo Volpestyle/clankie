@@ -617,12 +617,20 @@ export const flows: readonly Flow[] = [
           "admission names the harness as unavailable",
           run,
         );
-        const roster = yield* stack.cliJson("fleet", "roster");
-        yield* check(
-          roster.complete === true && roster.counts?.total === 0,
-          "no worker pane was left behind",
-          roster.counts,
+        // Absence needs a complete census. A roster read that missed its deadline or
+        // overlapped another census says it is incomplete ("not confirmed absent"),
+        // which on a loaded runner happens right after the refusal; read again until
+        // one completes, and fail with what the last incomplete read named.
+        const roster = yield* until(
+          "a complete fleet roster",
+          () =>
+            Effect.runPromise(stack.cliJson("fleet", "roster")).then((read) => {
+              if (read.complete === true) return read;
+              throw new Error(`incomplete roster: ${JSON.stringify(read.readWarnings)}`);
+            }),
+          { timeoutMs: 30_000, intervalMs: 1_000 },
         );
+        yield* check(roster.counts?.total === 0, "no worker pane was left behind", roster.counts);
       }),
   },
   {
