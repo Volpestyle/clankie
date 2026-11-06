@@ -23,6 +23,7 @@ import {
 } from "@clankie/protocol";
 import { launchPipedChrome, type PipedChrome } from "./browser-pipe.ts";
 import { startBrowserRecording } from "./browser-recording.ts";
+import type { CredentialBrowser, CredentialFillField, CredentialSeal } from "./credential-requests.ts";
 import {
   launchPublicWebChrome,
   nonPublicUrl,
@@ -130,43 +131,6 @@ export interface BrowserHost {
   ): Promise<CallBrowserToolResult>;
   close(): Promise<void>;
 }
-/** The signed-in browser as the credential broker sees it (#245, ADR 0342). */
-export interface CredentialBrowser {
-  /**
-   * Seal a conversation's current tab for one credential request when its top
-   * document is exactly `origin`. From then until the seal settles, no browser
-   * tool reaches that tab, and no conversation runs browser JavaScript.
-   */
-  sealForCredential(conversationId: string, origin: string): Promise<CredentialSeal | { refused: string }>;
-}
-export interface CredentialSeal {
-  /** The full address the broker loads for the fill: the sealed tab's URL, path and query included. */
-  readonly url: string;
-  /**
-   * Freeze every page in the signed-in Chrome and refuse while a shared or
-   * service worker of the origin runs, clear the origin's local storage,
-   * IndexedDB and cache storage (cookies stay), load the bound page in a new tab
-   * the broker makes (no opener, no name), type each value into its field, submit
-   * the field's form, then retire that tab and the sealed one. The conversation
-   * gets a new tab in the same session at the landing page, or a blank one when
-   * anything failed; only then do the other pages run again. Right before each
-   * value is typed the broker re-reads every target, then runs `confirm`
-   * synchronously; it returns a reason code to stop. The outcome carries a
-   * reason code, never page or value text.
-   */
-  fill(
-    fields: readonly CredentialFillField[],
-    values: Readonly<Record<string, string>>,
-    confirm: () => string | undefined,
-  ): Promise<{ outcome: "filled" } | { outcome: "failed"; reason: string }>;
-  /** Hand the same tab back; only for a seal no value ever reached. */
-  release(): Promise<void>;
-}
-interface CredentialFillField {
-  readonly kind: "username" | "password" | "code";
-  readonly selector: string;
-}
-
 interface BrowserWorkspace extends BrowserHost {
   /** The tab this workspace's tools act on, once a session has attached. */
   currentTarget(): string | undefined;
