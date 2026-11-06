@@ -53,7 +53,9 @@ export async function runCredentialsCommand(
     const read = options.readValue ?? readHidden;
     const values: Partial<Record<CredentialFieldKind, string>> = {};
     for (const kind of request.fields) {
-      const value = await read(`${LABELS[kind]} for ${request.origin} (${request.requester}): `);
+      const value = await read(
+        `${LABELS[kind]} for ${request.url ?? request.origin} (${request.requester}): `,
+      );
       if (!value) throw new Error("Nothing entered; the request is still open.");
       values[kind] = value;
     }

@@ -60,6 +60,11 @@ export const CredentialRequestIdSchema = z.string().regex(/^cr_[0-9a-f]{32}$/u);
 export const CredentialRequestSchema = z.strictObject({
   requestId: CredentialRequestIdSchema,
   origin: z.string(),
+  /**
+   * The full address the broker loads for the fill (path and query included),
+   * set once the tab is sealed. The worker chose it, so the owner sees all of it.
+   */
+  url: z.string().optional(),
   /** The worker that asked: its fleet pane. */
   requester: z.string(),
   fields: z.array(CredentialFieldKindSchema),

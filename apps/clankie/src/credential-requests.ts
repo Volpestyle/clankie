@@ -141,6 +141,7 @@ export function createCredentialRequests(deps: {
       if ("refused" in sealed) settle(entry, "failed", sealed.refused);
       else {
         entry.seal = sealed;
+        entry.request.url = sealed.url;
         entry.timer = setTimeout(() => void closeOpen(entry, "failed", "expired"), deps.openMs ?? OPEN_MS);
         entry.timer.unref();
       }

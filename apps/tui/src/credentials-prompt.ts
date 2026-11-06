@@ -18,13 +18,13 @@ export async function credentialsPrompt(flow: SetupFlow, api: OwnerSettingsApiOp
       options: requests.map((request) => ({
         value: request.requestId,
         label: request.origin,
-        description: `${request.requester} · ${request.fields.join(", ")}`,
+        description: `${request.url ?? request.origin} · ${request.requester} · ${request.fields.join(", ")}`,
       })),
     });
     const request = requests.find((candidate) => candidate.requestId === requestId);
     if (!request) return "Closed";
     const action = await flow.readSelect({
-      message: `Sign in to ${request.origin} for ${request.requester}?\nClankie's browser fills and submits the form; the worker never sees what you type.`,
+      message: `Sign in to ${request.origin} for ${request.requester}?\nPage: ${request.url ?? request.origin}\nClankie's browser loads this page fresh, fills and submits the form; the worker never sees what you type.`,
       allowBack: false,
       options: [
         { value: "answer", label: "Sign in" },

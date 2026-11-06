@@ -140,14 +140,19 @@ export interface CredentialBrowser {
   sealForCredential(conversationId: string, origin: string): Promise<CredentialSeal | { refused: string }>;
 }
 export interface CredentialSeal {
+  /** The full address the broker loads for the fill: the sealed tab's URL, path and query included. */
+  readonly url: string;
   /**
-   * Freeze every page in the signed-in Chrome, load the bound page in a new tab
+   * Freeze every page in the signed-in Chrome and refuse while a shared or
+   * service worker of the origin runs, clear the origin's local storage,
+   * IndexedDB and cache storage (cookies stay), load the bound page in a new tab
    * the broker makes (no opener, no name), type each value into its field, submit
    * the field's form, then retire that tab and the sealed one. The conversation
    * gets a new tab in the same session at the landing page, or a blank one when
-   * anything failed; only then do the other pages run again. `confirm` runs
-   * synchronously right before each value is typed and returns a reason code to
-   * stop. The outcome carries a reason code, never page or value text.
+   * anything failed; only then do the other pages run again. Right before each
+   * value is typed the broker re-reads every target, then runs `confirm`
+   * synchronously; it returns a reason code to stop. The outcome carries a
+   * reason code, never page or value text.
    */
   fill(
     fields: readonly CredentialFillField[],
@@ -504,6 +509,7 @@ export async function createBrowserHost(
       settled = true;
     };
     return {
+      url: boundUrl,
       async release() {
         settle();
         await locked(async () => unseal(lane, targetId, targetId));
@@ -521,6 +527,15 @@ export async function createBrowserHost(
             // Nothing that existed before this fill runs while it types: every page in
             // this Chrome is frozen first, or the fill does not start.
             frozen = await freezeEveryPage(cdp);
+            // A shared or service worker is not a page and keeps running through the
+            // freeze, so one of this origin that exists now refuses the fill.
+            const running = aloneWith(
+              origin,
+              undefined,
+              frozen,
+              (await cdp.send("Target.getTargets")).targetInfos,
+            );
+            if (running !== undefined) throw new CredentialFillError(running);
             // A tab the broker makes itself, with no opener and no name, so no page that
             // existed before the seal holds a reference to it.
             fillTab = (
@@ -1247,6 +1262,35 @@ async function freezeEveryPage(cdp: CDP): Promise<FrozenPages> {
   }
 }
 
+/**
+ * Whether the fill runs alone: every page but the fill tab is one the broker
+ * froze, and no shared or service worker of the origin runs (a worker is not
+ * frozen with the pages, and one that existed before the seal may hold
+ * agent-patched code the sign-in page can reach). A reason code, or undefined.
+ */
+function aloneWith(
+  origin: string,
+  fillTab: string | undefined,
+  frozen: FrozenPages,
+  targets: readonly { targetId: string; type: string; url: string }[],
+): string | undefined {
+  if (
+    targets.some(
+      (target) => target.type === "page" && target.targetId !== fillTab && !frozen.has(target.targetId),
+    )
+  )
+    return "page_not_frozen";
+  if (
+    targets.some(
+      (target) =>
+        (target.type === "shared_worker" || target.type === "service_worker") &&
+        exactOrigin(target.url) === origin,
+    )
+  )
+    return "worker_running";
+  return undefined;
+}
+
 async function thawPages(cdp: CDP, frozen: FrozenPages) {
   for (const sessionId of frozen.values()) {
     // allow-swallowed-rejection -- a page closed while frozen has nothing left to thaw.
@@ -1258,11 +1302,12 @@ async function thawPages(cdp: CDP, frozen: FrozenPages) {
 
 /**
  * The broker's own fill in a tab it just made: service workers bypassed, the
- * bound page loaded, an exact-origin top document and form with no opener or
- * name, typed input, and the form's own submit, all through a CDP session no
- * agent holds. Right before each value is typed, one synchronous check confirms
- * the owner, the request and the seal (`binding`); nothing is awaited between
- * it and the keystrokes.
+ * origin's storage cleared but for cookies, the bound page loaded, an
+ * exact-origin top document and form with no opener or name, typed input, and
+ * the form's own submit, all through a CDP session no agent holds. Right before
+ * each value is typed, every target is read again (no unfrozen page, no worker
+ * of the origin), then one synchronous check confirms the owner, the request
+ * and the seal (`binding`); nothing is awaited between it and the keystrokes.
  */
 async function fillCredentialForm(
   cdp: CDP,
@@ -1285,7 +1330,14 @@ async function fillCredentialForm(
     await cdp.send("Network.enable", undefined, sessionId);
     // No service worker of this origin sees the load or the submit.
     await cdp.send("Network.setBypassServiceWorker", { bypass: true }, sessionId);
-    await cdp.send("Storage.clearDataForOrigin", { origin, storageTypes: "service_workers" }, sessionId);
+    // Nothing a page wrote to this origin's storage before the seal reaches the
+    // sign-in page: local storage, IndexedDB, cache storage and service worker
+    // registrations are cleared. Cookies stay, for the site's device trust and CSRF.
+    await cdp.send(
+      "Storage.clearDataForOrigin",
+      { origin, storageTypes: "local_storage,indexeddb,cache_storage,service_workers" },
+      sessionId,
+    );
     const loaded = cdp.waitFor("Page.loadEventFired", { sessionId, timeoutMs: FILL_TIMEOUT_MS });
     const navigated = await cdp.send("Page.navigate", { url: boundUrl }, sessionId);
     if (navigated.errorText) return { reason: "page_unavailable" };
@@ -1311,18 +1363,15 @@ async function fillCredentialForm(
     if (checked !== "ok") return { reason: typeof checked === "string" ? checked : "form_check_failed" };
     if ((await run(`window.opener === null && window.name === ""`)) !== true)
       return { reason: "fill_tab_reachable" };
-    // Still nothing else running: every page but this one is one the broker froze.
-    const pages = (await cdp.send("Target.getTargets")).targetInfos.filter(
-      (target) => target.type === "page",
-    );
-    if (pages.some((page) => page.targetId !== targetId && !frozen.has(page.targetId)))
-      return { reason: "page_not_frozen" };
     for (const field of fields) {
       const selector = JSON.stringify(field.selector);
       const focused = await run(
         `(() => { const e = document.querySelector(${selector}); e.focus(); e.select(); return document.activeElement === e && location.origin === ${JSON.stringify(origin)}; })()`,
       );
       if (focused !== true) return { reason: "focus_lost" };
+      // Still nothing else running: no unfrozen page but this one, no worker of the origin.
+      const alone = aloneWith(origin, targetId, frozen, (await cdp.send("Target.getTargets")).targetInfos);
+      if (alone !== undefined) return { reason: alone };
       // The final check: owner, request and seal, synchronously, then the keystrokes.
       const refused = binding();
       if (refused !== undefined) return { reason: refused };
