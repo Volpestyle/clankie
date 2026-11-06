@@ -6,7 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { FileCredentialStore } from "@clankie/credential-broker";
+import {
+  ensureOperatorCredential,
+  FileCredentialStore,
+  rotateOperatorCredential,
+} from "@clankie/credential-broker";
 import type { CallBrowserToolResult } from "@clankie/protocol";
 import { runCredentialsCommand } from "../../tui/src/command/credentials.ts";
 import { createClankieApp } from "../src/app.ts";
@@ -15,6 +19,7 @@ import { createStubCaptain } from "../src/captain/port.ts";
 import { createCredentialRequests } from "../src/credential-requests.ts";
 import { createMcpHost } from "../src/mcp-host.ts";
 import { linearMcp } from "../src/linear-mcp.ts";
+import { createCredentialBackedOperatorAuthenticator } from "../src/operator-auth.ts";
 import { WorkerMcp } from "../src/worker-mcp.ts";
 
 // #245: a hired worker's sign-in request, the owner's no-echo answer over the
@@ -36,14 +41,33 @@ let a: string;
 let b: string;
 let redirectLogin = false;
 const posts: string[] = [];
+/** Site A's requests in arrival order: page loads, ticks, typing and probe beacons, posts. */
+const events: string[] = [];
+const times: number[] = [];
 const foreignHits: string[] = [];
 let worker: WorkerMcp;
 let mcpSession: string;
 let app: Awaited<ReturnType<typeof createClankieApp>>["app"];
 const intruders: Array<{ kill(): boolean }> = [];
+let operatorStore: FileCredentialStore;
+let ownerToken: string;
 
 const form = (action = "/session", method = "post") =>
   `<form method="${method}" action="${action}"><input id="user" name="user" type="text"><input id="pass" name="pass" type="password"><button>Sign in</button></form>`;
+/** Site A's sign-in page reports what its window can be reached by, and every keystroke (never its value). */
+const signInProbe = `<script>
+navigator.sendBeacon("/probe?" + new URLSearchParams({ opener: String(window.opener !== null), name: window.name }));
+addEventListener("input", () => navigator.sendBeacon("/typed"));
+</script>`;
+/**
+ * A page that reports, once it runs again, when it was frozen and resumed, and
+ * whether the window that opened it is gone.
+ */
+const lifecycle = (id: string) =>
+  `<script>let frozenAt = 0;
+document.addEventListener("freeze", () => { frozenAt = Date.now(); });
+document.addEventListener("resume", () => navigator.sendBeacon("/resumed?" + new URLSearchParams({ id: "${id}", from: frozenAt, to: Date.now(), openerGone: String(!window.opener || window.opener.closed) })));
+</script>`;
 
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -67,21 +91,37 @@ beforeAll(async () => {
     request.on("data", (chunk) => (body += chunk));
     request.on("end", () => {
       const path = request.url ?? "/";
+      events.push(`${request.method} ${path}`);
+      times.push(Date.now());
       response.setHeader("content-type", "text/html");
       if (request.method === "POST" && path === "/session") {
         posts.push(body);
         response.writeHead(303, { location: "/home", "set-cookie": "session=signed-in; Path=/" }).end();
         return;
       }
+      if (/^\/(resumed|typed|probe)\b/u.test(path)) return response.end();
       if (path === "/home")
         return response.end(
-          `<p>${/session=signed-in/u.test(request.headers.cookie ?? "") ? "Welcome back" : "Signed out"}</p>`,
+          `<p>${/session=signed-in/u.test(request.headers.cookie ?? "") ? "Welcome back" : "Signed out"}</p>${lifecycle("home")}`,
+        );
+      // A same-origin page the sign-in tab opened before the seal: it keeps that tab as
+      // its opener and names it, so it can find it again by reference or by name.
+      if (path === "/helper")
+        return response.end(`<script>window.opener.name = "pre-seal";</script>${lifecycle("helper")}`);
+      // A page that hides its freeze from anyone else listening.
+      if (path === "/unfreezable")
+        return response.end(
+          `<script>addEventListener("freeze", (event) => event.stopImmediatePropagation(), true)</script>${lifecycle("unfreezable")}`,
         );
       if (path === "/login-redirecting" && redirectLogin)
         return response.writeHead(302, { location: `${b}/login` }).end();
       if (path === "/framed") return response.end(`<p>Sign in below</p><iframe src="${b}/login"></iframe>`);
       if (path === "/foreign-action") return response.end(form(`${b}/session`));
-      response.end(`<html><body>${form()}</body></html>`);
+      if (path === "/login?helper")
+        return response.end(
+          `<html><body><button style="position:fixed;left:0;top:0;width:80px;height:80px" onclick="window.open('/helper')">Help</button><div style="margin-top:100px">${form()}</div>${signInProbe}${lifecycle("signin")}</body></html>`,
+        );
+      response.end(`<html><body>${form()}${signInProbe}</body></html>`);
     });
   });
   a = await listen(siteA);
@@ -114,11 +154,17 @@ beforeAll(async () => {
     credentialRequests,
     fleetToolsSnapshot: async () => ({ tools: "connected", assertCurrent() {} }),
   });
+  // The service's own owner authentication over a credential store, so rotation is real.
+  operatorStore = new FileCredentialStore(join(root, "operator.json"));
+  ownerToken = (await ensureOperatorCredential({ store: operatorStore, env: {} })).token;
   ({ app } = await createClankieApp({
     captain: createStubCaptain(),
     credentialRequests,
-    authenticateOperator: async (request) =>
-      request.headers.get("authorization") === "Bearer owner" ? { operatorId: "owner" } : undefined,
+    authenticateOperator: createCredentialBackedOperatorAuthenticator({
+      store: operatorStore,
+      env: {},
+      identity: { operatorId: "owner" },
+    }),
   }));
   const init = await mcp("initialize", {
     protocolVersion: "2025-06-18",
@@ -185,7 +231,7 @@ async function owner(args: string[], values: string[] = []) {
       fetch: async (path, init) =>
         await app.request(path, {
           ...init,
-          headers: { ...(init?.headers as Record<string, string>), authorization: "Bearer owner" },
+          headers: { ...(init?.headers as Record<string, string>), authorization: `Bearer ${ownerToken}` },
         }),
     },
   });
@@ -222,9 +268,33 @@ async function startIntruder(sealedTab: string, copied: string[]) {
   };
 }
 
-it("fills an exact-origin form for the owner while the tab is sealed, then hands back a fresh tab", async () => {
-  await browse("hire", "browser_use_open", { url: `${a}/login` });
+/** Site A's events from the broker's load of the sign-in page to the form's POST, with their times. */
+function fillWindow(from: number) {
+  const start = events.indexOf("GET /login?helper", from);
+  const end = events.indexOf("POST /session", start);
+  return { start, end, during: events.slice(start, end), loginAt: times[start]!, postAt: times[end]! };
+}
+/** Each page's report once it ran again: when it was frozen and resumed. */
+function resumes(from: number) {
+  return events
+    .slice(from)
+    .filter((event) => event.startsWith("POST /resumed?"))
+    .map((event) => Object.fromEntries(new URLSearchParams(event.slice("POST /resumed?".length))));
+}
+
+it("fills in a new tab of its own while every other page is frozen, then hands back a fresh tab", async () => {
+  // The sign-in tab opens a same-origin helper before the seal; the helper holds it as
+  // its opener and names it.
+  await browse("hire", "browser_use_open", { url: `${a}/login?helper` });
   const sealedTab = await currentTab("hire");
+  await browse("hire", "browser_use_click", { x: 40, y: 40 });
+  for (let tries = 0; !events.includes("GET /helper") && tries < 50; tries++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(await browse("hire", "browser_use_evaluate", { expression: "window.name" })).toMatchObject({
+    outcome: "ok",
+    content: "pre-seal",
+  });
   await browse("other", "browser_use_open", { url: `${a}/home` });
   // Chrome's password manager logs each save decision here, prompt or not.
   await browse("pm", "browser_use_open", { url: "chrome://password-manager-internals" });
@@ -264,9 +334,28 @@ it("fills an exact-origin form for the owner while the tab is sealed, then hands
     requests: [{ origin: a, requester: "w-245", fields: ["username", "password"] }],
   });
 
+  const from = events.length;
   const answered = await owner(["answer", pending.requestId!], [USER, SECRET]);
   expect(answered).toMatchObject({ outcome: "settled", request: { outcome: "filled" } });
   expect(posts).toContain(`user=${USER}&pass=${SECRET}`);
+  // The fill ran in a tab no page could reach: no opener, and not the sealed tab's name.
+  const fill = fillWindow(from);
+  expect(fill.start).toBeGreaterThan(-1);
+  expect(fill.end).toBeGreaterThan(fill.start);
+  expect(fill.during).toContain("POST /probe?opener=false&name=");
+  expect(fill.during).toContain("POST /typed");
+  // Every page that existed before ran again only after the submit, and reports it was
+  // frozen before the broker loaded the sign-in page; the helper's opener is gone by then.
+  for (let tries = 0; resumes(from).length < 2 && tries < 100; tries++)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  const reports = resumes(from);
+  expect(reports.map((report) => report.id).sort()).toEqual(["helper", "home"]);
+  for (const report of reports) {
+    expect(Number(report.from)).toBeGreaterThan(0);
+    expect(Number(report.from)).toBeLessThanOrEqual(fill.loginAt);
+    expect(Number(report.to)).toBeGreaterThanOrEqual(fill.postAt);
+  }
+  expect(reports.find((report) => report.id === "helper")!.openerGone).toBe("true");
   expect(await intruder.stop()).toEqual({ heldOpenAtStop: 0, reached: [], read: [] });
   const decisions = content(await browse("pm", "browser_use_read"));
   expect(decisions).toContain("Saving disabled");
@@ -276,11 +365,82 @@ it("fills an exact-origin form for the owner while the tab is sealed, then hands
     outcome: "filled",
   });
 
-  // A fresh tab in the same session at the landing page; the tab that held the secret is gone.
-  expect(content(await browse("hire", "browser_use_read"))).toContain("Welcome back");
-  const tabs = content(await browse("hire", "browser_use_tabs"));
-  expect(tabs).not.toContain(sealedTab);
+  // A fresh tab in the same session at the landing page; the tabs that held the secret are gone.
+  const tabs = JSON.parse(content(await browse("hire", "browser_use_tabs"))) as Array<{
+    targetId: string;
+    url: string;
+  }>;
+  expect(tabs.map((tab) => tab.targetId)).not.toContain(sealedTab);
+  expect(tabs.filter((tab) => tab.url.endsWith("/login"))).toEqual([]);
   expect(await currentTab("hire")).not.toBe(sealedTab);
+  expect(content(await browse("hire", "browser_use_read"))).toContain("Welcome back");
+  await browse("hire", "browser_use_close");
+}, 120_000);
+
+it("fails closed when a page cannot be shown frozen, typing nothing", async () => {
+  await browse("hire", "browser_use_open", { url: `${a}/login` });
+  await browse("stuck", "browser_use_open", { url: `${a}/unfreezable` });
+  try {
+    const pending = await request({ conversation: "hire", origin: a, fields });
+    const before = posts.length;
+    const from = events.length;
+    expect(await owner(["answer", pending.requestId!], [USER, SECRET])).toMatchObject({
+      request: { outcome: "failed", reason: "page_not_frozen" },
+    });
+    // The broker never loaded the page, let alone typed.
+    expect(events.slice(from).filter((event) => !event.startsWith("POST /resumed"))).toEqual([]);
+    expect(posts.length).toBe(before);
+    // And nothing stays frozen behind it.
+    for (let tries = 0; !resumes(from).some((report) => report.id === "unfreezable") && tries < 100; tries++)
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(resumes(from).map((report) => report.id)).toContain("unfreezable");
+  } finally {
+    await browse("stuck", "browser_use_close");
+  }
+}, 120_000);
+
+it("stops the fill when the owner credential rotates while the answer body is pending", async () => {
+  await browse("hire", "browser_use_open", { url: `${a}/login` });
+  const pending = await request({ conversation: "hire", origin: a, fields });
+  const before = posts.length;
+  const from = events.length;
+  let reading!: () => void;
+  const bodyRead = new Promise<void>((resolve) => (reading = resolve));
+  let send!: (chunk: Uint8Array) => void;
+  let finish!: () => void;
+  // No eager pull: the stream is pulled only once the route reads the body.
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        send = (chunk) => controller.enqueue(chunk);
+        finish = () => controller.close();
+      },
+      pull() {
+        reading();
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  const answering = app.request(`/v1/credential-requests/${pending.requestId}/answer`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${ownerToken}` },
+    body,
+    duplex: "half",
+  } as RequestInit);
+  await bodyRead;
+  // The owner rotates the credential this answer authenticated with; the body arrives after.
+  ownerToken = (await rotateOperatorCredential({ store: operatorStore, env: {} })).token;
+  send(new TextEncoder().encode(JSON.stringify({ values: { username: USER, password: SECRET } })));
+  finish();
+  const answered = (await (await answering).json()) as Record<string, unknown>;
+  seen.push(JSON.stringify(answered));
+  expect(answered).toMatchObject({
+    outcome: "settled",
+    request: { outcome: "failed", reason: "owner_unavailable" },
+  });
+  // Nothing typed, nothing posted.
+  expect(events.slice(from)).not.toContain("POST /typed");
+  expect(posts.length).toBe(before);
 }, 120_000);
 
 it("refuses a wrong origin, a redirect to another origin, another origin's frame or form action", async () => {

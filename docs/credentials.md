@@ -173,9 +173,12 @@ clankie credentials decline REQUEST_ID
 ```
 
 A value is never a command argument; to pipe one, send one value per line in
-the request's field order. The broker reloads the page, fills and submits the
-form only when the page, its fields and its form's action are on the exact
-origin the worker named, then retires the tab. The worker reads only `filled`,
+the request's field order. The broker freezes every other page in Clankie's
+browser, loads the page in a new tab of its own that no earlier page can reach,
+and fills and submits the form only when the page, its fields and its form's
+action are on the exact origin the worker named and the answering owner
+credential is still current. It then retires that tab and the sealed one before
+the other pages run again. The worker reads only `filled`,
 `declined` or `failed` with a reason code. Requests live in the service's
 memory; a restart, or ten minutes without an answer, closes them. Nothing is
 saved yet, and Chrome's own password manager is off in Clankie's browser.

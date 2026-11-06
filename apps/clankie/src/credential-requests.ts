@@ -20,6 +20,8 @@ interface Entry {
   readonly fields: CredentialRequestInput["fields"];
   seal?: CredentialSeal | undefined;
   timer?: NodeJS.Timeout | undefined;
+  /** Set when the request is withdrawn, replaced or expires while its fill is under way. */
+  cancelled?: string | undefined;
 }
 
 /** What a worker reads back: pending, or one of the four outcomes. Never a value. */
@@ -34,7 +36,11 @@ export interface CredentialRequests {
   /** The worker closes its own open request; the tab comes back untouched. */
   withdraw(principalId: string, requestId: string): Promise<CredentialStatus>;
   list(): CredentialRequest[];
-  answer(requestId: string, answer: CredentialAnswer): Promise<CredentialAnswerResult>;
+  /**
+   * Fill with the owner's values. `owner` is the answering owner's authority,
+   * read synchronously right before the broker types: false stops the fill.
+   */
+  answer(requestId: string, answer: CredentialAnswer, owner: () => boolean): Promise<CredentialAnswerResult>;
   decline(requestId: string): Promise<CredentialAnswerResult>;
 }
 
@@ -87,6 +93,8 @@ export function createCredentialRequests(deps: {
   }
   /** Close an open request without a value: its tab comes back as it was. */
   async function closeOpen(entry: Entry, outcome: CredentialOutcome, reason?: string) {
+    // A fill under way stops at its final check and settles itself.
+    if (entry.request.state === "filling") entry.cancelled ??= reason ?? outcome;
     if (entry.request.state !== "open") return;
     const seal = entry.seal;
     settle(entry, outcome, reason);
@@ -152,7 +160,7 @@ export function createCredentialRequests(deps: {
       prune();
       return [...entries.values()].map(view);
     },
-    async answer(requestId, answer) {
+    async answer(requestId, answer, owner) {
       const entry = entries.get(requestId);
       if (!entry) return { outcome: "refused", reason: "not_found" };
       if (entry.request.state !== "open" || !entry.seal) return { outcome: "refused", reason: "closed" };
@@ -168,7 +176,14 @@ export function createCredentialRequests(deps: {
       entry.seal = undefined;
       entry.request.state = "filling";
       clearTimeout(entry.timer);
-      const filled = await seal.fill(entry.fields, values);
+      // The final check, run synchronously by the broker right before it types: the
+      // owner who answered still holds owner authority, and this request is still
+      // the open one for its seal.
+      const confirm = () =>
+        entries.get(requestId) !== entry || entry.request.state !== "filling"
+          ? "closed"
+          : (entry.cancelled ?? (owner() ? undefined : "owner_unavailable"));
+      const filled = await seal.fill(entry.fields, values, confirm);
       if (filled.outcome === "filled") settle(entry, "filled");
       else settle(entry, "failed", filled.reason);
       return { outcome: "settled", request: view(entry) };

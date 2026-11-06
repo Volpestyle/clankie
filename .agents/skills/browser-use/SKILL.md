@@ -74,7 +74,8 @@ Never ask for, type or read a password. A hired worker at a sign-in form calls
 `clankie_request_credential` (through `clankie_call`) with the conversation it
 browses in, the page's exact origin and each input's kind and CSS selector. The
 tab is then sealed: tools on it and browser JavaScript everywhere refuse until
-the owner answers. The broker fills and submits the form and retires the tab;
+the owner answers. The broker fills and submits the form in a tab of its own
+while every other page is frozen, then retires that tab and the sealed one;
 your next call lands on a fresh tab in the same session at the landing page.
 Poll with the `requestId`; the result is only `filled`, `declined` or `failed`
 with a reason code ([sign-in requests](../../../docs/credentials.md#sign-in-requests)).

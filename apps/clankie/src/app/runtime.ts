@@ -1156,7 +1156,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
 
   app.route("/", createHuddleRoutes(authorizeOwnerSecrets, dependencies.captain.huddles));
   app.route("/", createWorkerAskRoutes(authorizeOwnerSecrets, dependencies.captain.workerAsks));
-  app.route("/", createCredentialRequestRoutes(authorizeOwnerSecrets, dependencies.credentialRequests));
+  app.route(
+    "/",
+    createCredentialRequestRoutes(authorizeOwnerSecrets, dependencies.credentialRequests, (request) =>
+      questionOwnerAuthority(request),
+    ),
+  );
 
   app.get("/v1/runtime-connections", async (context) => {
     const operator = await authenticateOperator(context.req.raw, dependencies);
