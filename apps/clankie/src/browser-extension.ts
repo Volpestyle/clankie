@@ -1,5 +1,5 @@
 import type { ClankieExtension } from "@clankie/extension";
-import { createBrowserHost, type BrowserHost } from "./browser-host.ts";
+import { createBrowserHost, type BrowserHost, type CredentialBrowser } from "./browser-host.ts";
 import type { CorePorts, CoreProjection } from "./extension-host.ts";
 
 /**
@@ -19,7 +19,7 @@ export const browserExtension: ClankieExtension<
   settings: { key: "browser", schema: { parse: () => undefined } },
   needs: ["capabilityStateRoot", "attachmentRoot", "logger", "env", "settings"],
   create(host) {
-    let browser: BrowserHost | undefined;
+    let browser: (BrowserHost & CredentialBrowser) | undefined;
     return {
       async start() {
         try {
@@ -44,7 +44,7 @@ export const browserExtension: ClankieExtension<
         await browser?.close().catch(() => undefined);
       },
       health: () => ({ state: "ready" }),
-      projection: () => (browser === undefined ? {} : { browser }),
+      projection: () => (browser === undefined ? {} : { browser, credentialBrowser: browser }),
     };
   },
 };

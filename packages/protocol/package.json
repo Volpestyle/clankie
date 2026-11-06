@@ -62,6 +62,7 @@
     "./evidence-credentials": "./src/evidence-credentials.ts",
     "./huddles": "./src/huddles.ts",
     "./worker-asks": "./src/worker-asks.ts",
+    "./credential-requests": "./src/credential-requests.ts",
     "./routines": "./src/routines.ts",
     "./settings-proposals": "./src/settings-proposals.ts",
     "./fleet-leads": "./src/fleet-leads.ts",

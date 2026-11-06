@@ -1,6 +1,6 @@
 /** Clankie's private browser, driven directly through Browser Use Pi's public SDK. */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   Browser,
@@ -21,6 +21,7 @@ import {
   type CallBrowserToolRequest,
   type CallBrowserToolResult,
 } from "@clankie/protocol";
+import { launchPipedChrome, type PipedChrome } from "./browser-pipe.ts";
 import { startBrowserRecording } from "./browser-recording.ts";
 import {
   launchPublicWebChrome,
@@ -129,8 +130,51 @@ export interface BrowserHost {
   ): Promise<CallBrowserToolResult>;
   close(): Promise<void>;
 }
+/** The signed-in browser as the credential broker sees it (#245, ADR 0342). */
+export interface CredentialBrowser {
+  /**
+   * Seal a conversation's current tab for one credential request when its top
+   * document is exactly `origin`. From then until the seal settles, no browser
+   * tool reaches that tab, and no conversation runs browser JavaScript.
+   */
+  sealForCredential(conversationId: string, origin: string): Promise<CredentialSeal | { refused: string }>;
+}
+export interface CredentialSeal {
+  /** The full address the broker loads for the fill: the sealed tab's URL, path and query included. */
+  readonly url: string;
+  /**
+   * Freeze every page in the signed-in Chrome and refuse while a shared or
+   * service worker of the origin runs, clear the origin's local storage,
+   * IndexedDB and cache storage (cookies stay), load the bound page in a new tab
+   * the broker makes (no opener, no name), type each value into its field, submit
+   * the field's form, then retire that tab and the sealed one. The conversation
+   * gets a new tab in the same session at the landing page, or a blank one when
+   * anything failed; only then do the other pages run again. Right before each
+   * value is typed the broker re-reads every target, then runs `confirm`
+   * synchronously; it returns a reason code to stop. The outcome carries a
+   * reason code, never page or value text.
+   */
+  fill(
+    fields: readonly CredentialFillField[],
+    values: Readonly<Record<string, string>>,
+    confirm: () => string | undefined,
+  ): Promise<{ outcome: "filled" } | { outcome: "failed"; reason: string }>;
+  /** Hand the same tab back; only for a seal no value ever reached. */
+  release(): Promise<void>;
+}
+interface CredentialFillField {
+  readonly kind: "username" | "password" | "code";
+  readonly selector: string;
+}
 
-export async function createBrowserHost(options: BrowserHostOptions): Promise<BrowserHost> {
+interface BrowserWorkspace extends BrowserHost {
+  /** The tab this workspace's tools act on, once a session has attached. */
+  currentTarget(): string | undefined;
+}
+
+export async function createBrowserHost(
+  options: BrowserHostOptions,
+): Promise<BrowserHost & CredentialBrowser> {
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
   const env = options.environment ?? process.env;
@@ -138,17 +182,24 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     string,
     {
       tail: Promise<void>;
-      workspace?: BrowserHost | undefined;
+      workspace?: BrowserWorkspace | undefined;
       targets: Set<string>;
       contextId?: string | undefined;
       isolated: boolean;
       /** A turn without machine access: the public-web Chrome, never the owner's profile. */
       restricted: boolean;
       idle?: NodeJS.Timeout;
+      /** Set while a credential request holds this lane's tab; every tool refuses. */
+      sealed?: { targetId: string } | undefined;
+      /** The tab a recreated workspace resumes on instead of opening a blank one. */
+      resumeTarget?: string | undefined;
     }
   >();
-  let owner: BrowserUse | undefined;
+  /** Open credential seals; while any is open, no conversation runs browser JavaScript. */
+  let seals = 0;
+  let owner: PipedChrome | undefined;
   let connection: CDP | undefined;
+  /** The host's own endpoint on the pipe; it never leaves this process. */
   let endpoint: string | undefined;
   let headed = false;
   let closing = false;
@@ -212,6 +263,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       lane.workspace = undefined;
       lane.targets.clear();
       lane.contextId = undefined;
+      lane.resumeTarget = undefined;
     }
   }
   async function ensureChrome() {
@@ -223,28 +275,14 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
         await recoverChrome();
       }
     }
-    await mkdir(profileDir, { recursive: true, mode: 0o700 });
-    owner = await BrowserUse.create({
-      model: "openai/gpt-5.4",
-      streamFn: () => {
-        throw new Error("No nested browser agent");
-      },
-      browser: Browser.chromium({
-        profileDir,
-        headless: !headed,
-        ...(env.CLANKIE_BROWSER_EXECUTABLE ? { executablePath: env.CLANKIE_BROWSER_EXECUTABLE } : {}),
-      }),
-      workspace: join(root, "lifecycle"),
-      telemetry: false,
-      log: false,
+    // DevTools only on a pipe: no port another process of the owner's could reach.
+    owner = await launchPipedChrome({
+      profileDir,
+      headless: !headed,
+      executablePath: env.CLANKIE_BROWSER_EXECUTABLE,
     });
     try {
-      const [port, path] = (await readFile(join(profileDir, "DevToolsActivePort"), "utf8"))
-        .trim()
-        .split("\n");
-      if (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/"))
-        throw new Error("Owned Chrome did not publish its browser endpoint");
-      endpoint = `ws://127.0.0.1:${port}${path}`;
+      endpoint = owner.mint();
       connection = await CDP.connect(endpoint, 15_000);
     } catch (error) {
       await stopChrome();
@@ -320,7 +358,9 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     }
     lane.targets.clear();
     lane.contextId = undefined;
-    const browsing = [...lanes.values()].filter((other) => other.workspace);
+    lane.resumeTarget = undefined;
+    // A sealed lane has no workspace while it waits, but its tab must outlive other lanes' cleanup.
+    const browsing = [...lanes.values()].filter((other) => other.workspace || other.sealed);
     if (!browsing.some((other) => !other.restricted)) await stopChrome();
     if (!browsing.some((other) => other.restricted)) await stopPublicChrome();
   }
@@ -331,6 +371,8 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
   ) {
     clearTimeout(lane.idle);
     lane.idle = setTimeout(() => {
+      // The credential broker settles a sealed lane; idle cleanup waits for it.
+      if (lane.sealed) return armLaneIdle(id, lane, delay);
       let failed = false;
       const cleanup = lane.tail
         .then(() => locked(() => retire(id, lane)))
@@ -357,6 +399,203 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
     "catalog",
     new Set(),
   );
+  const modeChange = (request: CallBrowserToolRequest) =>
+    request.tool === "browser_use_open" &&
+    typeof request.arguments.headed === "boolean" &&
+    request.arguments.headed !== headed;
+  /** Settle a seal: the lane resumes on `resume`, and the sealed tab is closed unless it is that tab. */
+  async function unseal(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    sealedTarget: string,
+    resume: string | undefined,
+  ) {
+    if (lane.sealed?.targetId !== sealedTarget) return;
+    lane.sealed = undefined;
+    seals -= 1;
+    if (resume !== sealedTarget) lane.targets.delete(sealedTarget);
+    if (resume !== undefined) lane.targets.add(resume);
+    lane.resumeTarget = resume;
+  }
+  /** Close the tabs that held a credential and open a fresh one in the same session. */
+  async function retireCredentialTabs(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    targetIds: readonly string[],
+    landing: string,
+  ): Promise<string | undefined> {
+    const cdp = connection;
+    if (!cdp) return undefined;
+    for (const targetId of targetIds)
+      // allow-swallowed-rejection -- a tab already gone is retired; the fresh tab is still made.
+      await cdp.send("Target.closeTarget", { targetId }).catch(() => undefined);
+    // closeTarget answers before the tab is gone; wait for each to leave the target list.
+    for (const deadline = Date.now() + 5000; ; await new Promise((resolve) => setTimeout(resolve, 50))) {
+      const remaining = await cdp.send("Target.getTargets");
+      if (!remaining.targetInfos.some((target) => targetIds.includes(target.targetId))) break;
+      if (Date.now() > deadline) throw new Error("credential tab did not close");
+    }
+    const { targetId: fresh } = await cdp.send("Target.createTarget", {
+      url: landing,
+      ...(await laneContext(cdp, lane)),
+    });
+    return fresh;
+  }
+  /** The lane's own browser context, when it has one that still exists. */
+  async function laneContext(cdp: CDP, lane: NonNullable<ReturnType<typeof lanes.get>>) {
+    const contexts = lane.contextId ? (await cdp.send("Target.getBrowserContexts")).browserContextIds : [];
+    return lane.contextId && contexts.includes(lane.contextId) ? { browserContextId: lane.contextId } : {};
+  }
+  async function sealForCredential(
+    conversationId: string,
+    origin: string,
+  ): Promise<CredentialSeal | { refused: string }> {
+    if (closing) return { refused: "browser_closed" };
+    const lane = lanes.get(conversationId);
+    if (!lane || lane.restricted) return { refused: "no_signed_in_browser" };
+    if (lane.sealed) return { refused: "already_sealed" };
+    // Refuse new calls on this lane and machine JavaScript everywhere from now on.
+    lane.sealed = { targetId: "" };
+    seals += 1;
+    const abandon = () => {
+      lane.sealed = undefined;
+      seals -= 1;
+    };
+    try {
+      await lane.tail;
+      const sealed = await locked(async () => {
+        const targetId = lane.workspace?.currentTarget() ?? lane.resumeTarget;
+        if (!connection || !targetId) return { refused: "no_open_tab" };
+        // allow-swallowed-rejection -- a tab that is already gone is refused below, never sealed.
+        const info = await connection.send("Target.getTargetInfo", { targetId }).catch(() => undefined);
+        if (!info || exactOrigin(info.targetInfo.url) !== origin) return { refused: "wrong_origin" };
+        lane.sealed = { targetId };
+        // End every signed-in workspace: its Node REPL (with any background code it
+        // started), recording and CDP sessions. Each resumes on its own tab later.
+        for (const other of lanes.values()) {
+          if (other.restricted || !other.workspace) continue;
+          const workspace = other.workspace;
+          other.workspace = undefined;
+          if (other !== lane) other.resumeTarget = workspace.currentTarget();
+          // close() drains the workspace's accepted call before ending its session.
+          await workspace.close();
+        }
+        // Then end every other client of this Chrome, including any endpoint a
+        // script copied out before the seal: only the host's own reaches the tab.
+        await owner!.revokeExcept([endpoint!]);
+        return { targetId, url: info.targetInfo.url };
+      });
+      if (sealed.refused !== undefined) {
+        abandon();
+        return { refused: sealed.refused };
+      }
+      return credentialSeal(lane, sealed.targetId, sealed.url, origin);
+    } catch (error) {
+      if (lane.sealed) abandon();
+      options.logger.warn(
+        { event: "browser.credential.seal_failed", detail: errorText(error) },
+        "credential seal failed",
+      );
+      return { refused: "browser_unavailable" };
+    }
+  }
+  function credentialSeal(
+    lane: NonNullable<ReturnType<typeof lanes.get>>,
+    targetId: string,
+    boundUrl: string,
+    origin: string,
+  ): CredentialSeal {
+    let settled = false;
+    const settle = () => {
+      if (settled) throw new Error("credential seal already settled");
+      settled = true;
+    };
+    return {
+      url: boundUrl,
+      async release() {
+        settle();
+        await locked(async () => unseal(lane, targetId, targetId));
+      },
+      async fill(fields, values, confirm) {
+        settle();
+        return locked(async () => {
+          let reason = "browser_unavailable";
+          let landing = "about:blank";
+          let frozen: FrozenPages | undefined;
+          let fillTab: string | undefined;
+          try {
+            const cdp = connection;
+            if (!cdp) throw new CredentialFillError("browser_unavailable");
+            // Nothing that existed before this fill runs while it types: every page in
+            // this Chrome is frozen first, or the fill does not start.
+            frozen = await freezeEveryPage(cdp);
+            // A shared or service worker is not a page and keeps running through the
+            // freeze, so one of this origin that exists now refuses the fill.
+            const running = aloneWith(
+              origin,
+              undefined,
+              frozen,
+              (await cdp.send("Target.getTargets")).targetInfos,
+            );
+            if (running !== undefined) throw new CredentialFillError(running);
+            // A tab the broker makes itself, with no opener and no name, so no page that
+            // existed before the seal holds a reference to it.
+            fillTab = (
+              await cdp.send("Target.createTarget", { url: "about:blank", ...(await laneContext(cdp, lane)) })
+            ).targetId;
+            const binding = () => (closing || lane.sealed?.targetId !== targetId ? "seal_lost" : confirm());
+            const filled = await fillCredentialForm(
+              cdp,
+              fillTab,
+              boundUrl,
+              origin,
+              fields,
+              values,
+              frozen,
+              binding,
+            );
+            if ("reason" in filled) reason = filled.reason;
+            else {
+              // A landing address that echoes a value (a GET form slipping past) is never handed back.
+              const echoes = Object.values(values).some(
+                (value) =>
+                  filled.landing.includes(value) || filled.landing.includes(encodeURIComponent(value)),
+              );
+              landing = /^https?:/u.test(filled.landing) && !echoes ? filled.landing : "about:blank";
+              reason = "";
+            }
+          } catch (error) {
+            reason = error instanceof CredentialFillError ? error.reason : "browser_unavailable";
+            options.logger.warn(
+              {
+                event: "browser.credential.fill_failed",
+                reason,
+                // CDP errors name methods, never the params that carried a value.
+                detail: error instanceof CredentialFillError ? undefined : errorText(error),
+              },
+              "credential fill failed",
+            );
+          }
+          let fresh: string | undefined;
+          try {
+            fresh = await retireCredentialTabs(
+              lane,
+              fillTab === undefined ? [targetId] : [fillTab, targetId],
+              reason === "" ? landing : "about:blank",
+            );
+          } catch (error) {
+            reason ||= "retire_failed";
+            options.logger.warn(
+              { event: "browser.credential.retire_failed", detail: errorText(error) },
+              "credential tab retirement failed",
+            );
+          }
+          // Only once the tabs that held a value are gone do the other pages run again.
+          if (frozen && connection) await thawPages(connection, frozen);
+          await unseal(lane, targetId, fresh);
+          return reason === "" ? { outcome: "filled" as const } : { outcome: "failed" as const, reason };
+        });
+      },
+    };
+  }
   async function publicWebRefusal(
     tool: string,
     args: Record<string, unknown>,
@@ -374,6 +613,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
       : `A turn without machine access browses only public http(s) addresses: ${refusal}.`;
   }
   return {
+    sealForCredential,
     catalog: (signal) =>
       closing
         ? Promise.resolve({ schemaVersion: 1, available: false, tools: [] })
@@ -407,6 +647,20 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
           };
         const tool = tools[request.tool as ToolName];
         if (!tool) return { outcome: "refused", tool: request.tool, reason: "unknown_tool" };
+        // A tab holding a credential entry is the broker's alone, and machine JavaScript
+        // can reach every tab through root CDP, so none runs anywhere until it settles.
+        if (
+          current.sealed ||
+          (seals > 0 && !restricted && (request.tool === "browser_use_javascript" || modeChange(request)))
+        )
+          return {
+            outcome: "refused",
+            tool: request.tool,
+            reason: "browser_unavailable",
+            detail: current.sealed
+              ? "This tab is waiting for the owner to answer a sign-in. Check the credential request; the browser comes back when it settles."
+              : "A sign-in is in progress in the browser; browser JavaScript and mode changes wait until it settles.",
+          };
         if ("requiresShell" in tool && authority?.shell !== true)
           return {
             outcome: "refused",
@@ -471,16 +725,26 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
             await authority?.guard?.();
             if (!current.workspace) {
               const cdp = current.restricted ? publicChrome!.connection : connection!;
-              const cdpUrl = current.restricted ? publicChrome!.endpoint : endpoint!;
+              // Each signed-in workspace gets its own endpoint, which a seal can revoke.
+              const cdpUrl = current.restricted ? publicChrome!.endpoint : owner!.mint();
               // Each restricted conversation also gets its own disposable context in that Chrome.
               if (current.isolated || current.restricted)
                 current.contextId = (
                   await cdp.send("Target.createBrowserContext", { disposeOnDetach: true })
                 ).browserContextId;
-              const { targetId } = await cdp.send("Target.createTarget", {
-                url: "about:blank",
-                ...(current.contextId ? { browserContextId: current.contextId } : {}),
-              });
+              const resume = current.resumeTarget;
+              current.resumeTarget = undefined;
+              const live = resume
+                ? (await cdp.send("Target.getTargets")).targetInfos.some(
+                    (target) => target.targetId === resume,
+                  )
+                : false;
+              const { targetId } = live
+                ? { targetId: resume! }
+                : await cdp.send("Target.createTarget", {
+                    url: "about:blank",
+                    ...(current.contextId ? { browserContextId: current.contextId } : {}),
+                  });
               current.targets.add(targetId);
               current.workspace = await createBrowserWorkspace(
                 options,
@@ -488,7 +752,7 @@ export async function createBrowserHost(options: BrowserHostOptions): Promise<Br
                 createHash("sha256").update(id).digest("hex"),
                 current.targets,
                 current.contextId,
-                current.restricted ? cdpUrl : undefined,
+                { endpoint: cdpUrl, restricted: current.restricted },
               );
             }
           });
@@ -536,10 +800,10 @@ async function createBrowserWorkspace(
   key: string,
   targets: Set<string>,
   contextId?: string,
-  /** The public-web Chrome's endpoint; set only for turns without machine access. */
-  publicEndpoint?: string,
-): Promise<BrowserHost> {
-  const restricted = publicEndpoint !== undefined;
+  /** Where this workspace's own connection goes; restricted marks the public-web Chrome. */
+  access?: { endpoint: string; restricted: boolean },
+): Promise<BrowserWorkspace> {
+  const restricted = access?.restricted === true;
   const env = options.environment ?? process.env;
   const root = join(options.stateRoot, "browser");
   const profileDir = join(root, "profile");
@@ -621,15 +885,8 @@ async function createBrowserWorkspace(
     });
     try {
       const initial = await session.execute("await page.info()");
-      const [port, path] = publicEndpoint
-        ? []
-        : (await readFile(join(profileDir, "DevToolsActivePort"), "utf8")).trim().split("\n");
-      if (
-        !initial.targetId ||
-        (!publicEndpoint && (!port || !/^\d+$/u.test(port) || !path?.startsWith("/devtools/browser/")))
-      )
-        throw new Error("Owned Chrome did not publish its browser endpoint");
-      connection = await CDP.connect(publicEndpoint ?? `ws://127.0.0.1:${port}${path}`, 15_000);
+      if (!initial.targetId || !access) throw new Error("Owned Chrome did not publish its browser endpoint");
+      connection = await CDP.connect(access.endpoint, 15_000);
       await select(initial.targetId);
       try {
         recordingRequested = (await options.recordSessions?.()) ?? false;
@@ -643,7 +900,7 @@ async function createBrowserWorkspace(
         {
           event: "browser.host.ready",
           provider: "browser-use-pi",
-          profileDir: publicEndpoint ? "public" : profileDir,
+          profileDir: restricted ? "public" : profileDir,
         },
         "browser ready",
       );
@@ -871,6 +1128,7 @@ async function createBrowserWorkspace(
     return { outcome: "ok", tool: name, content, isError, artifacts: await images(result.images, name) };
   }
   return {
+    currentTarget: () => page?.targetId,
     async catalog() {
       return { schemaVersion: 1, available: !closing, tools: closing ? [] : catalog };
     },
@@ -898,4 +1156,245 @@ async function createBrowserWorkspace(
 }
 function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
+}
+
+/** `scheme://host[:port]` for an http(s) address, or undefined. */
+function exactOrigin(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+class CredentialFillError extends Error {
+  readonly reason: string;
+  constructor(reason: string) {
+    super(reason);
+    this.reason = reason;
+  }
+}
+
+const FILL_TIMEOUT_MS = 15_000;
+/** Checks the bound form inside the broker's isolated world; returns a reason code or "ok". */
+const CHECK_FORM = `(spec) => {
+  if (location.origin !== spec.origin) return "wrong_origin";
+  if (window.top !== window) return "framed";
+  const elements = spec.fields.map((field) => {
+    try { return document.querySelector(field.selector); } catch { return null; }
+  });
+  const types = { username: ["text", "email"], password: ["password"], code: ["text", "tel", "number", "password"] };
+  for (let i = 0; i < elements.length; i++) {
+    const element = elements[i];
+    if (!(element instanceof HTMLInputElement)) return "field_not_found";
+    if (!types[spec.fields[i].kind].includes(element.type)) return "field_shape_mismatch";
+    if (element.disabled || element.readOnly) return "field_not_editable";
+  }
+  const form = elements[0].form;
+  if (!form || elements.some((element) => element.form !== form)) return "form_mismatch";
+  if (form.method.toLowerCase() !== "post") return "form_not_post";
+  const target = form.getAttribute("target");
+  if (target && target !== "_self") return "form_target";
+  let action;
+  try { action = new URL(form.action, document.baseURI); } catch { return "form_action_origin"; }
+  if (action.origin !== spec.origin) return "form_action_origin";
+  return "ok";
+}`;
+
+/** Pages the broker froze for one fill: target id to the broker's session on it. */
+type FrozenPages = ReadonlyMap<string, string>;
+const FREEZE_WORLD = "clankie-credential-freeze";
+
+/** Evaluate in one of the broker's isolated worlds; a page that never answers fails the fill. */
+async function evaluateIn(cdp: CDP, sessionId: string, contextId: number, expression: string) {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new CredentialFillError("page_not_frozen")), 5000);
+  });
+  try {
+    const result = await Promise.race([
+      cdp.send("Runtime.evaluate", { expression, contextId, returnByValue: true }, sessionId),
+      timeout,
+    ]);
+    return result.exceptionDetails ? undefined : (result.result.value as unknown);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Freeze every page in this Chrome (Page.setWebLifecycleState). Each must report
+ * the freeze in the broker's own isolated world, or every page is thawed again
+ * and the fill fails closed.
+ */
+async function freezeEveryPage(cdp: CDP): Promise<FrozenPages> {
+  const frozen = new Map<string, string>();
+  try {
+    const { targetInfos } = await cdp.send("Target.getTargets");
+    for (const info of targetInfos) {
+      if (info.type !== "page") continue;
+      const { sessionId } = await cdp.send("Target.attachToTarget", {
+        targetId: info.targetId,
+        flatten: true,
+      });
+      frozen.set(info.targetId, sessionId);
+      const { frameTree } = await cdp.send("Page.getFrameTree", undefined, sessionId);
+      const { executionContextId } = await cdp.send(
+        "Page.createIsolatedWorld",
+        { frameId: frameTree.frame.id, worldName: FREEZE_WORLD },
+        sessionId,
+      );
+      await evaluateIn(
+        cdp,
+        sessionId,
+        executionContextId,
+        `globalThis.frozen = false; document.addEventListener("freeze", () => { globalThis.frozen = true; }, true); true`,
+      );
+      await cdp.send("Page.setWebLifecycleState", { state: "frozen" }, sessionId);
+      if ((await evaluateIn(cdp, sessionId, executionContextId, "globalThis.frozen")) !== true)
+        throw new CredentialFillError("page_not_frozen");
+    }
+    return frozen;
+  } catch (error) {
+    await thawPages(cdp, frozen);
+    throw error instanceof CredentialFillError ? error : new CredentialFillError("page_not_frozen");
+  }
+}
+
+/**
+ * Whether the fill runs alone: every page but the fill tab is one the broker
+ * froze, and no shared or service worker of the origin runs (a worker is not
+ * frozen with the pages, and one that existed before the seal may hold
+ * agent-patched code the sign-in page can reach). A reason code, or undefined.
+ */
+function aloneWith(
+  origin: string,
+  fillTab: string | undefined,
+  frozen: FrozenPages,
+  targets: readonly { targetId: string; type: string; url: string }[],
+): string | undefined {
+  if (
+    targets.some(
+      (target) => target.type === "page" && target.targetId !== fillTab && !frozen.has(target.targetId),
+    )
+  )
+    return "page_not_frozen";
+  if (
+    targets.some(
+      (target) =>
+        (target.type === "shared_worker" || target.type === "service_worker") &&
+        exactOrigin(target.url) === origin,
+    )
+  )
+    return "worker_running";
+  return undefined;
+}
+
+async function thawPages(cdp: CDP, frozen: FrozenPages) {
+  for (const sessionId of frozen.values()) {
+    // allow-swallowed-rejection -- a page closed while frozen has nothing left to thaw.
+    await cdp.send("Page.setWebLifecycleState", { state: "active" }, sessionId).catch(() => undefined);
+    // allow-swallowed-rejection -- a session already gone needs no detach.
+    await cdp.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
+  }
+}
+
+/**
+ * The broker's own fill in a tab it just made: service workers bypassed, the
+ * origin's storage cleared but for cookies, the bound page loaded, an
+ * exact-origin top document and form with no opener or name, typed input, and
+ * the form's own submit, all through a CDP session no agent holds. Right before
+ * each value is typed, every target is read again (no unfrozen page, no worker
+ * of the origin), then one synchronous check confirms the owner, the request
+ * and the seal (`binding`); nothing is awaited between it and the keystrokes.
+ */
+async function fillCredentialForm(
+  cdp: CDP,
+  targetId: string,
+  boundUrl: string,
+  origin: string,
+  fields: readonly CredentialFillField[],
+  values: Readonly<Record<string, string>>,
+  frozen: FrozenPages,
+  binding: () => string | undefined,
+): Promise<{ landing: string } | { reason: string }> {
+  if (exactOrigin(boundUrl) !== origin) return { reason: "wrong_origin" };
+  for (const field of fields) if (!values[field.kind]) return { reason: "missing_value" };
+  const created = await cdp.send("Target.getTargetInfo", { targetId });
+  if (created.targetInfo.openerId || created.targetInfo.canAccessOpener)
+    return { reason: "fill_tab_reachable" };
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+  try {
+    await cdp.send("Page.enable", undefined, sessionId);
+    await cdp.send("Network.enable", undefined, sessionId);
+    // No service worker of this origin sees the load or the submit.
+    await cdp.send("Network.setBypassServiceWorker", { bypass: true }, sessionId);
+    // Nothing a page wrote to this origin's storage before the seal reaches the
+    // sign-in page: local storage, IndexedDB, cache storage and service worker
+    // registrations are cleared. Cookies stay, for the site's device trust and CSRF.
+    await cdp.send(
+      "Storage.clearDataForOrigin",
+      { origin, storageTypes: "local_storage,indexeddb,cache_storage,service_workers" },
+      sessionId,
+    );
+    const loaded = cdp.waitFor("Page.loadEventFired", { sessionId, timeoutMs: FILL_TIMEOUT_MS });
+    const navigated = await cdp.send("Page.navigate", { url: boundUrl }, sessionId);
+    if (navigated.errorText) return { reason: "page_unavailable" };
+    await loaded;
+    // The top document's origin is checked inside the page, before typing and before submitting.
+    const { frameTree } = await cdp.send("Page.getFrameTree", undefined, sessionId);
+    const { executionContextId } = await cdp.send(
+      "Page.createIsolatedWorld",
+      { frameId: frameTree.frame.id, worldName: "clankie-credential-broker" },
+      sessionId,
+    );
+    const run = async (expression: string) => {
+      const result = await cdp.send(
+        "Runtime.evaluate",
+        { expression, contextId: executionContextId, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
+      if (result.exceptionDetails) throw new CredentialFillError("page_script_failed");
+      return result.result.value as unknown;
+    };
+    const spec = JSON.stringify({ origin, fields });
+    const checked = await run(`(${CHECK_FORM})(${spec})`);
+    if (checked !== "ok") return { reason: typeof checked === "string" ? checked : "form_check_failed" };
+    if ((await run(`window.opener === null && window.name === ""`)) !== true)
+      return { reason: "fill_tab_reachable" };
+    for (const field of fields) {
+      const selector = JSON.stringify(field.selector);
+      const focused = await run(
+        `(() => { const e = document.querySelector(${selector}); e.focus(); e.select(); return document.activeElement === e && location.origin === ${JSON.stringify(origin)}; })()`,
+      );
+      if (focused !== true) return { reason: "focus_lost" };
+      // Still nothing else running: no unfrozen page but this one, no worker of the origin.
+      const alone = aloneWith(origin, targetId, frozen, (await cdp.send("Target.getTargets")).targetInfos);
+      if (alone !== undefined) return { reason: alone };
+      // The final check: owner, request and seal, synchronously, then the keystrokes.
+      const refused = binding();
+      if (refused !== undefined) return { reason: refused };
+      // Real input, so the page's own handlers see typing; the value goes only to Chrome.
+      await cdp.send("Input.insertText", { text: values[field.kind]! }, sessionId);
+    }
+    // Re-check the whole form after typing, then submit it from the broker's world.
+    const rechecked = await run(`(${CHECK_FORM})(${spec})`);
+    if (rechecked !== "ok")
+      return { reason: typeof rechecked === "string" ? rechecked : "form_check_failed" };
+    const settled = cdp.waitFor("Page.loadEventFired", { sessionId, timeoutMs: FILL_TIMEOUT_MS }).then(
+      () => true,
+      () => false,
+    );
+    const submitted = await run(
+      `(() => { const f = document.querySelector(${JSON.stringify(fields[0]!.selector)}).form; f.requestSubmit(); return true; })()`,
+    );
+    if (submitted !== true) return { reason: "submit_failed" };
+    await settled;
+    const info = await cdp.send("Target.getTargetInfo", { targetId });
+    return { landing: info.targetInfo.url };
+  } finally {
+    // allow-swallowed-rejection -- the tab is retired next whether or not the session detaches.
+    await cdp.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
+  }
 }

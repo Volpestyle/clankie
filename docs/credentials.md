@@ -158,6 +158,39 @@ Replacing either account token requires restarting the process that logged into
 that gateway. Revoking the lab opt-in blocks the next privileged action without
 waiting for a restart.
 
+## Sign-in requests
+
+When a hired worker reaches a sign-in page in Clankie's private browser, it
+asks with `clankie_request_credential` (origin and field shape only) instead of
+asking you for a password
+([ADR 0342](adr/0342-desktop-work-runs-in-the-mode-the-owner-picks.md#implementation-boundary-245-first-slice)).
+Answer in the console with `/credentials`, or in a shell:
+
+```sh
+clankie credentials                      # open requests: origin, full page address, worker, fields
+clankie credentials answer REQUEST_ID    # prompts for each value with echo off
+clankie credentials decline REQUEST_ID
+```
+
+A value is never a command argument; to pipe one, send one value per line in
+the request's field order. The prompt and the list show the full address the
+broker will load, path and query included, because the worker chose it: check
+it is the site's own sign-in page. The broker freezes every other page in
+Clankie's browser and refuses (`worker_running`) while a shared or service
+worker of that origin is running, since those keep running through the freeze.
+It clears the origin's local storage, IndexedDB and cache storage (cookies
+stay), loads the page in a new tab of its own that no earlier page can reach,
+and fills and submits the form only when the page, its fields and its form's
+action are on the exact origin the worker named and the answering owner
+credential is still current. Right before each value it checks again that no
+other page is running and no worker of the origin has started; a sign-in page
+that starts one itself is refused, not filled. It then retires that tab and the sealed one before
+the other pages run again. The worker reads only `filled`,
+`declined` or `failed` with a reason code. Requests live in the service's
+memory; a restart, or ten minutes without an answer, closes them. Nothing is
+saved yet, and Chrome's own password manager is off in Clankie's browser.
+That browser has no DevTools port another program could attach to.
+
 ## Local Clankie bearers
 
 Local bearers authenticate Clankie processes to each other. They are not

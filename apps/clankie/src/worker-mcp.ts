@@ -49,6 +49,11 @@ import {
   type WorkerVideoPort,
 } from "./worker-video.ts";
 import { DurableReceiptStore } from "./durable-receipt-store.ts";
+import {
+  CredentialRequestIdSchema,
+  CredentialRequestInputSchema,
+} from "@clankie/protocol/credential-requests";
+import type { CredentialRequests, CredentialStatus } from "./credential-requests.ts";
 import { REVIEW_TOOLS } from "../../../integrations/claude-plugin/worker/bin/review-tools.mjs";
 import { canonicalJson } from "@clankie/protocol/canonical-json";
 
@@ -67,6 +72,27 @@ const minecraftWorkerCatalog = Object.entries(minecraftWorkerSchemas).map(([qual
     "Drive Clankie's current Minecraft stay only when he explicitly selected your exact fleet principal through minecraft_driver. One driver; the owning conversation keeps its play lease and authority. Read motor settlement and verified evidence separately. No join, configuration, administration or raw motor access.",
   inputSchema: z.toJSONSchema(schema),
 }));
+
+/** A sign-in the owner types and the broker fills (#245, ADR 0342); a worker names only the form. */
+const WORKER_CREDENTIAL_TOOL = "clankie_request_credential";
+const WorkerCredentialSchema = z.union([
+  CredentialRequestInputSchema,
+  z.strictObject({ requestId: CredentialRequestIdSchema, withdraw: z.literal(true).optional() }),
+]);
+const workerCredentialCatalogEntry = {
+  qualifiedName: WORKER_CREDENTIAL_TOOL,
+  description:
+    "Ask the owner to sign in on a page open in Clankie's private browser, without the password ever reaching you. Open the sign-in page with `clankie browser call` first, then send conversation (the same --conversation), the page's exact origin and fields: {kind: username|password|code, selector: CSS selector of the input}. The tab is sealed until it settles: browser tools on it and browser JavaScript everywhere refuse. The broker reloads the page, types the owner's values, submits the form and retires the tab; you get a fresh tab in the same session at the landing page. 'pending' is normal: call again with only requestId (or requestId and withdraw:true to give up). The result is only filled, declined, saved or failed. Never ask for, type or read a password yourself.",
+  inputSchema: z.toJSONSchema(WorkerCredentialSchema),
+};
+function credentialStatusText(status: CredentialStatus, origin?: string): string {
+  if (status.outcome === "pending")
+    return JSON.stringify({
+      ...status,
+      note: `Waiting for sign-in${origin ? ` to ${origin}` : ""}; the owner answers in Clankie (/credentials or \`clankie credentials answer ${status.requestId}\`). Call again with this requestId.`,
+    });
+  return JSON.stringify(status);
+}
 
 /** The app note board (ADR 0301), read-only for a fleet worker. */
 const WORKER_READ_NOTES_TOOL = "clankie_read_notes";
@@ -371,6 +397,8 @@ export class WorkerMcp {
       ): Promise<unknown>;
     };
     video?: WorkerVideoPort;
+    /** Sign-in requests for this machine's private browser (#245). */
+    credentialRequests?: CredentialRequests;
     /** The app note board's read (ADR 0301); a worker never posts to it. */
     appNotes?: {
       read(input: {
@@ -1801,6 +1829,9 @@ export class WorkerMcp {
                   ...connected,
                   ...(this.options.minecraft === undefined ? [] : minecraftWorkerCatalog),
                   ...(this.options.video === undefined ? [] : [workerVideoCatalogEntry]),
+                  ...(this.options.credentialRequests === undefined || authorityNow.local !== true
+                    ? []
+                    : [workerCredentialCatalogEntry]),
                   ...(this.options.appNotes === undefined ? [] : [workerReadNotesCatalogEntry]),
                 ];
                 const terms = (search.query ?? "").toLowerCase().split(/\s+/u).filter(Boolean);
@@ -1883,6 +1914,36 @@ export class WorkerMcp {
                   : result,
               );
               return { content: [{ type: "text", text }], isError: result.outcome === "refused" };
+            }
+            if (name === WORKER_CREDENTIAL_TOOL) {
+              // The browser is this Mac's; only a worker admitted on this Mac may ask for it.
+              if (
+                authorityNow.fleet === undefined ||
+                authorityNow.local !== true ||
+                this.options.credentialRequests === undefined
+              )
+                throw new Error("Sign-in requests need a worker admitted on this machine");
+              const input = WorkerCredentialSchema.parse(args);
+              const requests = this.options.credentialRequests;
+              const status =
+                "origin" in input
+                  ? await requests.open(
+                      authorityNow.principalId,
+                      authorityNow.pane ?? authorityNow.principalId,
+                      input,
+                    )
+                  : input.withdraw
+                    ? await requests.withdraw(authorityNow.principalId, input.requestId)
+                    : requests.status(authorityNow.principalId, input.requestId);
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: credentialStatusText(status, "origin" in input ? input.origin : undefined),
+                  },
+                ],
+                isError: status.outcome === "not_found",
+              };
             }
             if (name === WORKER_READ_NOTES_TOOL) {
               if (authorityNow.fleet === undefined || this.options.appNotes === undefined)

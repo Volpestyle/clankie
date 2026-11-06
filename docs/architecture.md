@@ -847,8 +847,12 @@ call-time revocation checks still apply.
   check rather than grinding at it ([ADR 0127](adr/0127-his-accounts-are-his.md)).
   Browsing defaults to headless. After 60 idle seconds in a conversation, the host saves its recording and
   closes its tabs. The last workspace closing also closes Chrome. Persistent logins remain; the next burst starts headless.
-  One lifecycle owner launches Chrome lazily, holds the SDK profile lock and
-  owns shutdown/recovery. Other workspaces attach to its CDP endpoint. Mode
+  One lifecycle owner launches Chrome lazily and owns shutdown/recovery. Chrome
+  serves DevTools only on a pipe the service holds
+  ([`browser-pipe.ts`](../apps/clankie/src/browser-pipe.ts)); each workspace gets
+  its own token-gated loopback endpoint minted in memory, so no other process of
+  the owner's user can attach, and a sign-in seal revokes every endpoint but the
+  broker's. Chrome's password manager and form autofill are off in the profile. Mode
   changes refuse while other conversations browse; crashes invalidate handles
   without replaying effects.
   JavaScript bindings reset at idle close, mode changes or worker timeout; workspace

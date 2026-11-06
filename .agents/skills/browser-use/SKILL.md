@@ -70,6 +70,19 @@ the browser's mode can't change there. A
 it through another tool ([ADR 0206](../../../docs/adr/0206-browser-use-pi-supplies-the-browser-workspace.md#amendment-turns-without-machine-access-browse-the-public-web-logged-out-2026-10-25-vuh-2590)).
 The owner's own turns keep the signed-in profile.
 
+Never ask for, type or read a password. A hired worker at a sign-in form calls
+`clankie_request_credential` (through `clankie_call`) with the conversation it
+browses in, the page's exact origin and each input's kind and CSS selector. The
+tab is then sealed: tools on it and browser JavaScript everywhere refuse until
+the owner answers. The broker fills and submits the form in a tab of its own
+while every other page is frozen, then retires that tab and the sealed one;
+your next call lands on a fresh tab in the same session at the landing page.
+Poll with the `requestId`; the result is only `filled`, `declined` or `failed`
+with a reason code ([sign-in requests](../../../docs/credentials.md#sign-in-requests)).
+The owner sees the tab's full address, so ask from the site's own sign-in page.
+`worker_running` means a shared or service worker of that origin was running:
+close the tabs on that origin you no longer need and ask again.
+
 `browser_use_open` with `headed: true` opens your profile for human sign-in.
 Changing modes resets your workspace and is unavailable while other conversations
 are browsing. After 60 seconds without a tool call in your conversation, the

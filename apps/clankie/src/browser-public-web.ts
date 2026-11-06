@@ -261,7 +261,7 @@ export interface PublicWebChrome {
   close(): Promise<void>;
 }
 
-async function chromeExecutable(configured: string | undefined): Promise<string> {
+export async function chromeExecutable(configured: string | undefined): Promise<string> {
   const candidates = configured
     ? [configured]
     : process.platform === "darwin"

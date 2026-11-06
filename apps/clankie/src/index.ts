@@ -96,6 +96,7 @@ import { CaptainSeats, captainSeatSnapshot } from "./captain-seat.ts";
 import { createCaptainSeatLauncher } from "./captain-seat-launcher.ts";
 import { createModelKeys } from "./model-keys.ts";
 import { DEFAULT_DEVICE_DOORWAY_PORT, deviceDoorwayFetch } from "./device-doorway.ts";
+import { createCredentialRequests } from "./credential-requests.ts";
 import { WorkerMcp } from "./worker-mcp.ts";
 import { OpenCodeProfiles } from "./opencode-profiles.ts";
 import { RemoteOpenCodeWorkers } from "./captain/remote-opencode-workers.ts";
@@ -269,6 +270,7 @@ import { verifyCompanionApp } from "./companion-app-identity.ts";
 import { applyRepoProviderEnvironment } from "./repo-environment.ts";
 import {
   browserOf,
+  credentialBrowserOf,
   createCoreExtensions,
   doorwayOf,
   projected,
@@ -536,6 +538,8 @@ extensions.add(browserExtension, {
 });
 await extensions.start();
 const browserHost = browserOf(extensions);
+// Sign-in requests (#245): the broker's book, filling only Clankie's own signed-in browser.
+const credentialRequests = createCredentialRequests({ browser: credentialBrowserOf(extensions), logger });
 
 // What he makes (ADR 0328 extension): pictures, clips, skin drafts and his drawing hand (ADR 0096).
 extensions.add(mediaExtension, { enabled: switchedOn(startupSettings, "media"), settings: undefined });
@@ -2164,6 +2168,7 @@ const workerMcp = new WorkerMcp({
   host: mcpHost,
   ...(minecraft === undefined ? {} : { minecraft }),
   ...(media === undefined ? {} : { video: media.generator }),
+  credentialRequests,
   appNotes: {
     read: async (input) =>
       captain.appNotes?.({ action: "read", ...input }) ??
@@ -2717,6 +2722,7 @@ const clankie = await createClankieApp({
   ...(discordPresenceRuntime === undefined ? {} : { discordPresenceRuntime }),
   ...(discordUserPresenceRuntime === undefined ? {} : { discordUserPresenceRuntime }),
   ...(browserHost === undefined ? {} : { browserTools: browserHost }),
+  credentialRequests,
   ...(computerUseHarnesses === undefined ? {} : { computerUseHarnesses }),
   activityObservations: {
     current: (_signal) => Promise.resolve(activityObservations.current()),
