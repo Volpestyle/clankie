@@ -293,7 +293,7 @@ export function createRex(options: RexOptions = {}): Rex {
             if (blockId === undefined || blockKey === undefined) continue;
             if (creator !== undefined && creator !== TERMINAL_CREATOR) continue;
             const target = { session: sessionId, block: blockId };
-            // A block that won't answer is left out, not the whole list.
+            // allow-swallowed-rejection -- a block that won't answer is left out, not the whole list.
             const live = await occupied(target).catch(() => undefined);
             if (live === undefined) continue;
             const title = text(entry?.label) ?? text(session?.label);
@@ -432,6 +432,7 @@ export function createRex(options: RexOptions = {}): Rex {
             if (await working.seen(confirmMs))
               return { status: "delivered", detail: "The agent took it and started working." };
             // The stream can miss a change it started after; ask once more.
+            // allow-swallowed-rejection -- an unanswered last check leaves the send unconfirmed, as said below.
             const now = await statusOf(target).catch(() => undefined);
             return now?.state === "working"
               ? { status: "delivered", detail: "The agent took it and started working." }
