@@ -315,6 +315,9 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   asks [list] [--all]   Workers' open structured asks to their leads (--all includes settled ones)
   asks answer ASK_ID (--value VALUE | --text TEXT)   Answer one; the worker hears it tied to the ask
   asks withdraw ASK_ID   Drop an ask that will not be answered
+  credentials [list] [--all]   Workers' open sign-in requests for Clankie's private browser
+  credentials answer REQUEST_ID   Type the sign-in with echo off (or pipe one value per line); the broker fills it
+  credentials decline REQUEST_ID   Refuse a sign-in request; the worker's tab comes back untouched
   huddle [list | ID] [--json]   Recent huddles, or one huddle's board: seats, blockers, landing order
   huddle start [--project ID] [--window MINUTES]   Ask every seat what it's on, what blocks it, what it lands when
   huddle close ID   Stop collecting and tell the lead what arrived
