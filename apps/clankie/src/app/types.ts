@@ -178,6 +178,8 @@ export interface ClankieAppDependencies {
   agentMessageReceipts?: import("../agent-message-receipts.ts").AgentMessageReceipts;
   /** Which connected apps the owner lets answer prompts in agent panes (ADR 0303). */
   connectorPromptAnswersPath?: string;
+  /** Where the daily fleet digest is stored; absent, none is generated. */
+  fleetDailyDigest?: { path: string; intervalMs?: number };
   /** Sends a job to a connected lead's stored wake webhook (ADR 0336). */
   leadWakes?: import("../lead-wakes.ts").LeadWakes;
   /** Setup's one read-only agent and its proposal (ADR 0320). */

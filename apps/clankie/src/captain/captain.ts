@@ -5408,6 +5408,7 @@ export function createCaptain(deps: CaptainDeps, options: CaptainOptions): Capta
     leadChats,
     fleetRoom: (request, signal) => fleetRoom.read(request, signal),
     leadChangesCurrent: () => lead.status().lead === "apps",
+    confirmedHireTimes: () => herdrWatches.confirmedHireTimes(),
     leadChangeSources: (deviceId, herdr = true) =>
       leadChangeSources({
         herdr,

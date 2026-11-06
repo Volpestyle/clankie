@@ -1195,6 +1195,10 @@ export class HerdrWatchStore implements HerdrWatchPort {
    * settles its native receipts as {@link retireGoneLocalHires} does, then releases a
    * stale allocation whose pane never appeared through the operator's own census.
    */
+  public confirmedHireTimes(): readonly number[] {
+    return this.projectHires.confirmedHireTimes();
+  }
+
   private retireGoneProjectHires(workingDirectory: string, guard: () => Promise<void>): Promise<void> {
     return this.recovery.retireGoneProjectHires(workingDirectory, guard);
   }

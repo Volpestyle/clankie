@@ -13,7 +13,7 @@ import { DesktopSettingsSchema } from "./desktop.ts";
 import { AutonomySettingsSchema, FLEET_WORKING_PREFERENCE_FIELDS } from "@clankie/protocol/autonomy";
 import { EmbodimentBudgetSchema } from "@clankie/protocol/embodiment";
 import { HireProfileSchema } from "@clankie/protocol/hire-profile";
-import { FLEET_AUTO_TIDY } from "@clankie/protocol/fleet-settings";
+import { FLEET_AUTO_TIDY, FleetDigestTimeSchema } from "@clankie/protocol/fleet-settings";
 import { FleetResourcePolicySchema, FleetResourceMachineIdSchema } from "@clankie/protocol/fleet-resources";
 import { z } from "zod";
 import { ProjectsSettingsSchema, RetiredWorkingPreferencesSchema } from "@clankie/protocol/projects";
@@ -487,6 +487,8 @@ export const FleetSettingsSchema = z
      * (VUH-2392). "off" leaves both to the lead.
      */
     autoTidy: z.enum(FLEET_AUTO_TIDY).default("1h"),
+    /** Host-local time the daily fleet digest is generated; quiet hours defer it. */
+    digestTime: FleetDigestTimeSchema.default("08:00"),
     /** Physical machine capacity is separate from the fleet-size staffing preference. */
     resources: FleetResourcePolicySchema.optional(),
     machineResources: z.record(FleetResourceMachineIdSchema, FleetResourcePolicySchema).optional(),

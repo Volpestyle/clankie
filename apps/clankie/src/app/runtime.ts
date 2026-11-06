@@ -2694,7 +2694,9 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
   });
   const promptAnswers = new ConnectorPromptAnswers(dependencies.connectorPromptAnswersPath);
   const detection = dependencies.connectorDetection ?? new ConnectorDetection();
-  registerFleetDigestRoutes(app, dependencies, { herdr: () => detection.multiplexer("herdr") });
+  const dailyFleetDigests = registerFleetDigestRoutes(app, dependencies, {
+    herdr: () => detection.multiplexer("herdr"),
+  });
   registerConnectorRoutes({
     dependencies,
     app,
@@ -2803,7 +2805,12 @@ export async function createClankieApp(dependencies: ClankieAppDependencies): Pr
     conversationBodyRouteAuthorized,
     stopBodyRequests,
     close: async (): Promise<void> => {
-      const closing = [remoteLeads.close(), joinedSeats?.close(), closeReceiptObservations()];
+      const closing = [
+        remoteLeads.close(),
+        joinedSeats?.close(),
+        closeReceiptObservations(),
+        dailyFleetDigests?.close(),
+      ];
       dependencies.modelKeys?.close?.();
       stopBodyRequests();
       clearInterval(supportTimer);

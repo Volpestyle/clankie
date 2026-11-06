@@ -428,7 +428,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
                            Hire setup's one read-only agent, read its proposal, approve lines by id (JSON)
   maximum-trust-mode [status|on|off]
                            Let Claude, Codex and Grok skip their permission prompts; questions only you can answer still come to you (JSON)
-  fleet digest [--json]  Read an aggregate daily fleet digest, owner attention first
+  fleet digest [--daily] [--json]  Read an aggregate fleet digest, owner attention first
   fleet leads [--json]  Read active Clankie and connected app leads
   fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]
   fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards
@@ -5588,7 +5588,7 @@ channel or Discord.
 
 <a id="fleet-status-fleet-set-notes-text-size-size-models-mode-fleet-clear"></a>
 
-### `fleet [status|show] [--json]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
+### `fleet [status|show] [--json]` / `fleet set [--notes TEXT] [--closure lead|owner] [--machine-setup lead|owner] [--commit lead|owner] [--push lead|owner] [--release lead|owner|time_rule --release-rule TEXT] [--gate-preset hands-off|balanced|careful] [--everyday-work allow|lead|owner] [--leaves-mac allow|lead|owner] [--hard-to-undo allow|lead|owner] [--money-and-accounts owner] [--tools connected|off] [--peer-messages on|off] [--worker-sandbox on|off] [--seat-host auto|desktop|herdr] [--lead-restarts on|off] [--seat-restarts on|off] [--auto-tidy off|30m|1h|4h|1d] [--digest-time HH:mm|off] [--harness NAME|auto] [--model NAME|auto] [--account LABEL|auto] [--hire-profile FILE.json]` / `fleet clear`
 
 Read, set, or clear how the owner wants work routed across the agents Clankie
 leads — which harness is the workhorse, which one reviews, what never goes to
@@ -11619,9 +11619,9 @@ command is sent, and a call that cannot be recorded is refused. The audit stores
 only the digest, but the full command text stays in that conversation's session
 transcript. The digest is a convention, not secrecy.
 
-### `fleet digest [--json]`
+### `fleet digest [--daily] [--json]`
 
-Read the owner's aggregate daily fleet digest through `GET /v1/fleet/digest`.
+Read the owner's aggregate fleet digest through `GET /v1/fleet/digest`.
 The default is readable text; `--json` returns the strict snapshot. Owner
 operator authentication is required. Pending owner decisions appear first,
 followed by blocked workers and incomplete source observations.
@@ -11638,6 +11638,13 @@ The read sends nothing, acknowledges nothing, and changes no repository or
 owner decision. It is generated on demand, without a model call or daily
 notification. See [the digest guide](fleet-digest.md) for retention and account
 burn coverage.
+
+`--daily` reads `GET /v1/fleet/digest/daily` instead: the latest digest the
+service generated at `fleet.digestTime`, with PRs, issues, CI findings, project
+hires, confirmed closes and reports since the previous digest. Owner waits in
+that response are observed live on each read. Set the time with
+`clankie fleet set --digest-time HH:mm|off` (default `08:00`, host-local; quiet
+hours defer it). See [the daily digest](fleet-digest.md#the-daily-digest).
 
 ### `fleet leads [--json] [--channels]`
 

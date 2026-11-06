@@ -82,6 +82,7 @@ describe("clankie fleet", () => {
         leadRestarts: "on",
         seatRestarts: "on",
         autoTidy: "1h",
+        digestTime: "08:00",
       },
     });
     const prompts: Parameters<SetupFlow["readText"]>[0][] = [];
@@ -153,6 +154,7 @@ describe("clankie fleet", () => {
       leadRestarts: "off",
       seatRestarts: "off",
       autoTidy: "4h",
+      digestTime: "08:00",
     });
     expect(read().autonomy.fleet).toEqual(
       FleetAutonomySchema.parse({
@@ -187,6 +189,7 @@ describe("clankie fleet budget", () => {
       leadRestarts: "on",
       seatRestarts: "on",
       autoTidy: "1h",
+      digestTime: "08:00",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain("fleet tool access disabled");
@@ -248,6 +251,7 @@ describe("clankie fleet peer messages", () => {
       leadRestarts: "on",
       seatRestarts: "on",
       autoTidy: "1h",
+      digestTime: "08:00",
       ...FleetAutonomySchema.parse({}),
     });
     expect(formatFleetLines(off.fleet).join("\n")).toContain(

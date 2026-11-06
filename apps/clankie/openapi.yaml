@@ -207,7 +207,7 @@ paths:
       operationId: getFleetDigest
       security: [{ operatorBearer: [] }]
       summary: Read the aggregate daily fleet digest, owner attention first
-      description: Owner operator only. Reuses changes-feed and fleet_capacity projections without acknowledging reports or answering questions. Counts and availability only; private source text, identities, paths and account labels are omitted. UTC report/close day and retained-history limits are explicit. Credentials, repository/provider visibility and discovery are fenced immediately before publication. No model call or scheduled delivery.
+      description: Owner operator only. Reuses changes-feed and fleet_capacity projections without acknowledging reports or answering questions. Counts and availability only; private source text, identities, paths and account labels are omitted. UTC report/close day and retained-history limits are explicit. Credentials, repository/provider visibility and discovery are fenced immediately before publication. No model call; this route is on demand.
       responses:
         "200":
           description: Current aggregate observations; unknown is preserved for unavailable sources
@@ -223,6 +223,29 @@ paths:
           description: Owner operator authentication required
         "503":
           description: Authentication, visibility or publication witness unavailable
+
+  /v1/fleet/digest/daily:
+    get:
+      tags: [Operator]
+      operationId: getFleetDailyDigest
+      security: [{ operatorBearer: [] }]
+      summary: Read the latest scheduled fleet digest with live owner waits
+      description: Owner operator only, under the same publication fence as the on-demand digest. The digest is the latest one generated at fleet.digestTime (quiet hours defer it), or null before the first. It counts activity since the previous digest. Waits are observed for this read and never stored, so resolved waits are absent. Counts and availability only. Generation sends nothing and makes no model call.
+      responses:
+        "200":
+          description: Schedule, live waits and the latest digest; unknown is preserved for unavailable sources
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FleetDailyDigestRead" }
+        "400":
+          description: Query parameters are unsupported
+        "401":
+          description: Owner operator authentication required
+        "503":
+          description: Authentication, visibility or publication witness unavailable, or no digest store on this service
 
   /v1/fleet/leads:
     get:
@@ -3221,6 +3244,7 @@ paths:
                       leadRestarts: { type: string, enum: [on, off] }
                       seatRestarts: { type: string, enum: [on, off] }
                       autoTidy: { type: string, enum: ["off", 30m, 1h, 4h, 1d] }
+                      digestTime: { type: string, pattern: "^(off|([01][0-9]|2[0-3]):[0-5][0-9])$" }
                       hire: { type: object, description: Full HireProfileSchema; null clears on write }
                       everydayWork: { type: string, enum: [allow, lead, owner] }
                       leavesMac: { type: string, enum: [allow, lead, owner] }
@@ -3265,6 +3289,7 @@ paths:
                     leadRestarts: { type: string, enum: [on, off] }
                     seatRestarts: { type: string, enum: [on, off] }
                     autoTidy: { type: string, enum: ["off", 30m, 1h, 4h, 1d] }
+                    digestTime: { type: string, pattern: "^(off|([01][0-9]|2[0-3]):[0-5][0-9])$" }
                     hire: { type: object, description: Full HireProfileSchema; null clears on write }
                     everydayWork: { type: string, enum: [allow, lead, owner] }
                     leavesMac: { type: string, enum: [allow, lead, owner] }
@@ -8376,6 +8401,71 @@ paths:
 
 components:
   schemas:
+    FleetDailyDigestRead:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, schedule, waits, digest]
+      properties:
+        schemaVersion: { type: integer, enum: [1] }
+        schedule:
+          type: object
+          additionalProperties: false
+          required: [time, timeZone]
+          properties:
+            time: { type: string, description: "HH:mm, or off" }
+            timeZone: { type: string }
+        waits:
+          type: object
+          additionalProperties: false
+          required: [observedAt, attention]
+          properties:
+            observedAt: { type: string, format: date-time }
+            attention:
+              {
+                type: array,
+                maxItems: 3,
+                items: { type: object },
+                description: Same items as FleetDigestSnapshot.attention,
+                observed for this read,
+              }
+        digest:
+          nullable: true
+          type: object
+          additionalProperties: false
+          required:
+            [
+              schemaVersion,
+              slot,
+              timeZone,
+              since,
+              generatedAt,
+              coverage,
+              pullRequests,
+              issues,
+              ciFindings,
+              workers,
+              reports,
+              burn,
+              sources,
+            ]
+          properties:
+            schemaVersion: { type: integer, enum: [1] }
+            slot: { type: string, description: Owner-local date of the scheduled time }
+            timeZone: { type: string }
+            since: { type: string, format: date-time }
+            generatedAt: { type: string, format: date-time }
+            coverage: { type: string, enum: [retained_observations] }
+            pullRequests: { type: object, description: "opened and merged counts, or unknown" }
+            issues: { type: object, description: "opened and closed counts, or unknown" }
+            ciFindings: { type: object, description: "opened and currently open counts, or unknown" }
+            workers: { type: object, description: "hired and closed counts, or unknown" }
+            reports: { type: object, description: "done and blocked counts, or unknown" }
+            burn: { type: object, description: Same fields as FleetDigestSnapshot.burn }
+            sources:
+              {
+                type: object,
+                description: "github, reports, hires, closeHistory and capacity: ready, partial or unavailable",
+              }
     FleetDigestSnapshot:
       {
         "type": "object",

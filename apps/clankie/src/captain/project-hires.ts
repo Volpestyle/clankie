@@ -142,6 +142,12 @@ export class ProjectHires {
       (entry) => entry.started && entry.confirmed && entry.occupantId === occupantId,
     );
   }
+  /** When each confirmed project hire began; a confirmed start, not a first sighting. */
+  public confirmedHireTimes(): readonly number[] {
+    return this.read().allocations.flatMap((entry) =>
+      entry.started && entry.confirmed && entry.beganAt !== undefined ? [entry.beganAt] : [],
+    );
+  }
   /**
    * The title Clankie hired this native session under, or is still hiring this pane under before
    * its session is known. Its Herdr handle was minted from that title (LOCAL-VUH-59).

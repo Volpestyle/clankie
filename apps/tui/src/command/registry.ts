@@ -550,7 +550,7 @@ const HEADLESS_COMMAND_HELP = [
   {
     nouns: ["fleet"],
     lines: [
-      "  fleet digest [--json]  Read an aggregate daily fleet digest, owner attention first",
+      "  fleet digest [--daily] [--json]  Read an aggregate fleet digest, owner attention first",
       "  fleet leads [--json]  Read active Clankie and connected app leads",
       "  fleet report-leads PANE|--joined-hire ID [list | grant CONVERSATION [APP_DEVICE [REF]] | revoke TARGET]",
       "  fleet roster [retire SEAT OCCUPANT | undo ID]  Read owner-only fleet counts and retire through the close guards",

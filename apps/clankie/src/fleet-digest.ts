@@ -2,13 +2,14 @@ import type { FleetCapacity, OperatorFleetSnapshot } from "@clankie/protocol";
 import { FleetDigestSnapshotSchema, type FleetDigestSnapshot } from "@clankie/protocol/fleet-digest";
 import type { LeadChangeSnapshot } from "./lead-changes.ts";
 
-/** The digest reads existing projections; it never offers/acknowledges a report or answers an ask. */
-export function projectFleetDigest(input: {
-  now: Date;
+export interface FleetDigestInputs {
   changes: readonly LeadChangeSnapshot[];
   capacity?: FleetCapacity | undefined;
   fleet?: OperatorFleetSnapshot | undefined;
-}): FleetDigestSnapshot {
+}
+
+/** The digest reads existing projections; it never offers/acknowledges a report or answers an ask. */
+export function projectFleetDigest(input: FleetDigestInputs & { now: Date }): FleetDigestSnapshot {
   const today = input.now.toISOString().slice(0, 10);
   const start = Date.parse(`${today}T00:00:00.000Z`);
   const inDay = (at: string) => Date.parse(at) >= start && Date.parse(at) <= input.now.getTime();
