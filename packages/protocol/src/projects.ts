@@ -19,6 +19,7 @@ import {
 export * from "./project-work-policy.ts";
 import { ProjectReviewSchema } from "./reviews.ts";
 import { TrackerPostingSchema } from "./tracker-posting.ts";
+import { ProjectTrackingSchema } from "./project-tracking.ts";
 
 export const ProjectIdSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
 const RefSchema = z.string().trim().min(1).max(200);
@@ -164,6 +165,8 @@ export const ProjectSchema = z
     review: ProjectReviewSchema.optional(),
     /** Posting to the project's Linear or GitHub tracker (ADR 0302); absent means ask me. */
     trackerPosting: TrackerPostingSchema.optional(),
+    /** The project's repos and tracker; Clankie keeps each repo's tracking block in step with it. */
+    tracking: ProjectTrackingSchema.optional(),
     fleet: z
       .object({
         size: z.enum(["max", "large", "small", "solo"]).optional(),
@@ -301,6 +304,8 @@ export const ProjectsSnapshotSchema = z
     projectReview: z.literal(true).optional(),
     /** Opt-in "Posting to your tracker" view (ADR 0302), so existing strict clients keep their shape. */
     projectTrackerPosting: z.literal(true).optional(),
+    /** Opt-in repos-and-tracker view, so existing strict clients keep their shape. */
+    projectTracking: z.literal(true).optional(),
     retiredWorkingPreferences: RetiredWorkingPreferencesSchema.optional(),
     linearProjectBindings: z.literal(true).optional(),
     /** Each project's status line by project ID, in the autonomy-aware view of a current service. */
@@ -502,6 +507,8 @@ export const UpdateProjectSettingsSchema = z
         review: ProjectReviewSchema.nullable().optional(),
         /** null restores the default, ask me. */
         trackerPosting: TrackerPostingSchema.nullable().optional(),
+        /** The whole setting; null stops managing the blocks and leaves them in the repos. */
+        tracking: ProjectTrackingSchema.nullable().optional(),
       })
       .strict()
       .refine(

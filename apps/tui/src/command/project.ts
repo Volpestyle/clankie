@@ -27,6 +27,8 @@ export async function runProjectCommand(
   } = {},
 ) {
   if (args[0] === "ci") return (await import("./project-ci.ts")).runProjectCiCommand(args, options);
+  if (args[0] === "tracking")
+    return (await import("./project-tracking.ts")).runProjectTrackingCommand(args, options);
   if (args[2] === "--worktree-root" || args[0] === "remove-worktree-root")
     return runProjectWorktreeCommand(args, options);
   if (

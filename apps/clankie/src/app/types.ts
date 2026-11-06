@@ -288,6 +288,7 @@ export interface ClankieAppDependencies {
   };
   fleetProjectMembership?: Pick<import("../fleet-project-membership.ts").FleetProjectMembership, "read">;
   projectWorktreeRoot?: import("@clankie/settings").ObserveProjectWorktreeRoot;
+  projectTracking?: import("../project-tracking.ts").ProjectTrackingService;
   /** `clankie herdr prepare NAME`: prepare native workers through that fleet's registered transport. */
   prepareFleet?: (id: string, options: { codexSourceSetup?: string }, fleet: HerdrFleet) => Promise<unknown>;
   prepareLocalClaudeShim?: (action: "install" | "remove", binding: HerdrBinding) => Promise<unknown>;

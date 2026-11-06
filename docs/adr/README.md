@@ -387,5 +387,6 @@ superseded or retired record in its own status paragraph, starting with
 - [0359: Owned runtime work shares one account governor](0359-owned-runtime-work-shares-one-account-governor.md) — Recorded existing practice for #344 (2026-11-04); no runtime or authority change.
 - [0360: Temporary views stay private to the owner](0360-temporary-views-stay-private-to-the-owner.md) — Recorded existing practice for #344 (2026-11-04); no sharing authority added.
 - [0361: A play sitting has a bounded model budget](0361-a-play-sitting-has-a-bounded-model-budget.md) — Recorded existing practice for #344 (2026-11-04); no play policy changed.
+- [0362: A project owns its repos and tracker](0362-a-project-owns-its-repos-and-tracker.md) — Accepted, 2026-11-05.
 
 <!-- adr-index:end -->

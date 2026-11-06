@@ -81,6 +81,7 @@ import {
   TrackerReadRejected,
   trackerStoreVersion,
   type TrackerActor,
+  type GithubApi,
 } from "@clankie/work-items";
 import type { McpHost, TrackerRouteFence } from "./mcp-host.ts";
 import type { CaptainPort } from "./captain/port.ts";
@@ -2008,6 +2009,10 @@ export function createWorkItemsService(options: WorkItemsServiceOptions) {
     async prepareLeadChangeScope() {
       const snapshot = await leadRepoSnapshot(true);
       return { stamp: snapshot.stamp, assertCurrent: snapshot.assertCurrent };
+    },
+    /** The connected account's GitHub, else the owner's own `gh` login, as every other write. */
+    async githubForge(): Promise<GithubApi> {
+      return checkpointAccess((await githubSnapshot())?.token).api;
     },
     async leadChangePulls(signal?: AbortSignal) {
       const snapshot = await leadRepoSnapshot();

@@ -44,6 +44,7 @@ function projectSnapshot(
   includeAutoUpdates = false,
   includeReview = false,
   includeTrackerPosting = false,
+  includeTracking = false,
 ) {
   const projects = current.projects.projects.map((saved) => {
     const project = { ...saved };
@@ -59,6 +60,7 @@ function projectSnapshot(
     if (!includeAutoUpdates) delete project.autoUpdates;
     if (!includeReview) delete project.review;
     if (!includeTrackerPosting) delete project.trackerPosting;
+    if (!includeTracking) delete project.tracking;
     if (!includeWorkPolicy) {
       delete project.wipCap;
       delete project.ownerLoop;
@@ -92,6 +94,7 @@ function projectSnapshot(
     ...(includeAutoUpdates ? { projectAutoUpdates: true } : {}),
     ...(includeReview ? { projectReview: true } : {}),
     ...(includeTrackerPosting ? { projectTrackerPosting: true } : {}),
+    ...(includeTracking ? { projectTracking: true } : {}),
     revision: projectsRevision(current.projects),
   };
 }
@@ -175,6 +178,7 @@ export function createProjectRoutes(
         context.req.query("includeAutoUpdates") === "true",
         context.req.query("includeReview") === "true",
         context.req.query("includeTrackerPosting") === "true",
+        context.req.query("includeTracking") === "true",
       ),
       ...(status === undefined ? {} : { projectStatus: status.projects, needsYou: status.needsYou }),
       ...(health === undefined ? {} : health),
@@ -306,6 +310,7 @@ export function createProjectRoutes(
           context.req.query("includeAutoUpdates") === "true",
           context.req.query("includeReview") === "true",
           context.req.query("includeTrackerPosting") === "true",
+          context.req.query("includeTracking") === "true",
         ),
       );
     } catch {

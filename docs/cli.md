@@ -220,6 +220,7 @@ on stderr. Exit 0 on success, 1 on failure. Secrets never as flags.
   project create PROJECT --settings FILE.json --revision REVISION  Create a new local project from reviewed settings
   project list | update PROJECT --changes FILE.json --revision REVISION  Read or edit project roles, models, limits and tracker binding
   project settings PROJECT [--closure lead|owner|inherit] [--machine-setup lead|owner|inherit]  Read effective fleet policy or edit project overrides
+  project tracking PROJECT [apply|clear|--provider github|linear --public-board BOARD --private-board BOARD --repo OWNER/NAME... --accept-suggestion --no-apply]  Read or set a project's repos and tracker, and propose each repo's tracking block as a pull request (JSON)
   project add|remove-workspace NAME --workspace PATH [--machine ID --platform windows|posix]  Manage approved project workspaces (JSON)
   project add NAME --worktree-root ROOT --repo APPROVED_REPO [--machine ID --platform windows|posix]  Enroll a linked-worktree root
   project remove-worktree-root NAME --worktree-root ROOT [--machine ID --platform windows|posix]  Remove a root enrollment
@@ -11942,6 +11943,76 @@ Linear's state as it stands, including any Linear writes made after the cutover,
 and never the pilot's. The VUH-1987 rehearsal on a scratch copy of the real
 Clankie Work store shows both effects
 ([record](https://github.com/Volpestyle/clankie-ops/blob/main/archive/clankie-docs-testing/2026-10-25-vuh-1987-switch-back/README.md)).
+
+### Project repos and tracker
+
+`clankie project tracking PROJECT` reads a project's repos and tracker and each
+repo's state. It opens with what the local repos suggest and asks about what they
+don't settle. A suggestion is read from repo content, so it never decides anything:
+`--accept-suggestion` only shows it, saving and proposing nothing, and you set each
+value yourself.
+
+```sh
+clankie project tracking PROJECT
+clankie project tracking PROJECT --provider github --public-board owner/public \
+  --private-board owner/private --repo owner/one --repo owner/two
+clankie project tracking PROJECT --accept-suggestion
+clankie project tracking PROJECT apply
+clankie project tracking PROJECT clear
+```
+
+Unnamed fields keep their saved value, and `--repo` replaces the whole list. Saving
+proposes straight away unless you add `--no-apply`. `clear` stops managing the blocks
+and leaves them in the repos.
+
+Clankie fills a block between `<!-- clankie:tracking -->` and
+`<!-- /clankie:tracking -->` from a template, and never touches text outside the
+markers. Each repo gets one small pull request from `clankie/tracking-block`, which
+Clankie never merges. An hourly sweep repeats this for drift and only reads when the
+project's `push` preference is `owner`. Only a repo GitHub confirms as private gets
+the private board; every other repo's block names just the public board, and no pull
+request body holds a block. A changed tracker moves no issues; the result offers that
+as separate work. See
+[ADR 0362](adr/0362-a-project-owns-its-repos-and-tracker.md).
+
+| State         | Meaning                                                                       |
+| ------------- | ----------------------------------------------------------------------------- |
+| `in_step`     | The default branch matches; `confirmedPull` is the merged proposal read back. |
+| `drifted`     | The block is missing or differs, with no matching proposal open.              |
+| `proposed`    | This exact block is in an open pull request.                                  |
+| `declined`    | You closed this exact proposal. The sweep leaves it; `apply` reopens it.      |
+| `refused`     | Clankie won't write here until you act; `reason` says why.                    |
+| `unavailable` | The forge could not be reached; the next pass retries.                        |
+
+`refused` reasons: `malformed_markers`, `unclosed_code_fence`, `duplicate_blocks`,
+`unsupported_guide`, `guide_too_large`, `guide_not_utf8`, `repository_archived`,
+`repository_moved`, `repo_in_two_projects`, `public_board_not_public`,
+`private_board_exposed` and `proposal_branch_edited`. `public_board_not_public` means
+the public board looks like GitHub but isn't a repo GitHub shows as public: pick a
+public repo, in any spelling. A GitHub Project URL counts, because nothing says who can
+see it, as does any other GitHub-hosted address and a bare `owner/name` under Linear. `repo_in_two_projects` means another project claims the repo: remove it from
+one. `proposal_branch_edited` means someone else's commit is on the proposal branch:
+merge or delete it.
+
+When a repo is no longer confirmed private and `clankie/tracking-block` names a private
+board, `apply` and the sweep close its open pull requests and delete the branch, even
+with someone else's commit on top; the result names the pull as `withdrawnPull`. Under
+`push: owner` the sweep writes nothing: the read shows `private_board_exposed` and you
+get an alert, and `apply` withdraws it. You also get an alert if a withdrawal fails, or
+if the default branch itself still names the board, including in a code fence, on a repo
+Clankie refuses, or when a later forge call fails or the token can't write. There the
+status reason opens with `private_board_published`, ahead of any refusal or forge error,
+and `apply` proposes the public block where it can. The repo's own merged
+history is yours to manage: withdrawing can't remove merged commits, and GitHub keeps a
+closed pull request's diff on its page until GitHub Support removes it.
+
+After `clear`, or when you drop a repo, the next sweep (at service start, then hourly)
+withdraws that repo's proposal if it names the private board, even while the repo is
+private, because nothing watches it afterwards. It only does that to a branch Clankie
+wrote for this board. With someone else's commit on top, or under `push: owner`, you get
+an alert instead, and closing the pull request and deleting the branch is yours to do.
+A branch of that name that isn't about this board is left alone. If the repo is public
+and its default branch names the board, you get an alert before Clankie forgets the repo.
 
 ### Work tracker settings
 

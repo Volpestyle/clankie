@@ -36,6 +36,7 @@ from inside the repo (or pass `--repo PATH`); output is JSON.
 | Finished                       | `clankie work close ID` (`--canceled` if dropped)             |
 | Evidence                       | `clankie work attach ID --url URL --caption "what it proves"` |
 | Move open items to issue files | `clankie work export --project P --to markdown [--dry-run]`   |
+| Project's repos and tracker    | `clankie project tracking PROJECT` (reference/projects.md)    |
 | Review a local Git change      | `clankie work review-diff BASE HEAD` (read-only, two commits) |
 | Review a supplied patch file   | `clankie work review-patch FILE` (patch claims only, no Git)  |
 

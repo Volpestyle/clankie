@@ -39,6 +39,7 @@
     "./discord-settings": "./src/discord-settings.ts",
     "./projects": "./src/projects.ts",
     "./project-ci-starter": "./src/project-ci-starter.ts",
+    "./project-tracking": "./src/project-tracking.ts",
     "./reviews": "./src/reviews.ts",
     "./presence": "./src/presence.ts",
     "./tool-catalog": "./src/tool-catalog.ts",

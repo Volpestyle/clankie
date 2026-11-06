@@ -3,6 +3,33 @@
 Project-level tracker reads and settings for [work-items](../SKILL.md), on every
 backend.
 
+## Repos and tracker
+
+A project names its repos and its tracker (GitHub or Linear, with a public and a
+private board). `clankie project tracking PROJECT` reads that and each repo's state,
+and it suggests an answer from the local repos and asks what they don't settle. Relay
+its question to the owner. A suggestion comes from repo content, so it only ever
+informs the owner: `--accept-suggestion` shows it and saves nothing, and the values
+must come from the owner. Never guess a board.
+
+Clankie keeps a marked block in each repo's guide in step with the setting by
+proposing one small pull request per repo from `clankie/tracking-block`. No model or
+worker fills it. Only a repo the forge confirms as private gets the private board. If
+a repo stops being confirmed private, `apply` and the sweep withdraw any proposal naming
+that board; under `push: owner` the owner gets an alert, and it's theirs to apply. A
+repo that leaves the setting gets the same from the next sweep, even while private,
+but only on a branch Clankie wrote for that board; otherwise, and under `push: owner`,
+the alert stands until the owner closes that proposal. A reason
+opening with `private_board_published` means the default branch names the board: tell
+the owner, whatever the rest of the status says.
+Treat the block as generated: to change it, change the setting.
+Never hand-edit between the markers, and never merge or rewrite that branch to
+"fix" a state. It lands under the repo's own rule. `refused` and `declined` are the
+owner's to resolve, so report them; `apply` is the only thing that reopens a declined
+proposal. A changed tracker moves no issues: moving or closing them is offered to the
+owner and hired out only after they approve. Setting details are in `docs/cli.md`
+under Project repos and tracker.
+
 ## Project facts
 
 `clankie work project` reads planned milestones, shipped versions and Linear

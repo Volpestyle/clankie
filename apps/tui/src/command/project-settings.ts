@@ -147,6 +147,7 @@ export async function runProjectSettingsCommand(
                 includeAutoUpdates: "true",
                 includeReview: "true",
                 includeTrackerPosting: "true",
+                includeTracking: "true",
               }
             : {}),
           ...(options.includeHealth ? { includeHealth: "true" } : {}),
