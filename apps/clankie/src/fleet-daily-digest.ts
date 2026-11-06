@@ -14,7 +14,7 @@ const LONGEST_WINDOW_MS = 7 * 24 * 60 * 60_000;
 export const hostTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** The owner-local date of the most recent `time`, so a digest deferred past midnight keeps its day. */
-export function fleetDigestSlot(now: Date, time: string, timeZone: string): string {
+function fleetDigestSlot(now: Date, time: string, timeZone: string): string {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-GB", {
       timeZone,
@@ -93,8 +93,6 @@ export function projectDailyFleetDigest(input: {
 
 export interface DailyFleetDigests {
   latest(): Promise<FleetDailyDigest | null>;
-  /** Generate the digest if its slot is due; resolves true when one was stored. */
-  tick(): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -167,7 +165,6 @@ export function startDailyFleetDigests(options: {
   timer.unref();
   return {
     latest,
-    tick,
     close: async () => {
       clearInterval(timer);
       await running?.catch(() => undefined);

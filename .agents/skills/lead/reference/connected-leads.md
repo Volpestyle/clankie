@@ -223,3 +223,9 @@ close history, and current hires are not today's hiring total. PR totals use
 the feed's retained window. Treat `unknown` and partial sources as missing
 evidence. Account burn includes known observations only. For the exact fields
 and UTC-day limits, see the [fleet digest guide](../../../../docs/fleet-digest.md).
+
+`clankie fleet digest --daily` reads the digest the service generates once a day
+at `fleet.digestTime` (`clankie fleet set --digest-time HH:mm|off`; quiet hours
+defer it). It counts PRs, issues, CI findings, project hires and closes since the
+previous digest, and observes owner waits live on each read. It uses the same
+owner credential, so a connected app can't read it yet.

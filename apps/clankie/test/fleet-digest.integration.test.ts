@@ -33,6 +33,7 @@ import { createFleetCapacityReader, projectFleetCapacity } from "../src/app/flee
 import { isolatedHerdr } from "./fixtures/local-fleet-proof/herdr-fixture.ts";
 import { ConnectorDetection } from "../src/app/connector-detection.ts";
 import {
+  runFleetDailyDigestCommand,
   runFleetDigestCommand,
   formatFleetDailyDigest,
   formatFleetDigest,
@@ -330,9 +331,7 @@ async function fixture(options: { daily?: boolean; digestOff?: boolean } = {}) {
     workItems: work,
     connectorDetection: detection,
     clock: () => now,
-    ...(options.daily
-      ? { fleetDailyDigest: { path: join(root, "daily-digest.json"), intervalMs: 20 } }
-      : {}),
+    ...(options.daily ? { fleetDailyDigest: { path: join(root, "daily-digest.json"), intervalMs: 20 } } : {}),
   };
   if (options.digestOff)
     await settings.update((current) => ({ ...current, fleet: { ...current.fleet, digestTime: "off" } }));
@@ -504,10 +503,14 @@ it("discovery off avoids native inventory through the real capacity reader", asy
   expect(body.resources).toEqual({ heavy: "unknown", machines: "unknown" });
 });
 
-it.each(["operator", "provider", "origin", "discovery"])(
-  "the final publication refuses a %s change during the final authentication await",
-  async (kind) => {
-    const f = await fixture();
+it.each(
+  ["operator", "provider", "origin", "discovery"].flatMap((kind) =>
+    [FLEET_DIGEST_PATH, FLEET_DAILY_DIGEST_PATH].map((path) => [kind, path] as const),
+  ),
+)(
+  "the final publication refuses a %s change during the final authentication await of %s",
+  async (kind, path) => {
+    const f = await fixture({ daily: true, digestOff: true });
     f.afterAuthentication(async () => {
       if (kind === "operator")
         await f.operatorStore.set("clankie_operator", { type: "api", key: mintOperatorToken() });
@@ -523,7 +526,7 @@ it.each(["operator", "provider", "origin", "discovery"])(
         ]);
       if (kind === "discovery") f.detection.setMultiplexer("herdr", false);
     });
-    const response = await f.read();
+    const response = await f.read(f.token, path);
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "fleet_digest_unavailable" });
   },
@@ -596,9 +599,7 @@ it("generates the digest on the real timer at the owner's time, after quiet hour
 
   // The next day covers only what happened since the last digest.
   f.clockAt(new Date(Date.parse(digest.generatedAt) + 86400_000));
-  await vi.waitFor(async () =>
-    expect((await daily(f)).digest?.generatedAt).toBe(f.now().toISOString()),
-  );
+  await vi.waitFor(async () => expect((await daily(f)).digest?.generatedAt).toBe(f.now().toISOString()));
   const next = (await daily(f)).digest!;
   expect(next.since).toBe(digest.generatedAt);
   expect(next.slot > digest.slot).toBe(true);
@@ -617,7 +618,7 @@ it("reads through API and shipped CLI with only live waits and without touching 
     { kind: "blocked_workers", count: 1 },
   ]);
   expect(JSON.stringify(before)).not.toContain("PRIVATE");
-  const cli = await runFleetDigestCommand(["--daily", "--json"], {
+  const cli = await runFleetDailyDigestCommand(["--daily", "--json"], {
     host: f.origin,
     env: { CLANKIE_OPERATOR_TOKEN: f.token },
   });

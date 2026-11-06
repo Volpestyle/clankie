@@ -11,12 +11,18 @@ import { ownerSettingsApi, type OwnerSettingsApiOptions } from "./owner-settings
 const USAGE = "Usage: clankie fleet digest [--daily] [--json]";
 
 export async function runFleetDigestCommand(args: readonly string[], options: OwnerSettingsApiOptions = {}) {
-  if (args.some((arg) => arg !== "--json" && arg !== "--daily") || new Set(args).size !== args.length)
+  if (args.some((arg) => arg !== "--json") || args.length > 1) throw new Error(USAGE);
+  return (await ownerSettingsApi(options)).get(FLEET_DIGEST_PATH, FleetDigestSnapshotSchema);
+}
+
+export async function runFleetDailyDigestCommand(
+  args: readonly string[],
+  options: OwnerSettingsApiOptions = {},
+) {
+  const flags = args.filter((arg) => arg !== "--daily");
+  if (flags.some((arg) => arg !== "--json") || flags.length > 1 || args.length !== flags.length + 1)
     throw new Error(USAGE);
-  const api = await ownerSettingsApi(options);
-  return args.includes("--daily")
-    ? api.get(FLEET_DAILY_DIGEST_PATH, FleetDailyDigestReadSchema)
-    : api.get(FLEET_DIGEST_PATH, FleetDigestSnapshotSchema);
+  return (await ownerSettingsApi(options)).get(FLEET_DAILY_DIGEST_PATH, FleetDailyDigestReadSchema);
 }
 
 function attentionLines(attention: FleetDigestSnapshot["attention"]): string[] {
@@ -31,8 +37,7 @@ function attentionLines(attention: FleetDigestSnapshot["attention"]): string[] {
 }
 
 export function formatFleetDailyDigest(read: FleetDailyDigestRead): string {
-  const when =
-    read.schedule.time === "off" ? "off" : `${read.schedule.time} ${read.schedule.timeZone}`;
+  const when = read.schedule.time === "off" ? "off" : `${read.schedule.time} ${read.schedule.timeZone}`;
   const lines = [`Daily fleet digest — schedule: ${when}`, `Waits observed ${read.waits.observedAt}`];
   lines.push(...attentionLines(read.waits.attention));
   const digest = read.digest;

@@ -3,7 +3,9 @@
 Run `clankie fleet digest` whenever you want a current fleet summary, or use
 `clankie fleet digest --json` for the structured response. The owner read API
 is `GET /v1/fleet/digest`; both use the owner's operator credential. This is an
-on-demand read, with no model call, daily notification or repository change.
+on-demand read, with no model call, notification or repository change. For what
+the fleet did since the last scheduled digest, see
+[the daily digest](#the-daily-digest).
 
 Pending owner decisions come first, then blocked workers and incomplete source
 observations. The rest shows current hired workers and statuses, today's done
@@ -45,5 +47,40 @@ The server rechecks operator credentials, repository/provider visibility and
 discovery before publishing. Responses are `no-store`; a lost or changed
 authorization refuses the read.
 
-The [CLI reference](cli.md#fleet-digest---json) and OpenAPI describe the entry
-point. No digest setting or scheduled delivery is required.
+The [CLI reference](cli.md#fleet-digest---daily---json) and OpenAPI describe the
+entry point.
+
+## The daily digest
+
+The service also generates a digest once a day. Run
+`clankie fleet digest --daily` (or `--json`), or read
+`GET /v1/fleet/digest/daily`, with the same owner credential.
+
+Change the time with `clankie fleet set --digest-time HH:mm`, or stop it with
+`--digest-time off`. The default is `08:00` in the host's time zone. If that time
+falls in the owner's desktop quiet hours, the digest is generated when they end
+and keeps that day's date. A service that was down generates it at its next
+check. Changing the time takes effect from the next day that has no digest yet.
+
+Each digest covers the time since the previous one, up to seven days. The first
+covers the last 24 hours. It counts:
+
+- PRs opened and merged, and issues opened and closed, by GitHub's own timestamps
+  across the enrolled repositories. A `ci-finding` label marks CI findings: those
+  filed in the window, and those open at generation.
+- Confirmed project hires, from the hire ledger. A worker started outside a
+  project isn't counted.
+- Confirmed closes, and done and blocked reports. A done report isn't proof that
+  work landed.
+- Accounts against pace, using the same burn fields as the on-demand digest.
+
+Owner decisions and blocked workers aren't stored. Every read observes them
+live, so a wait resolved after generation never appears. `waits.observedAt` says
+when, and `digest.generatedAt` dates the rest.
+
+Only the latest digest is kept, at `fleet-daily-digest.json` in the service's
+state directory. A source that fails records `unknown`, not zero. Generation
+sends nothing, makes no model call and notifies nobody.
+
+Connected lead apps can't read the daily digest yet: both routes need the owner's
+operator credential ([#164](https://github.com/Volpestyle/clankie/issues/164)).

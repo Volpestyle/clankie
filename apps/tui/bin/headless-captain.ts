@@ -516,14 +516,23 @@ export async function runHeadlessCaptainCommand(
     }
     if (command === "fleet") {
       if (rest[0] === "digest") {
-        const { runFleetDigestCommand, formatFleetDigest, formatFleetDailyDigest } =
-          await import("../src/command/fleet-digest.ts");
-        const digest = await runFleetDigestCommand(rest.slice(1), options);
-        if (rest.includes("--json")) outputJson(stdout, digest);
-        else
-          stdout.write(
-            "waits" in digest ? formatFleetDailyDigest(digest) : formatFleetDigest(digest),
-          );
+        const {
+          runFleetDailyDigestCommand,
+          runFleetDigestCommand,
+          formatFleetDailyDigest,
+          formatFleetDigest,
+        } = await import("../src/command/fleet-digest.ts");
+        const args = rest.slice(1);
+        const json = rest.includes("--json");
+        if (rest.includes("--daily")) {
+          const digest = await runFleetDailyDigestCommand(args, options);
+          if (json) outputJson(stdout, digest);
+          else stdout.write(formatFleetDailyDigest(digest));
+        } else {
+          const digest = await runFleetDigestCommand(args, options);
+          if (json) outputJson(stdout, digest);
+          else stdout.write(formatFleetDigest(digest));
+        }
         return 0;
       }
       if (rest[0] === "permits") {
