@@ -177,8 +177,8 @@ export async function runSeatHookCommand(
     }
   }
   if (event === "UserPromptSubmit") {
-    const result = (await response.json()) as { additionalContext?: unknown };
-    if (typeof result.additionalContext === "string" && result.additionalContext)
+    const result = (await response.json()) as { additionalContext?: unknown; messageIds?: unknown };
+    if (typeof result.additionalContext === "string" && result.additionalContext) {
       (options.stdout ?? process.stdout).write(
         JSON.stringify({
           hookSpecificOutput: {
@@ -187,6 +187,25 @@ export async function runSeatHookCommand(
           },
         }) + "\n",
       );
+      // Acknowledge only what this invocation injected; a failed hook never reaches here.
+      // The context is already injected; a missed receipt only leaves the message unacknowledged.
+      if (Array.isArray(result.messageIds)) {
+        try {
+          const ack = await (options.fetchImpl ?? fetch)(
+            new URL(fleetSeatHookPath(paneId), commandHost({ ...options, env })),
+            {
+              method: "POST",
+              headers: { authorization: `Bearer ${credential.token}`, "content-type": "application/json" },
+              body: JSON.stringify({ ...body, deliveredMessageIds: result.messageIds }),
+              signal: AbortSignal.timeout(5_000),
+            },
+          );
+          if (!ack.ok) process.stderr.write(`clankie seat-hook: hook receipt answered ${String(ack.status)}\n`);
+        } catch (error) {
+          process.stderr.write(`clankie seat-hook: hook receipt failed: ${String(error)}\n`);
+        }
+      }
+    }
   }
   return 0;
 }
