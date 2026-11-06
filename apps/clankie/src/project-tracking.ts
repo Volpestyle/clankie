@@ -90,11 +90,28 @@ export function trackedRepoFile(path: string): TrackedRepoStore {
   };
 }
 
+/**
+ * What a pass's writes rest on, renewed before each one by the forge (work-items' authorizeWrite):
+ * the owner's own apply, or for a sweep the setting and `push: lead` that called for the write.
+ */
+export interface TrackingWriteAuthority {
+  authorize(): Promise<boolean>;
+  current(): boolean;
+}
+/** A read: nothing it reaches may write. */
+const READ_ONLY: TrackingWriteAuthority = { authorize: async () => false, current: () => false };
+
+const pushes = (settings: ClankieSettings, project: Project | undefined) =>
+  effectiveFleetAutonomy(settings.autonomy, project?.autonomy).push === "lead";
+
 /** Deterministic end to end: settings in, a template out, one small proposal per repo. */
 export function createProjectTrackingService(options: {
   readonly settings: { load(): Promise<ClankieSettings> };
-  /** The forge the proposals go through, resolved for each pass so a reconnect takes effect. */
-  readonly forge: () => Promise<GithubApi>;
+  /**
+   * The forge the proposals go through, resolved for each pass so a reconnect takes effect. It
+   * pins the account it resolved and refuses a write once that account or `authority` changes.
+   */
+  readonly forge: (authority: TrackingWriteAuthority) => Promise<GithubApi>;
   readonly suggest?: (project: Project) => Promise<ProjectTrackingSuggestion | undefined>;
   readonly logger?: TrackingLogger;
   /** Reaches the owner; false means it did not, and the next sweep tries again. */
@@ -159,12 +176,26 @@ export function createProjectTrackingService(options: {
       ),
     );
     const departed = [...tracked].filter(([key]) => !claimed.has(key));
-    if (departed.length === 0) return;
-    const api = await options.forge();
     for (const [key, { repo, projectId, tracker }] of departed) {
-      const project = current.projects.projects.find((candidate) => candidate.id === projectId);
-      const withdraw = effectiveFleetAutonomy(current.autonomy, project?.autonomy).push === "lead";
-      const status = await withdrawDepartedRepo(api, repo, tracker, { withdraw });
+      const projectOf = (settings: ClankieSettings) =>
+        settings.projects.projects.find((candidate) => candidate.id === projectId);
+      const withdraw = pushes(current, projectOf(current));
+      // Still unclaimed, and still the push preference that said to withdraw.
+      const authority: TrackingWriteAuthority = {
+        current: () => true,
+        authorize: async () => {
+          const now = await options.settings.load();
+          return (
+            pushes(now, projectOf(now)) &&
+            !now.projects.projects.some((project) =>
+              project.tracking?.repos.some((claimed) => claimed.toLowerCase() === key),
+            )
+          );
+        },
+      };
+      const status = await withdrawDepartedRepo(await options.forge(authority), repo, tracker, {
+        withdraw,
+      });
       const exposed = status?.reason?.includes("private_board_exposed") === true;
       const heard =
         status && (exposed || status.reason?.startsWith("private_board_published"))
@@ -201,13 +232,14 @@ export function createProjectTrackingService(options: {
   const forEachRepo = async (
     projects: readonly Project[],
     project: Project,
+    authority: TrackingWriteAuthority,
     visit: (api: GithubApi, repo: string, sharedWith: string | undefined) => Promise<TrackingRepoStatus>,
   ): Promise<TrackingRepoStatus[]> => {
     const repos = project.tracking?.repos ?? [];
     if (repos.length === 0) return [];
     let api: GithubApi;
     try {
-      api = await options.forge();
+      api = await options.forge(authority);
     } catch (error) {
       const reason = (error instanceof Error ? error.message : String(error)).slice(0, 400);
       return repos.map((repo) => ({ repo, state: "unavailable", reason }));
@@ -235,14 +267,17 @@ export function createProjectTrackingService(options: {
         projectId,
         revision: projectsRevision(current.projects),
         ...(project.tracking ? { tracking: project.tracking } : {}),
-        repos: await forEachRepo(current.projects.projects, project, (api, repo, sharedWith) =>
+        repos: await forEachRepo(current.projects.projects, project, READ_ONLY, (api, repo, sharedWith) =>
           inspectTrackingRepo(api, repo, tracker!, sharedWith === undefined ? {} : { sharedWith }),
         ),
         ...(suggestion ? { suggestion } : {}),
       };
     },
-    /** The owner's own apply, bound to the revision they reviewed. It reopens a declined proposal. */
-    async apply(projectId: string, expectedRevision: string) {
+    /**
+     * The owner's own apply, bound to the revision they reviewed. It reopens a declined proposal.
+     * Each write renews `owner` and finds the settings still at that revision.
+     */
+    async apply(projectId: string, expectedRevision: string, owner: TrackingWriteAuthority) {
       const current = await options.settings.load();
       if (projectsRevision(current.projects) !== expectedRevision) return "stale_revision" as const;
       const project = current.projects.projects.find((saved) => saved.id === projectId);
@@ -250,7 +285,13 @@ export function createProjectTrackingService(options: {
       const tracker = project.tracking?.tracker;
       if (!tracker) return "no_tracking" as const;
       await rememberRepos(project);
-      return forEachRepo(current.projects.projects, project, (api, repo, sharedWith) =>
+      const authority: TrackingWriteAuthority = {
+        current: () => owner.current(),
+        authorize: async () =>
+          (await owner.authorize()) &&
+          projectsRevision((await options.settings.load()).projects) === expectedRevision,
+      };
+      return forEachRepo(current.projects.projects, project, authority, (api, repo, sharedWith) =>
         proposeTrackingRepo(api, repo, tracker, {
           reopenDeclined: true,
           ...(sharedWith === undefined ? {} : { sharedWith }),
@@ -275,13 +316,28 @@ export function createProjectTrackingService(options: {
         const tracker = project.tracking?.tracker;
         if (!tracker) continue;
         await rememberRepos(project);
-        const proposes = effectiveFleetAutonomy(current.autonomy, project.autonomy).push === "lead";
-        const statuses = await forEachRepo(current.projects.projects, project, (api, repo, sharedWith) => {
-          const repoOptions = sharedWith === undefined ? {} : { sharedWith };
-          return proposes
-            ? proposeTrackingRepo(api, repo, tracker, repoOptions)
-            : inspectTrackingRepo(api, repo, tracker, repoOptions);
-        });
+        const proposes = pushes(current, project);
+        // Nobody at the keyboard: the writes rest on this same setting still saying to push.
+        const setting = JSON.stringify(project.tracking);
+        const authority: TrackingWriteAuthority = {
+          current: () => true,
+          authorize: async () => {
+            const now = await options.settings.load();
+            const still = now.projects.projects.find((candidate) => candidate.id === project.id);
+            return JSON.stringify(still?.tracking) === setting && pushes(now, still);
+          },
+        };
+        const statuses = await forEachRepo(
+          current.projects.projects,
+          project,
+          authority,
+          (api, repo, sharedWith) => {
+            const repoOptions = sharedWith === undefined ? {} : { sharedWith };
+            return proposes
+              ? proposeTrackingRepo(api, repo, tracker, repoOptions)
+              : inspectTrackingRepo(api, repo, tracker, repoOptions);
+          },
+        );
         for (const status of statuses)
           if (status.reason?.startsWith("private_board_"))
             await alertExposure(project.id, status.repo, exposureAlert(project.id, status));
@@ -355,7 +411,12 @@ export function createProjectTrackingRoutes(
     // allow-swallowed-rejection -- an unreadable body is the malformed reply below
     const input = ApplyProjectTrackingSchema.safeParse(await context.req.json().catch(() => null));
     if (!input.success) return context.json({ error: "malformed" }, 400);
-    const result = await service.apply(input.data.projectId, input.data.expectedRevision);
+    const request = context.req.raw;
+    // The owner who sent this, renewed before each write, for as long as they wait on it.
+    const result = await service.apply(input.data.projectId, input.data.expectedRevision, {
+      current: () => !request.signal.aborted,
+      authorize: async () => !request.signal.aborted && (await authorize(request)) === true,
+    });
     if (result === "unknown_project") return context.json({ error: result }, 404);
     if (typeof result === "string") return context.json({ error: result }, 409);
     return context.json({ projectId: input.data.projectId, repos: result });

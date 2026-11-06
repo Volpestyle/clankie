@@ -34,6 +34,7 @@ import {
   type TrackedRepoStore,
 } from "../src/project-tracking.ts";
 import { suggestProjectTracking } from "../src/project-tracking-inference.ts";
+import { createWorkItemsService } from "../src/work-items.ts";
 import { runProjectCommand } from "../../tui/src/command/project.ts";
 import { startLoopbackForge } from "./helpers/loopback-forge.ts";
 
@@ -79,17 +80,21 @@ async function fixture(
   }));
   const alerts: string[] = [];
   const alerting = { delivered: true };
+  /** The connected GitHub account; a test reconnects by changing it. */
+  const connection = { token: "loopback" };
+  // The real write path: the work-items service's forge, with its authority and account checks.
+  const workItems = createWorkItemsService({
+    stateDirectory: directory,
+    githubConnection: async () => ({ token: connection.token }),
+    githubApiBase: forge.baseUrl,
+    fetch: async (url, init) => {
+      const status = gate?.(init?.method ?? "GET", new URL(String(url)).pathname);
+      return status ? new Response("{}", { status }) : fetch(url, init);
+    },
+  });
   const service = createProjectTrackingService({
     settings,
-    forge: async () =>
-      githubRestApi({
-        token: "loopback",
-        baseUrl: forge.baseUrl,
-        fetch: async (url, init) => {
-          const status = gate?.(init?.method ?? "GET", new URL(String(url)).pathname);
-          return status ? new Response("{}", { status }) : fetch(url, init);
-        },
-      }),
+    forge: (authority) => workItems.githubForge(authority),
     suggest: suggestProjectTracking,
     alert: async (text) => {
       alerts.push(text);
@@ -118,9 +123,11 @@ async function fixture(
       tracking?: { repos: string[] };
       suggestion?: { publicBoard?: string };
     }>;
-  return { forge, settings, service, cli, body, token, alerts, alerting, directory };
+  return { forge, settings, service, cli, body, token, alerts, alerting, directory, connection };
 }
 
+/** The conditional delete of the proposal branch, as the loopback forge records it. */
+const DELETE_BRANCH = `POST /graphql:updateRefs:fixture/r:refs/heads/${TRACKING_BRANCH}:delete`;
 const byRepo = (statuses: readonly TrackingRepoStatus[], repo: string) =>
   statuses.find((status) => status.repo === repo)!;
 
@@ -1064,11 +1071,11 @@ it("closes only this repo's own proposal: no other pull, branch or repo", async 
   const main = await forge.head(REPO, "main");
   const mark = forge.requests.length;
   await service.sweep();
-  expect(writes(context, mark).filter((write) => /^(?:DELETE|PATCH)/u.test(write))).toEqual([
+  expect(writes(context, mark).filter((write) => /^PATCH|:delete$/u.test(write))).toEqual([
     `PATCH /repos/${REPO}/pulls/1`,
-    `DELETE /repos/${REPO}/git/refs/heads/${TRACKING_BRANCH}`,
+    DELETE_BRANCH,
   ]);
-  expect(writes(context, mark).every((write) => write.includes(`/repos/${REPO}/`))).toBe(true);
+  expect(writes(context, mark).every((write) => write.includes(`${REPO}`))).toBe(true);
   for (const number of others) expect(forge.pulls(REPO)[number - 1]!.state).toBe("open");
   expect(await forge.head(REPO, "main")).toBe(main);
   expect(forge.pulls("fixture/stays")[0]!.state).toBe("open");
@@ -1092,10 +1099,7 @@ for (const [how, leave] of LEAVING) {
     expect(forge.pulls(REPO)[0]!.state).toBe("closed");
     expect(await exposed(context, REPO)).toEqual([]);
     expect(writes(context, mark)).toEqual(
-      expect.arrayContaining([
-        `PATCH /repos/${REPO}/pulls/1`,
-        `DELETE /repos/${REPO}/git/refs/heads/${TRACKING_BRANCH}`,
-      ]),
+      expect.arrayContaining([`PATCH /repos/${REPO}/pulls/1`, DELETE_BRANCH]),
     );
     expect(forge.pulls(REPO)).toHaveLength(1);
     expect(alerts).toEqual([]);
@@ -1424,7 +1428,7 @@ it("doesn't alert again because a different call failed on the next pass", async
 async function failsAfterWithdrawing(push: "lead" | "owner" = "lead") {
   let deleted = false;
   const context = await fixture(push, {}, [], undefined, (method, path) => {
-    deleted ||= method === "DELETE";
+    deleted ||= path === "/graphql";
     return deleted && method === "GET" && path === `/repos/${REPO}` ? 502 : undefined;
   });
   const { forge, cli } = context;
@@ -1803,4 +1807,230 @@ it("keeps the tracked-repos file owner-only, even over a looser one, and leaves 
   expect((await stat(path)).mode & 0o777).toBe(0o600);
   expect((await readdir(directory)).filter((file) => file.endsWith(".pending"))).toEqual([]);
   expect(await readFile(path, "utf8")).toContain("secret-board");
+}, 60_000);
+
+// #958: only Clankie's own commit is replaced, every write passes the tracker write checks, the
+// ref moves only from the tip that was checked, and a truncated tree still finds the guide.
+
+const OTHER_BOARD = "https://linear.app/fixture/project/other-board";
+/** A private repo holding Clankie's open proposal #1, and the commit it was built on. */
+async function proposed(context: Fixture) {
+  const { forge, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  const first = await cli(...saveFlags([REPO]));
+  expect(first.repos[0]).toMatchObject({ state: "proposed", pull: { number: 1 } });
+  const tip = await forge.head(REPO, TRACKING_BRANCH);
+  return {
+    tip,
+    base: await forge.head(REPO, "main"),
+    message: await forge.message(REPO, tip),
+    guide: await forge.read(REPO, TRACKING_BRANCH, "CLAUDE.md"),
+  };
+}
+/** Fires `act` once, as the first request matching `method` and `path` arrives. */
+function once(context: Fixture, method: string, path: string, act: () => Promise<unknown> | void) {
+  let fired = false;
+  context.forge.onRequest(async (seen, at) => {
+    if (fired || seen !== method || at !== path) return;
+    fired = true;
+    await act();
+  });
+}
+const repoWrites = ({ forge }: Fixture, mark: number) =>
+  forge.writesSince(mark).filter((write) => write.path.includes(REPO));
+
+it("never replaces a proposal someone amended, even keeping Clankie's message", async () => {
+  const context = await fixture();
+  const { forge, cli } = context;
+  const { base, message, guide } = await proposed(context);
+  const amended = await forge.commitAs(
+    REPO,
+    TRACKING_BRANCH,
+    { "CLAUDE.md": { content: `${guide}\nA line a person added.\n` } },
+    message,
+    base,
+  );
+  const mark = forge.requests.length;
+  const result = await cli(...saveFlags([REPO], OTHER_BOARD));
+  expect(result.repos[0]).toMatchObject({
+    state: "refused",
+    reason: expect.stringContaining("proposal_branch_edited"),
+  });
+  expect(repoWrites(context, mark)).toEqual([]);
+  expect(await forge.head(REPO, TRACKING_BRANCH)).toBe(amended);
+}, 60_000);
+
+it("never replaces Clankie's change stacked on someone else's commit", async () => {
+  const context = await fixture();
+  const { forge, cli } = context;
+  const { base, message, guide } = await proposed(context);
+  await forge.commitAs(
+    REPO,
+    TRACKING_BRANCH,
+    { "NOTES.md": { content: "a person's work\n" } },
+    "Theirs",
+    base,
+  );
+  // The exact change Clankie writes, re-made on top of theirs.
+  const restacked = await forge.commitAs(REPO, TRACKING_BRANCH, { "CLAUDE.md": { content: guide } }, message);
+  const mark = forge.requests.length;
+  const result = await cli(...saveFlags([REPO], OTHER_BOARD));
+  expect(result.repos[0]).toMatchObject({
+    state: "refused",
+    reason: expect.stringContaining("proposal_branch_edited"),
+  });
+  expect(repoWrites(context, mark)).toEqual([]);
+  expect(await forge.head(REPO, TRACKING_BRANCH)).toBe(restacked);
+}, 60_000);
+
+it("leaves an amended proposal in a repo that left the setting, and tells the owner", async () => {
+  const context = await fixture();
+  const { forge, service, alerts } = context;
+  await departing(context);
+  const tip = await forge.head(REPO, TRACKING_BRANCH);
+  const guide = await forge.read(REPO, TRACKING_BRANCH, "CLAUDE.md");
+  const amended = await forge.commitAs(
+    REPO,
+    TRACKING_BRANCH,
+    { "CLAUDE.md": { content: `${guide}\nA line a person added.\n` } },
+    await forge.message(REPO, tip),
+    await forge.head(REPO, "main"),
+  );
+  await drop(context);
+  const mark = forge.requests.length;
+  await service.sweep();
+  expect(repoWrites(context, mark)).toEqual([]);
+  expect(forge.pulls(REPO)[0]!.state).toBe("open");
+  expect(await forge.head(REPO, TRACKING_BRANCH)).toBe(amended);
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toContain(
+    `${REPO} left project garden's tracking setting, and its proposal #1 still names`,
+  );
+}, 60_000);
+
+it("refuses a proposal write once the connected GitHub account changes mid-pass", async () => {
+  const context = await fixture();
+  const { forge, cli, connection } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  once(context, "GET", `/repos/${REPO}/pulls`, () => {
+    connection.token = "someone-else";
+  });
+  const mark = forge.requests.length;
+  const result = await cli(...saveFlags([REPO]));
+  expect(result.repos[0]).toMatchObject({
+    state: "unavailable",
+    reason: expect.stringContaining("Connected GitHub account changed"),
+  });
+  expect(repoWrites(context, mark)).toEqual([]);
+  expect(forge.pulls(REPO)).toEqual([]);
+}, 60_000);
+
+it("refuses the owner's apply once the settings move past the revision they applied", async () => {
+  const context = await fixture();
+  const { forge, settings, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  once(context, "GET", `/repos/${REPO}/pulls`, () =>
+    settings.update((current) => ({
+      ...current,
+      projects: {
+        ...current.projects,
+        projects: current.projects.projects.map((project) => ({ ...project, name: "Renamed" })),
+      },
+    })),
+  );
+  const mark = forge.requests.length;
+  const result = await cli(...saveFlags([REPO]));
+  expect(result.repos[0]).toMatchObject({
+    state: "unavailable",
+    reason: expect.stringContaining("Owner authority expired"),
+  });
+  expect(repoWrites(context, mark)).toEqual([]);
+}, 60_000);
+
+it("stops a sweep's write once pushing becomes the owner's call mid-pass", async () => {
+  const context = await fixture();
+  const { forge, settings, service, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]), "--no-apply");
+  once(context, "GET", `/repos/${REPO}/pulls`, () =>
+    settings.update((current) => ({
+      ...current,
+      projects: {
+        ...current.projects,
+        projects: current.projects.projects.map((project) => ({
+          ...project,
+          autonomy: { fleet: { push: "owner" as const } },
+        })),
+      },
+    })),
+  );
+  const mark = forge.requests.length;
+  await service.sweep();
+  expect(repoWrites(context, mark)).toEqual([]);
+  expect(forge.pulls(REPO)).toEqual([]);
+}, 60_000);
+
+it("refuses to replace a proposal branch someone pushed to after Clankie checked it", async () => {
+  const context = await fixture();
+  const { forge, cli } = context;
+  await proposed(context);
+  let theirs = "";
+  once(context, "POST", `/repos/${REPO}/git/commits`, async () => {
+    await forge.push(REPO, TRACKING_BRANCH, { "NOTES.md": { content: "pushed just now\n" } });
+    theirs = await forge.head(REPO, TRACKING_BRANCH);
+  });
+  const result = await cli(...saveFlags([REPO], OTHER_BOARD));
+  expect(result.repos[0]).toMatchObject({
+    state: "unavailable",
+    reason: expect.stringContaining("branch_moved"),
+  });
+  expect(theirs).not.toBe("");
+  expect(await forge.head(REPO, TRACKING_BRANCH)).toBe(theirs);
+}, 60_000);
+
+it("refuses to delete a departed repo's proposal branch someone pushed to mid-withdrawal", async () => {
+  const context = await fixture();
+  const { forge, service, alerts } = context;
+  await departing(context);
+  await drop(context);
+  let theirs = "";
+  once(context, "PATCH", `/repos/${REPO}/pulls/1`, async () => {
+    await forge.push(REPO, TRACKING_BRANCH, { "NOTES.md": { content: "pushed just now\n" } });
+    theirs = await forge.head(REPO, TRACKING_BRANCH);
+  });
+  await service.sweep();
+  expect(theirs).not.toBe("");
+  expect(await forge.head(REPO, TRACKING_BRANCH)).toBe(theirs);
+  expect(alerts).toHaveLength(1);
+}, 60_000);
+
+it("finds a guide a truncated tree leaves out, rather than creating another", async () => {
+  const context = await fixture();
+  const { forge, cli, service } = context;
+  const block = renderTrackingBlock({ ...GITHUB, privateBoard: SECRET }, "private");
+  await forge.addRepo(REPO, { "AGENTS.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/held", { "AGENTS.md": { content: `${GUIDE}\n${block}\n` } }, "private");
+  forge.truncateTrees(REPO);
+  forge.truncateTrees("fixture/held");
+  const mark = forge.requests.length;
+  const result = await cli(...saveFlags([REPO, "fixture/held"]));
+  // Its exec bit can't be read by path, so rewriting it would risk a change outside the markers.
+  expect(byRepo(result.repos, REPO)).toMatchObject({
+    state: "refused",
+    reason: "guide_mode_unknown: AGENTS.md",
+  });
+  expect(byRepo(result.repos, "fixture/held")).toMatchObject({ state: "in_step", guide: "AGENTS.md" });
+  expect(forge.writesSince(mark).filter((write) => /fixture\/(?:r|held)\b/u.test(write.path))).toEqual([]);
+  expect((await service.view("garden"))!.repos.map((status) => status.state)).toEqual(["refused", "in_step"]);
+}, 60_000);
+
+it("withdraws a proposal whose guide a truncated tree leaves out once the repo turns public", async () => {
+  const context = await fixture();
+  const { forge, service } = context;
+  await proposed(context);
+  forge.truncateTrees(REPO);
+  forge.setVisibility(REPO, "public");
+  await service.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+  expect(await exposed(context, REPO)).toEqual([]);
 }, 60_000);

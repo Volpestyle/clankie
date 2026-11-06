@@ -43,8 +43,19 @@ flowchart LR
 - **The owner's answer holds.** A closed proposal stays closed for that exact block,
   whichever closed proposal carried it: the sweep reports it and only
   `clankie project tracking PROJECT apply` reopens it. A commit someone else put on the
-  branch is never replaced. The sweep only reads when the project's `push` preference
-  is `owner`.
+  branch is never replaced: the branch is Clankie's only when its tip is one commit whose
+  parent is in the default branch's history and whose tree differs from that parent's only
+  in the guide it rewrote, holding the block its trailer names with every byte outside the
+  markers unchanged. The trailer alone proves nothing, since an amended commit keeps it.
+  The branch then moves only from the tip just checked, through GitHub's conditional
+  `updateRefs`, so a push in between is refused rather than replaced. The sweep only reads
+  when the project's `push` preference is `owner`.
+- **Writes pass the tracker's write checks.** Each proposal write renews the authority it
+  rests on and confirms the connected GitHub account, or `gh` login, is the one the pass
+  began with, the same `authorizeWrite` and account checks every other tracker write passes.
+  For `apply` that authority is the owner's request at the revision they applied; for the
+  sweep it is the same tracking setting still under `push: lead`, and for a departed repo
+  that it is still unclaimed under that preference.
 - **Refusal over guessing.** Malformed markers, two blocks, an unclosed code fence with
   no block above it, a guide that links elsewhere or is not UTF-8 are reported, and
   nothing is written. So is a repo two projects claim, since their blocks would rewrite
@@ -76,7 +87,8 @@ flowchart LR
   reaches in `project-tracking-repos.json` under its state root, and the next sweep
   treats one that no project claims like a public flip, whatever its audience, with one
   difference: it only writes to a branch Clankie wrote for this board, meaning the tip
-  carries the trailer for this board's private block. That proposal it withdraws, or
+  is Clankie's own commit, as above, carrying this board's private block. That proposal it
+  withdraws, only from the tip it read, or
   under `push: owner` alerts until it is gone. A branch with someone else's commit on
   top, or an earlier block of Clankie's, is left in place and alerted on until it is
   gone if it says this board or carries that block. Any other branch of that name is
@@ -111,6 +123,10 @@ flowchart LR
   returns to the setting, that block reads as `declined` until the owner applies.
 - Only GitHub repos can be proposed to today, through the connected account or the
   owner's `gh` login. Linear is a tracker choice, not a place the block lands.
-- The branch check and its forced update are two calls, because GitHub has no
-  compare-and-swap for refs. A commit pushed between them would be replaced.
+- A ref update or delete names the tip it expects (GraphQL `updateRefs` with `beforeOid`),
+  so a commit pushed after the check is never replaced or deleted (#958).
+- GitHub lists a very large root tree only in part (`truncated`). A guide it leaves out is
+  looked up by path, so it is always found, but that lookup doesn't give a file's exec bit:
+  Clankie reads such a guide and refuses to rewrite it (`guide_mode_unknown`), and can't
+  confirm a proposal there as his own, so he never replaces one.
 - The app's Common control still needs its relay route and screen.
