@@ -943,7 +943,9 @@ for (const deleted of [false, true])
     await forge.merge(REPO, 1);
     if (deleted) await forge.deleteBranch(REPO, TRACKING_BRANCH);
     forge.setVisibility(REPO, "public");
+    // The pass that writes the proposal is the one that tells the owner.
     await service.sweep();
+    expect(alerts).toHaveLength(1);
     await service.sweep();
     expect(await forge.read(REPO, "main", "CLAUDE.md")).toContain("secret-board");
     expect((await cli()).repos[0]).toMatchObject({ state: "proposed", reason: "private_board_published" });
@@ -1223,17 +1225,39 @@ it("alerts once on a default branch that names the board in a fence, without chu
   expect(alerts[0]).toContain(DEFAULT_BRANCH_ALERT);
 }, 60_000);
 
-it("doesn't take a longer name, or the public block's own words, for the private board", async () => {
+it("doesn't take a longer name for the private board", async () => {
   const { forge, service, cli, alerts } = await fixture();
   await forge.addRepo(REPO, { "CLAUDE.md": { content: `${GUIDE}\nSee fixture/private-notes.\n` } });
-  await forge.addRepo("fixture/plain", { "CLAUDE.md": { content: GUIDE } });
   await cli(...saveFlags([REPO], "fixture/private"));
-  await cli("--private-board", "repo", "--repo", "fixture/plain");
-  await forge.merge("fixture/plain", 1);
+  await service.sweep();
+  expect(alerts).toEqual([]);
+  expect(forge.pulls(REPO).map((pull) => pull.state)).toEqual(["open"]);
+}, 60_000);
+
+it("doesn't take the public block's own words for the private board", async () => {
+  const { forge, service, cli, alerts } = await fixture();
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } });
+  await cli(...saveFlags([REPO], "repo"));
+  await forge.merge(REPO, 1);
   await service.sweep();
   expect(alerts).toEqual([]);
   expect((await cli()).repos[0]).toMatchObject({ state: "in_step" });
-  expect(forge.pulls("fixture/plain").map((pull) => pull.state)).toEqual(["closed"]);
+}, 60_000);
+
+it("finds an earlier board behind broken markers, on the branch and on the default branch", async () => {
+  const context = await fixture("owner");
+  const { forge, service, cli, alerts } = context;
+  const broken = `${GUIDE}\n${PRIVATE_BLOCK.replace(TRACKING_CLOSE, "")}\n`;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/onmain", { "CLAUDE.md": { content: broken } }, "private");
+  await cli(...saveFlags([REPO, "fixture/onmain"]));
+  await forge.push(REPO, TRACKING_BRANCH, { "CLAUDE.md": { content: broken } });
+  await cli("--private-board", "fixture/another-private", "--no-apply");
+  forge.setVisibility(REPO, "public");
+  forge.setVisibility("fixture/onmain", "public");
+  await service.sweep();
+  expect(alerts.join("")).toContain(`${REPO} is no longer confirmed private, and its proposal #1`);
+  expect(alerts.join("")).toContain(`fixture/onmain is no longer confirmed private, and its default branch`);
 }, 60_000);
 
 it("sweeps once at start, so a restart doesn't put the next pass an interval off", async () => {
