@@ -282,7 +282,11 @@ import type { PublicGatewayDoorwayChange } from "./public-gateway-connector.ts";
 import { bodyIdleCheck, createBodyActivity, startScheduledUpdates } from "./scheduled-update.ts";
 import { batchRuntimeUpdates, DEFAULT_UPDATE_BATCH_MS } from "./update-batching.ts";
 import { ownerCheckoutSyncReport, startOwnerCheckoutSync } from "./owner-checkout-sync.ts";
-import { createProjectTrackingService, startProjectTrackingSweep } from "./project-tracking.ts";
+import {
+  createProjectTrackingService,
+  startProjectTrackingSweep,
+  trackedRepoFile,
+} from "./project-tracking.ts";
 import { suggestProjectTracking } from "./project-tracking-inference.ts";
 import { HarnessInstalls } from "./harness-installs.ts";
 import { HarnessSignIns } from "./harness-logins.ts";
@@ -1073,6 +1077,7 @@ const projectTracking = createProjectTrackingService({
   suggest: suggestProjectTracking,
   logger,
   alert: (text) => captain.notifyRuntimeHealthAlert(text),
+  trackedRepos: trackedRepoFile(join(stateRoot, "project-tracking-repos.json")),
 });
 const projectWorktreeRoot: ObserveProjectWorktreeRoot = (input) =>
   input.machineId === "local" ? observeLocalProjectWorktreeRoot(input) : remoteWorktreeRoot(input);

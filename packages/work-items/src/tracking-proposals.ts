@@ -7,6 +7,7 @@ import type { GithubApi } from "./backends/github.ts";
 import {
   chooseTrackingGuide,
   GUIDE_FILES,
+  mentionsPrivateBoard,
   namesPrivateBoard,
   readTrackingBlock,
   renderTrackingBlock,
@@ -23,6 +24,7 @@ const TITLE = "Update the Clankie tracking block";
 const MAX_GUIDE_BYTES = 1024 * 1024;
 const SYMLINK_MODE = "120000";
 const PRIVATE_BOARD_EXPOSED = "private_board_exposed";
+const PRIVATE_BOARD_PUBLISHED = "private_board_published";
 
 export interface TrackingRepoOptions {
   /** Another project claiming this repo. Two settings for one block would rewrite each other. */
@@ -66,9 +68,13 @@ const commitHash = async (api: GithubApi, slug: string, sha: string): Promise<st
   return new RegExp(`^${TRAILER}: ([a-f0-9]{16})$`, "mu").exec(commit.message)?.[1];
 };
 
-type GuideRead =
-  | { readonly guides: Partial<Record<GuideFile, string>>; readonly entries: Map<string, TreeEntry> }
-  | { readonly refused: string };
+interface GuideRead {
+  readonly guides: Partial<Record<GuideFile, string>>;
+  readonly entries: Map<string, TreeEntry>;
+  /** Every guide's text, including one refused below: a refusal must not hide what it says. */
+  readonly texts: readonly (readonly [GuideFile, string])[];
+  readonly refused?: string;
+}
 
 /** Root entries only, by tree mode, because a symlinked guide must never be replaced by a copy. */
 async function readGuides(api: GithubApi, slug: string, treeSha: string): Promise<GuideRead> {
@@ -81,26 +87,45 @@ async function readGuides(api: GithubApi, slug: string, treeSha: string): Promis
       .map((entry) => [entry.path, entry]),
   );
   const guides: Partial<Record<GuideFile, string>> = {};
+  const texts: (readonly [GuideFile, string])[] = [];
+  let refused: string | undefined;
   for (const file of GUIDE_FILES) {
     const entry = entries.get(file);
     if (!entry) continue;
-    if (entry.type !== "blob") return { refused: `unsupported_guide: ${file} is not a file` };
+    if (entry.type !== "blob") {
+      refused ??= `unsupported_guide: ${file} is not a file`;
+      continue;
+    }
     const bytes = await blobBytes(api, slug, entry.sha);
     if (entry.mode === SYMLINK_MODE) {
       const other = GUIDE_FILES.find((candidate) => candidate !== file)!;
       const target = bytes.toString("utf8").trim().replace(/^\.\//u, "");
       // The linked file is the one the other "includes"; its own entry is read in this loop.
       if (target !== other || entries.get(other)?.mode === SYMLINK_MODE || !entries.has(other))
-        return { refused: `unsupported_guide: ${file} links somewhere other than ${other}` };
+        refused ??= `unsupported_guide: ${file} links somewhere other than ${other}`;
       continue;
     }
-    if (bytes.byteLength > MAX_GUIDE_BYTES) return { refused: `guide_too_large: ${file}` };
     const text = bytes.toString("utf8");
+    texts.push([file, text]);
+    if (bytes.byteLength > MAX_GUIDE_BYTES) refused ??= `guide_too_large: ${file}`;
     // A byte that does not survive decoding would be rewritten; that is outside the markers.
-    if (!Buffer.from(text, "utf8").equals(bytes)) return { refused: `guide_not_utf8: ${file}` };
-    guides[file] = text;
+    else if (!Buffer.from(text, "utf8").equals(bytes)) refused ??= `guide_not_utf8: ${file}`;
+    else guides[file] = text;
   }
-  return { guides, entries };
+  return { guides, entries, texts, ...(refused === undefined ? {} : { refused }) };
+}
+
+/** The default branch's tip and guides. */
+async function readDefaultBranch(api: GithubApi, slug: string, defaultBranch: string) {
+  const ref = (await api.request("GET", `repos/${slug}/git/ref/heads/${refPath(defaultBranch)}`)) as {
+    readonly object: { readonly sha: string };
+  };
+  const head = ref.object.sha;
+  const commit = (await api.request("GET", `repos/${slug}/git/commits/${head}`)) as {
+    readonly tree: { readonly sha: string };
+  };
+  const baseTree = commit.tree.sha;
+  return { head, baseTree, read: await readGuides(api, slug, baseTree) };
 }
 
 interface Plan {
@@ -114,6 +139,7 @@ interface Plan {
   readonly created: boolean;
   readonly hash: string;
   readonly openPull: Pull | undefined;
+  readonly published: boolean;
 }
 
 type Reading =
@@ -122,6 +148,18 @@ type Reading =
   | { readonly status: TrackingRepoStatus; readonly exposedPulls: readonly Pull[] };
 
 const pullRef = (pull: Pull) => ({ number: pull.number, url: pull.html_url });
+
+/** Keeps the default branch's exposure on a status that has its own reason to report. */
+const carryPublished = (published: boolean, status: TrackingRepoStatus): TrackingRepoStatus =>
+  !published || status.reason?.startsWith(PRIVATE_BOARD_PUBLISHED)
+    ? status
+    : {
+        ...status,
+        reason:
+          status.reason === undefined
+            ? PRIVATE_BOARD_PUBLISHED
+            : `${PRIVATE_BOARD_PUBLISHED}: ${status.reason}`.slice(0, 400),
+      };
 
 /** Private only on the forge's own word. An `internal` repo, or a missing answer, reads as public. */
 const trackingAudience = (repository: {
@@ -167,11 +205,15 @@ async function listProposals(api: GithubApi, slug: string, fullName: string): Pr
 /**
  * Whether the proposal branch still names a private board, read from its tip so a commit stacked
  * on top can't hide it. Undefined when it doesn't; otherwise the open pulls riding on that branch.
+ * The configured board counts anywhere the default branch doesn't already say it: withdrawing
+ * text the owner wrote there would only bring it back in the next proposal.
  */
 async function exposedProposals(
   api: GithubApi,
   slug: string,
   fullName: string,
+  tracker: TrackerChoice,
+  onDefault: GuideRead["texts"],
 ): Promise<readonly Pull[] | undefined> {
   const tip = await branchTip(api, slug);
   if (tip === undefined) return undefined;
@@ -183,10 +225,23 @@ async function exposedProposals(
   };
   for (const entry of tree.tree) {
     if (!(GUIDE_FILES as readonly string[]).includes(entry.path) || entry.type !== "blob") continue;
-    if (namesPrivateBoard((await blobBytes(api, slug, entry.sha)).toString("utf8")))
+    const text = (await blobBytes(api, slug, entry.sha)).toString("utf8");
+    const before = onDefault.find(([file]) => file === entry.path)?.[1] ?? "";
+    if (
+      namesPrivateBoard(text) ||
+      (mentionsPrivateBoard(text, tracker) && !mentionsPrivateBoard(before, tracker))
+    )
       return (await listProposals(api, slug, fullName)).filter((pull) => pull.state === "open");
   }
   return undefined;
+}
+
+interface RepositoryRead {
+  readonly default_branch: string;
+  readonly full_name: string;
+  readonly archived?: boolean;
+  readonly private?: unknown;
+  readonly visibility?: unknown;
 }
 
 async function readRepo(
@@ -195,30 +250,35 @@ async function readRepo(
   tracker: TrackerChoice,
   options: TrackingRepoOptions,
 ): Promise<Reading> {
-  const refused = (reason: string, guide?: string): Reading => ({
-    status: { repo: slug, state: "refused", reason, ...(guide === undefined ? {} : { guide }) },
-  });
-  const repository = (await api.request("GET", `repos/${slug}`)) as {
-    readonly default_branch: string;
-    readonly full_name: string;
-    readonly archived?: boolean;
-    readonly private?: unknown;
-    readonly visibility?: unknown;
-  };
+  const repository = (await api.request("GET", `repos/${slug}`)) as RepositoryRead;
   const audience = trackingAudience(repository);
-  // Ahead of every refusal, so no reason to stop writing can strand a private board in the open.
+  const defaultBranch = repository.default_branch;
+  // Both reads come ahead of every refusal, so no reason to stop writing can strand a private
+  // board in the open or keep the owner from hearing about it. A default branch that can't be
+  // read doesn't stop the withdrawal either; it fails where the block is needed.
+  const defaults = await readDefaultBranch(api, slug, defaultBranch).catch((error: unknown) => ({ error }));
+  const texts = "error" in defaults ? [] : defaults.read.texts;
+  const published =
+    audience === "public" &&
+    texts.some(([, guide]) => namesPrivateBoard(guide) || mentionsPrivateBoard(guide, tracker));
+  const carry = (status: TrackingRepoStatus) => carryPublished(published, status);
+  const refused = (reason: string, guide?: string): Reading => ({
+    status: carry({ repo: slug, state: "refused", reason, ...(guide === undefined ? {} : { guide }) }),
+  });
   const exposedPulls =
-    audience === "public" ? await exposedProposals(api, slug, repository.full_name) : undefined;
+    audience === "public"
+      ? await exposedProposals(api, slug, repository.full_name, tracker, texts)
+      : undefined;
   if (exposedPulls) {
     const [pull] = exposedPulls;
     return {
       exposedPulls,
-      status: {
+      status: carry({
         repo: slug,
         state: "refused",
         reason: PRIVATE_BOARD_EXPOSED,
         ...(pull ? { pull: pullRef(pull) } : {}),
-      },
+      }),
     };
   }
   if (options.sharedWith !== undefined) return refused(`repo_in_two_projects: also in ${options.sharedWith}`);
@@ -227,17 +287,9 @@ async function readRepo(
   if (repository.archived) return refused("repository_archived");
   if (audience === "public" && !(await publicBoardConfirmed(api, tracker)))
     return refused("public_board_not_public");
-  const defaultBranch = repository.default_branch;
-  const ref = (await api.request("GET", `repos/${slug}/git/ref/heads/${refPath(defaultBranch)}`)) as {
-    readonly object: { readonly sha: string };
-  };
-  const head = ref.object.sha;
-  const commit = (await api.request("GET", `repos/${slug}/git/commits/${head}`)) as {
-    readonly tree: { readonly sha: string };
-  };
-  const baseTree = commit.tree.sha;
-  const read = await readGuides(api, slug, baseTree);
-  if ("refused" in read) return refused(read.refused);
+  if ("error" in defaults) throw defaults.error;
+  const { head, baseTree, read } = defaults;
+  if (read.refused !== undefined) return refused(read.refused);
   const choice = chooseTrackingGuide(read.guides);
   if (choice.kind === "refused") return refused(choice.reason);
   const file = choice.file;
@@ -253,13 +305,13 @@ async function readRepo(
   if (readTrackingBlock(text) === block) {
     const confirmed = pulls.find((pull) => pull.merged_at);
     return {
-      status: {
+      status: carry({
         repo: slug,
         state: "in_step",
         guide: file,
         ...(confirmed ? { confirmedPull: pullRef(confirmed) } : {}),
         ...(openPull ? { stalePull: pullRef(openPull) } : {}),
-      },
+      }),
     };
   }
   const plan: Plan = {
@@ -273,6 +325,7 @@ async function readRepo(
     created: choice.created === true,
     hash,
     openPull,
+    published,
   };
   if (openPull) {
     const openHash = await commitHash(api, slug, openPull.head.sha);
@@ -280,12 +333,12 @@ async function readRepo(
       return refused("proposal_branch_edited: someone else's commit tops the proposal", file);
     return {
       plan,
-      status: {
+      status: carry({
         repo: slug,
         state: openHash === hash ? "proposed" : "drifted",
         guide: file,
         pull: pullRef(openPull),
-      },
+      }),
     };
   }
   // Every closed one: a comment on any older pull moves it ahead in the forge's order.
@@ -301,7 +354,6 @@ async function readRepo(
       break;
     }
   }
-  const published = audience === "public" && namesPrivateBoard(text);
   return {
     plan,
     status: {
@@ -310,7 +362,7 @@ async function readRepo(
       guide: file,
       ...(declined ? { pull: pullRef(declined) } : {}),
       reason: published
-        ? "private_board_published"
+        ? PRIVATE_BOARD_PUBLISHED
         : readTrackingBlock(text) === undefined
           ? "block_missing"
           : "block_differs",
@@ -393,7 +445,7 @@ async function settle(
   if (!("plan" in reading)) return reading.status;
   if (reading.status.state === "proposed") return reading.status;
   if (reading.status.state === "declined" && !options.reopenDeclined) return reading.status;
-  return writeProposal(api, reading.plan);
+  return carryPublished(reading.plan.published, await writeProposal(api, reading.plan));
 }
 
 /** Close every proposal on the branch, then delete it. A failed delete is found again next pass. */
@@ -435,12 +487,56 @@ export async function proposeTrackingRepo(
       await withdrawProposals(api, repo, reading.exposedPulls);
     } catch (error) {
       // Still exposed, so the state stays the one the owner gets alerted on.
-      return { ...reading.status, reason: `${PRIVATE_BOARD_EXPOSED}: ${errorText(error)}`.slice(0, 400) };
+      return { ...reading.status, reason: `${reading.status.reason}: ${errorText(error)}`.slice(0, 400) };
     }
     reading = await readRepo(api, repo, tracker, options);
     return {
       ...(await settle(api, reading, options)),
       ...(withdrawn ? { withdrawnPull: pullRef(withdrawn) } : {}),
+    };
+  } catch (error) {
+    return unavailable(repo, error);
+  }
+}
+
+/**
+ * A repo that left the setting has no pass left to watch it, so a proposal naming the private
+ * board goes now, whatever the repo's audience: it could turn public with nobody looking.
+ * Undefined means nothing there names the board. `withdraw` false only reports, as under
+ * `push: owner`. A `private_board_exposed` or `unavailable` answer means it isn't finished.
+ */
+export async function withdrawDepartedRepo(
+  api: GithubApi,
+  repo: string,
+  tracker: TrackerChoice,
+  options: { readonly withdraw: boolean },
+): Promise<TrackingRepoStatus | undefined> {
+  try {
+    const repository = (await api.request("GET", `repos/${repo}`)) as RepositoryRead;
+    const defaults = await readDefaultBranch(api, repo, repository.default_branch).catch(
+      (error: unknown) => ({ error }),
+    );
+    const texts = "error" in defaults ? [] : defaults.read.texts;
+    const pulls = await exposedProposals(api, repo, repository.full_name, tracker, texts);
+    if (!pulls) return undefined;
+    const [pull] = pulls;
+    const status: TrackingRepoStatus = {
+      repo,
+      state: "refused",
+      reason: PRIVATE_BOARD_EXPOSED,
+      ...(pull ? { pull: pullRef(pull) } : {}),
+    };
+    if (!options.withdraw) return status;
+    try {
+      await withdrawProposals(api, repo, pulls);
+    } catch (error) {
+      return { ...status, reason: `${PRIVATE_BOARD_EXPOSED}: ${errorText(error)}`.slice(0, 400) };
+    }
+    return {
+      repo,
+      state: "refused",
+      reason: "repo_left_the_setting",
+      ...(pull ? { withdrawnPull: pullRef(pull) } : {}),
     };
   } catch (error) {
     return unavailable(repo, error);

@@ -34,7 +34,8 @@ flowchart LR
   file the other includes: a `CLAUDE.md` symlink to `AGENTS.md`, or an `@AGENTS.md`
   import. It goes in `CLAUDE.md` when neither includes the other, when each includes
   the other, and when a repo has no guide, which is then created.
-- **Proposals only.** Applying and the hourly sweep each propose from one branch,
+- **Proposals only.** Applying and the sweep, which runs at service start and then
+  hourly, each propose from one branch,
   `clankie/tracking-block`, through the forge's API, so no local checkout is touched.
   This code never merges. The pull request lands under that repo's own rule, even
   where that rule would allow a direct push. Reading the block back from the default
@@ -53,17 +54,28 @@ flowchart LR
   board. A public repo, an `internal` one, and one whose visibility it won't confirm
   all get the public block, which says private work is not named there. No pull request
   body holds a block at all, because a body outlives its branch and the repo's audience
-  can change. Any public board that looks like GitHub must parse to a repo the forge
-  shows as public, in whatever spelling, or it is refused rather than published. The two
+  can change. Any public board that looks like GitHub, including any address GitHub
+  hosts and a bare `owner/name` under Linear, must parse to a repo the forge shows as
+  public, in whatever spelling, or it is refused rather than published. The two
   boards must differ, compared by the repo they parse to. No block lists the project's
   other repos, and a proposal in one repo names no other.
 - **A proposal doesn't outlive its audience.** When a repo is no longer confirmed
   private and the tip of `clankie/tracking-block` names a private board, that comes
   before every other check, so no refusal can strand it: `apply` and a sweep close every
   open pull on the branch and delete it, even with someone else's commit on top, then
-  carry on as usual. Under `push: owner` the sweep writes nothing and alerts the owner
-  instead, as it does when the withdrawal fails or the default branch itself names the
-  board.
+  carry on as usual. The configured board counts wherever it appears on the branch,
+  fenced or in broken markers, unless the default branch already says it: withdrawing
+  the owner's own text would only bring it back. Under `push: owner` the sweep writes
+  nothing and alerts the owner instead, as it does when the withdrawal fails. A default
+  branch that names the board reaches the owner whatever else happens to the repo,
+  refused or proposing: the status reason opens with `private_board_published`.
+- **Leaving the setting ends no duty.** No pass reads a repo after `clear` or a drop, so
+  a proposal left there could turn public unseen. Clankie records each repo a pass
+  reaches in `project-tracking-repos.json` under its state root, and the next sweep
+  treats one that no project claims like a public flip, whatever its audience: it
+  withdraws a proposal naming the board, or under `push: owner` alerts until the
+  proposal is gone. It forgets the repo once nothing there names the board. A repo that
+  returned, or that another project claims, is left alone.
 - **Issues stay put.** A changed tracker never moves or closes an issue. The change
   offers that to the owner, and approved work is hired out separately.
 - **Shown, never taken.** `clankie project tracking PROJECT` opens with what the
@@ -85,7 +97,8 @@ flowchart LR
 - A repo's own merged history is the owner's to manage. Withdrawing removes the branch,
   not what was already published: merged commits stay, and GitHub keeps a closed pull
   request's commits and diff on its page until GitHub Support removes them. Between the
-  repo changing and the next pass, up to an hour, the proposal stays visible.
+  repo changing or leaving the setting and the next pass, up to an hour, the proposal
+  stays visible.
 - A proposal Clankie withdrew reads as closed. If the repo turns private again, that
   block reads as `declined` until the owner applies.
 - Only GitHub repos can be proposed to today, through the connected account or the

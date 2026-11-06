@@ -109,6 +109,17 @@ export function namesPrivateBoard(text: string): boolean {
     .some((line) => /^\s*- Private work:/u.test(line) && line.trim() !== UNNAMED_PRIVATE_WORK);
 }
 
+/**
+ * Whether the configured private board appears anywhere in this guide, fenced, in a mangled block
+ * or in prose. The public block is skipped so a board that shares its words can't match it.
+ */
+export function mentionsPrivateBoard(text: string, tracker: TrackerChoice): boolean {
+  const escaped = tracker.privateBoard.replace(/[.*+?^${}()|[\]\\/]/gu, "\\$&");
+  return new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, "iu").test(
+    text.replaceAll("\r\n", "\n").replace(renderTrackingBlock(tracker, "public"), ""),
+  );
+}
+
 const lineEnding = (text: string) => (/\r\n/u.test(text) ? "\r\n" : "\n");
 
 /** The block as read, in LF, so a CRLF guide does not read as drift forever. */

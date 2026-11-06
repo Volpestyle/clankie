@@ -195,7 +195,12 @@ export async function startLoopbackForge() {
         return { status: 422, value: { message: "Reference does not exist" } };
       await git(slug, "update-ref", "-d", `refs/${match[1]!}`);
       for (const pull of pulls.get(slug)!)
-        if (pull.state === "open" && `heads/${pull.head.ref}` === match[1]) pull.state = "closed";
+        if (
+          pull.state === "open" &&
+          `heads/${pull.head.ref}` === match[1] &&
+          pull.head.repo?.full_name === (fullNames.get(slug) ?? slug)
+        )
+          pull.state = "closed";
       return { status: 204, value: undefined };
     }
     if (route === "GET pulls") {

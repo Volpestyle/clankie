@@ -26,7 +26,12 @@ import {
 } from "@clankie/work-items";
 import { createClankieApp } from "../src/app.ts";
 import { createStubCaptain } from "../src/captain/port.ts";
-import { createProjectTrackingService } from "../src/project-tracking.ts";
+import {
+  createProjectTrackingService,
+  startProjectTrackingSweep,
+  trackedRepoFile,
+  type TrackedRepoStore,
+} from "../src/project-tracking.ts";
 import { suggestProjectTracking } from "../src/project-tracking-inference.ts";
 import { runProjectCommand } from "../../tui/src/command/project.ts";
 import { startLoopbackForge } from "./helpers/loopback-forge.ts";
@@ -48,7 +53,12 @@ const WITH_BLOCK = (block: string) =>
   `# Before\n\n  ${block}\n\nAfter, with a fenced example:\n\n\`\`\`\n${TRACKING_OPEN}\n\`\`\`\n`;
 const OLD_BLOCK = `${TRACKING_OPEN}\nold words\n${TRACKING_CLOSE}`;
 
-async function fixture(push: "lead" | "owner" = "lead", extraProject: object = {}, others: object[] = []) {
+async function fixture(
+  push: "lead" | "owner" = "lead",
+  extraProject: object = {},
+  others: object[] = [],
+  trackedRepos?: (directory: string) => TrackedRepoStore,
+) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "project-tracking-")));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const forge = await startLoopbackForge();
@@ -74,6 +84,7 @@ async function fixture(push: "lead" | "owner" = "lead", extraProject: object = {
       alerts.push(text);
       return alerting.delivered;
     },
+    ...(trackedRepos ? { trackedRepos: trackedRepos(directory) } : {}),
   });
   const body = await createClankieApp({
     settings,
@@ -96,7 +107,7 @@ async function fixture(push: "lead" | "owner" = "lead", extraProject: object = {
       tracking?: { repos: string[] };
       suggestion?: { publicBoard?: string };
     }>;
-  return { forge, settings, service, cli, body, token, alerts, alerting };
+  return { forge, settings, service, cli, body, token, alerts, alerting, directory };
 }
 
 const byRepo = (statuses: readonly TrackingRepoStatus[], repo: string) =>
@@ -628,6 +639,14 @@ for (const [provider, board] of [
   ["github", "https://github.com.example.org/fixture/public"],
   ["linear", "https://github.com/fixture"],
   ["linear", "https://github.com.example.org/fixture/public"],
+  ["linear", "https://raw.githubusercontent.com/fixture/hidden/main/README.md"],
+  ["linear", "raw.githubusercontent.com/fixture/hidden"],
+  ["linear", "https://fixture.github.io/hidden"],
+  ["linear", "https://gist.github.com/fixture/abc"],
+  ["linear", "https://gh.io/hidden"],
+  ["linear", "fixture/hidden"],
+  ["linear", "fixture/hidden.git"],
+  ["linear", "fixture/hidden/issues"],
 ] as const)
   it(`refuses a ${provider} public board that names no confirmed public repo: ${board}`, async () => {
     const { forge, cli } = await fixture();
@@ -658,6 +677,14 @@ it("takes any spelling of a public repo as the board, and a board with no repo o
   expect(spelled.repos[0]).toMatchObject({ state: "proposed" });
   const linear = await cli("--provider", "linear", "--public-board", "VUH", "--repo", "fixture/two");
   expect(linear.repos[0]).toMatchObject({ state: "proposed" });
+  // A Linear address that only mentions GitHub in its words is still the owner's word.
+  const worded = await cli(
+    "--public-board",
+    "https://linear.app/fixture/project/github-migration-1a2b",
+    "--repo",
+    "fixture/two",
+  );
+  expect(worded.repos[0]).toMatchObject({ state: "proposed" });
 }, 60_000);
 
 for (const [publicBoard, privateBoard] of [
@@ -901,4 +928,342 @@ it("refuses a guide that links elsewhere and one that is not UTF-8, with no writ
   });
   expect(repos[1]).toMatchObject({ state: "refused", reason: "guide_not_utf8: CLAUDE.md" });
   expect(forge.writesSince(mark)).toEqual([]);
+}, 60_000);
+
+const PRIVATE_BLOCK = renderTrackingBlock({ ...GITHUB, privateBoard: SECRET }, "private");
+const writes = ({ forge }: Fixture, mark: number) =>
+  forge.writesSince(mark).map((request) => `${request.method} ${request.path}`);
+const DEFAULT_BRANCH_ALERT = "its default branch still names the private board";
+
+for (const deleted of [false, true])
+  it(`alerts on a merged block when the sweep proposes over it, branch ${deleted ? "deleted" : "kept"}`, async () => {
+    const { forge, service, cli, alerts } = await fixture();
+    await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+    await cli(...saveFlags([REPO]));
+    await forge.merge(REPO, 1);
+    if (deleted) await forge.deleteBranch(REPO, TRACKING_BRANCH);
+    forge.setVisibility(REPO, "public");
+    await service.sweep();
+    await service.sweep();
+    expect(await forge.read(REPO, "main", "CLAUDE.md")).toContain("secret-board");
+    expect((await cli()).repos[0]).toMatchObject({ state: "proposed", reason: "private_board_published" });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toContain(DEFAULT_BRANCH_ALERT);
+    expect(alerts[0]).not.toContain("secret-board");
+  }, 60_000);
+
+it("alerts on a merged block while a public proposal is open under push: owner", async () => {
+  const { forge, service, cli, alerts } = await fixture("owner");
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  await forge.merge(REPO, 1);
+  forge.setVisibility(REPO, "public");
+  await cli("apply");
+  await service.sweep();
+  expect(alerts.join("")).toContain(DEFAULT_BRANCH_ALERT);
+}, 60_000);
+
+const REFUSED_OVER_A_MERGED_BLOCK: [string, string, (context: Fixture) => Promise<unknown>][] = [
+  ["archived", "repository_archived", async ({ forge }) => forge.archive(REPO)],
+  ["moved", "repository_moved", async ({ forge }) => forge.rename(REPO, "fixture/renamed")],
+  [
+    "a board gone private",
+    "public_board_not_public",
+    async ({ forge }) => forge.setVisibility(GITHUB.publicBoard, "private"),
+  ],
+  [
+    "broken markers",
+    "malformed_markers",
+    async ({ forge }) =>
+      forge.push(REPO, "main", {
+        "CLAUDE.md": { content: `${GUIDE}\n${PRIVATE_BLOCK.replace(TRACKING_CLOSE, "")}\n` },
+      }),
+  ],
+  [
+    "a second block",
+    "duplicate_blocks",
+    async ({ forge }) => forge.push(REPO, "main", { "AGENTS.md": { content: `${OLD_BLOCK}\n` } }),
+  ],
+  [
+    "a guide that links elsewhere",
+    "unsupported_guide",
+    async ({ forge }) =>
+      forge.push(REPO, "main", {
+        "AGENTS.md": { content: "docs/guide.md", mode: "120000" },
+      }),
+  ],
+  [
+    "bytes that aren't UTF-8",
+    "guide_not_utf8",
+    async ({ forge }) =>
+      forge.push(REPO, "main", {
+        "CLAUDE.md": { content: Buffer.from(`${PRIVATE_BLOCK}\n\xe9`, "latin1") },
+      }),
+  ],
+];
+for (const [name, reason, arrange] of REFUSED_OVER_A_MERGED_BLOCK)
+  it(`alerts on a merged block in a repo refused for ${name}`, async () => {
+    const context = await fixture("owner");
+    const { forge, service, cli, alerts } = context;
+    await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+    await cli(...saveFlags([REPO]));
+    await forge.merge(REPO, 1);
+    await forge.deleteBranch(REPO, TRACKING_BRANCH);
+    await arrange(context);
+    forge.setVisibility(REPO, "public");
+    const mark = forge.requests.length;
+    await service.sweep();
+    expect(alerts.join("")).toContain(DEFAULT_BRANCH_ALERT);
+    expect(forge.writesSince(mark)).toEqual([]);
+    // The refusal is still what the owner reads.
+    const status = (await cli()).repos[0]!;
+    expect(status.state).toBe("refused");
+    expect(status.reason).toContain(reason);
+  }, 60_000);
+
+it("names both places when a proposal and the default branch hold the board", async () => {
+  const { forge, service, cli, alerts } = await fixture("owner");
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  await forge.merge(REPO, 1);
+  await forge.push(REPO, TRACKING_BRANCH, { "NOTES.md": { content: "still here\n" } });
+  forge.setVisibility(REPO, "public");
+  await service.sweep();
+  expect(alerts[0]).toContain(`its default branch and its ${TRACKING_BRANCH} branch still name`);
+}, 60_000);
+
+it("closes only this repo's own proposal: no other pull, branch or repo", async () => {
+  const context = await fixture();
+  const { forge, service, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/stays", { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO, "fixture/stays"]));
+  const others = [
+    await forge.forkPull(REPO, "stranger/r", TRACKING_BRANCH),
+    await forge.forkPull(REPO, null, TRACKING_BRANCH),
+    await forge.forkPull(REPO, REPO, "feature"),
+    await forge.forkPull(REPO, REPO, `${TRACKING_BRANCH}-2`),
+  ];
+  forge.setVisibility(REPO, "public");
+  const main = await forge.head(REPO, "main");
+  const mark = forge.requests.length;
+  await service.sweep();
+  expect(writes(context, mark).filter((write) => /^(?:DELETE|PATCH)/u.test(write))).toEqual([
+    `PATCH /repos/${REPO}/pulls/1`,
+    `DELETE /repos/${REPO}/git/refs/heads/${TRACKING_BRANCH}`,
+  ]);
+  expect(writes(context, mark).every((write) => write.includes(`/repos/${REPO}/`))).toBe(true);
+  for (const number of others) expect(forge.pulls(REPO)[number - 1]!.state).toBe("open");
+  expect(await forge.head(REPO, "main")).toBe(main);
+  expect(forge.pulls("fixture/stays")[0]!.state).toBe("open");
+}, 60_000);
+
+const LEAVING: [string, (context: Fixture) => Promise<unknown>][] = [
+  ["cleared", ({ cli }) => cli("clear")],
+  ["dropped", ({ cli }) => cli("--repo", "fixture/keep", "--no-apply")],
+];
+for (const [how, leave] of LEAVING) {
+  it(`withdraws a proposal naming the board from a repo ${how} from the setting`, async () => {
+    const context = await fixture();
+    const { forge, service, cli, alerts } = context;
+    await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+    await forge.addRepo("fixture/keep", { "CLAUDE.md": { content: GUIDE } }, "private");
+    await cli(...saveFlags([REPO, "fixture/keep"]));
+    await leave(context);
+    const mark = forge.requests.length;
+    await service.sweep();
+    // While it is still private: nothing will be watching when it turns public.
+    expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+    expect(await exposed(context, REPO)).toEqual([]);
+    expect(writes(context, mark)).toEqual(
+      expect.arrayContaining([
+        `PATCH /repos/${REPO}/pulls/1`,
+        `DELETE /repos/${REPO}/git/refs/heads/${TRACKING_BRANCH}`,
+      ]),
+    );
+    expect(forge.pulls(REPO)).toHaveLength(1);
+    expect(alerts).toEqual([]);
+    if (how === "dropped") expect(forge.pulls("fixture/keep")[0]!.state).toBe("open");
+
+    const settled = forge.requests.length;
+    await service.sweep();
+    expect(writes(context, settled).filter((write) => write.includes(REPO))).toEqual([]);
+  }, 60_000);
+
+  it(`alerts instead of writing when a repo is ${how} under push: owner, until the proposal goes`, async () => {
+    const context = await fixture("owner");
+    const { forge, service, cli, alerts, alerting } = context;
+    await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+    await forge.addRepo("fixture/keep", { "CLAUDE.md": { content: GUIDE } }, "private");
+    await cli(...saveFlags([REPO, "fixture/keep"]));
+    await leave(context);
+    const mark = forge.requests.length;
+    alerting.delivered = false;
+    await service.sweep();
+    alerting.delivered = true;
+    await service.sweep();
+    await service.sweep();
+    expect(forge.writesSince(mark)).toEqual([]);
+    const about = alerts.filter((alert) => alert.startsWith(REPO));
+    expect(about).toHaveLength(2);
+    expect(about[1]).toContain(`${REPO} left project garden's tracking setting`);
+    expect(about[1]).toContain("its proposal #1");
+    expect(about[1]).not.toContain("secret-board");
+    // Once the owner has dealt with it the repo is forgotten, so it can't alert again.
+    forge.close(REPO, 1);
+    await forge.deleteBranch(REPO, TRACKING_BRANCH);
+    await service.sweep();
+    const reads = forge.requests.length;
+    await service.sweep();
+    expect(forge.requests.slice(reads).filter((request) => request.path.includes(REPO))).toEqual([]);
+  }, 60_000);
+}
+
+it("keeps a proposal when its repo comes back, or moves to another project, before the sweep", async () => {
+  const { forge, service, cli, settings } = await fixture();
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/moved", { "CLAUDE.md": { content: GUIDE } }, "private");
+  await forge.addRepo("fixture/keep", { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO, "fixture/moved", "fixture/keep"]));
+  await cli("--repo", "fixture/keep", "--no-apply");
+  await cli("--repo", "fixture/keep", "--repo", REPO, "--no-apply");
+  await settings.update((current) => ({
+    ...current,
+    projects: ProjectsSettingsSchema.parse({
+      projects: [
+        ...current.projects.projects,
+        ProjectSchema.parse({
+          id: "shed",
+          name: "Shed",
+          tracking: {
+            repos: ["FIXTURE/moved"],
+            tracker: { ...GITHUB, privateBoard: SECRET },
+          },
+        }),
+      ],
+    }),
+  }));
+  await service.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("open");
+  expect(forge.pulls("fixture/moved")[0]!.state).toBe("open");
+}, 60_000);
+
+it("finds a repo that left the setting after a restart, and retries one the forge refused", async () => {
+  const context = await fixture("lead", {}, [], (directory) =>
+    trackedRepoFile(join(directory, "tracked.json")),
+  );
+  const { forge, settings, cli, directory } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  await cli("clear");
+  forge.protectBranch(REPO, TRACKING_BRANCH);
+  const alerts: string[] = [];
+  const restarted = createProjectTrackingService({
+    settings,
+    forge: async () => githubRestApi({ token: "loopback", baseUrl: forge.baseUrl }),
+    alert: async (text) => Boolean(alerts.push(text)),
+    trackedRepos: trackedRepoFile(join(directory, "tracked.json")),
+  });
+  await restarted.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toContain("left project garden's tracking setting");
+  forge.allowDelete(REPO, TRACKING_BRANCH);
+  await restarted.sweep();
+  expect(await exposed(context, REPO)).toEqual([]);
+}, 60_000);
+
+it("carries on with the sweep when the tracked repos can't be read, and saves nothing over them", async () => {
+  const saves: unknown[] = [];
+  const context = await fixture("lead", {}, [], () => ({
+    load: async () => {
+      throw new Error("unreadable");
+    },
+    save: async (repos) => void saves.push(repos),
+  }));
+  const { forge, service, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  forge.setVisibility(REPO, "public");
+  await service.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+  expect(saves).toEqual([]);
+}, 60_000);
+
+it("finds the configured board in a block a commit wrapped in a fence", async () => {
+  const context = await fixture();
+  const { forge, service, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  const proposed = await forge.read(REPO, TRACKING_BRANCH, "CLAUDE.md");
+  await forge.push(REPO, TRACKING_BRANCH, {
+    "CLAUDE.md": {
+      content: proposed
+        .replace(TRACKING_OPEN, `\`\`\`\n${TRACKING_OPEN}`)
+        .replace(TRACKING_CLOSE, `${TRACKING_CLOSE}\n\`\`\``),
+    },
+  });
+  forge.setVisibility(REPO, "public");
+  await service.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+  expect(await exposed(context, REPO)).toEqual([]);
+}, 60_000);
+
+it("alerts once on a default branch that names the board in a fence, without churning its proposal", async () => {
+  const context = await fixture();
+  const { forge, service, cli, alerts } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: `${GUIDE}\n\`\`\`\n${PRIVATE_BLOCK}\n\`\`\`\n` } });
+  await cli(...saveFlags([REPO]));
+  const mark = forge.requests.length;
+  await service.sweep();
+  await service.sweep();
+  expect(forge.writesSince(mark)).toEqual([]);
+  expect(forge.pulls(REPO).map((pull) => pull.state)).toEqual(["open"]);
+  expect(alerts).toHaveLength(1);
+  expect(alerts[0]).toContain(DEFAULT_BRANCH_ALERT);
+}, 60_000);
+
+it("doesn't take a longer name, or the public block's own words, for the private board", async () => {
+  const { forge, service, cli, alerts } = await fixture();
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: `${GUIDE}\nSee fixture/private-notes.\n` } });
+  await forge.addRepo("fixture/plain", { "CLAUDE.md": { content: GUIDE } });
+  await cli(...saveFlags([REPO], "fixture/private"));
+  await cli("--private-board", "repo", "--repo", "fixture/plain");
+  await forge.merge("fixture/plain", 1);
+  await service.sweep();
+  expect(alerts).toEqual([]);
+  expect((await cli()).repos[0]).toMatchObject({ state: "in_step" });
+  expect(forge.pulls("fixture/plain").map((pull) => pull.state)).toEqual(["closed"]);
+}, 60_000);
+
+it("sweeps once at start, so a restart doesn't put the next pass an interval off", async () => {
+  let passes = 0;
+  let finish = () => {};
+  const sweep = startProjectTrackingSweep(
+    {
+      sweep: () => {
+        passes += 1;
+        return new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      },
+    },
+    () => {},
+    60 * 60 * 1000,
+  );
+  cleanups.push(async () => sweep.stop());
+  expect(passes).toBe(1);
+  finish();
+}, 60_000);
+
+it("withdraws even when the default branch's guide can't be read", async () => {
+  const context = await fixture();
+  const { forge, service, cli } = context;
+  await forge.addRepo(REPO, { "CLAUDE.md": { content: GUIDE } }, "private");
+  await cli(...saveFlags([REPO]));
+  await forge.push(REPO, "main", { "CLAUDE.md": { content: "x".repeat(1024 * 1024 + 1) } });
+  forge.setVisibility(REPO, "public");
+  await service.sweep();
+  expect(forge.pulls(REPO)[0]!.state).toBe("closed");
+  expect(await exposed(context, REPO)).toEqual([]);
 }, 60_000);

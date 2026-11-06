@@ -39,6 +39,10 @@ export const TrackerChoiceSchema = z
 export type TrackerChoice = z.infer<typeof TrackerChoiceSchema>;
 
 const GITHUB_URL = /^(?:[a-z]+:\/\/)?(?:[\w.-]+@)?(?:www\.)?github\.com[/:]/iu;
+/** Any other address GitHub serves: raw files, Pages, gists, the API, a short link. */
+const GITHUB_HOSTED = /github[\w-]*\.[a-z]|\bgh(?:cr)?\.io\b/iu;
+/** GitHub's own `owner/name` shape. A dotted first part is a host, as in `linear.app/team`. */
+const BARE_REPO = /^[a-z\d-]+\/[\w.-]+(?:[/?#]|$)/iu;
 
 /**
  * Which GitHub repo a board means, in any spelling. `unreadable` looks like GitHub but names no
@@ -49,7 +53,8 @@ export function trackingBoardRepo(
   board: string,
 ): { readonly kind: "repo"; readonly slug: string } | { readonly kind: "unreadable" | "other" } {
   const url = GITHUB_URL.exec(board);
-  if (!url && provider !== "github") return { kind: /github\./iu.test(board) ? "unreadable" : "other" };
+  if (!url && GITHUB_HOSTED.test(board)) return { kind: "unreadable" };
+  if (!url && provider !== "github") return { kind: BARE_REPO.test(board) ? "unreadable" : "other" };
   const [owner, name] = (url ? board.slice(url[0].length) : board).split(/[?#]/u, 1)[0]!.split("/");
   const slug = `${owner}/${(name ?? "").replace(/\.git$/iu, "")}`;
   return TrackingRepoSchema.safeParse(slug).success ? { kind: "repo", slug } : { kind: "unreadable" };
@@ -86,6 +91,9 @@ export type ProjectTracking = z.infer<typeof ProjectTrackingSchema>;
  *
  * Any state can carry `withdrawnPull`: this pass closed that proposal and deleted its branch,
  * because the repo is no longer confirmed private and the proposal named the private board.
+ *
+ * Any state can also open its `reason` with `private_board_published`: a repo not confirmed
+ * private whose default branch names the private board. What follows it is the usual reason.
  */
 export const TrackingRepoStateSchema = z.enum([
   "in_step",

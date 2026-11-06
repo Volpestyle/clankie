@@ -11990,7 +11990,7 @@ as separate work. See
 `private_board_exposed` and `proposal_branch_edited`. `public_board_not_public` means
 the public board looks like GitHub but isn't a repo GitHub shows as public: pick a
 public repo, in any spelling. A GitHub Project URL counts, because nothing says who can
-see it. `repo_in_two_projects` means another project claims the repo: remove it from
+see it, as does any other GitHub-hosted address and a bare `owner/name` under Linear. `repo_in_two_projects` means another project claims the repo: remove it from
 one. `proposal_branch_edited` means someone else's commit is on the proposal branch:
 merge or delete it.
 
@@ -11999,10 +11999,16 @@ board, `apply` and the sweep close its open pull requests and delete the branch,
 with someone else's commit on top; the result names the pull as `withdrawnPull`. Under
 `push: owner` the sweep writes nothing: the read shows `private_board_exposed` and you
 get an alert, and `apply` withdraws it. You also get an alert if a withdrawal fails, or
-if the default branch itself still names the board (`private_board_published`), where
-`apply` proposes the public block. The repo's own merged history is yours to manage:
-withdrawing can't remove merged commits, and GitHub keeps a closed pull request's diff
-on its page until GitHub Support removes it.
+if the default branch itself still names the board, including in a code fence or on a
+repo Clankie refuses. There the status reason opens with `private_board_published`, ahead
+of any refusal, and `apply` proposes the public block where it can. The repo's own merged
+history is yours to manage: withdrawing can't remove merged commits, and GitHub keeps a
+closed pull request's diff on its page until GitHub Support removes it.
+
+After `clear`, or when you drop a repo, the next sweep (at service start, then hourly)
+withdraws that repo's proposal if it names the private board, even while the repo is
+private, because nothing watches it afterwards. Under `push: owner` you get an alert
+instead, and closing the pull request and deleting the branch is yours to do.
 
 ### Work tracker settings
 
