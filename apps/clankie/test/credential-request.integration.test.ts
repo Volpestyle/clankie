@@ -696,7 +696,8 @@ it("refuses while a service worker of the origin runs, loading nothing", async (
     expect(await owner(["answer", pending.requestId!], [USER, SECRET])).toMatchObject({
       request: { outcome: "failed", reason: "worker_running" },
     });
-    expect(events.slice(from)).toEqual([]);
+    // Refused at the freeze: the broker never loaded the sign-in page.
+    expect(events.slice(from).filter((event) => !event.startsWith("POST /resumed"))).toEqual([]);
     expect(posts.length).toBe(before);
   } finally {
     await browse("stuck", "browser_use_close");

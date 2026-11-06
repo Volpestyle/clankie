@@ -247,13 +247,20 @@ decision): while a request is open its tab is sealed (no browser tool reaches
 it, and no conversation runs browser JavaScript, whose root CDP reaches every
 tab). On an answer, the broker freezes every page in that Chrome
 (`Page.setWebLifecycleState`; each must report the freeze or the fill fails
-closed), then loads the bound page in a new tab it creates itself, with no
-opener and no window name and service workers bypassed, so no page that existed
-before the seal holds a reference to the tab that receives the values. It
-checks the top document, every field and the form's action are the exact origin
-and the form posts, types the values, submits the form itself, and retires both
-that tab and the sealed one; the other pages run again only after that. Right
-before each value is typed, one synchronous check confirms that the owner
+closed). A shared or service worker is not a page and keeps running through the
+freeze, so if one of the origin is running then, the fill fails closed with
+`worker_running`. The broker then clears the origin's local storage, IndexedDB,
+cache storage and service worker registrations (cookies stay, for the site's
+device trust and CSRF) and loads the bound page in a new tab it creates itself,
+with no opener and no window name and service workers bypassed, so no page that
+existed before the seal holds a reference to the tab that receives the values.
+It checks the top document, every field and the form's action are the exact
+origin and the form posts, types the values, submits the form itself, and
+retires both that tab and the sealed one; the other pages run again only after
+that. Right before each value is typed, the broker reads every target again
+and stops with `page_not_frozen` for any page but its own it did not freeze,
+or `worker_running` for any shared or service worker of the origin, including
+one the sign-in page itself started. Then one synchronous check confirms that the owner
 authority witnessed before the answer body was read is still current (the
 operator credential's read fence or the paired device's registry record), that
 the request is still the one being answered, and that its seal holds; nothing is
@@ -261,7 +268,9 @@ awaited between that check and the keystrokes, so rotating the owner credential
 while the answer is in flight stops the fill. The worker gets a new tab in the
 same session at the landing page, or a blank one on any failure; access to the
 tabs that held the secret never returns. A decline, withdrawal or expiry returns
-the untouched tab.
+the untouched tab. The bound page is the sealed tab's full address, which the
+worker chose, so the owner's prompt and the request list show all of it (path
+and query), not only the origin.
 
 Not built in this slice: the app, pet and Discord cards, saving a login
 ("save for this site" and the `saved` result), `clankie credentials
@@ -279,6 +288,8 @@ machine-authorized script copied out earlier stops working and its sessions end
 before any value is typed. Chrome's password manager and form autofill are off
 in that profile, so Chrome neither offers to save a typed password nor keeps a
 username. Still open: same-user memory inspection of the service or a REPL
-worker (needs debugger rights), and shared workers or page storage an agent
-left for the origin before the seal (service workers are bypassed; shared
-workers keep running and storage is not cleared).
+worker (needs debugger rights); a site whose sign-in page starts a shared or
+service worker is refused rather than filled; and residual same-origin paths
+that depend on the site's own code (messages queued for frozen pages, the
+landing-address echo check covering only raw and URL-encoded values, and
+extensions already in the profile), which are tracked privately.
