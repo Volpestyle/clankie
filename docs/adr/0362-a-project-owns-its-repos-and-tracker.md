@@ -68,14 +68,22 @@ flowchart LR
   the owner's own text would only bring it back. Under `push: owner` the sweep writes
   nothing and alerts the owner instead, as it does when the withdrawal fails. A default
   branch that names the board reaches the owner whatever else happens to the repo,
-  refused or proposing: the status reason opens with `private_board_published`.
+  refused, proposing, or with any later forge call failing: the status reason opens with
+  `private_board_published`. Only a default branch the forge won't serve at all goes
+  unread, and the next pass reads it again.
 - **Leaving the setting ends no duty.** No pass reads a repo after `clear` or a drop, so
   a proposal left there could turn public unseen. Clankie records each repo a pass
   reaches in `project-tracking-repos.json` under its state root, and the next sweep
-  treats one that no project claims like a public flip, whatever its audience: it
-  withdraws a proposal naming the board, or under `push: owner` alerts until the
-  proposal is gone. It forgets the repo once nothing there names the board. A repo that
-  returned, or that another project claims, is left alone.
+  treats one that no project claims like a public flip, whatever its audience, with one
+  difference: it only writes to a branch Clankie wrote for this board, meaning the tip
+  carries the trailer for this board's private block. That proposal it withdraws, or
+  under `push: owner` alerts until it is gone. A branch with someone else's commit on
+  top, or an earlier block of Clankie's, is left in place and alerted on until it is
+  gone if it says this board or carries that block. Any other branch of that name is
+  left alone, unreported. A public repo whose default branch names the board alerts the
+  owner, and that merged text stays theirs to manage. The repo is forgotten once the
+  branch is settled, that alert has reached the owner, and the default branch has been
+  read. A repo that returned, or that another project claims, is left alone.
 - **Issues stay put.** A changed tracker never moves or closes an issue. The change
   offers that to the owner, and approved work is hired out separately.
 - **Shown, never taken.** `clankie project tracking PROJECT` opens with what the
@@ -99,8 +107,8 @@ flowchart LR
   request's commits and diff on its page until GitHub Support removes them. Between the
   repo changing or leaving the setting and the next pass, up to an hour, the proposal
   stays visible.
-- A proposal Clankie withdrew reads as closed. If the repo turns private again, that
-  block reads as `declined` until the owner applies.
+- A proposal Clankie withdrew reads as closed. If the repo turns private again, or
+  returns to the setting, that block reads as `declined` until the owner applies.
 - Only GitHub repos can be proposed to today, through the connected account or the
   owner's `gh` login. Linear is a tracker choice, not a place the block lands.
 - The branch check and its forced update are two calls, because GitHub has no

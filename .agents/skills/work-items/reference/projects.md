@@ -17,8 +17,9 @@ proposing one small pull request per repo from `clankie/tracking-block`. No mode
 worker fills it. Only a repo the forge confirms as private gets the private board. If
 a repo stops being confirmed private, `apply` and the sweep withdraw any proposal naming
 that board; under `push: owner` the owner gets an alert, and it's theirs to apply. A
-repo that leaves the setting gets the same from the next sweep, even while private;
-under `push: owner` the alert stands until the owner closes that proposal. A reason
+repo that leaves the setting gets the same from the next sweep, even while private,
+but only on a branch Clankie wrote for that board; otherwise, and under `push: owner`,
+the alert stands until the owner closes that proposal. A reason
 opening with `private_board_published` means the default branch names the board: tell
 the owner, whatever the rest of the status says.
 Treat the block as generated: to change it, change the setting.

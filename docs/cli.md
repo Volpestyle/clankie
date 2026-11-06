@@ -11999,16 +11999,20 @@ board, `apply` and the sweep close its open pull requests and delete the branch,
 with someone else's commit on top; the result names the pull as `withdrawnPull`. Under
 `push: owner` the sweep writes nothing: the read shows `private_board_exposed` and you
 get an alert, and `apply` withdraws it. You also get an alert if a withdrawal fails, or
-if the default branch itself still names the board, including in a code fence or on a
-repo Clankie refuses. There the status reason opens with `private_board_published`, ahead
-of any refusal, and `apply` proposes the public block where it can. The repo's own merged
+if the default branch itself still names the board, including in a code fence, on a repo
+Clankie refuses, or when a later forge call fails or the token can't write. There the
+status reason opens with `private_board_published`, ahead of any refusal or forge error,
+and `apply` proposes the public block where it can. The repo's own merged
 history is yours to manage: withdrawing can't remove merged commits, and GitHub keeps a
 closed pull request's diff on its page until GitHub Support removes it.
 
 After `clear`, or when you drop a repo, the next sweep (at service start, then hourly)
 withdraws that repo's proposal if it names the private board, even while the repo is
-private, because nothing watches it afterwards. Under `push: owner` you get an alert
-instead, and closing the pull request and deleting the branch is yours to do.
+private, because nothing watches it afterwards. It only does that to a branch Clankie
+wrote for this board. With someone else's commit on top, or under `push: owner`, you get
+an alert instead, and closing the pull request and deleting the branch is yours to do.
+A branch of that name that isn't about this board is left alone. If the repo is public
+and its default branch names the board, you get an alert before Clankie forgets the repo.
 
 ### Work tracker settings
 

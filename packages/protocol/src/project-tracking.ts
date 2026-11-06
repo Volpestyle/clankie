@@ -39,8 +39,8 @@ export const TrackerChoiceSchema = z
 export type TrackerChoice = z.infer<typeof TrackerChoiceSchema>;
 
 const GITHUB_URL = /^(?:[a-z]+:\/\/)?(?:[\w.-]+@)?(?:www\.)?github\.com[/:]/iu;
-/** Any other address GitHub serves: raw files, Pages, gists, the API, a short link. */
-const GITHUB_HOSTED = /github[\w-]*\.[a-z]|\bgh(?:cr)?\.io\b/iu;
+/** Any other address GitHub serves: raw files, Pages, gists, the API, a short link, Enterprise Cloud. */
+const GITHUB_HOSTED = /github[\w-]*\.[a-z]|\b(?:gh|ghcr|git)\.io\b|\.ghe\.com\b/iu;
 /** GitHub's own `owner/name` shape. A dotted first part is a host, as in `linear.app/team`. */
 const BARE_REPO = /^[a-z\d-]+\/[\w.-]+(?:[/?#]|$)/iu;
 
@@ -93,7 +93,8 @@ export type ProjectTracking = z.infer<typeof ProjectTrackingSchema>;
  * because the repo is no longer confirmed private and the proposal named the private board.
  *
  * Any state can also open its `reason` with `private_board_published`: a repo not confirmed
- * private whose default branch names the private board. What follows it is the usual reason.
+ * private whose default branch names the private board. What follows it is the usual reason,
+ * a forge error included.
  */
 export const TrackingRepoStateSchema = z.enum([
   "in_step",

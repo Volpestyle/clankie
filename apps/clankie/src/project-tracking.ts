@@ -47,7 +47,13 @@ function exposureAlert(projectId: string, status: TrackingRepoStatus): string {
 }
 
 function departedAlert(projectId: string, status: TrackingRepoStatus): string {
-  return `${status.repo} left project ${projectId}'s tracking setting, and ${proposalName(status)} still names the private board. Clankie has not withdrawn it, and no pass watches this repo now: close the pull request and delete the ${TRACKING_BRANCH} branch.`;
+  const left = `${status.repo} left project ${projectId}'s tracking setting`;
+  if (!status.reason?.includes("private_board_exposed"))
+    return `${left}, it is no longer confirmed private, and its default branch still names the private board. No pass watches this repo now, and its merged history is yours to manage.`;
+  const where = status.reason.startsWith("private_board_published")
+    ? `its default branch and ${proposalName(status)} still name`
+    : `${proposalName(status)} still names`;
+  return `${left}, and ${where} the private board. Clankie has not withdrawn it, and no pass watches this repo now: close the pull request and delete the ${TRACKING_BRANCH} branch.`;
 }
 
 /** A repo a pass has reached, so the proposal it may hold is found again once it leaves the setting. */
@@ -96,29 +102,33 @@ export function createProjectTrackingService(options: {
   readonly trackedRepos?: TrackedRepoStore;
 }) {
   const alerted = new Set<string>();
-  const alertExposure = async (
-    projectId: string,
-    status: TrackingRepoStatus,
-    text = exposureAlert(projectId, status),
-  ) => {
-    const key = `${projectId}\n${status.repo}\n${String(status.pull?.number)}\n${status.reason ?? ""}`;
-    if (alerted.has(key)) return;
+  /**
+   * Once per exposure, which the text says exactly: a reason also carries whichever call failed
+   * this pass. True when the owner has heard, or when no alert is wired to tell them.
+   */
+  const alertExposure = async (projectId: string, repo: string, text: string) => {
+    if (alerted.has(text)) return true;
     const delivered = await options.alert?.(text).catch((error: unknown) => {
       options.logger?.warn(
-        { event: "project_tracking.alert_failed", projectId, repo: status.repo, error: String(error) },
+        { event: "project_tracking.alert_failed", projectId, repo, error: String(error) },
         "Could not alert the owner about a private board",
       );
       return false;
     });
-    if (delivered) alerted.add(key);
+    if (delivered) alerted.add(text);
+    return delivered ?? true;
   };
   // Changed in memory and saved in order, so an apply beside a sweep can't lose an entry. A file
-  // that won't load stays as it is: nothing is saved over it, and every pass logs why.
+  // that won't load stays as it is: nothing is saved over it, and every pass logs why and tries
+  // it again, so a hand fix needs no restart.
   let loaded: Promise<Map<string, TrackedRepo>> | undefined;
   const trackedRepos = () =>
-    (loaded ??= Promise.resolve(options.trackedRepos?.load() ?? []).then(
-      (repos) => new Map(repos.map((tracked) => [tracked.repo.toLowerCase(), tracked])),
-    ));
+    (loaded ??= Promise.resolve(options.trackedRepos?.load() ?? [])
+      .then((repos) => new Map(repos.map((tracked) => [tracked.repo.toLowerCase(), tracked])))
+      .catch((error: unknown) => {
+        loaded = undefined;
+        throw error;
+      }));
   let saving = Promise.resolve();
   const saveTrackedRepos = (tracked: Map<string, TrackedRepo>) => {
     const save = () => options.trackedRepos?.save([...tracked.values()]);
@@ -140,7 +150,7 @@ export function createProjectTrackingService(options: {
       );
     }
   };
-  /** A repo no project claims keeps its entry until nothing there names the board. */
+  /** A repo no project claims keeps its entry until its proposal is gone and the owner has heard. */
   const settleDepartedRepos = async (current: ClankieSettings) => {
     const tracked = await trackedRepos();
     const claimed = new Set(
@@ -155,17 +165,20 @@ export function createProjectTrackingService(options: {
       const project = current.projects.projects.find((candidate) => candidate.id === projectId);
       const withdraw = effectiveFleetAutonomy(current.autonomy, project?.autonomy).push === "lead";
       const status = await withdrawDepartedRepo(api, repo, tracker, { withdraw });
-      if (status?.reason?.startsWith("private_board_exposed"))
-        await alertExposure(projectId, status, departedAlert(projectId, status));
-      else if (status?.state === "unavailable")
+      const exposed = status?.reason?.includes("private_board_exposed") === true;
+      const heard =
+        status && (exposed || status.reason?.startsWith("private_board_published"))
+          ? await alertExposure(projectId, repo, departedAlert(projectId, status))
+          : true;
+      if (status?.state === "unavailable")
         options.logger?.warn(
           { event: "project_tracking.departed_unavailable", projectId, status },
           "Could not check a repo that left the tracking setting",
         );
-      else {
+      else if (heard && !exposed) {
         tracked.delete(key);
         await saveTrackedRepos(tracked);
-        if (status)
+        if (status?.reason?.endsWith("repo_left_the_setting"))
           options.logger?.info(
             { event: "project_tracking.departed_withdrawn", projectId, status },
             "Withdrew a proposal from a repo that left the tracking setting",
@@ -270,7 +283,8 @@ export function createProjectTrackingService(options: {
             : inspectTrackingRepo(api, repo, tracker, repoOptions);
         });
         for (const status of statuses)
-          if (status.reason?.startsWith("private_board_")) await alertExposure(project.id, status);
+          if (status.reason?.startsWith("private_board_"))
+            await alertExposure(project.id, status.repo, exposureAlert(project.id, status));
         const unsettled = statuses.filter(
           (status) =>
             status.state !== "in_step" || status.withdrawnPull !== undefined || status.reason !== undefined,
